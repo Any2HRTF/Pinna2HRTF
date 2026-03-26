@@ -1,0 +1,28 @@
+dataset:
+    root_train: "/groups/ari/data/SONICOM/Mesh2PPM/Datasets/Local/train"
+    root_val: "/groups/ari/data/SONICOM/Mesh2PPM/Datasets/Local/val"
+    root_test: "/groups/ari/data/SONICOM/Mesh2PPM/Datasets/Local/test"
+    train_batch_size: 24
+    val_batch_size: 24
+    num_workers: 4
+scheduler:
+    name: "CosineAnnealingLR"
+grad_norm:
+    alpha: 1.5
+optim:
+    learning_rate: 0.001
+    weight_decay: 0.01
+model:
+    window_size: 4
+    depth: false
+    img_size: 256
+    num_heads: [32, 64, 128]
+    depths: [2, 3, 2]
+    number_of_camera_views: 9
+    checkpoints_dir: "/groups/ari/data/SONICOM/Mesh2PPM/logs/local_9_views"
+stats:
+    logdir: "/groups/ari/data/SONICOM/Mesh2PPM/logs/local_9_views"
+    val_freq: 10
+    csv_export_path: "/groups/ari/data/SONICOM/Mesh2PPM/logs/local_9_views/stats"
+training:
+    epochs: 501

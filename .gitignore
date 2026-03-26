@@ -1,0 +1,11 @@
+.venv/
+.DS_Store
+uv.lock
+.python-version
+Data/
+DataARI/
+__pycache__/
+*.egg-info
+build/
+dist/
+
