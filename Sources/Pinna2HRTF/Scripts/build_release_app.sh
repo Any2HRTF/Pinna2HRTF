@@ -9,6 +9,11 @@ CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 ICON="$ROOT/Sources/Pinna2HRTF/Resources/app_icon.icns"
+EXTERNAL_ROOT="$ROOT/External"
+if [[ ! -d "$EXTERNAL_ROOT" ]]; then
+  EXTERNAL_ROOT="$REPO_ROOT/External"
+fi
+UV_BIN="$EXTERNAL_ROOT/bin/uv"
 
 cd "$ROOT"
 CLANG_MODULE_CACHE_PATH="/private/tmp/pinna2hrtf-clang-cache" \
@@ -18,8 +23,29 @@ swift build -c release --disable-sandbox --scratch-path "$SCRATCH" --product Pin
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS" "$RESOURCES"
 cp "$SCRATCH/release/Pinna2HRTF" "$MACOS/Pinna2HRTF"
+cp -R "$ROOT/HRTFCalculation" "$RESOURCES/HRTFCalculation"
+cp "$ROOT/pyproject.toml" "$RESOURCES/pyproject.toml"
+if [[ -f "$ROOT/uv.lock" ]]; then
+  cp "$ROOT/uv.lock" "$RESOURCES/uv.lock"
+fi
+if [[ -d "$EXTERNAL_ROOT/bin" ]]; then
+  mkdir -p "$RESOURCES/External"
+  cp -R "$EXTERNAL_ROOT/bin" "$RESOURCES/External/bin"
+fi
+if [[ -d "$REPO_ROOT/Paper/Data/Resources/EvalGrid" ]]; then
+  mkdir -p "$RESOURCES/Data/Resources"
+  cp -R "$REPO_ROOT/Paper/Data/Resources/EvalGrid" "$RESOURCES/Data/Resources/EvalGrid"
+fi
 if [[ -f "$ICON" ]]; then
   cp "$ICON" "$RESOURCES/app_icon.icns"
+fi
+if [[ ! -x "$UV_BIN" ]]; then
+  UV_BIN="$(command -v uv || true)"
+fi
+if [[ -x "$UV_BIN" ]]; then
+  cd "$RESOURCES"
+  UV_CACHE_DIR="/private/tmp/pinna2hrtf-uv-cache" "$UV_BIN" sync --no-dev
+  cd "$ROOT"
 fi
 cat > "$CONTENTS/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

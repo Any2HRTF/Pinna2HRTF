@@ -30,6 +30,9 @@ enum PipelineConfigWriter {
         let inference = project.settings.inference
         let preprocessing = project.settings.preprocessing
         let numcalc = project.settings.numcalc
+        let bundledGrid = Defaults.pipelineRoot.appendingPathComponent("Data/Resources/EvalGrid")
+        let sourceGrid = Defaults.worktreeRoot().appendingPathComponent("Paper/Data/Resources/EvalGrid")
+        let evaluationGrid = FileManager.default.fileExists(atPath: bundledGrid.path) ? bundledGrid.path : sourceGrid.path
         return """
         paths:
           left_ear: \(project.leftEar)
@@ -38,7 +41,7 @@ enum PipelineConfigWriter {
           external_deps_dir: \(environment.externalDir)
           numcalc_executable: \(environment.numcalcExecutable)
           mesh_grading_executable: \(environment.meshGradingExecutable)
-          evaluation_grid: \(Defaults.worktreeRoot().appendingPathComponent("Paper/Data/Resources/EvalGrid").path)
+          evaluation_grid: \(evaluationGrid)
         inference:
           enabled: true
           model_config_file: \(inference.modelConfig)

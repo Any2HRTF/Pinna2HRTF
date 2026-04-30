@@ -19,10 +19,10 @@ struct EnvironmentPanelView: View {
             Button {
                 store.setupEnvironment()
             } label: {
-                Label("Set Up", systemImage: "arrow.down.circle")
+                Label(allToolsReady ? "Set Up Python" : "Install Missing", systemImage: "arrow.down.circle")
                     .frame(maxWidth: .infinity)
             }
-            .disabled(store.environmentProcess != nil || !FileManager.default.isExecutableFile(atPath: store.environment.uvExecutable))
+            .disabled(store.environmentProcess != nil)
         }
         .buttonStyle(.bordered)
         .controlSize(.regular)

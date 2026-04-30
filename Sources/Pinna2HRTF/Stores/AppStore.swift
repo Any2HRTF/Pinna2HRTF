@@ -23,8 +23,8 @@ final class AppStore: ObservableObject {
     let registryStore: ProjectRegistryStore
 
     init() {
-        rootURL = Defaults.worktreeRoot()
-        packageURL = Defaults.packageRoot()
+        rootURL = Defaults.runtimeRoot
+        packageURL = Defaults.pipelineRoot
         registryStore = ProjectRegistryStore(rootURL: rootURL, packageURL: packageURL)
         let registry = AppStore.migrated(registryStore.load(), rootURL: rootURL, packageURL: packageURL)
         projects = registry.projects
@@ -244,8 +244,13 @@ final class AppStore: ObservableObject {
             appendLog("Environment setup is already running.")
             return
         }
+        copyPathToolsIntoEnvironment()
         let process = Process()
         let bundledUV = FileManager.default.isExecutableFile(atPath: environment.uvExecutable)
+        guard bundledUV || Defaults.which("uv") != nil else {
+            appendLog("UV is missing. Install uv or use a release app that bundles it, then run Set Up again.")
+            return
+        }
         process.executableURL = bundledUV ? URL(fileURLWithPath: environment.uvExecutable) : URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = bundledUV ? ["sync"] : ["uv", "sync"]
         process.currentDirectoryURL = packageURL
@@ -280,11 +285,54 @@ final class AppStore: ObservableObject {
     func processEnvironment() -> [String: String] {
         var values = ProcessInfo.processInfo.environment
         values["PINNA2HRTF_ROOT"] = rootURL.path
-        values["UV_CACHE_DIR"] = rootURL.appendingPathComponent("External/uv-cache").path
-        values["MPLCONFIGDIR"] = rootURL.appendingPathComponent("External/matplotlib-cache").path
+        values["UV_CACHE_DIR"] = Defaults.appDataURL.appendingPathComponent("Cache/uv").path
+        values["MPLCONFIGDIR"] = Defaults.appDataURL.appendingPathComponent("Cache/matplotlib").path
         values["PYTHONPATH"] = packageURL.path
-        values["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + (values["PATH"] ?? "")
+        values["PATH"] = URL(fileURLWithPath: environment.externalDir).appendingPathComponent("bin").path + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + (values["PATH"] ?? "")
         return values
+    }
+
+    func copyPathToolsIntoEnvironment() {
+        let bin = URL(fileURLWithPath: environment.externalDir).appendingPathComponent("bin", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        } catch {
+            appendLog("Could not prepare dependency folder \(bin.path): \(error.localizedDescription)")
+            return
+        }
+        let tools = [
+            ("uv", \EnvironmentConfig.uvExecutable),
+            ("NumCalc", \EnvironmentConfig.numcalcExecutable),
+            ("hrtf_mesh_grading", \EnvironmentConfig.meshGradingExecutable)
+        ]
+        for tool in tools {
+            let current = environment[keyPath: tool.1]
+            if FileManager.default.isExecutableFile(atPath: current) {
+                continue
+            }
+            guard let source = Defaults.which(tool.0) else {
+                appendLog("\(tool.0) is missing from the app bundle and PATH.")
+                continue
+            }
+            let target = bin.appendingPathComponent(tool.0)
+            do {
+                if FileManager.default.fileExists(atPath: target.path) {
+                    try FileManager.default.removeItem(at: target)
+                }
+                try FileManager.default.copyItem(at: URL(fileURLWithPath: source), to: target)
+                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target.path)
+                updateEnvironment {
+                    switch tool.0 {
+                    case "uv": $0.uvExecutable = target.path
+                    case "NumCalc": $0.numcalcExecutable = target.path
+                    default: $0.meshGradingExecutable = target.path
+                    }
+                }
+                appendLog("Copied \(tool.0) into \(target.path)")
+            } catch {
+                appendLog("Could not copy \(tool.0) into the app dependencies: \(error.localizedDescription)")
+            }
+        }
     }
 
     func stopRunningProcess() {

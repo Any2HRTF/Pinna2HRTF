@@ -17,18 +17,83 @@ enum Defaults {
         packageRoot(from: filePath).deletingLastPathComponent()
     }
 
+    static var pipelineRoot: URL {
+        if let resourceURL = Bundle.main.resourceURL,
+           FileManager.default.fileExists(atPath: resourceURL.appendingPathComponent("HRTFCalculation").path) {
+            return resourceURL
+        }
+        return packageRoot()
+    }
+
+    static var isPackagedApp: Bool {
+        if let resourceURL = Bundle.main.resourceURL,
+           FileManager.default.fileExists(atPath: resourceURL.appendingPathComponent("HRTFCalculation").path) {
+            return true
+        }
+        return false
+    }
+
+    static var runtimeRoot: URL {
+        if let resourceURL = Bundle.main.resourceURL,
+           FileManager.default.fileExists(atPath: resourceURL.appendingPathComponent("HRTFCalculation").path) {
+            return resourceURL
+        }
+        return worktreeRoot()
+    }
+
     static var appDataURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return base.appendingPathComponent("Pinna2HRTF", isDirectory: true)
     }
 
     static func environment(root: URL) -> EnvironmentConfig {
-        EnvironmentConfig(
-            uvExecutable: root.appendingPathComponent("External/bin/uv").path,
-            numcalcExecutable: root.appendingPathComponent("External/bin/NumCalc").path,
-            meshGradingExecutable: root.appendingPathComponent("External/bin/hrtf_mesh_grading").path,
-            externalDir: root.appendingPathComponent("External").path
+        let pipeline = pipelineRoot
+        let appSupportBin = appDataURL.appendingPathComponent("External/bin", isDirectory: true)
+        return EnvironmentConfig(
+            uvExecutable: executablePath(named: "uv", bundled: pipeline.appendingPathComponent("External/bin/uv"), install: appSupportBin.appendingPathComponent("uv")),
+            numcalcExecutable: executablePath(named: "NumCalc", bundled: pipeline.appendingPathComponent("External/bin/NumCalc"), install: appSupportBin.appendingPathComponent("NumCalc")),
+            meshGradingExecutable: executablePath(named: "hrtf_mesh_grading", bundled: pipeline.appendingPathComponent("External/bin/hrtf_mesh_grading"), install: appSupportBin.appendingPathComponent("hrtf_mesh_grading")),
+            externalDir: externalDir(root: root, pipeline: pipeline).path
         )
+    }
+
+    static func externalDir(root: URL, pipeline: URL) -> URL {
+        let bundled = pipeline.appendingPathComponent("External", isDirectory: true)
+        if isPackagedApp {
+            return bundled
+        }
+        if FileManager.default.fileExists(atPath: bundled.path) {
+            return bundled
+        }
+        let source = root.appendingPathComponent("External", isDirectory: true)
+        if FileManager.default.fileExists(atPath: source.path) {
+            return source
+        }
+        return appDataURL.appendingPathComponent("External", isDirectory: true)
+    }
+
+    static func executablePath(named name: String, bundled: URL, install: URL) -> String {
+        if FileManager.default.isExecutableFile(atPath: bundled.path) {
+            return bundled.path
+        }
+        if let path = which(name) {
+            return path
+        }
+        if FileManager.default.isExecutableFile(atPath: install.path) {
+            return install.path
+        }
+        return bundled.path
+    }
+
+    static func which(_ name: String) -> String? {
+        let paths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        for path in paths {
+            let candidate = URL(fileURLWithPath: path).appendingPathComponent(name).path
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+        return nil
     }
 
     static func settings(packageRoot: URL) -> ProjectSettings {
