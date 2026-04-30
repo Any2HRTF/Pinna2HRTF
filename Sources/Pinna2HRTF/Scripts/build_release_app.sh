@@ -50,6 +50,30 @@ if [[ -x "$UV_BIN" ]]; then
   UV_CACHE_DIR="/private/tmp/pinna2hrtf-uv-cache" \
   "$UV_BIN" sync --no-dev
   cd "$ROOT"
+  PYTHON_REALPATH="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$RESOURCES/.venv/bin/python")"
+  PYTHON_PREFIX="$(cd "$(dirname "$PYTHON_REALPATH")/.." && pwd)"
+  PYTHON_BUNDLE="$RESOURCES/Python/$(basename "$PYTHON_PREFIX")"
+  mkdir -p "$RESOURCES/Python"
+  rm -rf "$PYTHON_BUNDLE"
+  cp -R "$PYTHON_PREFIX" "$PYTHON_BUNDLE"
+  rm -f "$RESOURCES/.venv/bin/python" "$RESOURCES/.venv/bin/python3" "$RESOURCES/.venv/bin/python3.11"
+  ln -s "../../Python/$(basename "$PYTHON_PREFIX")/bin/python3.11" "$RESOURCES/.venv/bin/python"
+  ln -s "python" "$RESOURCES/.venv/bin/python3"
+  ln -s "python" "$RESOURCES/.venv/bin/python3.11"
+  python3 - "$RESOURCES/.venv/pyvenv.cfg" "$(basename "$PYTHON_PREFIX")" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+name = sys.argv[2]
+lines = path.read_text().splitlines()
+next_lines = []
+for line in lines:
+    if line.startswith("home = "):
+        next_lines.append(f"home = ../../Python/{name}/bin")
+    else:
+        next_lines.append(line)
+path.write_text("\n".join(next_lines) + "\n")
+PY
 fi
 cat > "$CONTENTS/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

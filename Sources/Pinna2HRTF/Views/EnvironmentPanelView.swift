@@ -16,13 +16,20 @@ struct EnvironmentPanelView: View {
             ToolStatusRow("UV", path: store.environment.uvExecutable)
             ToolStatusRow("NumCalc", path: store.environment.numcalcExecutable)
             ToolStatusRow("Mesh grading", path: store.environment.meshGradingExecutable)
-            Button {
-                store.setupEnvironment()
-            } label: {
-                Label(allToolsReady ? "Set Up Python" : "Install Missing", systemImage: "arrow.down.circle")
-                    .frame(maxWidth: .infinity)
+            if !Defaults.isPackagedApp {
+                Button {
+                    store.setupEnvironment()
+                } label: {
+                    Label(allToolsReady ? "Set Up Python" : "Install Missing", systemImage: "arrow.down.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(store.environmentProcess != nil)
+            } else {
+                Text("Bundled runtime")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .disabled(store.environmentProcess != nil)
         }
         .buttonStyle(.bordered)
         .controlSize(.regular)

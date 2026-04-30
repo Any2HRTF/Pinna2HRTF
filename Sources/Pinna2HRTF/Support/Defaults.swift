@@ -46,6 +46,10 @@ enum Defaults {
         return base.appendingPathComponent("Pinna2HRTF", isDirectory: true)
     }
 
+    static var runtimeProjectURL: URL {
+        appDataURL.appendingPathComponent("Runtime", isDirectory: true)
+    }
+
     static func environment(root: URL) -> EnvironmentConfig {
         let pipeline = pipelineRoot
         let appSupportBin = appDataURL.appendingPathComponent("External/bin", isDirectory: true)

@@ -186,6 +186,11 @@ final class AppStore: ObservableObject {
             return
         }
         do {
+            try prepareRuntimeProject()
+            if Defaults.isPackagedApp && !FileManager.default.fileExists(atPath: runtimePythonURL.path) {
+                appendLog("Python runtime is missing from the app bundle.")
+                return
+            }
             let configURL = try PipelineConfigWriter.prepare(project: project, environment: environment)
             startProcess(stage: stage, project: project, configURL: configURL)
         } catch {
@@ -197,10 +202,15 @@ final class AppStore: ObservableObject {
 
     func startProcess(stage: Stage, project: ProjectRecord, configURL: URL) {
         let process = Process()
-        let bundledUV = FileManager.default.isExecutableFile(atPath: environment.uvExecutable)
-        process.executableURL = bundledUV ? URL(fileURLWithPath: environment.uvExecutable) : URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = bundledUV ? ["run", "--no-sync", "python", "-m", "HRTFCalculation.RunConfig", "--config", configURL.path, "--stage", stage.rawValue] : ["uv", "run", "--no-sync", "python", "-m", "HRTFCalculation.RunConfig", "--config", configURL.path, "--stage", stage.rawValue]
-        process.currentDirectoryURL = packageURL
+        if Defaults.isPackagedApp {
+            process.executableURL = runtimePythonURL
+            process.arguments = ["-m", "HRTFCalculation.RunConfig", "--config", configURL.path, "--stage", stage.rawValue]
+        } else {
+            let bundledUV = FileManager.default.isExecutableFile(atPath: environment.uvExecutable)
+            process.executableURL = bundledUV ? URL(fileURLWithPath: environment.uvExecutable) : URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = bundledUV ? ["run", "--no-sync", "python", "-m", "HRTFCalculation.RunConfig", "--config", configURL.path, "--stage", stage.rawValue] : ["uv", "run", "--no-sync", "python", "-m", "HRTFCalculation.RunConfig", "--config", configURL.path, "--stage", stage.rawValue]
+        }
+        process.currentDirectoryURL = executionPackageURL
         process.environment = processEnvironment()
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -245,7 +255,15 @@ final class AppStore: ObservableObject {
             appendLog("Environment setup is already running.")
             return
         }
-        copyPathToolsIntoEnvironment()
+        do {
+            try prepareRuntimeProject()
+        } catch {
+            appendLog("Could not prepare runtime folder: \(error.localizedDescription)")
+            return
+        }
+        if !Defaults.isPackagedApp {
+            copyPathToolsIntoEnvironment()
+        }
         let process = Process()
         let bundledUV = FileManager.default.isExecutableFile(atPath: environment.uvExecutable)
         guard bundledUV || Defaults.which("uv") != nil else {
@@ -254,7 +272,7 @@ final class AppStore: ObservableObject {
         }
         process.executableURL = bundledUV ? URL(fileURLWithPath: environment.uvExecutable) : URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = bundledUV ? ["sync"] : ["uv", "sync"]
-        process.currentDirectoryURL = packageURL
+        process.currentDirectoryURL = executionPackageURL
         process.environment = processEnvironment()
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -289,9 +307,33 @@ final class AppStore: ObservableObject {
         values["PINNA2HRTF_ROOT"] = rootURL.path
         values["UV_CACHE_DIR"] = Defaults.appDataURL.appendingPathComponent("Cache/uv").path
         values["MPLCONFIGDIR"] = Defaults.appDataURL.appendingPathComponent("Cache/matplotlib").path
-        values["PYTHONPATH"] = packageURL.path
+        values["PYTHONPATH"] = executionPackageURL.path
         values["PATH"] = URL(fileURLWithPath: environment.externalDir).appendingPathComponent("bin").path + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + (values["PATH"] ?? "")
         return values
+    }
+
+    var executionPackageURL: URL {
+        Defaults.isPackagedApp ? Defaults.runtimeProjectURL : packageURL
+    }
+
+    var runtimePythonURL: URL {
+        Defaults.runtimeProjectURL.appendingPathComponent(".venv/bin/python")
+    }
+
+    func prepareRuntimeProject() throws {
+        guard Defaults.isPackagedApp else { return }
+        let runtime = Defaults.runtimeProjectURL
+        try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: true)
+        let entries = ["HRTFCalculation", "pyproject.toml", "uv.lock", ".venv", "Python"]
+        for entry in entries {
+            let source = packageURL.appendingPathComponent(entry)
+            let target = runtime.appendingPathComponent(entry)
+            guard FileManager.default.fileExists(atPath: source.path) else { continue }
+            if FileManager.default.fileExists(atPath: target.path) {
+                try FileManager.default.removeItem(at: target)
+            }
+            try FileManager.default.copyItem(at: source, to: target)
+        }
     }
 
     func copyPathToolsIntoEnvironment() {
