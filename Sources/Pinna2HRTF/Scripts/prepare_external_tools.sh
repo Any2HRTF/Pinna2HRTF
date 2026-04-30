@@ -6,6 +6,7 @@ EXTERNAL_ROOT="${1:-$ROOT/External}"
 BIN="$EXTERNAL_ROOT/bin"
 SRC="$EXTERNAL_ROOT/src"
 NCPU="$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
+PMP_COMMIT="58283eee4749553345bf4eed74c87c889b03e06c"
 
 mkdir -p "$BIN" "$SRC"
 
@@ -36,11 +37,12 @@ fi
 if [[ ! -x "$BIN/hrtf_mesh_grading" ]]; then
   GRADING_SRC="$SRC/hrtf_mesh_grading"
   if [[ ! -d "$GRADING_SRC" ]]; then
-    git clone --recursive --depth 1 https://github.com/cg-tub/hrtf_mesh_grading.git "$GRADING_SRC"
+    git clone --depth 1 https://github.com/cg-tub/hrtf_mesh_grading.git "$GRADING_SRC"
   fi
   PMP_DIR="$GRADING_SRC/pmp-library"
-  if [[ ! -d "$PMP_DIR" && -d "$GRADING_SRC/pmp-library-full" ]]; then
-    PMP_DIR="$GRADING_SRC/pmp-library-full"
+  if [[ ! -d "$PMP_DIR" ]]; then
+    git clone https://github.com/cg-tub/pmp-library.git "$PMP_DIR"
+    git -C "$PMP_DIR" checkout "$PMP_COMMIT"
   fi
   if ! command -v cmake >/dev/null 2>&1; then
     echo "cmake is required to build hrtf_mesh_grading"
