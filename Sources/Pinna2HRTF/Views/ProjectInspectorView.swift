@@ -46,6 +46,7 @@ struct ProjectInspectorView: View {
                 }
                 SettingsDisclosure("Mesh2HRTF", systemImage: "waveform.path.ecg") {
                     Toggle("Use predictions for preprocessing", isOn: inferenceBoolBinding(\.usePredictionsForPreprocessing))
+                    PathField("Evaluation grid", text: optionalPreprocessingBinding(\.evaluationGrid), mode: .directory)
                     LabeledTextField("Min frequency", text: preprocessingBinding(\.minFrequency))
                     LabeledTextField("Max frequency", text: preprocessingBinding(\.maxFrequency))
                     LabeledTextField("Frequency steps", text: preprocessingBinding(\.frequencyStepCount))
@@ -109,6 +110,13 @@ struct ProjectInspectorView: View {
         Binding(
             get: { store.selectedProject?.settings.preprocessing[keyPath: keyPath] ?? "" },
             set: { value in store.updateSelectedProject { $0.settings.preprocessing[keyPath: keyPath] = value } }
+        )
+    }
+
+    func optionalPreprocessingBinding(_ keyPath: WritableKeyPath<PreprocessingSettings, String?>) -> Binding<String> {
+        Binding(
+            get: { store.selectedProject?.settings.preprocessing[keyPath: keyPath] ?? "" },
+            set: { value in store.updateSelectedProject { $0.settings.preprocessing[keyPath: keyPath] = value.isEmpty ? nil : value } }
         )
     }
 

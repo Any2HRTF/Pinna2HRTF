@@ -41,7 +41,7 @@ class PathsConfig(BaseModel):
     mesh2hrtf_path: Path | None = None
     numcalc_executable: Path | None = None
     mesh_grading_executable: Path | None = None
-    evaluation_grid: Path = Field(default_factory=lambda: worktree_root() / "Paper" / "Data" / "Resources" / "EvalGrid")
+    evaluation_grid: str = "Default"
 
 
 class InferenceConfig(BaseModel):

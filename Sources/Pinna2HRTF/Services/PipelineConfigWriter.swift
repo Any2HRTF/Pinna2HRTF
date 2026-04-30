@@ -30,9 +30,8 @@ enum PipelineConfigWriter {
         let inference = project.settings.inference
         let preprocessing = project.settings.preprocessing
         let numcalc = project.settings.numcalc
-        let bundledGrid = Defaults.pipelineRoot.appendingPathComponent("Data/Resources/EvalGrid")
-        let sourceGrid = Defaults.worktreeRoot().appendingPathComponent("Paper/Data/Resources/EvalGrid")
-        let evaluationGrid = FileManager.default.fileExists(atPath: bundledGrid.path) ? bundledGrid.path : sourceGrid.path
+        let selectedGrid = preprocessing.evaluationGrid?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let evaluationGrid = selectedGrid.isEmpty ? "Default" : selectedGrid
         return """
         paths:
           left_ear: \(project.leftEar)

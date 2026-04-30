@@ -6,60 +6,55 @@ struct ProjectSidebarView: View {
     var body: some View {
         List(selection: $store.selectedProjectID) {
             Section("Projects") {
-                ForEach(store.projects) { project in
-                    ProjectRow(project: project)
-                        .tag(project.id)
-                        .contextMenu {
-                            Button("Remove Project") {
-                                store.selectedProjectID = project.id
-                                store.forgetSelectedProject()
+                if store.projects.isEmpty {
+                    Text("No Projects")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(store.projects) { project in
+                        ProjectRow(project: project)
+                            .tag(project.id)
+                            .contextMenu {
+                                Button("Remove Project") {
+                                    store.selectedProjectID = project.id
+                                    store.forgetSelectedProject()
+                                }
                             }
-                        }
+                    }
                 }
             }
         }
         .listStyle(.sidebar)
-        .safeAreaInset(edge: .top) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
-                    Image(systemName: "ear")
-                        .font(.title3)
-                        .foregroundStyle(.blue)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Pinna2HRTF")
-                            .font(.headline)
-                        Text("Project workspace")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
+        .navigationTitle("Projects")
+        .safeAreaInset(edge: .bottom) {
+            HStack(spacing: 8) {
+                Button {
+                    store.createProject()
+                } label: {
+                    Image(systemName: "plus")
                 }
-                HStack {
-                    Button {
-                        store.createProject()
-                    } label: {
-                        Label("New Project", systemImage: "plus")
-                    }
-                    Button(role: .destructive) {
-                        store.forgetSelectedProject()
-                    } label: {
-                        Label("Remove Project", systemImage: "minus")
-                    }
-                    .disabled(store.selectedProject == nil)
+                .help("New Project")
+                Button(role: .destructive) {
+                    store.forgetSelectedProject()
+                } label: {
+                    Image(systemName: "minus")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .help("Remove Project")
+                .disabled(store.selectedProject == nil)
+                Spacer()
+                Text(projectCountText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
             .background(.bar)
         }
-        .safeAreaInset(edge: .bottom) {
-            EnvironmentPanelView(store: store)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(.bar)
-        }
+    }
+
+    var projectCountText: String {
+        store.projects.count == 1 ? "1 project" : "\(store.projects.count) projects"
     }
 }
 
