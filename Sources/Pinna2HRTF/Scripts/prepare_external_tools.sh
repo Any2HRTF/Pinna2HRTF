@@ -40,9 +40,15 @@ if [[ ! -x "$BIN/hrtf_mesh_grading" ]]; then
     git clone --depth 1 https://github.com/cg-tub/hrtf_mesh_grading.git "$GRADING_SRC"
   fi
   PMP_DIR="$GRADING_SRC/pmp-library"
-  if [[ ! -d "$PMP_DIR" ]]; then
-    git clone https://github.com/cg-tub/pmp-library.git "$PMP_DIR"
+  if [[ ! -f "$PMP_DIR/CMakeLists.txt" ]]; then
+    rm -rf "$PMP_DIR"
+    git clone --recursive https://github.com/cg-tub/pmp-library.git "$PMP_DIR"
     git -C "$PMP_DIR" checkout "$PMP_COMMIT"
+    git -C "$PMP_DIR" submodule update --init --recursive
+  fi
+  if [[ ! -f "$PMP_DIR/CMakeLists.txt" ]]; then
+    echo "pmp-library checkout is missing CMakeLists.txt"
+    exit 1
   fi
   if ! command -v cmake >/dev/null 2>&1; then
     echo "cmake is required to build hrtf_mesh_grading"
