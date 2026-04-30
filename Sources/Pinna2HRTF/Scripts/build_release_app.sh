@@ -48,7 +48,7 @@ if [[ -x "$UV_BIN" ]]; then
   GIT_CONFIG_KEY_0="url.https://github.com/.insteadOf" \
   GIT_CONFIG_VALUE_0="git@github.com:" \
   UV_CACHE_DIR="/private/tmp/pinna2hrtf-uv-cache" \
-  "$UV_BIN" sync --no-dev
+  "$UV_BIN" sync --no-dev --managed-python --python 3.11
   cd "$ROOT"
   PYTHON_REALPATH="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$RESOURCES/.venv/bin/python")"
   PYTHON_PREFIX="$(cd "$(dirname "$PYTHON_REALPATH")/.." && pwd)"
