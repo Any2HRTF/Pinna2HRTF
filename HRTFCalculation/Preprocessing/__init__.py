@@ -2,43 +2,152 @@ import argparse
 import trimesh
 import tempfile
 import subprocess
+import shutil
+from pathlib import Path
 
 from .src.create_head import head
 from .src.ear_canal_closer import ear_canal_closer
 from .src.cut_eararea import cut_eararea
-from .src.head_stitcher import head_stitcher
-from .src.material_assign_and_mesh2input import main
+from HRTFCalculation.Config import PreprocessingConfig
+
+
+def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, mesh2hrtf_path, evaluation_grid, preprocessing=None, output_dir=None, export_path=None, logger=print):
+    settings = preprocessing or PreprocessingConfig()
+    if output_dir is None and export_path is None:
+        raise ValueError("output_dir or export_path is required")
+    left_path = Path(left_path)
+    right_path = Path(right_path)
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        projects_dir = output_dir / "Projects"
+        left_project = projects_dir / "Left"
+        right_project = projects_dir / "Right"
+        legacy_projects = [projects_dir / "project-Left", projects_dir / "project-Right"]
+        intermediates = output_dir / "intermediates"
+    else:
+        export_prefix = Path(export_path)
+        left_project = Path(f"{export_prefix}-Left")
+        right_project = Path(f"{export_prefix}-Right")
+        legacy_projects = []
+        intermediates = Path(f"{export_prefix}-intermediates")
+    if settings.write_intermediates:
+        work_dir = intermediates
+        if work_dir.exists():
+            shutil.rmtree(work_dir)
+        (work_dir / "left").mkdir(parents=True, exist_ok=True)
+        (work_dir / "right").mkdir(parents=True, exist_ok=True)
+        cleanup = None
+    else:
+        cleanup = tempfile.TemporaryDirectory()
+        work_dir = Path(cleanup.name)
+        (work_dir / "left").mkdir(parents=True, exist_ok=True)
+        (work_dir / "right").mkdir(parents=True, exist_ok=True)
+    try:
+        left_ear = trimesh.load(left_path)
+        right_ear = trimesh.load(right_path)
+        shutil.copyfile(left_path, work_dir / "left" / "input_ear.stl")
+        shutil.copyfile(right_path, work_dir / "right" / "input_ear.stl")
+        left_closed = work_dir / "left" / "closed_ear.stl"
+        right_closed = work_dir / "right" / "closed_ear.stl"
+        dummy_head = work_dir / "dummy_head.stl"
+        left_cut = work_dir / "left" / "cut_head.stl"
+        right_cut = work_dir / "right" / "cut_head.stl"
+        left_stitched = work_dir / "left" / "stitched_head.stl"
+        right_stitched = work_dir / "right" / "stitched_head.stl"
+        left_graded = work_dir / "left" / "graded_head.ply"
+        right_graded = work_dir / "right" / "graded_head.ply"
+        ear_canal_closer(trimesh.load(left_path)).export(left_closed)
+        ear_canal_closer(trimesh.load(right_path)).export(right_closed)
+        head(
+            left_ear,
+            right_ear,
+            dummy_head,
+            radius_scale=settings.head_radius_scale,
+            width_scale=settings.head_width_scale,
+            height_scale=settings.head_height_scale,
+            y_deformation=settings.head_y_deformation,
+        )
+        cut_eararea(trimesh.load(dummy_head), trimesh.load(left_closed), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="left").export(left_cut)
+        cut_eararea(trimesh.load(dummy_head), trimesh.load(right_closed), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="right").export(right_cut)
+        from .src.head_stitcher import head_stitcher
+        head_stitcher(head_path=str(left_cut), ear_path=str(left_closed), export_path=str(left_stitched))
+        head_stitcher(head_path=str(right_cut), ear_path=str(right_closed), export_path=str(right_stitched))
+        subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-v', '-g', str(settings.mesh_gamma_left), '-h', str(settings.mesh_hole_size), '-s', 'left', '-i', str(left_stitched), '-o', str(left_graded)], check=True)
+        subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-v', '-g', str(settings.mesh_gamma_right), '-h', str(settings.mesh_hole_size), '-s', 'right', '-i', str(right_stitched), '-o', str(right_graded)], check=True)
+        if left_project.exists():
+            shutil.rmtree(left_project)
+        if right_project.exists():
+            shutil.rmtree(right_project)
+        for project in legacy_projects:
+            if project.exists():
+                shutil.rmtree(project)
+        left_project.parent.mkdir(parents=True, exist_ok=True)
+        from .src.material_assign_and_mesh2input import main as mesh2input_main
+        mesh2input_main(
+            head=str(left_graded),
+            title=settings.title,
+            source_type=settings.source_type_left,
+            filepath=str(left_project),
+            mesh2hrtf_path=str(mesh2hrtf_path),
+            evaluationGrids=str(evaluation_grid),
+            method=settings.method,
+            pictures=settings.pictures,
+            reference=settings.reference,
+            computeHRIRs=settings.compute_hrirs,
+            unit=settings.unit,
+            speedOfSound=settings.speed_of_sound,
+            densityOfMedium=settings.air_density,
+            materialSearchPaths=settings.material_search_paths,
+            min_frequency=settings.min_frequency,
+            max_frequency=settings.max_frequency,
+            frequency_vector_type=settings.frequency_vector_type,
+            frequency_step_count=settings.frequency_step_count,
+            tolerance=settings.source_assignment_tolerance,
+        )
+        mesh2input_main(
+            head=str(right_graded),
+            title=settings.title,
+            source_type=settings.source_type_right,
+            filepath=str(right_project),
+            mesh2hrtf_path=str(mesh2hrtf_path),
+            evaluationGrids=str(evaluation_grid),
+            method=settings.method,
+            pictures=settings.pictures,
+            reference=settings.reference,
+            computeHRIRs=settings.compute_hrirs,
+            unit=settings.unit,
+            speedOfSound=settings.speed_of_sound,
+            densityOfMedium=settings.air_density,
+            materialSearchPaths=settings.material_search_paths,
+            min_frequency=settings.min_frequency,
+            max_frequency=settings.max_frequency,
+            frequency_vector_type=settings.frequency_vector_type,
+            frequency_step_count=settings.frequency_step_count,
+            tolerance=settings.source_assignment_tolerance,
+        )
+        logger(f"Preprocessing completed: {left_project} and {right_project}")
+    finally:
+        if cleanup is not None:
+            cleanup.cleanup()
+
 
 def preprocess():
     parser = argparse.ArgumentParser(description="Run preprocessing from ears to Mesh2HRTF project folders.")
-
     parser.add_argument('--left-path', type=str, required=True, help='Path to left ear mesh.')
     parser.add_argument('--right-path', type=str, required=True, help='Path to right ear mesh.')
     parser.add_argument('--export-path', type=str, required=True,  help='Path to exported Mesh2HRTF Project.')
     parser.add_argument('--mesh-grading-executable', type=str, required=True, help='Path to the mesh_grading executable.')
     parser.add_argument('--Mesh2HRTF-path', type=str, required=True, help='Path to the location of the mesh2hrtf directory.')
-    parser.add_argument('--Mesh2HRTF-Evaluation-Grid', type=str, default='Default', help='Path to the evaluation grid to be used for Mesh2HRTF.')
+    parser.add_argument('--Mesh2HRTF-Evaluation-Grid', type=str, default='/Users/felixperfler/Documents/ISF/2026/Pipeline Paper/Paper/Data/Resources/EvalGrid', help='Path to the evaluation grid to be used for Mesh2HRTF.')
+    parser.add_argument('--ear-cut-clearance-scale', type=float, default=1.3)
     args = parser.parse_args()
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        left_ear = trimesh.load(args.left_path)
-        right_ear = trimesh.load(args.right_path)
-
-        ear_canal_closer(trimesh.load(args.left_path)).export(f"{temp_dir}/left_ear.stl")
-        ear_canal_closer(trimesh.load(args.right_path)).export(f"{temp_dir}/right_ear.stl")
-
-        head(left_ear, right_ear, f"{temp_dir}/head.stl")
-        
-        cut_eararea(trimesh.load(f"{temp_dir}/head.stl"), trimesh.load(f"{temp_dir}/left_ear.stl")).export(f"{temp_dir}/head_cut_left.stl")
-        cut_eararea(trimesh.load(f"{temp_dir}/head.stl"), trimesh.load(f"{temp_dir}/right_ear.stl")).export(f"{temp_dir}/head_cut_right.stl")
-
-        head_stitcher(head_path=f"{temp_dir}/head_cut_left.stl", ear_path=f"{temp_dir}/left_ear.stl", export_path=f"{temp_dir}/head_left.stl")
-        head_stitcher(head_path=f"{temp_dir}/head_cut_right.stl", ear_path=f"{temp_dir}/right_ear.stl", export_path=f"{temp_dir}/head_right.stl")
-        
-        subprocess.run([args.mesh_grading_executable, '-x', '0.5', '-y', '10', '-v', '-g', '0.15', '-h', '0.2', '-s', 'left', '-i', f"{temp_dir}/head_left.stl", '-o', f"{temp_dir}/head_left_graded.ply"])
-
-        subprocess.run([args.mesh_grading_executable, '-x', '0.5', '-y', '10', '-v', '-g', '0.15', '-h', '0.2', '-s', 'right', '-i', f"{temp_dir}/head_right.stl", '-o', f"{temp_dir}/head_right_graded.ply"])
-        
-        main(head=f"{temp_dir}/head_left_graded.ply", title="HRTF Simulation",sourceType="Left ear", filepath=f"{args.export_path}-Left", programPath=args.Mesh2HRTF_path, evaluationGrids=args.Mesh2HRTF_Evaluation_Grid)
-        
-        main(head=f"{temp_dir}/head_right_graded.ply", title="HRTF Simulation",sourceType="Right ear", filepath=f"{args.export_path}-Right", programPath=args.Mesh2HRTF_path, evaluationGrids=args.Mesh2HRTF_Evaluation_Grid)
+    settings = PreprocessingConfig(ear_cut_clearance_scale=args.ear_cut_clearance_scale)
+    run_preprocessing_pipeline(
+        left_path=args.left_path,
+        right_path=args.right_path,
+        export_path=args.export_path,
+        mesh_grading_executable=args.mesh_grading_executable,
+        mesh2hrtf_path=args.Mesh2HRTF_path,
+        evaluation_grid=args.Mesh2HRTF_Evaluation_Grid,
+        preprocessing=settings,
+    )

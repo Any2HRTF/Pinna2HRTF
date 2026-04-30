@@ -18,7 +18,7 @@ import trimesh
 import pyglet  # necessary for .show to work!
 
 
-def head(left_ear, right_ear, export_path):
+def head(left_ear, right_ear, export_path, radius_scale=1.01, width_scale=1.5, height_scale=1.5, y_deformation=0.005):
 
     left_entities = left_ear.outline().entities
     right_entities = right_ear.outline().entities
@@ -42,16 +42,16 @@ def head(left_ear, right_ear, export_path):
     if np.abs(left_radius - right_radius) > 4:
         print("Warning: left and right ear radius are quite asymmetrical.")
 
-    radius = np.mean([left_radius, right_radius]) * 1.01
+    radius = np.mean([left_radius, right_radius]) * radius_scale
 
     print(f"radius: {radius:.2f}")
     dummy_head = trimesh.creation.icosphere(7, radius)
 
     for i, vert in enumerate(dummy_head.vertices):
-       a = vert[2] * 0.005 + 1
+       a = vert[2] * y_deformation + 1
        dummy_head.vertices[i,1] = a*vert[1]
 
-    dummy_head.apply_scale((1.5, 1, 1.5))
+    dummy_head.apply_scale((width_scale, 1, height_scale))
 
     dummy_head.export(export_path)
     return radius

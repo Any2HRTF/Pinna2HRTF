@@ -1,0 +1,121 @@
+import SwiftUI
+
+struct ProjectInspectorView: View {
+    @ObservedObject var store: AppStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Project")
+                    .font(.headline)
+                Spacer()
+            }
+            Divider()
+            if store.selectedProject == nil {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("No project selected")
+                        .font(.title3.weight(.semibold))
+                    Text("Create or select a project in the sidebar to edit settings and run the pipeline.")
+                        .foregroundStyle(.secondary)
+                    Button {
+                        store.createProject()
+                    } label: {
+                        Label("New Project", systemImage: "plus")
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                settingsPanel
+                    .frame(maxHeight: .infinity)
+                Divider()
+                RunPanelView(store: store)
+            }
+        }
+        .padding(.top, 12)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 12)
+        .background(.regularMaterial)
+    }
+
+    var settingsPanel: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                requiredPanel
+                SettingsDisclosure("Inference", systemImage: "wand.and.stars") {
+                    ModelPicker(selection: modelNameBinding, options: store.modelOptions)
+                }
+                SettingsDisclosure("Mesh2HRTF", systemImage: "waveform.path.ecg") {
+                    Toggle("Use predictions for preprocessing", isOn: inferenceBoolBinding(\.usePredictionsForPreprocessing))
+                    LabeledTextField("Min frequency", text: preprocessingBinding(\.minFrequency))
+                    LabeledTextField("Max frequency", text: preprocessingBinding(\.maxFrequency))
+                    LabeledTextField("Frequency steps", text: preprocessingBinding(\.frequencyStepCount))
+                }
+                SettingsDisclosure("Mesh Grading", systemImage: "ruler") {
+                    LabeledTextField("Min edge length", text: preprocessingBinding(\.meshMinEdgeLength))
+                    LabeledTextField("Max edge length", text: preprocessingBinding(\.meshMaxEdgeLength))
+                    LabeledTextField("Max error", text: preprocessingBinding(\.meshMaxError))
+                    LabeledTextField("Gamma left", text: preprocessingBinding(\.meshGammaLeft))
+                    LabeledTextField("Gamma right", text: preprocessingBinding(\.meshGammaRight))
+                }
+                SettingsDisclosure("NumCalc", systemImage: "cpu") {
+                    LabeledTextField("Parallel instances", text: numcalcBinding(\.maxInstances))
+                    LabeledTextField("CPU limit (%)", text: numcalcBinding(\.maxCPULoad))
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    var requiredPanel: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            LabeledTextField("Project name", text: projectStringBinding(\.name, refresh: false))
+            PathField("Left ear", text: projectStringBinding(\.leftEar), mode: .file)
+            PathField("Right ear", text: projectStringBinding(\.rightEar), mode: .file)
+            PathField("Save location", text: projectStringBinding(\.saveLocation), mode: .directory)
+        }
+        .padding(10)
+        .background(.background, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    func projectStringBinding(_ keyPath: WritableKeyPath<ProjectRecord, String>, refresh: Bool = true) -> Binding<String> {
+        Binding(
+            get: { store.selectedProject?[keyPath: keyPath] ?? "" },
+            set: { value in store.updateSelectedProject(refresh: refresh) { $0[keyPath: keyPath] = value } }
+        )
+    }
+
+    func inferenceBinding(_ keyPath: WritableKeyPath<InferenceSettings, String>) -> Binding<String> {
+        Binding(
+            get: { store.selectedProject?.settings.inference[keyPath: keyPath] ?? "" },
+            set: { value in store.updateSelectedProject { $0.settings.inference[keyPath: keyPath] = value } }
+        )
+    }
+
+    var modelNameBinding: Binding<String> {
+        Binding(
+            get: { store.selectedModelName(for: store.selectedProject) },
+            set: { value in store.setSelectedModelName(value) }
+        )
+    }
+
+    func inferenceBoolBinding(_ keyPath: WritableKeyPath<InferenceSettings, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { store.selectedProject?.settings.inference[keyPath: keyPath] ?? false },
+            set: { value in store.updateSelectedProject { $0.settings.inference[keyPath: keyPath] = value } }
+        )
+    }
+
+    func preprocessingBinding(_ keyPath: WritableKeyPath<PreprocessingSettings, String>) -> Binding<String> {
+        Binding(
+            get: { store.selectedProject?.settings.preprocessing[keyPath: keyPath] ?? "" },
+            set: { value in store.updateSelectedProject { $0.settings.preprocessing[keyPath: keyPath] = value } }
+        )
+    }
+
+    func numcalcBinding(_ keyPath: WritableKeyPath<NumCalcSettings, String>) -> Binding<String> {
+        Binding(
+            get: { store.selectedProject?.settings.numcalc[keyPath: keyPath] ?? "" },
+            set: { value in store.updateSelectedProject { $0.settings.numcalc[keyPath: keyPath] = value } }
+        )
+    }
+}

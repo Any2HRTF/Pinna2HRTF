@@ -6,7 +6,7 @@ Inputs:
 head_path - path to head mesh as .stl file
 ear_path - path to ear mesh as .stl file. Used to adapt the size of the ellipse
 export_path
-spazi - a factor for the spacing around the ear. Default ist 1.3
+ear_cut_clearance_scale - a factor for the spacing around the ear. Default ist 1.3
 
 Lukas Thalhammer, Acoustics Research Institute
 September 2024
@@ -18,10 +18,9 @@ import trimesh
 #import pyglet  # necessary for .show to work! Used for debugging only
 
 
-def cut_eararea(head, ear, spazi=1.3, side='auto'):
-    # compute size of the ellipse
-    a = ( np.abs(np.max(ear.vertices[:,2]) - np.min(ear.vertices[:,2])) / 2 ) * spazi  # length 1st axis of the ellipse along the z-axis
-    b = ( np.abs(np.max(ear.vertices[:,0]) - np.min(ear.vertices[:,0])) / 2 ) * spazi*spazi  # length 2nd axis of the ellipse along the x-axis
+def cut_eararea(head, ear, ear_cut_clearance_scale=1.3, side='auto'):
+    a = ( np.abs(np.max(ear.vertices[:,2]) - np.min(ear.vertices[:,2])) / 2 ) * ear_cut_clearance_scale
+    b = ( np.abs(np.max(ear.vertices[:,0]) - np.min(ear.vertices[:,0])) / 2 ) * ear_cut_clearance_scale*ear_cut_clearance_scale
     
     # compute center of the ear
     offset = ( (np.max(ear.vertices[:,0])+np.min(ear.vertices[:,0]))/2, (np.max(ear.vertices[:,2])+np.min(ear.vertices[:,2]))/2)
@@ -33,13 +32,13 @@ def cut_eararea(head, ear, spazi=1.3, side='auto'):
         else:
             side = 'right'
     elif side not in ('left', 'right'):
-        raise Exception("Inconclusive LorR parameter. Please use 'auto', 'left' or 'right'.")
+        raise Exception("Inconclusive side parameter. Please use 'auto', 'left' or 'right'.")
 
     # check if cylinder covers the whole ear
     ear_mask = elliptical_cylinder_mask(ear, a, b, offset, side=side)
     if not ear_mask.all():
        import warnings
-       warnings.simplefilter(f'Not all of the ear was removed. Try again with a bigger spazi.')
+       warnings.warn('Not all of the ear was removed. Try again with a bigger ear_cut_clearance_scale.')
 
     # compute the vertex mask
     vert_mask = elliptical_cylinder_mask(head, a, b, offset, side=side)
@@ -72,7 +71,7 @@ def elliptical_cylinder_mask(mesh, a, b, offset, side='left'):
     elif side == 'right':  # right side
         y_condition = (mesh.vertices[:, 1] <= 0) 
     else:
-        raise Exception('Inconclusive LorR parameter. Please use \'left\' or \'right\'.')
+        raise Exception('Inconclusive side parameter. Please use \'left\' or \'right\'.')
 
     # Both conditions must be satisfied for a vertex to be inside the cylinder
     mask = ellipse_condition & y_condition
@@ -85,19 +84,20 @@ if __name__ == "__main__":
     parser.add_argument('--head_path', type=str, required=True, help='Path to the head mesh')
     parser.add_argument('--ear_path', type=str, required=True, help='Path to the ear mesh')
     parser.add_argument('--export_path', type=str, required=True, help='Path to save the cut head to')
-    parser.add_argument('--spazi', type=float, required=False, default=1.3, help='Factor for spacing around the ear. Default is 1.3')
+    parser.add_argument('--ear-cut-clearance-scale', type=float, required=False, default=1.3, help='Factor for spacing around the ear. Default is 1.3')
+    parser.add_argument('--spazi', type=float, required=False, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     head_path = args.head_path
     ear_path = args.ear_path
     export_path = args.export_path
-    spazi = args.spazi
+    ear_cut_clearance_scale = args.spazi if args.spazi is not None else args.ear_cut_clearance_scale
 
     # File loadup and function call
     head = trimesh.load(head_path)
     ear = trimesh.load(ear_path)
 
-    head = cut_eararea(head, ear, spazi=spazi)
+    head = cut_eararea(head, ear, ear_cut_clearance_scale=ear_cut_clearance_scale)
 
     # Export
     head.export(export_path)
