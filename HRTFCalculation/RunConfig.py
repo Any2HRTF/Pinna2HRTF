@@ -209,6 +209,11 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
     m2h.output2hrtf(str(left))
     m2h.output2hrtf(str(right))
     m2h.merge_sofa_files([str(left), str(right)], savedir=str(output_dir))
+    try:
+        m2h.inspect_sofa_files(str(output_dir), pattern="HRIR", plot="3D")
+        logger(f"Wrote SOFA visualizations into {output_dir}")
+    except Exception as error:
+        logger(f"Could not write SOFA visualizations: {error}")
 
 
 def parse_args() -> argparse.Namespace:

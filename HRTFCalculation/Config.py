@@ -91,6 +91,7 @@ class PreprocessingConfig(BaseModel):
     air_density: str = "1.1839"
     material_search_paths: str = "None"
     source_assignment_tolerance: float = 2.0
+    source_assignment_mode: Literal["landmark", "legacy_axis"] = "landmark"
 
 
 class NumCalcConfig(BaseModel):

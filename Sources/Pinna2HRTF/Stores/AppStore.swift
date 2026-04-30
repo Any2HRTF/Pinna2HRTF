@@ -10,6 +10,7 @@ final class AppStore: ObservableObject {
     @Published var environment: EnvironmentConfig
     @Published var logText = ""
     @Published var selectedMesh: URL?
+    @Published var selectedImage: NSImage?
     @Published var selectedScene = SCNScene()
     @Published var artifacts: [Artifact] = []
     @Published var stageStates: [Stage: StageState] = Dictionary(uniqueKeysWithValues: Stage.allCases.map { ($0, .ready) })
@@ -131,7 +132,18 @@ final class AppStore: ObservableObject {
 
     func resetViewer() {
         selectedMesh = nil
+        selectedImage = nil
         selectedScene = SCNScene()
+    }
+
+    func openArtifact(_ artifact: Artifact) {
+        if artifact.isMesh {
+            openMesh(artifact.url)
+        } else if artifact.isImage {
+            openImage(artifact.url)
+        } else {
+            appendLog("Cannot open artifact: \(artifact.url.path)")
+        }
     }
 
     func openMesh(_ url: URL) {
@@ -163,7 +175,19 @@ final class AppStore: ObservableObject {
         lightNode.position = SCNVector3(0, -180, 220)
         scene.rootNode.addChildNode(lightNode)
         selectedMesh = url
+        selectedImage = nil
         selectedScene = scene
+        appendLog("Opened \(url.path)")
+    }
+
+    func openImage(_ url: URL) {
+        guard FileManager.default.fileExists(atPath: url.path), let image = NSImage(contentsOf: url) else {
+            appendLog("Cannot open image: \(url.path)")
+            return
+        }
+        selectedMesh = url
+        selectedImage = image
+        selectedScene = SCNScene()
         appendLog("Opened \(url.path)")
     }
 
@@ -417,6 +441,7 @@ final class AppStore: ObservableObject {
         }
         failedStagesByProject[project.id] = []
         selectedMesh = nil
+        selectedImage = nil
         selectedScene = SCNScene()
         refreshArtifacts()
         appendLog("Reset generated outputs in \(output.path)")

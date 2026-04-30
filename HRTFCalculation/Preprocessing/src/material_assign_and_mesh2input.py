@@ -38,7 +38,7 @@ def main(head, source_type=None, filepath=None, mesh2hrtf_path=None,
          title='PPM model generated HRTF', method='ML-FMM BEM',
          pictures=False, reference=True, computeHRIRs=True, unit='mm', speedOfSound='346.18',
          densityOfMedium='1.1839', evaluationGrids='/Users/felixperfler/Documents/ISF/2026/Pipeline Paper/Paper/Data/Resources/EvalGrid', materialSearchPaths="None",
-         tolerance=2, sourceType=None, programPath=None, minFrequency=None, maxFrequency=None, frequencyVectorType=None, frequencyVectorValue=None):
+         tolerance=2, source_position=None, source_assignment_mode="landmark", sourceType=None, programPath=None, minFrequency=None, maxFrequency=None, frequencyVectorType=None, frequencyVectorValue=None):
     source_type = source_type or sourceType
     mesh2hrtf_path = mesh2hrtf_path or programPath
     if minFrequency is not None:
@@ -74,34 +74,48 @@ def main(head, source_type=None, filepath=None, mesh2hrtf_path=None,
     me.materials.append(m_le)
     me.materials.append(m_re)
 
-    left_index = None
-    right_index = None
-    left_y = -np.inf
-    right_y = np.inf
+    if source_position is not None and source_assignment_mode == "landmark":
+        source_position = np.asarray(source_position, dtype=float)
+        centers = np.asarray([[f.calc_center_median().x, f.calc_center_median().y, f.calc_center_median().z] for f in bm.faces])
+        index = int(np.argmin(np.linalg.norm(centers - source_position, axis=1)))
+        distance = float(np.linalg.norm(centers[index] - source_position))
+        if source_type == "Left ear":
+            bm.faces[index].material_index = 1
+        elif source_type == "Right ear":
+            bm.faces[index].material_index = 2
+        else:
+            bm.faces[index].material_index = 1 if source_position[1] >= 0 else 2
+        print(f"assigned {source_type} source by landmark at face {index}, distance {distance:.3f} mm")
+    else:
+        left_index = None
+        right_index = None
+        left_y = -np.inf
+        right_y = np.inf
 
-    for f in bm.faces:
-        med = f.calc_center_median()
-        f_dist = np.sqrt(med.x**2 + med.z**2)
-        if f_dist < tolerance:
-            if med.y > left_y:
-                left_y = med.y
-                left_index = f.index
-            if med.y < right_y:
-                right_y = med.y
-                right_index = f.index
-
-    if left_index is None or right_index is None:
         for f in bm.faces:
             med = f.calc_center_median()
-            if med.y > left_y:
-                left_y = med.y
-                left_index = f.index
-            if med.y < right_y:
-                right_y = med.y
-                right_index = f.index
+            f_dist = np.sqrt(med.x**2 + med.z**2)
+            if f_dist < tolerance:
+                if med.y > left_y:
+                    left_y = med.y
+                    left_index = f.index
+                if med.y < right_y:
+                    right_y = med.y
+                    right_index = f.index
 
-    bm.faces[left_index].material_index = 1
-    bm.faces[right_index].material_index = 2
+        if left_index is None or right_index is None:
+            for f in bm.faces:
+                med = f.calc_center_median()
+                if med.y > left_y:
+                    left_y = med.y
+                    left_index = f.index
+                if med.y < right_y:
+                    right_y = med.y
+                    right_index = f.index
+
+        bm.faces[left_index].material_index = 1
+        bm.faces[right_index].material_index = 2
+        print(f"assigned sources by legacy axis heuristic at faces {left_index} and {right_index}")
 
     bm.to_mesh(me)
     bm.free()

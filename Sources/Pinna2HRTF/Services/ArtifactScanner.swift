@@ -26,6 +26,10 @@ enum ArtifactScanner {
                 }
             }
         }
+        let hrtfPlot = output.appendingPathComponent("HRTF/HRIR_EvalGrid_merged_3D_horizontal_plane.jpeg")
+        if FileManager.default.fileExists(atPath: hrtfPlot.path) {
+            next.append(Artifact(title: "HRTF", url: hrtfPlot))
+        }
         return next
     }
 

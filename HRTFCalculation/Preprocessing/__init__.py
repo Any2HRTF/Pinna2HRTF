@@ -1,4 +1,5 @@
 import argparse
+import json
 import trimesh
 import tempfile
 import subprocess
@@ -6,7 +7,7 @@ import shutil
 from pathlib import Path
 
 from .src.create_head import head
-from .src.ear_canal_closer import ear_canal_closer
+from .src.ear_canal_closer import ear_canal_closer, estimate_ear_canal_position
 from .src.cut_eararea import cut_eararea
 from HRTFCalculation.Config import PreprocessingConfig
 
@@ -49,6 +50,8 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
         shutil.copyfile(right_path, work_dir / "right" / "input_ear.stl")
         left_closed = work_dir / "left" / "closed_ear.stl"
         right_closed = work_dir / "right" / "closed_ear.stl"
+        left_landmark_path = work_dir / "left" / "source_landmark.json"
+        right_landmark_path = work_dir / "right" / "source_landmark.json"
         dummy_head = work_dir / "dummy_head.stl"
         left_cut = work_dir / "left" / "cut_head.stl"
         right_cut = work_dir / "right" / "cut_head.stl"
@@ -56,8 +59,16 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
         right_stitched = work_dir / "right" / "stitched_head.stl"
         left_graded = work_dir / "left" / "graded_head.ply"
         right_graded = work_dir / "right" / "graded_head.ply"
-        ear_canal_closer(trimesh.load(left_path)).export(left_closed)
-        ear_canal_closer(trimesh.load(right_path)).export(right_closed)
+        left_landmark = estimate_ear_canal_position(left_ear, side="left")
+        right_landmark = estimate_ear_canal_position(right_ear, side="right")
+        with open(left_landmark_path, "w") as f:
+            json.dump(left_landmark, f, indent=2)
+        with open(right_landmark_path, "w") as f:
+            json.dump(right_landmark, f, indent=2)
+        logger(f"Left source landmark: {left_landmark['method']} at {[round(v, 3) for v in left_landmark['position']]}, confidence {left_landmark['confidence']:.2f}")
+        logger(f"Right source landmark: {right_landmark['method']} at {[round(v, 3) for v in right_landmark['position']]}, confidence {right_landmark['confidence']:.2f}")
+        ear_canal_closer(left_ear).export(left_closed)
+        ear_canal_closer(right_ear).export(right_closed)
         head(
             left_ear,
             right_ear,
@@ -103,6 +114,8 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             frequency_vector_type=settings.frequency_vector_type,
             frequency_step_count=settings.frequency_step_count,
             tolerance=settings.source_assignment_tolerance,
+            source_position=left_landmark["position"],
+            source_assignment_mode=settings.source_assignment_mode,
         )
         mesh2input_main(
             head=str(right_graded),
@@ -124,6 +137,8 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             frequency_vector_type=settings.frequency_vector_type,
             frequency_step_count=settings.frequency_step_count,
             tolerance=settings.source_assignment_tolerance,
+            source_position=right_landmark["position"],
+            source_assignment_mode=settings.source_assignment_mode,
         )
         logger(f"Preprocessing completed: {left_project} and {right_project}")
     finally:

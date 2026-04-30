@@ -30,9 +30,9 @@ struct MeshViewerView: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Mesh Viewer")
+                    Text("Artifact Viewer")
                         .font(.title2.weight(.semibold))
-                    Text(store.selectedMesh?.path ?? "Select an STL/PLY artifact")
+                    Text(store.selectedMesh?.path ?? "Select a mesh or SOFA plot")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -41,13 +41,13 @@ struct MeshViewerView: View {
                 Menu {
                     ForEach(store.artifacts.filter(\.exists)) { artifact in
                         Button {
-                            store.openMesh(artifact.url)
+                            store.openArtifact(artifact)
                         } label: {
-                            Label(artifact.title, systemImage: artifact.url == store.selectedMesh ? "checkmark" : "cube")
+                            Label(artifact.title, systemImage: artifact.url == store.selectedMesh ? "checkmark" : artifact.systemImage)
                         }
                     }
                 } label: {
-                    Label("Select Mesh", systemImage: "list.bullet.rectangle")
+                    Label("Select Artifact", systemImage: "list.bullet.rectangle")
                 }
                 .controlSize(.small)
             }
@@ -57,7 +57,14 @@ struct MeshViewerView: View {
             ZStack {
                 Rectangle()
                     .fill(.background)
-                SceneView(scene: store.selectedScene, options: [.allowsCameraControl, .autoenablesDefaultLighting])
+                if let image = store.selectedImage {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .padding(18)
+                } else {
+                    SceneView(scene: store.selectedScene, options: [.allowsCameraControl, .autoenablesDefaultLighting])
+                }
             }
             .frame(maxHeight: .infinity)
         }
