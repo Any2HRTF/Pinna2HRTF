@@ -213,19 +213,20 @@ final class AppStore: ObservableObject {
         pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            Task { @MainActor in self?.appendLog(text.trimmingCharacters(in: .newlines)) }
+            guard let store = self else { return }
+            Task { @MainActor in store.appendLog(text.trimmingCharacters(in: .newlines)) }
         }
         process.terminationHandler = { [weak self] process in
+            guard let store = self else { return }
             Task { @MainActor in
-                guard let self else { return }
                 pipe.fileHandleForReading.readabilityHandler = nil
                 if process.terminationStatus != 0 {
-                    self.failedStagesByProject[project.id, default: []].insert(stage)
+                    store.failedStagesByProject[project.id, default: []].insert(stage)
                 }
-                self.appendLog(process.terminationStatus == 0 ? "\(stage.title) finished for \(project.name)" : "\(stage.title) for \(project.name) exited with status \(process.terminationStatus)")
-                self.runningProcesses[project.id] = nil
-                self.runningStages[project.id] = nil
-                self.refreshArtifacts()
+                store.appendLog(process.terminationStatus == 0 ? "\(stage.title) finished for \(project.name)" : "\(stage.title) for \(project.name) exited with status \(process.terminationStatus)")
+                store.runningProcesses[project.id] = nil
+                store.runningStages[project.id] = nil
+                store.refreshArtifacts()
             }
         }
         do {
@@ -263,15 +264,16 @@ final class AppStore: ObservableObject {
         pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            Task { @MainActor in self?.appendLog(text.trimmingCharacters(in: .newlines)) }
+            guard let store = self else { return }
+            Task { @MainActor in store.appendLog(text.trimmingCharacters(in: .newlines)) }
         }
         process.terminationHandler = { [weak self] process in
+            guard let store = self else { return }
             Task { @MainActor in
-                guard let self else { return }
                 pipe.fileHandleForReading.readabilityHandler = nil
-                self.appendLog(process.terminationStatus == 0 ? "Environment setup finished" : "Environment setup exited with status \(process.terminationStatus)")
-                self.environmentProcess = nil
-                self.refreshArtifacts()
+                store.appendLog(process.terminationStatus == 0 ? "Environment setup finished" : "Environment setup exited with status \(process.terminationStatus)")
+                store.environmentProcess = nil
+                store.refreshArtifacts()
             }
         }
         do {
@@ -382,7 +384,7 @@ final class AppStore: ObservableObject {
     static func migrated(_ registry: ProjectRegistry, rootURL: URL, packageURL: URL) -> ProjectRegistry {
         var next = registry
         let defaultEnvironment = Defaults.environment(root: rootURL)
-        let replacements = [
+        let replacements: [(String, String)] = [
             (packageURL.appendingPathComponent("External").path, rootURL.appendingPathComponent("External").path),
             (packageURL.appendingPathComponent("Paper").path, rootURL.appendingPathComponent("Paper").path),
             (packageURL.appendingPathComponent("Sources/HRTFCalculation").path, packageURL.appendingPathComponent("HRTFCalculation").path)
