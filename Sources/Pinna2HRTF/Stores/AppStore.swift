@@ -59,7 +59,7 @@ final class AppStore: ObservableObject {
     }
 
     func createProject() {
-        let project = Defaults.sampleProject(root: rootURL, packageRoot: packageURL, index: projects.count + 1)
+        let project = Defaults.newProject(packageRoot: packageURL, index: projects.count + 1)
         projects.append(project)
         selectedProjectID = project.id
         failedStagesByProject[project.id] = []
@@ -183,6 +183,10 @@ final class AppStore: ObservableObject {
         }
         guard runningProcesses[project.id] == nil else {
             appendLog("\(project.name) already has a running task.")
+            return
+        }
+        guard !project.leftEar.isEmpty, !project.rightEar.isEmpty, !project.saveLocation.isEmpty else {
+            appendLog("Select a left ear mesh, right ear mesh, and save location before running.")
             return
         }
         do {

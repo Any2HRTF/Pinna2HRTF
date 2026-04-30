@@ -109,12 +109,12 @@ enum Defaults {
         )
     }
 
-    static func sampleProject(root: URL, packageRoot: URL, index: Int) -> ProjectRecord {
+    static func newProject(packageRoot: URL, index: Int) -> ProjectRecord {
         ProjectRecord(
             name: "Project \(index)",
-            leftEar: root.appendingPathComponent("Paper/Data/03 Automatic Stitching/Input/Target STL Left/NH130.stl").path,
-            rightEar: root.appendingPathComponent("Paper/Data/03 Automatic Stitching/Input/Target STL Right/NH130.stl").path,
-            saveLocation: appDataURL.appendingPathComponent("Projects/Project \(index)").path,
+            leftEar: "",
+            rightEar: "",
+            saveLocation: "",
             settings: settings(packageRoot: packageRoot)
         )
     }

@@ -16,8 +16,7 @@ final class ProjectRegistryStore {
             return registry
         }
         let environment = Defaults.environment(root: rootURL)
-        let project = Defaults.sampleProject(root: rootURL, packageRoot: packageURL, index: 1)
-        return ProjectRegistry(projects: [project], selectedProjectID: project.id, environment: environment)
+        return ProjectRegistry(projects: [], selectedProjectID: nil, environment: environment)
     }
 
     func save(_ registry: ProjectRegistry) {
