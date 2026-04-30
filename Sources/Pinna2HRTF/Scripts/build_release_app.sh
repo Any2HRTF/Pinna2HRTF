@@ -44,7 +44,11 @@ if [[ ! -x "$UV_BIN" ]]; then
 fi
 if [[ -x "$UV_BIN" ]]; then
   cd "$RESOURCES"
-  UV_CACHE_DIR="/private/tmp/pinna2hrtf-uv-cache" "$UV_BIN" sync --no-dev
+  GIT_CONFIG_COUNT=1 \
+  GIT_CONFIG_KEY_0="url.https://github.com/.insteadOf" \
+  GIT_CONFIG_VALUE_0="git@github.com:" \
+  UV_CACHE_DIR="/private/tmp/pinna2hrtf-uv-cache" \
+  "$UV_BIN" sync --no-dev
   cd "$ROOT"
 fi
 cat > "$CONTENTS/Info.plist" <<'PLIST'
