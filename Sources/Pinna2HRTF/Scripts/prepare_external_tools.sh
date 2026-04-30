@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 EXTERNAL_ROOT="${1:-$ROOT/External}"
 BIN="$EXTERNAL_ROOT/bin"
 SRC="$EXTERNAL_ROOT/src"
+NCPU="$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
 
 mkdir -p "$BIN" "$SRC"
 
@@ -23,6 +24,11 @@ if [[ ! -x "$BIN/NumCalc" ]]; then
   if [[ ! -d "$MESH2HRTF_SRC" ]]; then
     git clone --depth 1 https://github.com/Any2HRTF/Mesh2HRTF.git "$MESH2HRTF_SRC"
   fi
+  if [[ ! -x "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/bin/NumCalc" ]]; then
+    mkdir -p "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/bin"
+    make -C "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/src" clean || true
+    make -C "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/src"
+  fi
   cp "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/bin/NumCalc" "$BIN/NumCalc"
   chmod +x "$BIN/NumCalc"
 fi
@@ -36,8 +42,12 @@ if [[ ! -x "$BIN/hrtf_mesh_grading" ]]; then
   if [[ ! -d "$PMP_DIR" && -d "$GRADING_SRC/pmp-library-full" ]]; then
     PMP_DIR="$GRADING_SRC/pmp-library-full"
   fi
+  if ! command -v cmake >/dev/null 2>&1; then
+    echo "cmake is required to build hrtf_mesh_grading"
+    exit 1
+  fi
   cmake -S "$PMP_DIR" -B "$PMP_DIR/build" -DCMAKE_BUILD_TYPE=Release
-  cmake --build "$PMP_DIR/build" --config Release --target hrtf_mesh_grading --parallel "$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
+  cmake --build "$PMP_DIR/build" --config Release --target hrtf_mesh_grading --parallel "$NCPU"
   cp "$PMP_DIR/build/hrtf_mesh_grading" "$BIN/hrtf_mesh_grading"
   if [[ -f "$PMP_DIR/build/libpmp.1.2.1.dylib" ]]; then
     cp "$PMP_DIR/build/libpmp.1.2.1.dylib" "$BIN/libpmp.1.2.1.dylib"

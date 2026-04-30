@@ -20,11 +20,22 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
+      - name: Verify arm64 runner
+        run: |
+          test "$(uname -m)" = "arm64"
+          swift --version
+
       - name: Prepare external tools
         run: ./Sources/Pinna2HRTF/Scripts/prepare_external_tools.sh
 
       - name: Build release app bundle
         run: ./Sources/Pinna2HRTF/Scripts/build_release_app.sh
+
+      - name: Verify arm64 binaries
+        run: |
+          lipo -archs build/release/Pinna2HRTF.app/Contents/MacOS/Pinna2HRTF | grep -qw arm64
+          file build/release/Pinna2HRTF.app/Contents/Resources/External/bin/NumCalc | grep -qw arm64
+          file build/release/Pinna2HRTF.app/Contents/Resources/External/bin/hrtf_mesh_grading | grep -qw arm64
 
       - name: Ad-hoc sign app
         run: codesign --force --deep --sign - build/release/Pinna2HRTF.app
