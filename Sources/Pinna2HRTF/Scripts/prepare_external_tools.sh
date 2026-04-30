@@ -54,7 +54,7 @@ if [[ ! -x "$BIN/hrtf_mesh_grading" ]]; then
     echo "cmake is required to build hrtf_mesh_grading"
     exit 1
   fi
-  cmake -S "$PMP_DIR" -B "$PMP_DIR/build" -DCMAKE_BUILD_TYPE=Release
+  cmake -S "$PMP_DIR" -B "$PMP_DIR/build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -Wno-dev
   cmake --build "$PMP_DIR/build" --config Release --target hrtf_mesh_grading --parallel "$NCPU"
   cp "$PMP_DIR/build/hrtf_mesh_grading" "$BIN/hrtf_mesh_grading"
   if [[ -f "$PMP_DIR/build/libpmp.1.2.1.dylib" ]]; then
