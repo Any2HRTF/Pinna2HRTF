@@ -69,6 +69,7 @@ class PreprocessingConfig(BaseModel):
     head_height_scale: float = 1.5
     head_y_deformation: float = 0.005
     ear_cut_clearance_scale: float = 1.3
+    ear_cut_mode: Literal["ellipse", "exact"] = "ellipse"
     mesh_min_edge_length: float = 0.5
     mesh_max_edge_length: float = 10.0
     mesh_max_error: float = 0.5

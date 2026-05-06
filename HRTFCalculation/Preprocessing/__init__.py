@@ -78,8 +78,8 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             height_scale=settings.head_height_scale,
             y_deformation=settings.head_y_deformation,
         )
-        cut_eararea(trimesh.load(dummy_head), trimesh.load(left_closed), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="left").export(left_cut)
-        cut_eararea(trimesh.load(dummy_head), trimesh.load(right_closed), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="right").export(right_cut)
+        cut_eararea(trimesh.load(dummy_head), trimesh.load(left_closed), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="left", mode=settings.ear_cut_mode).export(left_cut)
+        cut_eararea(trimesh.load(dummy_head), trimesh.load(right_closed), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="right", mode=settings.ear_cut_mode).export(right_cut)
         from .src.head_stitcher import head_stitcher
         head_stitcher(head_path=str(left_cut), ear_path=str(left_closed), export_path=str(left_stitched))
         head_stitcher(head_path=str(right_cut), ear_path=str(right_closed), export_path=str(right_stitched))
