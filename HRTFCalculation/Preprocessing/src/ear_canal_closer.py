@@ -82,15 +82,16 @@ def estimate_ear_canal_position(ear, side="auto"):
     }
 
 
-def ear_canal_closer(ear):
-    boundaries = _mesh_boundaries(ear)
+def _legacy_caps(loops):
+    """Original cap construction: triangulate the boundary loop directly using its 3D coordinates.
 
-    if len(boundaries) <= 1:
-        print("The ear mesh has one or fewer holes. I assume the ear canal is already closed and skip this step.")
-        return ear
-
+    Note that ``shapely.Polygon`` only consumes the first two coordinates, so this
+    effectively projects to the XY plane. For typical ear meshes (canal axis ~Y)
+    that projection is degenerate, which is why interpolated mode below is usually
+    a better choice for predicted ears.
+    """
     patches = []
-    for loop in boundaries[1:]:
+    for loop in loops:
         if len(loop) < 3:
             continue
         polygon = shapely.Polygon(loop)
@@ -100,6 +101,84 @@ def ear_canal_closer(ear):
         canal = trimesh.Trimesh(vertices=loop, faces=triangulated_faces)
         canal.faces = canal.faces[:, ::-1]
         patches.append(canal)
+    return patches
+
+
+def _interpolated_caps(loops, n_neighbors=5):
+    """Project each canal loop onto the XZ plane, triangulate there, and lift the
+    new interior vertices back into 3D with an inverse-distance-weighted Y from
+    the boundary. Produces a smoother, less self-intersecting cap when the canal
+    opening is non-planar.
+    """
+    patches = []
+    for loop in loops:
+        if len(loop) < 3:
+            continue
+
+        # Push the cap slightly inward (toward the head) rather than outward.
+        if np.mean(loop[:, 1]) > 0:
+            flat_y = float(np.min(loop[:, 1]))
+        else:
+            flat_y = float(np.max(loop[:, 1]))
+
+        loop_2d = loop[:, [0, 2]]
+        polygon = shapely.Polygon(loop_2d)
+        if not polygon.is_valid or polygon.area <= 0:
+            polygon = polygon.buffer(0)
+        if polygon.is_empty or not polygon.is_valid or polygon.area <= 0:
+            continue
+
+        verts_2d, triangulated_faces = trimesh.creation.triangulate_polygon(
+            polygon, engine='triangle'
+        )
+        verts_3d = np.column_stack([
+            verts_2d[:, 0],
+            np.full(len(verts_2d), flat_y),
+            verts_2d[:, 1],
+        ])
+
+        k = min(n_neighbors, len(loop))
+        for i, vert in enumerate(verts_3d):
+            dists = np.linalg.norm(loop_2d - vert[[0, 2]], axis=1)
+            nearest = np.argsort(dists)[:k]
+            weights = 1.0 / (dists[nearest] + 1e-10)
+            weights /= weights.sum()
+            verts_3d[i, 1] = float(np.sum(weights * loop[nearest, 1]))
+
+        canal = trimesh.Trimesh(vertices=verts_3d, faces=triangulated_faces)
+        canal.faces = canal.faces[:, ::-1]
+        patches.append(canal)
+    return patches
+
+
+def ear_canal_closer(ear, mode="legacy"):
+    """Close all non-largest boundary loops on ``ear`` with triangulated caps.
+
+    Parameters
+    ----------
+    ear : trimesh.Trimesh
+        Ear mesh, expected to have at least one extra boundary loop besides the
+        outer cut where the ear meets the head.
+    mode : {"legacy", "interpolated"}
+        ``"legacy"`` (default) preserves the original behaviour for reproducibility.
+        ``"interpolated"`` projects each canal loop onto the XZ plane, triangulates
+        in 2D, and interpolates the cap's Y coordinates from the boundary using
+        inverse-distance weighting. The latter is generally more robust on
+        non-planar openings such as PPM-predicted ears.
+    """
+    if mode not in ("legacy", "interpolated"):
+        raise ValueError(f"Unknown mode {mode!r}; expected 'legacy' or 'interpolated'.")
+
+    boundaries = _mesh_boundaries(ear)
+
+    if len(boundaries) <= 1:
+        print("The ear mesh has one or fewer holes. I assume the ear canal is already closed and skip this step.")
+        return ear
+
+    if mode == "legacy":
+        patches = _legacy_caps(boundaries[1:])
+    else:
+        patches = _interpolated_caps(boundaries[1:])
 
     if not patches:
         return ear
@@ -114,6 +193,9 @@ if __name__ == "__main__":
     parser.add_argument('--export_path', type=str, required=True, help='Path to save the closed up ear to')
     parser.add_argument('--landmark_path', type=str, required=False, default=None, help='Path to save the estimated ear canal landmark')
     parser.add_argument('--side', type=str, required=False, default='auto', help='Ear side')
+    parser.add_argument('--mode', type=str, required=False, default='legacy',
+                        choices=['legacy', 'interpolated'],
+                        help='Cap construction mode (see ear_canal_closer docstring). Default: legacy.')
     args = parser.parse_args()
 
     ear_path = args.ear_path
@@ -123,5 +205,5 @@ if __name__ == "__main__":
     if args.landmark_path:
         with open(args.landmark_path, "w") as f:
             json.dump(estimate_ear_canal_position(ear, side=args.side), f, indent=2)
-    ear = ear_canal_closer(ear)
+    ear = ear_canal_closer(ear, mode=args.mode)
     ear.export(export_path)
