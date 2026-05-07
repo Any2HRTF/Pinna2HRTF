@@ -1,104 +1,195 @@
-# HRTF Calculation Pipeline
+<p align="center">
+  <img src="Sources/Pinna2HRTF/Resources/app_icon.png" alt="Pinna2HRTF icon" width="128" height="128">
+</p>
 
-## Project Structure
-All the scripts require the data to be present in a particular structure. If the root directory is e.g. `Data` the following subdirecties with matching names have to be present:
-```
-Target STL Left
-Target STL Right
-```
-In `Target STL Left` and `Target STL Right` the cut out ears of the subjects with matching ids should be put in `stl` file format.
+# Pinna2HRTF
 
-### Installation
-Create a Python 3.11 environmnet with all the dependencies listed in `pyproject.toml` installed. If using uv run:
-```
-$ uv sync
-```
-Moreover, install [hrtf_mesh_grading](https://github.com/cg-tub/hrtf_mesh_grading) and [Mesh2HRTF](https://github.com/Any2HRTF/Mesh2HRTF).
+Pinna2HRTF is a macOS app and Python pipeline for generating head-related transfer functions from left and right pinna meshes. It wraps the full workflow from PPM-based ear prediction through mesh preprocessing, Mesh2HRTF project creation, NumCalc execution, and SOFA postprocessing.
 
-## Inference
-### Run
-With the environment mentioned above activated, run the inference script and pass it the path to the directory with the directories mentioned above.
-```
-$ uv run hrtf-inference --data_dir /path/to/Data
-```
-### Output
-The inference script performs the automated registration of the scanned ears and creates the following directories:
-```
-Prediction Parameters Left
-Prediction Parameters Right
-Prediction STL Left
-Prediction STL Right
-```
-## Calculation of the HRTFs
-### Run the Preprocessing
+The repository can be used in two ways:
 
-To run the full preprocessing pipeline in one command:
-```
-$ uv run hrtf-preprocessing --left-path "path/to/left/ear.stl" --right-path "path/to/right/ear.stl" --export-path "path/to/export/project" --mesh-grading-executable "path/to/hrtf_mesh_grading" --Mesh2HRTF-path "path/to/Mesh2HRTF/mesh2hrtf"
-```
+- `Pinna2HRTF`, a native SwiftUI macOS app for project setup, staged execution, artifact browsing, mesh preview, logs, and environment setup.
+- `HRTFCalculation`, a `uv`-managed Python package with command line entry points for scripted and batch runs.
 
-First, create the heads:
-```
-$ uv run python HRTFCalculation/Preprocessing/src/create_head.py --left_path "path/to/left/ear.stl" --right_path "path/to/right/ear.stl" --export_path "path/to/export.stl"
-```
-Then perform for both sides and target as well as prediction data individually:
-(Note that closing the ear canal is necessary for the predicted PPM ears, it might not be necessary for the target ears)
-```
-$ uv run python HRTFCalculation/Preprocessing/src/ear_canal_closer.py --ear_path "path/to/ear.stl" --export_path "path/to/export.stl"
-$ uv run python HRTFCalculation/Preprocessing/src/cut_eararea.py --head_path "path/to/head.stl" --ear_path "path/to/closed/ear.stl" --export_path "path/to/export.stl"
-$ uv run python HRTFCalculation/Preprocessing/src/head_stitcher.py --head_path "path/to/cut/head.stl" --ear_path "path/to/closed/ear.stl" --export_path "path/to/export.stl"
-```
-Then run `hrtf_mesh_grading` for the left and right sides of the resulting mesh.
-The script `Preprocessing/src/material_assign_and_mesh2input.py` will set microphone positions and export the project for NumCalc calculations.
-Please refere to the [mesh2hrtf documentation](https://github.com/Any2HRTF/Mesh2HRTF/wiki/Basic_Project_export#final-export-from-blender) for detailed information about the arguments. Though, strictly necessary are the following:
-```
-head: "path/to/graded/head.ply"
-sourceType: "Left ear" or "Right ear"
-filepath: p.ex. "Target Left", i.e. output path
-programPath: "path/to/Mesh2HRTF/mesh2hrtf"
-minFrequency: p.ex. 0
-maxFrequency: p.ex. 24000
-frequencyVectorType: "Step size" or "Num steps"
-frequencyVectorValue: int for Step size or Num steps
-```
-Next, run NumCalc on the project foldes created in filepath to calculate the HRTFs.
-To finalize the projects, use the [mesh2hrtf python API](https://mesh2hrtf.readthedocs.io/en/latest/mesh2hrtf.html):
-'''
-mesh2hrtf.output2hrtf(/path/to/projectfolder)
-mesh2hrtf.merge_sofa_files(/paths/to/projectfolders)
-'''
+## Features
 
-### Output
-The preprocessing script will, for all subject codes found in "Target STL Left":
-1. create an accurately sized dummy head,
-2. close the ear canals of the prediction ears,
-3. for target and prediction ears and each side respectively, cut an area around the ear and stitch the ear to it,
-4. perform the hrtf-mesh-grading algorithm,
-5. pick microphone positions, assign the corresponding materials, create according NumCalc projects and start the NumCalc computation.
-After this script, four new folders will have been created and filled:
-```
-Target Left
-Target Right
-Prediction Left
-Prediction Right
+- Native macOS project manager for multiple HRTF runs.
+- Left and right input mesh selection with copy or reference handling.
+- PPM inference models bundled under `HRTFCalculation/Inference/resources`.
+- Config-driven staged pipeline execution:
+  - Inference
+  - Preprocessing
+  - NumCalc
+  - Postprocessing
+- Automatic output scanning for predicted ears, intermediate meshes, Mesh2HRTF projects, NumCalc results, and SOFA files.
+- Built-in mesh and image preview for generated artifacts.
+- Local NumCalc execution and SLURM array-job support from the Python config runner.
+- Release app packaging script that bundles the Swift app, Python pipeline, app icon, runtime environment, and external binaries when available.
+
+## Requirements
+
+- macOS 13 or newer for the native app.
+- Swift 5.9 or newer.
+- `uv`.
+- Python 3.11, managed through `uv`.
+- Mesh2HRTF and NumCalc.
+- `hrtf_mesh_grading`.
+
+The app looks for external tools in this order:
+
+- bundled `External/bin` inside the app or repository
+- tools available on `PATH`
+- installed tools under `~/Library/Application Support/Pinna2HRTF/External/bin`
+
+## Setup
+
+Install the Python environment from the repository root:
+
+```sh
+uv sync
 ```
 
-### Run the Postprocessing
-To finalize the project, with the Python environment activated please run 
+The Python dependencies include the Mesh2HRTF and PPM packages from GitHub, so the first sync may take a while.
+
+Prepare external binaries in an `External/bin` folder when they are not already available on `PATH`:
+
+```text
+External/bin/uv
+External/bin/NumCalc
+External/bin/hrtf_mesh_grading
 ```
-$ uv run hrtf-postprocessing --data_dir /path/to/Data
+
+The app can also copy missing `PATH` tools into its application support dependency folder when you run environment setup from the UI.
+
+## Run The macOS App
+
+For development:
+
+```sh
+swift run Pinna2HRTF
 ```
-This will create the `SOFA` files in the seperate left and right project folders, potential error results and left & right merged `SOFA` HRTF files in the created folders 
+
+In the app:
+
+1. Create a project.
+2. Select the left and right ear STL files.
+3. Choose an output folder.
+4. Check the environment panel for `uv`, `NumCalc`, and mesh grading.
+5. Run stages individually or use `Command-R` to run the next incomplete stage.
+6. Inspect generated meshes, plots, logs, and SOFA outputs from the artifact browser.
+
+Useful menu commands:
+
+- `Command-N`: new project
+- `Command-R`: run next stage
+- `Command-.`: stop the running stage
+- `Shift-Command-R`: refresh artifacts
+
+## Build A Release App
+
+```sh
+Sources/Pinna2HRTF/Scripts/build_release_app.sh
 ```
-Target HRTF
-Prediction HRTF
+
+The release bundle is written to:
+
+```text
+build/release/Pinna2HRTF.app
+```
+
+The script builds the Swift executable, copies the Python pipeline into the app resources, includes the app icon, copies available external binaries, installs the Python environment with `uv`, and writes the app `Info.plist`.
+
+## Command Line Usage
+
+The command line runner is config based. Write a template first:
+
+```sh
+uv run hrtf-run-config --write-template pinna2hrtf.yaml
+```
+
+Edit the paths and settings in `pinna2hrtf.yaml`, then run one stage:
+
+```sh
+uv run hrtf-run-config --config pinna2hrtf.yaml --stage inference
+uv run hrtf-run-config --config pinna2hrtf.yaml --stage preprocessing
+uv run hrtf-run-config --config pinna2hrtf.yaml --stage numcalc
+uv run hrtf-run-config --config pinna2hrtf.yaml --stage postprocessing
+```
+
+Run every enabled stage:
+
+```sh
+uv run hrtf-run-config --config pinna2hrtf.yaml --stage all
+```
+
+Preview the selected actions without running them:
+
+```sh
+uv run hrtf-run-config --config pinna2hrtf.yaml --stage all --dry-run
+```
+
+The legacy entry points are still available:
+
+```sh
+uv run hrtf-inference --data_dir /path/to/Data
+uv run hrtf-preprocessing --left-path /path/to/left.stl --right-path /path/to/right.stl --export-path /path/to/output --mesh-grading-executable /path/to/hrtf_mesh_grading --Mesh2HRTF-path /path/to/Mesh2HRTF/mesh2hrtf
+uv run hrtf-postprocessing --data_dir /path/to/Data
+```
+
+## Pipeline Outputs
+
+A typical project output folder contains:
+
+```text
+Input/
+Target STL Left/
+Target STL Right/
+Prediction STL Left/
+Prediction STL Right/
+Prediction Parameters Left/
+Prediction Parameters Right/
+intermediates/
+Projects/
+HRTF/
+.pinna2hrtf_native_run.yaml
+```
+
+Important generated files include:
+
+- predicted ear meshes in `Prediction STL Left` and `Prediction STL Right`
+- closed ears, dummy head, cut heads, stitched heads, and graded heads in `intermediates`
+- Mesh2HRTF projects in `Projects/Left` and `Projects/Right`
+- merged SOFA files and HRTF plots in `HRTF`
+
+## Configuration Notes
+
+The app writes `.pinna2hrtf_native_run.yaml` into each project output folder before launching a stage. This is the same configuration format accepted by `hrtf-run-config`.
+
+Key settings include:
+
+- input ear paths and output directory
+- PPM model configuration and checkpoint
+- mesh grading executable
+- Mesh2HRTF path
+- evaluation grid
+- preprocessing frequency range and mesh parameters
+- local or SLURM NumCalc mode
+- SOFA postprocessing output directory
+
+## Repository Layout
+
+```text
+HRTFCalculation/                 Python pipeline package
+HRTFCalculation/Inference/       PPM inference code and model resources
+HRTFCalculation/Preprocessing/   mesh preparation and Mesh2HRTF export
+HRTFCalculation/Postprocessing/  SOFA generation and merge helpers
+Sources/Pinna2HRTF/             SwiftUI macOS app
+Sources/Pinna2HRTF/Resources/   app icon assets
+Sources/Pinna2HRTF/Scripts/     packaging and external-tool scripts
+Package.swift                   Swift package manifest
+pyproject.toml                  Python package and uv dependency metadata
 ```
 
 ## Citation
 
-If you find our work valuable, please cite
-
-```
-@article{
-}
-```
+If you use this pipeline in academic work, please cite the associated paper or project once citation details are available.
