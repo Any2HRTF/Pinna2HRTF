@@ -5,7 +5,6 @@ struct PipelineCommandContext {
     var canRunProject: Bool
     var canStopProject: Bool
     var canResetProject: Bool
-    var canSetupEnvironment: Bool
     var createProject: () -> Void
     var removeProject: () -> Void
     var runNextStage: () -> Void
@@ -13,7 +12,6 @@ struct PipelineCommandContext {
     var stopProject: () -> Void
     var resetProject: () -> Void
     var refreshArtifacts: () -> Void
-    var setupEnvironment: () -> Void
 }
 
 struct PipelineCommands: Commands {
@@ -72,11 +70,6 @@ struct PipelineCommands: Commands {
                 commands?.refreshArtifacts()
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
-
-            Button("Set Up Environment") {
-                commands?.setupEnvironment()
-            }
-            .disabled(commands?.canSetupEnvironment != true)
         }
     }
 }

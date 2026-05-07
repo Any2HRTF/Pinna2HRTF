@@ -31,15 +31,13 @@ struct ContentView: View {
             canRunProject: selectedProject != nil && !selectedProjectIsRunning,
             canStopProject: selectedProjectIsRunning,
             canResetProject: selectedProject != nil && !selectedProjectIsRunning,
-            canSetupEnvironment: store.environmentProcess == nil,
             createProject: { store.createProject() },
             removeProject: { store.forgetSelectedProject() },
             runNextStage: { store.runNextStage() },
             runStage: { store.run(stage: $0) },
             stopProject: { store.stopRunningProcess() },
             resetProject: { store.resetSelectedProjectOutputs() },
-            refreshArtifacts: { store.refreshArtifacts() },
-            setupEnvironment: { store.setupEnvironment() }
+            refreshArtifacts: { store.refreshArtifacts() }
         )
     }
 }

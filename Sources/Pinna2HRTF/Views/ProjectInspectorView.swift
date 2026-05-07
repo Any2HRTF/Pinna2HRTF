@@ -30,8 +30,6 @@ struct ProjectInspectorView: View {
                 Divider()
                 RunPanelView(store: store)
             }
-            Divider()
-            EnvironmentPanelView(store: store)
         }
         .padding(.top, 12)
         .padding(.horizontal, 14)
