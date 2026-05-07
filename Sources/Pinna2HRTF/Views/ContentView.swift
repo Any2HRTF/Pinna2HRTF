@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var store = AppStore()
-    @State private var logExpanded = true
+    @SceneStorage("logExpanded") private var logExpanded = true
 
     var body: some View {
         NavigationSplitView {
@@ -15,35 +15,31 @@ struct ContentView: View {
             ProjectInspectorView(store: store)
                 .navigationSplitViewColumnWidth(min: 360, ideal: 420, max: 480)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .newProject)) { _ in
-            store.createProject()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .removeProject)) { _ in
-            store.forgetSelectedProject()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .runSelectedProject)) { _ in
-            store.runNextStage()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .runStage)) { notification in
-            guard let rawValue = notification.object as? String, let stage = Stage(rawValue: rawValue) else { return }
-            store.run(stage: stage)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .stopSelectedProject)) { _ in
-            store.stopRunningProcess()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .resetSelectedProject)) { _ in
-            store.resetSelectedProjectOutputs()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .refreshArtifacts)) { _ in
-            store.refreshArtifacts()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .setupEnvironment)) { _ in
-            store.setupEnvironment()
-        }
+        .focusedSceneValue(\.pipelineCommands, commandContext)
         .onChange(of: store.selectedProjectID) { _ in
             store.persist()
             store.resetViewer()
             store.refreshArtifacts()
         }
+    }
+
+    var commandContext: PipelineCommandContext {
+        let selectedProject = store.selectedProject
+        let selectedProjectIsRunning = selectedProject.map { store.runningProcesses[$0.id] != nil } ?? false
+        return PipelineCommandContext(
+            canRemoveProject: selectedProject != nil,
+            canRunProject: selectedProject != nil && !selectedProjectIsRunning,
+            canStopProject: selectedProjectIsRunning,
+            canResetProject: selectedProject != nil && !selectedProjectIsRunning,
+            canSetupEnvironment: store.environmentProcess == nil,
+            createProject: { store.createProject() },
+            removeProject: { store.forgetSelectedProject() },
+            runNextStage: { store.runNextStage() },
+            runStage: { store.run(stage: $0) },
+            stopProject: { store.stopRunningProcess() },
+            resetProject: { store.resetSelectedProjectOutputs() },
+            refreshArtifacts: { store.refreshArtifacts() },
+            setupEnvironment: { store.setupEnvironment() }
+        )
     }
 }

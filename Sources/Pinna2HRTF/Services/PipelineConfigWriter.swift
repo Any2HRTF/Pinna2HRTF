@@ -58,8 +58,16 @@ enum PipelineConfigWriter {
           head_radius_scale: 1.01
           head_width_scale: 1.5
           head_height_scale: 1.5
-          head_y_deformation: 0.005
+          head_adaptive_ovalness: true
+          head_ovalness_strength: 0.08
+          head_min_width_scale: 1.48
+          head_max_height_scale: 1.53
+          head_y_deformation: 0.0
           ear_cut_clearance_scale: 1.3
+          ear_cut_mode: ellipse
+          projected_cut_margin: 10.0
+          seam_smoothing_iterations: 5
+          seam_smoothing_factor: 0.35
           mesh_min_edge_length: \(preprocessing.meshMinEdgeLength)
           mesh_max_edge_length: \(preprocessing.meshMaxEdgeLength)
           mesh_max_error: \(preprocessing.meshMaxError)

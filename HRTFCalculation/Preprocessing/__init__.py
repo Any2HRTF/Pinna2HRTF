@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .src.create_head import head
 from .src.ear_canal_closer import ear_canal_closer, estimate_ear_canal_position
-from .src.cut_eararea import cut_eararea
+from .src.cut_eararea import cut_eararea, cut_eararea_projected_footprint
 from HRTFCalculation.Config import PreprocessingConfig
 
 
@@ -77,12 +77,20 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             width_scale=settings.head_width_scale,
             height_scale=settings.head_height_scale,
             y_deformation=settings.head_y_deformation,
+            adaptive_ovalness=settings.head_adaptive_ovalness,
+            ovalness_strength=settings.head_ovalness_strength,
+            min_width_scale=settings.head_min_width_scale,
+            max_height_scale=settings.head_max_height_scale,
         )
-        cut_eararea(trimesh.load(dummy_head), trimesh.load(left_closed), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="left").export(left_cut)
-        cut_eararea(trimesh.load(dummy_head), trimesh.load(right_closed), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="right").export(right_cut)
+        if settings.ear_cut_mode == "projected_footprint":
+            cut_eararea_projected_footprint(trimesh.load(dummy_head, process=False), trimesh.load(left_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, projected_cut_margin=settings.projected_cut_margin, side="left").export(left_cut)
+            cut_eararea_projected_footprint(trimesh.load(dummy_head, process=False), trimesh.load(right_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, projected_cut_margin=settings.projected_cut_margin, side="right").export(right_cut)
+        else:
+            cut_eararea(trimesh.load(dummy_head, process=False), trimesh.load(left_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="left").export(left_cut)
+            cut_eararea(trimesh.load(dummy_head, process=False), trimesh.load(right_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="right").export(right_cut)
         from .src.head_stitcher import head_stitcher
-        head_stitcher(head_path=str(left_cut), ear_path=str(left_closed), export_path=str(left_stitched))
-        head_stitcher(head_path=str(right_cut), ear_path=str(right_closed), export_path=str(right_stitched))
+        head_stitcher(head_path=str(left_cut), ear_path=str(left_closed), export_path=str(left_stitched), seam_smoothing_iterations=settings.seam_smoothing_iterations, seam_smoothing_factor=settings.seam_smoothing_factor)
+        head_stitcher(head_path=str(right_cut), ear_path=str(right_closed), export_path=str(right_stitched), seam_smoothing_iterations=settings.seam_smoothing_iterations, seam_smoothing_factor=settings.seam_smoothing_factor)
         subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-v', '-g', str(settings.mesh_gamma_left), '-h', str(settings.mesh_hole_size), '-s', 'left', '-i', str(left_stitched), '-o', str(left_graded)], check=True)
         subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-v', '-g', str(settings.mesh_gamma_right), '-h', str(settings.mesh_hole_size), '-s', 'right', '-i', str(right_stitched), '-o', str(right_graded)], check=True)
         if left_project.exists():
@@ -153,7 +161,7 @@ def preprocess():
     parser.add_argument('--export-path', type=str, required=True,  help='Path to exported Mesh2HRTF Project.')
     parser.add_argument('--mesh-grading-executable', type=str, required=True, help='Path to the mesh_grading executable.')
     parser.add_argument('--Mesh2HRTF-path', type=str, required=True, help='Path to the location of the mesh2hrtf directory.')
-    parser.add_argument('--Mesh2HRTF-Evaluation-Grid', type=str, default='/Users/felixperfler/Documents/ISF/2026/Pipeline Paper/Paper/Data/Resources/EvalGrid', help='Path to the evaluation grid to be used for Mesh2HRTF.')
+    parser.add_argument('--Mesh2HRTF-Evaluation-Grid', type=str, default='/Users/felixperfler/Documents/ISF/2026/Pipeline Paper/Data/Resources/EvalGrid', help='Path to the evaluation grid to be used for Mesh2HRTF.')
     parser.add_argument('--ear-cut-clearance-scale', type=float, default=1.3)
     args = parser.parse_args()
     settings = PreprocessingConfig(ear_cut_clearance_scale=args.ear_cut_clearance_scale)

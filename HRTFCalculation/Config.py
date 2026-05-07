@@ -34,9 +34,9 @@ def default_resource(name: str) -> Path:
 class PathsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    left_ear: Path = Field(default_factory=lambda: worktree_root() / "Paper" / "Data" / "03 Automatic Stitching" / "Input" / "Target STL Left" / "NH130.stl")
-    right_ear: Path = Field(default_factory=lambda: worktree_root() / "Paper" / "Data" / "03 Automatic Stitching" / "Input" / "Target STL Right" / "NH130.stl")
-    output_dir: Path = Field(default_factory=lambda: worktree_root() / "Paper" / "Data" / "temp" / "GuiRun")
+    left_ear: Path = Field(default_factory=lambda: worktree_root() / "Data" / "03 Automatic Stitching" / "Input" / "Target STL Left" / "NH130.stl")
+    right_ear: Path = Field(default_factory=lambda: worktree_root() / "Data" / "03 Automatic Stitching" / "Input" / "Target STL Right" / "NH130.stl")
+    output_dir: Path = Field(default_factory=lambda: worktree_root() / "Data" / "temp" / "GuiRun")
     external_deps_dir: Path = Field(default_factory=lambda: worktree_root() / "External")
     mesh2hrtf_path: Path | None = None
     numcalc_executable: Path | None = None
@@ -67,8 +67,16 @@ class PreprocessingConfig(BaseModel):
     head_radius_scale: float = 1.01
     head_width_scale: float = 1.5
     head_height_scale: float = 1.5
-    head_y_deformation: float = 0.005
+    head_adaptive_ovalness: bool = True
+    head_ovalness_strength: float = 0.08
+    head_min_width_scale: float = 1.48
+    head_max_height_scale: float = 1.53
+    head_y_deformation: float = 0.0
     ear_cut_clearance_scale: float = 1.3
+    ear_cut_mode: Literal["ellipse", "projected_footprint"] = "ellipse"
+    projected_cut_margin: float = 10.0
+    seam_smoothing_iterations: int = 5
+    seam_smoothing_factor: float = 0.35
     mesh_min_edge_length: float = 0.5
     mesh_max_edge_length: float = 10.0
     mesh_max_error: float = 0.5

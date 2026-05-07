@@ -18,7 +18,7 @@ import trimesh
 import pyglet  # necessary for .show to work!
 
 
-def head(left_ear, right_ear, export_path, radius_scale=1.01, width_scale=1.5, height_scale=1.5, y_deformation=0.005):
+def head(left_ear, right_ear, export_path, radius_scale=1.01, width_scale=1.5, height_scale=1.5, y_deformation=0.0, adaptive_ovalness=True, ovalness_strength=0.08, min_width_scale=1.48, max_height_scale=1.53):
 
     left_entities = left_ear.outline().entities
     right_entities = right_ear.outline().entities
@@ -43,13 +43,20 @@ def head(left_ear, right_ear, export_path, radius_scale=1.01, width_scale=1.5, h
         print("Warning: left and right ear radius are quite asymmetrical.")
 
     radius = np.mean([left_radius, right_radius]) * radius_scale
+    if adaptive_ovalness:
+        left_extent = np.ptp(left_outline, axis=0)
+        right_extent = np.ptp(right_outline, axis=0)
+        flare = np.mean([left_extent[0] / max(left_extent[2], np.finfo(float).eps), right_extent[0] / max(right_extent[2], np.finfo(float).eps)])
+        ovalness = np.clip((flare - 0.45) / 0.55, 0, 1) * ovalness_strength
+        width_scale = max(min_width_scale, width_scale - ovalness)
+        height_scale = min(max_height_scale, height_scale + ovalness)
 
     print(f"radius: {radius:.2f}")
+    print(f"head scale x/y/z: {width_scale:.3f}/1.000/{height_scale:.3f}")
     dummy_head = trimesh.creation.icosphere(7, radius)
 
-    for i, vert in enumerate(dummy_head.vertices):
-       a = vert[2] * y_deformation + 1
-       dummy_head.vertices[i,1] = a*vert[1]
+    if y_deformation != 0:
+        dummy_head.vertices[:, 1] *= dummy_head.vertices[:, 2] * y_deformation + 1
 
     dummy_head.apply_scale((width_scale, 1, height_scale))
 

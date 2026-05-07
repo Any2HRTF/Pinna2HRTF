@@ -58,6 +58,30 @@ def cut_eararea(head, ear, ear_cut_clearance_scale=1.3, side='auto'):
     return head
 
 
+def cut_eararea_projected_footprint(head, ear, ear_cut_clearance_scale=1.3, projected_cut_margin=10.0, side='auto'):
+    if side == 'auto':
+        side = 'left' if np.mean(ear.vertices[:, 1]) >= 0 else 'right'
+    elif side not in ('left', 'right'):
+        raise Exception("Inconclusive side parameter. Please use 'auto', 'left' or 'right'.")
+
+    margin = max(float(projected_cut_margin), 0.0)
+    centers = np.asarray(head.triangles_center)
+    ear_vertices = np.asarray(ear.vertices)
+    x_min = np.min(ear_vertices[:, 0]) - margin
+    x_max = np.max(ear_vertices[:, 0]) + margin
+    z_min = np.min(ear_vertices[:, 2]) - margin
+    z_max = np.max(ear_vertices[:, 2]) + margin
+    if side == 'left':
+        side_mask = centers[:, 1] >= 0
+    else:
+        side_mask = centers[:, 1] <= 0
+    inside = (centers[:, 0] >= x_min) & (centers[:, 0] <= x_max) & (centers[:, 2] >= z_min) & (centers[:, 2] <= z_max)
+    face_mask = ~(inside & side_mask)
+    head.update_faces(face_mask)
+    head.remove_unreferenced_vertices()
+    return head
+
+
 # Create elliptical cylindermask
 def elliptical_cylinder_mask(mesh, a, b, offset, side='left'):
     # Ellipse condition in the xz-plane (since the cylinder is along the y-axis)
@@ -85,6 +109,8 @@ if __name__ == "__main__":
     parser.add_argument('--ear_path', type=str, required=True, help='Path to the ear mesh')
     parser.add_argument('--export_path', type=str, required=True, help='Path to save the cut head to')
     parser.add_argument('--ear-cut-clearance-scale', type=float, required=False, default=1.3, help='Factor for spacing around the ear. Default is 1.3')
+    parser.add_argument('--cut-mode', type=str, required=False, default='ellipse')
+    parser.add_argument('--projected-cut-margin', type=float, required=False, default=10.0)
     parser.add_argument('--spazi', type=float, required=False, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
@@ -97,7 +123,10 @@ if __name__ == "__main__":
     head = trimesh.load(head_path)
     ear = trimesh.load(ear_path)
 
-    head = cut_eararea(head, ear, ear_cut_clearance_scale=ear_cut_clearance_scale)
+    if args.cut_mode == 'projected_footprint':
+        head = cut_eararea_projected_footprint(head, ear, ear_cut_clearance_scale=ear_cut_clearance_scale, projected_cut_margin=args.projected_cut_margin)
+    else:
+        head = cut_eararea(head, ear, ear_cut_clearance_scale=ear_cut_clearance_scale)
 
     # Export
     head.export(export_path)
