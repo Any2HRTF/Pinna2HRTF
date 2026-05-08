@@ -82,6 +82,7 @@ struct PreprocessingSettings: Codable, Equatable {
     var frequencyStepCount = "129"
     var evaluationGrid: String?
     var headRadius: String?
+    var useCustomHeadRadius: Bool?
     var meshMinEdgeLength = "0.5"
     var meshMaxEdgeLength = "10.0"
     var meshMaxError = "0.5"

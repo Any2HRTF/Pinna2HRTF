@@ -50,6 +50,33 @@ struct LabeledTextField: View {
     }
 }
 
+struct LabeledMillimeterSlider: View {
+    let title: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+
+    init(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) {
+        self.title = title
+        self._value = value
+        self.range = range
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(Int(value.rounded())) mm")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: $value, in: range, step: 1)
+        }
+    }
+}
+
 enum PathFieldMode {
     case file
     case directory

@@ -35,7 +35,8 @@ enum PipelineConfigWriter {
         let numcalc = project.settings.numcalc
         let selectedGrid = preprocessing.evaluationGrid?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let evaluationGrid = selectedGrid.isEmpty ? "Default" : selectedGrid
-        let headRadius = yamlNumber(preprocessing.headRadius).map { "  head_radius: \($0)\n" } ?? ""
+        let useCustomHeadRadius = preprocessing.useCustomHeadRadius ?? (preprocessing.headRadius != nil)
+        let headRadius = useCustomHeadRadius ? "  head_radius: \(yamlNumber(preprocessing.headRadius) ?? "0")\n" : ""
         return """
         paths:
           left_ear: \(project.leftEar)
