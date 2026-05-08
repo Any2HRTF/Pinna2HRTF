@@ -26,9 +26,14 @@ enum ArtifactScanner {
                 }
             }
         }
-        let hrtfPlot = output.appendingPathComponent("HRTF/HRIR_EvalGrid_merged_3D_horizontal_plane.jpeg")
-        if FileManager.default.fileExists(atPath: hrtfPlot.path) {
-            next.append(Artifact(title: "HRTF", url: hrtfPlot))
+        for plot in [
+            ("HRTF horizontal plane", "HRTF/HRIR_EvalGrid_merged_3D_horizontal_plane.jpeg"),
+            ("HRTF median plane", "HRTF/HRIR_EvalGrid_merged_3D_median_plane.jpeg")
+        ] {
+            let hrtfPlot = output.appendingPathComponent(plot.1)
+            if FileManager.default.fileExists(atPath: hrtfPlot.path) {
+                next.append(Artifact(title: plot.0, url: hrtfPlot))
+            }
         }
         return next
     }

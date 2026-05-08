@@ -136,6 +136,8 @@ uv run hrtf-preprocessing --left-path /path/to/left.stl --right-path /path/to/ri
 uv run hrtf-postprocessing --data_dir /path/to/Data
 ```
 
+Add `--head-radius 75` to `hrtf-preprocessing` only when the input pinnae need to be placed laterally before preprocessing.
+
 ## Pipeline Outputs
 
 A typical project output folder contains:
@@ -173,6 +175,7 @@ Key settings include:
 - Mesh2HRTF path
 - evaluation grid
 - preprocessing frequency range and mesh parameters
+- optional `head_radius`, which laterally places the left and right pinnae at `+head_radius` and `-head_radius` before preprocessing; leave it empty to keep the input mesh positions unchanged
 - local or SLURM NumCalc mode
 - SOFA postprocessing output directory
 

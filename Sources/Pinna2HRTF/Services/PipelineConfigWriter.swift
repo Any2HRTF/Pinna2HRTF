@@ -18,6 +18,9 @@ enum PipelineConfigWriter {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let source = URL(fileURLWithPath: path)
         let target = folder.appendingPathComponent(source.lastPathComponent)
+        if source.standardizedFileURL.path == target.standardizedFileURL.path {
+            return source.path
+        }
         if FileManager.default.fileExists(atPath: target.path) {
             try FileManager.default.removeItem(at: target)
         }
@@ -32,6 +35,7 @@ enum PipelineConfigWriter {
         let numcalc = project.settings.numcalc
         let selectedGrid = preprocessing.evaluationGrid?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let evaluationGrid = selectedGrid.isEmpty ? "Default" : selectedGrid
+        let headRadius = yamlNumber(preprocessing.headRadius).map { "  head_radius: \($0)\n" } ?? ""
         return """
         paths:
           left_ear: \(project.leftEar)
@@ -66,7 +70,7 @@ enum PipelineConfigWriter {
           ear_cut_clearance_scale: 1.3
           ear_cut_mode: ellipse
           projected_cut_margin: 10.0
-          seam_smoothing_iterations: 5
+        \(headRadius)  seam_smoothing_iterations: 5
           seam_smoothing_factor: 0.35
           mesh_min_edge_length: \(preprocessing.meshMinEdgeLength)
           mesh_max_edge_length: \(preprocessing.meshMaxEdgeLength)
@@ -103,5 +107,16 @@ enum PipelineConfigWriter {
           mesh_background: white
           show_axes: true
         """
+    }
+
+    static func yamlNumber(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            return nil
+        }
+        guard Double(trimmed) != nil else {
+            return nil
+        }
+        return trimmed
     }
 }

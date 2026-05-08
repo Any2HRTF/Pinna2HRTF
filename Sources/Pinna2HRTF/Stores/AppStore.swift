@@ -351,6 +351,12 @@ final class AppStore: ObservableObject {
     func prepareRuntimeProject() throws {
         guard Defaults.isPackagedApp else { return }
         let runtime = Defaults.runtimeProjectURL
+        if !runningProcesses.isEmpty || environmentProcess != nil {
+            if runtimeProjectIsReady {
+                return
+            }
+            throw NSError(domain: "Pinna2HRTF", code: 1, userInfo: [NSLocalizedDescriptionKey: "The bundled runtime is not ready. Wait for the running task to finish, then start again."])
+        }
         try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: true)
         let entries = ["HRTFCalculation", "pyproject.toml", "uv.lock", ".venv", "Python"]
         for entry in entries {
@@ -362,6 +368,11 @@ final class AppStore: ObservableObject {
             }
             try FileManager.default.copyItem(at: source, to: target)
         }
+    }
+
+    var runtimeProjectIsReady: Bool {
+        FileManager.default.fileExists(atPath: Defaults.runtimeProjectURL.appendingPathComponent("HRTFCalculation/RunConfig.py").path) &&
+        FileManager.default.isExecutableFile(atPath: runtimePythonURL.path)
     }
 
     func copyPathToolsIntoEnvironment() {
@@ -435,6 +446,10 @@ final class AppStore: ObservableObject {
         ]
         for name in names {
             let url = output.appendingPathComponent(name)
+            if path(url, contains: URL(fileURLWithPath: project.leftEar)) || path(url, contains: URL(fileURLWithPath: project.rightEar)) {
+                appendLog("Skipped reset of \(url.path) because it contains a configured input mesh.")
+                continue
+            }
             if FileManager.default.fileExists(atPath: url.path) {
                 try? FileManager.default.removeItem(at: url)
             }
@@ -494,5 +509,11 @@ final class AppStore: ObservableObject {
             next = next.replacingOccurrences(of: replacement.0, with: replacement.1)
         }
         return next
+    }
+
+    func path(_ parent: URL, contains child: URL) -> Bool {
+        let parentPath = parent.standardizedFileURL.path
+        let childPath = child.standardizedFileURL.path
+        return childPath == parentPath || childPath.hasPrefix(parentPath + "/")
     }
 }

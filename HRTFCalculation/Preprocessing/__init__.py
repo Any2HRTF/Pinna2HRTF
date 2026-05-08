@@ -12,6 +12,19 @@ from .src.cut_eararea import cut_eararea, cut_eararea_projected_footprint
 from HRTFCalculation.Config import PreprocessingConfig
 
 
+def pinna_y_center(ear):
+    entities = ear.outline().entities
+    if entities:
+        outline = max((entity.discrete(ear.vertices) for entity in entities), key=len)
+        return float(sum(point[1] for point in outline) / len(outline))
+    return float((ear.bounds[0][1] + ear.bounds[1][1]) / 2)
+
+
+def place_pinnae_at_head_radius(left_ear, right_ear, head_radius):
+    left_ear.apply_translation((0, head_radius - pinna_y_center(left_ear), 0))
+    right_ear.apply_translation((0, -head_radius - pinna_y_center(right_ear), 0))
+
+
 def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, mesh2hrtf_path, evaluation_grid, preprocessing=None, output_dir=None, export_path=None, logger=print):
     settings = preprocessing or PreprocessingConfig()
     if output_dir is None and export_path is None:
@@ -46,8 +59,11 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
     try:
         left_ear = trimesh.load(left_path)
         right_ear = trimesh.load(right_path)
-        shutil.copyfile(left_path, work_dir / "left" / "input_ear.stl")
-        shutil.copyfile(right_path, work_dir / "right" / "input_ear.stl")
+        if settings.head_radius is not None:
+            place_pinnae_at_head_radius(left_ear, right_ear, settings.head_radius)
+            logger(f"Placed pinnae at head radius: {settings.head_radius}")
+        left_ear.export(work_dir / "left" / "input_ear.stl")
+        right_ear.export(work_dir / "right" / "input_ear.stl")
         left_closed = work_dir / "left" / "closed_ear.stl"
         right_closed = work_dir / "right" / "closed_ear.stl"
         left_landmark_path = work_dir / "left" / "source_landmark.json"
@@ -163,8 +179,12 @@ def preprocess():
     parser.add_argument('--Mesh2HRTF-path', type=str, required=True, help='Path to the location of the mesh2hrtf directory.')
     parser.add_argument('--Mesh2HRTF-Evaluation-Grid', type=str, default='/Users/felixperfler/Documents/ISF/2026/Pipeline Paper/Data/Resources/EvalGrid', help='Path to the evaluation grid to be used for Mesh2HRTF.')
     parser.add_argument('--ear-cut-clearance-scale', type=float, default=1.3)
+    parser.add_argument('--head-radius', type=float, default=None, help='Optional lateral head radius in millimeters used to place pinnae before preprocessing.')
     args = parser.parse_args()
-    settings = PreprocessingConfig(ear_cut_clearance_scale=args.ear_cut_clearance_scale)
+    settings = PreprocessingConfig(
+        ear_cut_clearance_scale=args.ear_cut_clearance_scale,
+        head_radius=args.head_radius,
+    )
     run_preprocessing_pipeline(
         left_path=args.left_path,
         right_path=args.right_path,

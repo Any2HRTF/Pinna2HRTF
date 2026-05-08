@@ -47,6 +47,7 @@ struct ProjectInspectorView: View {
                 SettingsDisclosure("Mesh2HRTF", systemImage: "waveform.path.ecg") {
                     Toggle("Use predictions for preprocessing", isOn: inferenceBoolBinding(\.usePredictionsForPreprocessing))
                     PathField("Evaluation grid", text: optionalPreprocessingBinding(\.evaluationGrid), mode: .directory)
+                    LabeledTextField("Head radius", text: optionalPreprocessingBinding(\.headRadius))
                     LabeledTextField("Min frequency", text: preprocessingBinding(\.minFrequency))
                     LabeledTextField("Max frequency", text: preprocessingBinding(\.maxFrequency))
                     LabeledTextField("Frequency steps", text: preprocessingBinding(\.frequencyStepCount))

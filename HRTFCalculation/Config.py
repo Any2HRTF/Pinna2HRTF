@@ -75,6 +75,7 @@ class PreprocessingConfig(BaseModel):
     ear_cut_clearance_scale: float = 1.3
     ear_cut_mode: Literal["ellipse", "projected_footprint"] = "ellipse"
     projected_cut_margin: float = 10.0
+    head_radius: float | None = None
     seam_smoothing_iterations: int = 5
     seam_smoothing_factor: float = 0.35
     mesh_min_edge_length: float = 0.5
