@@ -1,0 +1,199 @@
+<Window x:Class="Pinna2HRTF.Windows.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Pinna2HRTF" Width="1280" Height="820" MinWidth="1060" MinHeight="680"
+        Background="#f6f7f9" Loaded="WindowLoaded" Closing="WindowClosing">
+  <Grid>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="300"/>
+      <ColumnDefinition Width="*"/>
+      <ColumnDefinition Width="390"/>
+    </Grid.ColumnDefinitions>
+    <Border Grid.Column="0" Background="#ffffff" BorderBrush="#d9dee8" BorderThickness="0,0,1,0">
+      <DockPanel>
+        <Grid DockPanel.Dock="Top" Margin="14">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <TextBlock Text="Projects" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          <Button Grid.Column="1" Content="New" Click="CreateProjectClicked"/>
+        </Grid>
+        <ListBox x:Name="ProjectList" Margin="10,0,10,10" BorderThickness="0" SelectionChanged="ProjectSelectionChanged" DisplayMemberPath="DisplayTitle"/>
+      </DockPanel>
+    </Border>
+    <Grid Grid.Column="1">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="*"/>
+        <RowDefinition Height="190"/>
+      </Grid.RowDefinitions>
+      <Border Grid.Row="0" Margin="14" Background="#ffffff" BorderBrush="#d9dee8" BorderThickness="1" CornerRadius="8">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="58"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <Grid Margin="14,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="230"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+              <TextBlock Text="Artifact Viewer" FontSize="20" FontWeight="SemiBold"/>
+              <TextBlock x:Name="SelectedArtifactText" Text="Select a mesh or SOFA plot" Foreground="#69717d" TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+            <ComboBox x:Name="ArtifactPicker" Grid.Column="1" VerticalAlignment="Center" SelectionChanged="ArtifactSelectionChanged" DisplayMemberPath="Title"/>
+          </Grid>
+          <Border Grid.Row="1" BorderBrush="#e4e7ee" BorderThickness="0,1,0,0">
+            <Grid>
+              <Viewport3D x:Name="MeshViewport" ClipToBounds="True">
+                <Viewport3D.Camera>
+                  <PerspectiveCamera Position="0,-280,120" LookDirection="0,280,-120" UpDirection="0,0,1" FieldOfView="38"/>
+                </Viewport3D.Camera>
+                <ModelVisual3D>
+                  <ModelVisual3D.Content>
+                    <DirectionalLight Color="#ffffff" Direction="-1,2,-3"/>
+                  </ModelVisual3D.Content>
+                </ModelVisual3D>
+                <ModelVisual3D>
+                  <ModelVisual3D.Content>
+                    <AmbientLight Color="#777777"/>
+                  </ModelVisual3D.Content>
+                </ModelVisual3D>
+              </Viewport3D>
+              <Image x:Name="ImagePreview" Stretch="Uniform" Margin="18" Visibility="Collapsed"/>
+              <TextBlock x:Name="ViewerPlaceholder" Text="No artifact selected" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#69717d" FontSize="18"/>
+            </Grid>
+          </Border>
+        </Grid>
+      </Border>
+      <Border Grid.Row="1" Margin="14,0,14,14" Background="#ffffff" BorderBrush="#d9dee8" BorderThickness="1" CornerRadius="8">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="42"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <Grid Margin="12,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="LogSummaryText" Text="Live Log" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <Button Grid.Column="1" Content="Clear" Click="ClearLogClicked"/>
+          </Grid>
+          <TextBox x:Name="LogText" Grid.Row="1" Margin="10,0,10,10" BorderThickness="0" FontFamily="Consolas" FontSize="12" TextWrapping="NoWrap" AcceptsReturn="True" IsReadOnly="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+        </Grid>
+      </Border>
+    </Grid>
+    <Border Grid.Column="2" Background="#fbfbfc" BorderBrush="#d9dee8" BorderThickness="1,0,0,0">
+      <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="14">
+          <TextBlock Text="Project" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,10"/>
+          <Label Content="Project name"/>
+          <TextBox x:Name="ProjectNameBox" TextChanged="ProjectEdited"/>
+          <Label Content="Left ear"/>
+          <DockPanel>
+            <Button DockPanel.Dock="Right" Content="Browse" Click="BrowseLeftEarClicked"/>
+            <TextBox x:Name="LeftEarBox" TextChanged="ProjectEdited"/>
+          </DockPanel>
+          <Label Content="Right ear"/>
+          <DockPanel>
+            <Button DockPanel.Dock="Right" Content="Browse" Click="BrowseRightEarClicked"/>
+            <TextBox x:Name="RightEarBox" TextChanged="ProjectEdited"/>
+          </DockPanel>
+          <Label Content="Save location"/>
+          <DockPanel>
+            <Button DockPanel.Dock="Right" Content="Browse" Click="BrowseSaveLocationClicked"/>
+            <TextBox x:Name="SaveLocationBox" TextChanged="ProjectEdited"/>
+          </DockPanel>
+          <CheckBox x:Name="CopyInputsBox" Content="Copy inputs into project" Margin="0,10,0,8" Checked="ProjectEdited" Unchecked="ProjectEdited"/>
+          <Expander Header="Inference" IsExpanded="True" Margin="0,8,0,0">
+            <StackPanel Margin="0,8,0,0">
+              <Label Content="Model"/>
+              <ComboBox x:Name="ModelPicker" SelectionChanged="ModelSelectionChanged"/>
+              <CheckBox x:Name="UsePredictionsBox" Content="Use predictions for preprocessing" Margin="0,8,0,0" Checked="ProjectEdited" Unchecked="ProjectEdited"/>
+            </StackPanel>
+          </Expander>
+          <Expander Header="Mesh2HRTF" IsExpanded="False" Margin="0,8,0,0">
+            <StackPanel Margin="0,8,0,0">
+              <Label Content="Evaluation grid"/>
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Browse" Click="BrowseEvaluationGridClicked"/>
+                <TextBox x:Name="EvaluationGridBox" TextChanged="ProjectEdited"/>
+              </DockPanel>
+              <CheckBox x:Name="UseHeadRadiusBox" Content="Use custom head radius" Margin="0,8,0,0" Checked="ProjectEdited" Unchecked="ProjectEdited"/>
+              <Label Content="Head radius"/>
+              <TextBox x:Name="HeadRadiusBox" TextChanged="ProjectEdited"/>
+              <Label Content="Min frequency"/>
+              <TextBox x:Name="MinFrequencyBox" TextChanged="ProjectEdited"/>
+              <Label Content="Max frequency"/>
+              <TextBox x:Name="MaxFrequencyBox" TextChanged="ProjectEdited"/>
+              <Label Content="Frequency steps"/>
+              <TextBox x:Name="FrequencyStepsBox" TextChanged="ProjectEdited"/>
+            </StackPanel>
+          </Expander>
+          <Expander Header="Mesh Grading" IsExpanded="False" Margin="0,8,0,0">
+            <StackPanel Margin="0,8,0,0">
+              <Label Content="Min edge length"/>
+              <TextBox x:Name="MeshMinEdgeBox" TextChanged="ProjectEdited"/>
+              <Label Content="Max edge length"/>
+              <TextBox x:Name="MeshMaxEdgeBox" TextChanged="ProjectEdited"/>
+              <Label Content="Max error"/>
+              <TextBox x:Name="MeshMaxErrorBox" TextChanged="ProjectEdited"/>
+              <Label Content="Gamma left"/>
+              <TextBox x:Name="MeshGammaLeftBox" TextChanged="ProjectEdited"/>
+              <Label Content="Gamma right"/>
+              <TextBox x:Name="MeshGammaRightBox" TextChanged="ProjectEdited"/>
+            </StackPanel>
+          </Expander>
+          <Expander Header="NumCalc" IsExpanded="False" Margin="0,8,0,0">
+            <StackPanel Margin="0,8,0,0">
+              <Label Content="Parallel instances"/>
+              <TextBox x:Name="MaxInstancesBox" TextChanged="ProjectEdited"/>
+              <Label Content="CPU limit (%)"/>
+              <TextBox x:Name="MaxCpuLoadBox" TextChanged="ProjectEdited"/>
+            </StackPanel>
+          </Expander>
+          <Expander Header="Environment" IsExpanded="False" Margin="0,8,0,0">
+            <StackPanel Margin="0,8,0,0">
+              <Label Content="uv"/>
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Browse" Click="BrowseUvClicked"/>
+                <TextBox x:Name="UvBox" TextChanged="EnvironmentEdited"/>
+              </DockPanel>
+              <Label Content="NumCalc"/>
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Browse" Click="BrowseNumCalcClicked"/>
+                <TextBox x:Name="NumCalcBox" TextChanged="EnvironmentEdited"/>
+              </DockPanel>
+              <Label Content="Mesh grading"/>
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Browse" Click="BrowseMeshGradingClicked"/>
+                <TextBox x:Name="MeshGradingBox" TextChanged="EnvironmentEdited"/>
+              </DockPanel>
+              <Label Content="External directory"/>
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Browse" Click="BrowseExternalClicked"/>
+                <TextBox x:Name="ExternalBox" TextChanged="EnvironmentEdited"/>
+              </DockPanel>
+              <TextBlock x:Name="EnvironmentStatusText" Margin="0,8,0,0" Foreground="#69717d"/>
+              <Button Content="Set Up Environment" Margin="0,8,0,0" Click="SetupEnvironmentClicked"/>
+            </StackPanel>
+          </Expander>
+          <Separator Margin="0,14,0,12"/>
+          <UniformGrid Columns="2">
+            <Button Content="Run Inference" Click="RunInferenceClicked"/>
+            <Button Content="Run Preprocessing" Click="RunPreprocessingClicked"/>
+            <Button Content="Run NumCalc" Click="RunNumCalcClicked"/>
+            <Button Content="Run Postprocess" Click="RunPostprocessingClicked"/>
+            <Button Content="Run Next" Click="RunNextClicked"/>
+            <Button Content="Stop" Click="StopClicked"/>
+            <Button Content="Refresh" Click="RefreshClicked"/>
+            <Button Content="Reset Outputs" Click="ResetOutputsClicked"/>
+          </UniformGrid>
+          <Button Content="Remove Project" Margin="0,12,0,0" Click="RemoveProjectClicked"/>
+        </StackPanel>
+      </ScrollViewer>
+    </Border>
+  </Grid>
+</Window>

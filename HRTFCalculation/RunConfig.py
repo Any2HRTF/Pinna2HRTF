@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import subprocess
 import shutil
 import tempfile
@@ -130,7 +131,7 @@ def run_numcalc_local(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
     if not config.paths.numcalc_executable.exists():
         raise FileNotFoundError(f"Missing NumCalc executable: {config.paths.numcalc_executable}")
     numcalc_executable = config.paths.numcalc_executable
-    if " " in str(numcalc_executable):
+    if " " in str(numcalc_executable) and platform.system() != "Windows":
         link_dir = Path(tempfile.gettempdir()) / "Pinna2HRTF"
         link_dir.mkdir(parents=True, exist_ok=True)
         link_path = link_dir / "NumCalc"

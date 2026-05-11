@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import sys
 from pathlib import Path
 from typing import Any, Literal
@@ -24,11 +25,19 @@ def worktree_root() -> Path:
                 return root
             if root.name == "Pinna2HRTF" and (root.parent / "Paper").exists() and (root.parent / "External").exists():
                 return root.parent
+            if (root / "pyproject.toml").exists() and (root / "HRTFCalculation").exists():
+                return root
     return Path(__file__).resolve().parents[2]
 
 
 def default_resource(name: str) -> Path:
     return Path(__file__).resolve().parent / "Inference" / "resources" / name
+
+
+def executable_name(name: str) -> str:
+    if platform.system() == "Windows" and not name.lower().endswith(".exe"):
+        return f"{name}.exe"
+    return name
 
 
 class PathsConfig(BaseModel):
@@ -157,9 +166,9 @@ class PipelineConfig(BaseModel):
         if clone.paths.mesh2hrtf_path is None:
             clone.paths.mesh2hrtf_path = clone.paths.external_deps_dir / "src" / "Mesh2HRTF" / "mesh2hrtf"
         if clone.paths.numcalc_executable is None:
-            clone.paths.numcalc_executable = clone.paths.external_deps_dir / "bin" / "NumCalc"
+            clone.paths.numcalc_executable = clone.paths.external_deps_dir / "bin" / executable_name("NumCalc")
         if clone.paths.mesh_grading_executable is None:
-            clone.paths.mesh_grading_executable = clone.paths.external_deps_dir / "bin" / "hrtf_mesh_grading"
+            clone.paths.mesh_grading_executable = clone.paths.external_deps_dir / "bin" / executable_name("hrtf_mesh_grading")
         if clone.postprocessing.output_sofa_dir is None:
             clone.postprocessing.output_sofa_dir = clone.paths.output_dir / "HRTF"
         return clone
