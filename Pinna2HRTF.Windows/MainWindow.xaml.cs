@@ -313,14 +313,14 @@ public partial class MainWindow : Window
     void BrowseEvaluationGridClicked(object sender, RoutedEventArgs e) => BrowseFolder(EvaluationGridBox);
     void BrowseExternalClicked(object sender, RoutedEventArgs e) => BrowseFolder(ExternalBox);
 
-    void BrowseFile(TextBox box, string filter)
+    void BrowseFile(System.Windows.Controls.TextBox box, string filter)
     {
-        var dialog = new OpenFileDialog { Filter = filter, CheckFileExists = false };
+        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = filter, CheckFileExists = false };
         if (dialog.ShowDialog(this) == true)
             box.Text = dialog.FileName;
     }
 
-    void BrowseFolder(TextBox box)
+    void BrowseFolder(System.Windows.Controls.TextBox box)
     {
         using var dialog = new Forms.FolderBrowserDialog { SelectedPath = Directory.Exists(box.Text) ? box.Text : "" };
         if (dialog.ShowDialog() == Forms.DialogResult.OK)
@@ -482,12 +482,16 @@ public partial class MainWindow : Window
         {
             Directory.CreateDirectory(project.SaveLocation);
             var config = PrepareConfig(project);
-            var executable = File.Exists(environment.UvExecutable) ? environment.UvExecutable : "uv";
+            var bundledPython = BundledPythonExecutable();
+            var executable = bundledPython ?? (File.Exists(environment.UvExecutable) ? environment.UvExecutable : "uv");
+            var arguments = bundledPython != null
+                ? $"-m HRTFCalculation.RunConfig --config {QuoteArgument(config)} --stage {stage.Value}"
+                : $"run --no-sync python -m HRTFCalculation.RunConfig --config {QuoteArgument(config)} --stage {stage.Value}";
             var process = new Process();
             process.StartInfo = new ProcessStartInfo
             {
                 FileName = executable,
-                Arguments = $"run --no-sync python -m HRTFCalculation.RunConfig --config {QuoteArgument(config)} --stage {stage.Value}",
+                Arguments = arguments,
                 WorkingDirectory = packageRoot,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
@@ -573,6 +577,12 @@ public partial class MainWindow : Window
         startInfo.Environment["MPLCONFIGDIR"] = Path.Combine(appData, "Cache", "matplotlib");
         startInfo.Environment["PYTHONPATH"] = packageRoot;
         startInfo.Environment["PATH"] = Path.Combine(environment.ExternalDir, "bin") + Path.PathSeparator + (startInfo.Environment.TryGetValue("PATH", out var path) ? path : "");
+    }
+
+    string? BundledPythonExecutable()
+    {
+        var candidate = Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
+        return File.Exists(candidate) ? candidate : null;
     }
 
     string PrepareConfig(ProjectRecord project)
@@ -929,7 +939,7 @@ static class MeshLoader
     {
         var mesh = string.Equals(Path.GetExtension(path), ".ply", StringComparison.OrdinalIgnoreCase) ? LoadPly(path) : LoadStl(path);
         Center(mesh);
-        var material = new DiffuseMaterial(new SolidColorBrush(Color.FromRgb(96, 145, 144)));
+        var material = new DiffuseMaterial(new SolidColorBrush(System.Windows.Media.Color.FromRgb(96, 145, 144)));
         return new GeometryModel3D(mesh, material) { BackMaterial = material };
     }
 

@@ -1,7 +1,7 @@
 <Window x:Class="Pinna2HRTF.Windows.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Pinna2HRTF" Width="1280" Height="820" MinWidth="1060" MinHeight="680"
+        Title="Pinna2HRTF" Icon="Resources/app_icon.ico" Width="1280" Height="820" MinWidth="1060" MinHeight="680"
         Background="#f6f7f9" Loaded="WindowLoaded" Closing="WindowClosing">
   <Grid>
     <Grid.ColumnDefinitions>
