@@ -32,7 +32,7 @@ struct MeshViewerView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Artifact Viewer")
                         .font(.title2.weight(.semibold))
-                    Text(store.selectedMesh?.path ?? "Select a mesh or SOFA plot")
+                    Text(store.selectedMesh?.path ?? "Select an artifact")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -47,7 +47,7 @@ struct MeshViewerView: View {
                         }
                     }
                 } label: {
-                    Label("Select Artifact", systemImage: "list.bullet.rectangle")
+                    Label("Artifact", systemImage: "list.bullet.rectangle")
                 }
                 .controlSize(.small)
             }

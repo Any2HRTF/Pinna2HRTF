@@ -344,27 +344,13 @@ public partial class MainWindow : Window
         var settings = project.Settings.Inference;
         var list = new List<Artifact>
         {
-            new("Input left ear", project.LeftEar),
-            new("Input right ear", project.RightEar),
-            new("Prepared inference left ear", Path.Combine(output, settings.TargetLeftFolder, Path.GetFileName(project.LeftEar))),
-            new("Prepared inference right ear", Path.Combine(output, settings.TargetRightFolder, Path.GetFileName(project.RightEar))),
-            new("Closed left ear", Path.Combine(output, "intermediates", "left", "closed_ear.stl")),
-            new("Closed right ear", Path.Combine(output, "intermediates", "right", "closed_ear.stl")),
-            new("Dummy head", Path.Combine(output, "intermediates", "dummy_head.stl")),
-            new("Cut left head", Path.Combine(output, "intermediates", "left", "cut_head.stl")),
-            new("Cut right head", Path.Combine(output, "intermediates", "right", "cut_head.stl")),
-            new("Stitched left head", Path.Combine(output, "intermediates", "left", "stitched_head.stl")),
-            new("Stitched right head", Path.Combine(output, "intermediates", "right", "stitched_head.stl")),
-            new("Graded left head", Path.Combine(output, "intermediates", "left", "graded_head.ply")),
-            new("Graded right head", Path.Combine(output, "intermediates", "right", "graded_head.ply")),
-            new("HRTF horizontal plane", Path.Combine(output, "HRTF", "HRIR_EvalGrid_merged_3D_horizontal_plane.jpeg")),
-            new("HRTF median plane", Path.Combine(output, "HRTF", "HRIR_EvalGrid_merged_3D_median_plane.jpeg"))
+            new("Left simulation mesh", Path.Combine(output, "intermediates", "left", "graded_head.ply")),
+            new("Right simulation mesh", Path.Combine(output, "intermediates", "right", "graded_head.ply")),
+            new("Horizontal HRTF plot", Path.Combine(output, "HRTF", "HRIR_EvalGrid_merged_3D_horizontal_plane.jpeg")),
+            new("Median HRTF plot", Path.Combine(output, "HRTF", "HRIR_EvalGrid_merged_3D_median_plane.jpeg"))
         };
-        AddMeshFolder(list, "Predicted left ear", Path.Combine(output, settings.PredictionLeftFolder));
-        AddMeshFolder(list, "Predicted right ear", Path.Combine(output, settings.PredictionRightFolder));
-        AddFiles(list, "SOFA output", Path.Combine(output, "HRTF"), ".sofa");
-        AddFiles(list, "NumCalc left log", Path.Combine(output, "Projects", "Left", "NumCalc", "source_1"), ".txt");
-        AddFiles(list, "NumCalc right log", Path.Combine(output, "Projects", "Right", "NumCalc", "source_1"), ".txt");
+        AddMeshFolder(list, "Generated left ear", Path.Combine(output, settings.PredictionLeftFolder));
+        AddMeshFolder(list, "Generated right ear", Path.Combine(output, settings.PredictionRightFolder));
         return list;
     }
 
@@ -372,16 +358,14 @@ public partial class MainWindow : Window
     {
         if (!Directory.Exists(folder))
             return;
-        foreach (var file in Directory.GetFiles(folder).Where(IsMesh).OrderBy(x => x))
-            list.Add(new Artifact($"{title} {Path.GetFileNameWithoutExtension(file)}", file));
-    }
-
-    void AddFiles(List<Artifact> list, string title, string folder, string extension)
-    {
-        if (!Directory.Exists(folder))
+        var files = Directory.GetFiles(folder).Where(IsMesh).OrderBy(x => x).ToList();
+        if (files.Count == 1)
+        {
+            list.Add(new Artifact(title, files[0]));
             return;
-        foreach (var file in Directory.GetFiles(folder).Where(x => string.Equals(Path.GetExtension(x), extension, StringComparison.OrdinalIgnoreCase)).OrderBy(x => x))
-            list.Add(new Artifact($"{title} {Path.GetFileName(file)}", file));
+        }
+        foreach (var file in files)
+            list.Add(new Artifact($"{title} - {Path.GetFileNameWithoutExtension(file)}", file));
     }
 
     void ArtifactSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -443,7 +427,7 @@ public partial class MainWindow : Window
         ImagePreview.Visibility = Visibility.Collapsed;
         ViewerPlaceholder.Text = "No artifact selected";
         ViewerPlaceholder.Visibility = Visibility.Visible;
-        SelectedArtifactText.Text = "Select a mesh or SOFA plot";
+        SelectedArtifactText.Text = "Select an artifact";
     }
 
     void RunInferenceClicked(object sender, RoutedEventArgs e) => RunStage(Stage.Inference);
