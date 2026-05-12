@@ -45,7 +45,7 @@ def cut_eararea(head, ear, ear_cut_clearance_scale=1.3, side='auto'):
 
 
     # select the faces to remove
-    n = len(head.faces)
+    n = len(head.vertices)
     vert_ind = np.argwhere(vert_mask)
     mask = np.ones(n, dtype=bool)
     mask[vert_ind] = False
