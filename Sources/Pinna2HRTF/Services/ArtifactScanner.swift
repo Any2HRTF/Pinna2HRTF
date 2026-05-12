@@ -5,6 +5,8 @@ enum ArtifactScanner {
         let output = URL(fileURLWithPath: project.saveLocation)
         let settings = project.settings.inference
         var next = [
+            Artifact(title: "Input left ear", url: URL(fileURLWithPath: project.leftEar)),
+            Artifact(title: "Input right ear", url: URL(fileURLWithPath: project.rightEar)),
             Artifact(title: "Left simulation mesh", url: output.appendingPathComponent("intermediates/left/graded_head.ply")),
             Artifact(title: "Right simulation mesh", url: output.appendingPathComponent("intermediates/right/graded_head.ply"))
         ]

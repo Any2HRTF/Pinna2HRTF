@@ -344,6 +344,8 @@ public partial class MainWindow : Window
         var settings = project.Settings.Inference;
         var list = new List<Artifact>
         {
+            new("Input left ear", project.LeftEar),
+            new("Input right ear", project.RightEar),
             new("Left simulation mesh", Path.Combine(output, "intermediates", "left", "graded_head.ply")),
             new("Right simulation mesh", Path.Combine(output, "intermediates", "right", "graded_head.ply")),
             new("Horizontal HRTF plot", Path.Combine(output, "HRTF", "HRIR_EvalGrid_merged_3D_horizontal_plane.jpeg")),
