@@ -9,6 +9,7 @@ Pinna2HRTF is a macOS app and Python pipeline for generating head-related transf
 The repository can be used in two ways:
 
 - `Pinna2HRTF`, a native SwiftUI macOS app for project setup, staged execution, artifact browsing, mesh preview, logs, and environment setup.
+- `Pinna2HRTF.Windows`, a Windows desktop shell for the same shared Python pipeline.
 - `HRTFCalculation`, a `uv`-managed Python package with command line entry points for scripted and batch runs.
 
 ## Features
@@ -29,6 +30,7 @@ The repository can be used in two ways:
 ## Requirements
 
 - macOS 13 or newer for the native app.
+- Windows 10 or Windows 11 x64 for the Windows desktop shell.
 - Swift 5.9 or newer.
 - `uv`.
 - Python 3.11, managed through `uv`.
@@ -98,6 +100,46 @@ build/release/Pinna2HRTF.app
 ```
 
 The script builds the Swift executable, copies the Python pipeline into the app resources, includes the app icon, copies available external binaries, installs the Python environment with `uv`, and writes the app `Info.plist`.
+
+## Run The Windows App
+
+The Windows app uses the shared Python pipeline and stores project state in:
+
+```text
+%APPDATA%\Pinna2HRTF\projects.json
+```
+
+For a portable release, the zip bundles `uv.exe`, `NumCalc.exe`, `hrtf_mesh_grading.exe`, a managed Python 3.11 runtime, and the Python environment. The app looks for native tools in `External\bin` first, then on `PATH`. If a tool is missing, open the Environment panel and browse to the executable.
+
+On first run:
+
+1. Start `Pinna2HRTF.Windows.exe`.
+2. Open Environment and confirm the bundled tool paths if you moved the folder manually.
+3. Create a project, choose left and right STL meshes, and choose a save location.
+4. Run each stage or use Run Next.
+
+## Build A Windows Portable App
+
+From the repository root on Windows:
+
+```powershell
+.\Scripts\prepare_windows_external_tools.ps1
+.\Scripts\build_windows_port.ps1
+```
+
+The portable folder is written to:
+
+```text
+dist\windows\Pinna2HRTF
+```
+
+The build script runs `uv sync --no-dev --managed-python --python 3.11` inside the portable folder so the release can run the bundled pipeline without setting up Python on first launch. For a quick shell-only build during development, use:
+
+```powershell
+.\Scripts\build_windows_port.ps1 -SkipPythonEnvironment -AllowMissingExternalTools
+```
+
+The folder can be moved to a path with spaces. Reopen the Environment panel after moving it if external tool paths need to be updated.
 
 ## Command Line Usage
 
@@ -189,6 +231,8 @@ HRTFCalculation/Postprocessing/  SOFA generation and merge helpers
 Sources/Pinna2HRTF/             SwiftUI macOS app
 Sources/Pinna2HRTF/Resources/   app icon assets
 Sources/Pinna2HRTF/Scripts/     packaging and external-tool scripts
+Sources/Pinna2HRTF.Windows/     Windows desktop shell
+Scripts/                        Windows portable build scripts
 Package.swift                   Swift package manifest
 pyproject.toml                  Python package and uv dependency metadata
 ```

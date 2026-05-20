@@ -6,8 +6,9 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
+$windowsProject = Join-Path $root "Sources\Pinna2HRTF.Windows"
 $dist = Join-Path $root "dist\windows\Pinna2HRTF"
-$publish = Join-Path $root "Pinna2HRTF.Windows\bin\Release\net8.0-windows\win-x64\publish"
+$publish = Join-Path $windowsProject "bin\Release\net8.0-windows\win-x64\publish"
 $distExternal = Join-Path $dist "External"
 $distBin = Join-Path $distExternal "bin"
 
@@ -15,7 +16,7 @@ if (Test-Path $dist) {
     Remove-Item $dist -Recurse -Force
 }
 
-dotnet publish (Join-Path $root "Pinna2HRTF.Windows\Pinna2HRTF.Windows.csproj") -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false
+dotnet publish (Join-Path $windowsProject "Pinna2HRTF.Windows.csproj") -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false
 
 New-Item -ItemType Directory -Path $dist | Out-Null
 Copy-Item (Join-Path $publish "*") $dist -Recurse -Force
@@ -111,5 +112,5 @@ if ($missingExternalTools.Count -gt 0) {
     }
 }
 
-Copy-Item (Join-Path $root "README-Windows.md") (Join-Path $dist "README-Windows.md") -Force
+Copy-Item (Join-Path $root "README.md") (Join-Path $dist "README.md") -Force
 Write-Host "Windows portable app written to $dist"
