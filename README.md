@@ -1,104 +1,179 @@
-# HRTF Calculation Pipeline
+<p align="center">
+  <img src="Sources/Pinna2HRTF/Resources/app_icon.png" alt="Pinna2HRTF icon" width="128" height="128">
+</p>
 
-## Project Structure
-All the scripts require the data to be present in a particular structure. If the root directory is e.g. `Data` the following subdirecties with matching names have to be present:
-```
-Target STL Left
-Target STL Right
-```
-In `Target STL Left` and `Target STL Right` the cut out ears of the subjects with matching ids should be put in `stl` file format.
+# Pinna2HRTF
 
-### Installation
-Create a Python 3.11 environmnet with all the dependencies listed in `pyproject.toml` installed. If using uv run:
-```
-$ uv sync
-```
-Moreover, install [hrtf_mesh_grading](https://github.com/cg-tub/hrtf_mesh_grading) and [Mesh2HRTF](https://github.com/Any2HRTF/Mesh2HRTF).
+Pinna2HRTF generates HRTFs from left and right pinna meshes. The recommended workflow is the command line: run each pipeline stage as its own command, keep the generated folders on disk, and resume individual stages when needed.
 
-## Inference
-### Run
-With the environment mentioned above activated, run the inference script and pass it the path to the directory with the directories mentioned above.
-```
-$ uv run hrtf-inference --data_dir /path/to/Data
-```
-### Output
-The inference script performs the automated registration of the scanned ears and creates the following directories:
-```
-Prediction Parameters Left
-Prediction Parameters Right
-Prediction STL Left
-Prediction STL Right
-```
-## Calculation of the HRTFs
-### Run the Preprocessing
+The pipeline can:
 
-To run the full preprocessing pipeline in one command:
-```
-$ uv run hrtf-preprocessing --left-path "path/to/left/ear.stl" --right-path "path/to/right/ear.stl" --export-path "path/to/export/project" --mesh-grading-executable "path/to/hrtf_mesh_grading" --Mesh2HRTF-path "path/to/Mesh2HRTF/mesh2hrtf"
+- predict complete left and right pinna meshes with the bundled PPM models
+- preprocess meshes into Mesh2HRTF projects
+- run NumCalc locally
+- merge the left and right projects into SOFA files and inspection plots
+
+## Requirements
+
+- macOS or Linux with Python 3.11 through `uv`
+- `uv`
+- `NumCalc`
+- `hrtf_mesh_grading`
+- Mesh2HRTF sources for preprocessing
+
+Prepare the Python environment:
+
+```sh
+uv sync
 ```
 
-First, create the heads:
-```
-$ uv run python HRTFCalculation/Preprocessing/src/create_head.py --left_path "path/to/left/ear.stl" --right_path "path/to/right/ear.stl" --export_path "path/to/export.stl"
-```
-Then perform for both sides and target as well as prediction data individually:
-(Note that closing the ear canal is necessary for the predicted PPM ears, it might not be necessary for the target ears)
-```
-$ uv run python HRTFCalculation/Preprocessing/src/ear_canal_closer.py --ear_path "path/to/ear.stl" --export_path "path/to/export.stl"
-$ uv run python HRTFCalculation/Preprocessing/src/cut_eararea.py --head_path "path/to/head.stl" --ear_path "path/to/closed/ear.stl" --export_path "path/to/export.stl"
-$ uv run python HRTFCalculation/Preprocessing/src/head_stitcher.py --head_path "path/to/cut/head.stl" --ear_path "path/to/closed/ear.stl" --export_path "path/to/export.stl"
-```
-Then run `hrtf_mesh_grading` for the left and right sides of the resulting mesh.
-The script `Preprocessing/src/material_assign_and_mesh2input.py` will set microphone positions and export the project for NumCalc calculations.
-Please refere to the [mesh2hrtf documentation](https://github.com/Any2HRTF/Mesh2HRTF/wiki/Basic_Project_export#final-export-from-blender) for detailed information about the arguments. Though, strictly necessary are the following:
-```
-head: "path/to/graded/head.ply"
-sourceType: "Left ear" or "Right ear"
-filepath: p.ex. "Target Left", i.e. output path
-programPath: "path/to/Mesh2HRTF/mesh2hrtf"
-minFrequency: p.ex. 0
-maxFrequency: p.ex. 24000
-frequencyVectorType: "Step size" or "Num steps"
-frequencyVectorValue: int for Step size or Num steps
-```
-Next, run NumCalc on the project foldes created in filepath to calculate the HRTFs.
-To finalize the projects, use the [mesh2hrtf python API](https://mesh2hrtf.readthedocs.io/en/latest/mesh2hrtf.html):
-'''
-mesh2hrtf.output2hrtf(/path/to/projectfolder)
-mesh2hrtf.merge_sofa_files(/paths/to/projectfolders)
-'''
+Prepare native tools:
 
-### Output
-The preprocessing script will, for all subject codes found in "Target STL Left":
-1. create an accurately sized dummy head,
-2. close the ear canals of the prediction ears,
-3. for target and prediction ears and each side respectively, cut an area around the ear and stitch the ear to it,
-4. perform the hrtf-mesh-grading algorithm,
-5. pick microphone positions, assign the corresponding materials, create according NumCalc projects and start the NumCalc computation.
-After this script, four new folders will have been created and filled:
-```
-Target Left
-Target Right
-Prediction Left
-Prediction Right
+```sh
+Sources/Pinna2HRTF/Scripts/prepare_external_tools.sh
 ```
 
-### Run the Postprocessing
-To finalize the project, with the Python environment activated please run 
+That script creates:
+
+```text
+External/bin/uv
+External/bin/NumCalc
+External/bin/hrtf_mesh_grading
+External/src/Mesh2HRTF
 ```
-$ uv run hrtf-postprocessing --data_dir /path/to/Data
+
+If `cmake` is not installed, the script bootstraps it through `uvx`.
+
+## CLI Workflow
+
+The examples below pass paths and settings directly to each command. Paths may be absolute or relative.
+
+Choose an output folder:
+
+```sh
+OUT="runs/example"
+mkdir -p "$OUT"
 ```
-This will create the `SOFA` files in the seperate left and right project folders, potential error results and left & right merged `SOFA` HRTF files in the created folders 
+
+Place or copy the input ears into the folders expected by inference:
+
+```sh
+mkdir -p "$OUT/Target STL Left" "$OUT/Target STL Right"
+cp /path/to/left.stl "$OUT/Target STL Left/left.stl"
+cp /path/to/right.stl "$OUT/Target STL Right/right.stl"
 ```
-Target HRTF
-Prediction HRTF
+
+Run inference:
+
+```sh
+uv run hrtf-inference \
+  --data_dir "$OUT" \
+  --configuration "HRTFCalculation/Inference/resources/Local 3 Views.yaml" \
+  --model_checkpoint "HRTFCalculation/Inference/resources/Local 3 Views.pth"
+```
+
+Run preprocessing. This creates two Mesh2HRTF projects, one for each side:
+
+```sh
+uv run hrtf-preprocessing \
+  --left-path "$OUT/Prediction STL Left/left.stl" \
+  --right-path "$OUT/Prediction STL Right/right.stl" \
+  --export-path "$OUT/project" \
+  --mesh-grading-executable "External/bin/hrtf_mesh_grading" \
+  --Mesh2HRTF-path "External/src/Mesh2HRTF/mesh2hrtf" \
+  --Mesh2HRTF-Evaluation-Grid Default \
+  --min-frequency 1000 \
+  --max-frequency 8000 \
+  --frequency-step-count 2
+```
+
+This writes:
+
+```text
+runs/example/project-Left
+runs/example/project-Right
+runs/example/project-intermediates
+```
+
+Run NumCalc:
+
+```sh
+mkdir -p "$OUT/Projects"
+rm -rf "$OUT/Projects/Left" "$OUT/Projects/Right"
+cp -R "$OUT/project-Left" "$OUT/Projects/Left"
+cp -R "$OUT/project-Right" "$OUT/Projects/Right"
+
+uv run hrtf-numcalc \
+  --project-path "$OUT/Projects" \
+  --numcalc-path "External/bin/NumCalc" \
+  --max-instances 1 \
+  --max-cpu-load 90
+```
+
+`hrtf-numcalc` is resumable. If one side or frequency already finished, Mesh2HRTF skips it.
+
+Generate SOFA files and plots:
+
+```sh
+uv run hrtf-sofa \
+  --left-project "$OUT/Projects/Left" \
+  --right-project "$OUT/Projects/Right" \
+  --output-dir "$OUT/HRTF" \
+  --overwrite
+```
+
+Expected final files:
+
+```text
+runs/example/HRTF/HRIR_Default_merged.sofa
+runs/example/HRTF/HRTF_Default_merged.sofa
+runs/example/HRTF/HRIR_Default_merged_3D_horizontal_plane.jpeg
+runs/example/HRTF/HRIR_Default_merged_3D_median_plane.jpeg
+```
+
+## Config Runner
+
+There is also a YAML-based runner for app integration and scripted staged runs:
+
+```sh
+uv run hrtf-run-config --write-template pinna2hrtf.yaml
+uv run hrtf-run-config --config pinna2hrtf.yaml --stage inference
+uv run hrtf-run-config --config pinna2hrtf.yaml --stage preprocessing
+uv run hrtf-run-config --config pinna2hrtf.yaml --stage numcalc
+uv run hrtf-run-config --config pinna2hrtf.yaml --stage postprocessing
+```
+
+Use this when you prefer to keep all stage settings in one file. The stage-by-stage CLI commands above are the recommended workflow.
+
+## Experimental Apps
+
+Native apps exist, but they are experimental wrappers around the same Python pipeline.
+
+### macOS
+
+Build and run the packaged macOS app locally:
+
+```sh
+./script/build_and_run.sh
+```
+
+This prepares external tools, builds `build/release/Pinna2HRTF.app`, embeds Python dependencies, and launches the app.
+
+### Windows
+
+Build the portable Windows app from Windows:
+
+```powershell
+.\Scripts\prepare_windows_external_tools.ps1
+.\Scripts\build_windows_port.ps1
+```
+
+The portable app is written to:
+
+```text
+dist\windows\Pinna2HRTF
 ```
 
 ## Citation
 
-If you find our work valuable, please cite
-
-```
-@article{
-}
-```
+If you use this pipeline in academic work, please cite the associated paper or project once citation details are available.

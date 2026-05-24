@@ -11,3 +11,12 @@ build/
 dist/
 External/
 AppData/
+.appdata/
+.dotnet/
+.dotnet-home/
+.nuget/
+.uv-cache/
+.dotnet-install.ps1
+**/bin/
+**/obj/
+Test Data/

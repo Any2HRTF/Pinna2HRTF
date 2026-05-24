@@ -77,6 +77,9 @@ enum Defaults {
     }
 
     static func executablePath(named name: String, bundled: URL, install: URL) -> String {
+        if isPackagedApp {
+            return bundled.path
+        }
         if FileManager.default.isExecutableFile(atPath: bundled.path) {
             return bundled.path
         }

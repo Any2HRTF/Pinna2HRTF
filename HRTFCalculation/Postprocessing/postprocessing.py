@@ -65,6 +65,8 @@ def main(args):
                         [f"{args.data_dir}/{scan_type} Left/{id}", f"{args.data_dir}/{scan_type} Right/{id}"],
                         savedir=export_dir
                     )
+                for plane in ["horizontal", "median"]:
+                    m2h.inspect_sofa_files(export_dir, pattern="HRIR", plot="3D", plane=plane)
             except:
                 print(f"ID: {id} could not be calculated")
     

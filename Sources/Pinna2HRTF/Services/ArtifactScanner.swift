@@ -7,30 +7,31 @@ enum ArtifactScanner {
         var next = [
             Artifact(title: "Input left ear", url: URL(fileURLWithPath: project.leftEar)),
             Artifact(title: "Input right ear", url: URL(fileURLWithPath: project.rightEar)),
-            Artifact(title: "Prepared inference left ear", url: output.appendingPathComponent(settings.targetLeftFolder).appendingPathComponent(URL(fileURLWithPath: project.leftEar).lastPathComponent)),
-            Artifact(title: "Prepared inference right ear", url: output.appendingPathComponent(settings.targetRightFolder).appendingPathComponent(URL(fileURLWithPath: project.rightEar).lastPathComponent)),
-            Artifact(title: "Closed left ear", url: output.appendingPathComponent("intermediates/left/closed_ear.stl")),
-            Artifact(title: "Closed right ear", url: output.appendingPathComponent("intermediates/right/closed_ear.stl")),
-            Artifact(title: "Dummy head", url: output.appendingPathComponent("intermediates/dummy_head.stl")),
-            Artifact(title: "Cut left head", url: output.appendingPathComponent("intermediates/left/cut_head.stl")),
-            Artifact(title: "Cut right head", url: output.appendingPathComponent("intermediates/right/cut_head.stl")),
-            Artifact(title: "Stitched left head", url: output.appendingPathComponent("intermediates/left/stitched_head.stl")),
-            Artifact(title: "Stitched right head", url: output.appendingPathComponent("intermediates/right/stitched_head.stl")),
-            Artifact(title: "Graded left head", url: output.appendingPathComponent("intermediates/left/graded_head.ply")),
-            Artifact(title: "Graded right head", url: output.appendingPathComponent("intermediates/right/graded_head.ply"))
+            Artifact(title: "Left simulation mesh", url: output.appendingPathComponent("intermediates/left/graded_head.ply")),
+            Artifact(title: "Right simulation mesh", url: output.appendingPathComponent("intermediates/right/graded_head.ply"))
         ]
-        for pair in [("Predicted left ear", output.appendingPathComponent(settings.predictionLeftFolder)), ("Predicted right ear", output.appendingPathComponent(settings.predictionRightFolder))] {
-            if let files = try? FileManager.default.contentsOfDirectory(at: pair.1, includingPropertiesForKeys: nil) {
-                for file in files.sorted(by: { $0.path < $1.path }) where ["stl", "ply"].contains(file.pathExtension.lowercased()) {
-                    next.append(Artifact(title: "\(pair.0) \(file.deletingPathExtension().lastPathComponent)", url: file))
-                }
+        for pair in [("Generated left ear", output.appendingPathComponent(settings.predictionLeftFolder)), ("Generated right ear", output.appendingPathComponent(settings.predictionRightFolder))] {
+            next.append(contentsOf: meshArtifacts(title: pair.0, folder: pair.1))
+        }
+        for plot in [
+            ("Horizontal HRTF plot", "HRTF/HRIR_EvalGrid_merged_3D_horizontal_plane.jpeg"),
+            ("Median HRTF plot", "HRTF/HRIR_EvalGrid_merged_3D_median_plane.jpeg")
+        ] {
+            let hrtfPlot = output.appendingPathComponent(plot.1)
+            if FileManager.default.fileExists(atPath: hrtfPlot.path) {
+                next.append(Artifact(title: plot.0, url: hrtfPlot))
             }
         }
-        let hrtfPlot = output.appendingPathComponent("HRTF/HRIR_EvalGrid_merged_3D_horizontal_plane.jpeg")
-        if FileManager.default.fileExists(atPath: hrtfPlot.path) {
-            next.append(Artifact(title: "HRTF", url: hrtfPlot))
-        }
         return next
+    }
+
+    static func meshArtifacts(title: String, folder: URL) -> [Artifact] {
+        guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return [] }
+        let meshes = files.filter { ["stl", "ply"].contains($0.pathExtension.lowercased()) }.sorted { $0.path < $1.path }
+        if meshes.count == 1, let file = meshes.first {
+            return [Artifact(title: title, url: file)]
+        }
+        return meshes.map { Artifact(title: "\(title) - \($0.deletingPathExtension().lastPathComponent)", url: $0) }
     }
 
     static func stageStates(for project: ProjectRecord, runningStage: Stage?, failedStages: Set<Stage>) -> [Stage: StageState] {

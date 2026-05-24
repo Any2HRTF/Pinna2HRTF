@@ -15,7 +15,6 @@ September 2024
 import argparse
 import numpy as np
 import trimesh
-from matplotlib.path import Path as MplPath
 #import pyglet  # necessary for .show to work! Used for debugging only
 
 
@@ -73,7 +72,7 @@ def _ellipse_cut(head, ear, ear_cut_clearance_scale, side):
 
 
     # select the faces to remove
-    n = len(head.faces)
+    n = len(head.vertices)
     vert_ind = np.argwhere(vert_mask)
     mask = np.ones(n, dtype=bool)
     mask[vert_ind] = False
@@ -86,41 +85,27 @@ def _ellipse_cut(head, ear, ear_cut_clearance_scale, side):
     return head
 
 
-def _exact_cut(head, ear, side, contains_radius=0.5):
-    """Cut along the projected silhouette of the largest ear boundary loop.
+def cut_eararea_projected_footprint(head, ear, ear_cut_clearance_scale=1.3, projected_cut_margin=10.0, side='auto'):
+    if side == 'auto':
+        side = 'left' if np.mean(ear.vertices[:, 1]) >= 0 else 'right'
+    elif side not in ('left', 'right'):
+        raise Exception("Inconclusive side parameter. Please use 'auto', 'left' or 'right'.")
 
-    Projects the boundary onto the head surface (closest-point), then uses a
-    2D point-in-polygon test on the head's face centroids in the XZ plane.
-    A small radius is passed to ``contains_points`` so faces straddling the
-    edge of the silhouette are also removed. After the cut, only the largest
-    connected component is kept as a safety net against stray islands.
-    """
-    entities = ear.outline().entities
-    if len(entities) == 0:
-        raise Exception("The ear mesh has no boundary loop. Check for non-manifolds!")
-    boundary = max((entity.discrete(ear.vertices) for entity in entities), key=len)
-
-    closest_points, _, _ = trimesh.proximity.closest_point(head, boundary)
-
-    boundary_xz = np.column_stack([closest_points[:, 0], closest_points[:, 2]])
-    cutting_path = MplPath(boundary_xz)
-
-    face_centroids = head.triangles_center
-    centroids_xz = np.column_stack([face_centroids[:, 0], face_centroids[:, 2]])
-    inside_mask = cutting_path.contains_points(centroids_xz, radius=contains_radius)
-
+    margin = max(float(projected_cut_margin), 0.0)
+    centers = np.asarray(head.triangles_center)
+    ear_vertices = np.asarray(ear.vertices)
+    x_min = np.min(ear_vertices[:, 0]) - margin
+    x_max = np.max(ear_vertices[:, 0]) + margin
+    z_min = np.min(ear_vertices[:, 2]) - margin
+    z_max = np.max(ear_vertices[:, 2]) + margin
     if side == 'left':
-        y_mask = face_centroids[:, 1] >= 0
+        side_mask = centers[:, 1] >= 0
     else:
-        y_mask = face_centroids[:, 1] <= 0
-
-    head.update_faces(~(inside_mask & y_mask))
+        side_mask = centers[:, 1] <= 0
+    inside = (centers[:, 0] >= x_min) & (centers[:, 0] <= x_max) & (centers[:, 2] >= z_min) & (centers[:, 2] <= z_max)
+    face_mask = ~(inside & side_mask)
+    head.update_faces(face_mask)
     head.remove_unreferenced_vertices()
-
-    components = head.split(only_watertight=False)
-    if len(components) > 1:
-        head = max(components, key=lambda c: len(c.faces))
-
     return head
 
 
@@ -150,10 +135,9 @@ if __name__ == "__main__":
     parser.add_argument('--head_path', type=str, required=True, help='Path to the head mesh')
     parser.add_argument('--ear_path', type=str, required=True, help='Path to the ear mesh')
     parser.add_argument('--export_path', type=str, required=True, help='Path to save the cut head to')
-    parser.add_argument('--ear-cut-clearance-scale', type=float, required=False, default=1.3, help='Factor for spacing around the ear. Default is 1.3 (ellipse mode only).')
-    parser.add_argument('--mode', type=str, required=False, default='ellipse',
-                        choices=['ellipse', 'exact'],
-                        help='Cut mode (see cut_eararea docstring). Default: ellipse.')
+    parser.add_argument('--ear-cut-clearance-scale', type=float, required=False, default=1.3, help='Factor for spacing around the ear. Default is 1.3')
+    parser.add_argument('--cut-mode', type=str, required=False, default='ellipse')
+    parser.add_argument('--projected-cut-margin', type=float, required=False, default=10.0)
     parser.add_argument('--spazi', type=float, required=False, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
@@ -166,7 +150,10 @@ if __name__ == "__main__":
     head = trimesh.load(head_path)
     ear = trimesh.load(ear_path)
 
-    head = cut_eararea(head, ear, ear_cut_clearance_scale=ear_cut_clearance_scale, mode=args.mode)
+    if args.cut_mode == 'projected_footprint':
+        head = cut_eararea_projected_footprint(head, ear, ear_cut_clearance_scale=ear_cut_clearance_scale, projected_cut_margin=args.projected_cut_margin)
+    else:
+        head = cut_eararea(head, ear, ear_cut_clearance_scale=ear_cut_clearance_scale)
 
     # Export
     head.export(export_path)

@@ -18,6 +18,9 @@ enum PipelineConfigWriter {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let source = URL(fileURLWithPath: path)
         let target = folder.appendingPathComponent(source.lastPathComponent)
+        if source.standardizedFileURL.path == target.standardizedFileURL.path {
+            return source.path
+        }
         if FileManager.default.fileExists(atPath: target.path) {
             try FileManager.default.removeItem(at: target)
         }
@@ -32,6 +35,8 @@ enum PipelineConfigWriter {
         let numcalc = project.settings.numcalc
         let selectedGrid = preprocessing.evaluationGrid?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let evaluationGrid = selectedGrid.isEmpty ? "Default" : selectedGrid
+        let useCustomHeadRadius = preprocessing.useCustomHeadRadius ?? (preprocessing.headRadius != nil)
+        let headRadius = useCustomHeadRadius ? "  head_radius: \(yamlNumber(preprocessing.headRadius) ?? "0")\n" : ""
         return """
         paths:
           left_ear: \(project.leftEar)
@@ -58,8 +63,16 @@ enum PipelineConfigWriter {
           head_radius_scale: 1.01
           head_width_scale: 1.5
           head_height_scale: 1.5
-          head_y_deformation: 0.005
+          head_adaptive_ovalness: true
+          head_ovalness_strength: 0.08
+          head_min_width_scale: 1.48
+          head_max_height_scale: 1.53
+          head_y_deformation: 0.0
           ear_cut_clearance_scale: 1.3
+          ear_cut_mode: ellipse
+          projected_cut_margin: 10.0
+        \(headRadius)  seam_smoothing_iterations: 5
+          seam_smoothing_factor: 0.35
           mesh_min_edge_length: \(preprocessing.meshMinEdgeLength)
           mesh_max_edge_length: \(preprocessing.meshMaxEdgeLength)
           mesh_max_error: \(preprocessing.meshMaxError)
@@ -95,5 +108,16 @@ enum PipelineConfigWriter {
           mesh_background: white
           show_axes: true
         """
+    }
+
+    static func yamlNumber(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            return nil
+        }
+        guard Double(trimmed) != nil else {
+            return nil
+        }
+        return trimmed
     }
 }

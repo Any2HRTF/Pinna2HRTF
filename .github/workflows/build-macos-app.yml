@@ -1,14 +1,15 @@
-name: Build macOS app
+name: Build apps
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-  workflow_dispatch:
+  release:
+    types:
+      - created
+
+permissions:
+  contents: write
 
 jobs:
-  build:
+  build-macos:
     runs-on: macos-26
     steps:
       - name: Checkout
@@ -48,3 +49,69 @@ jobs:
         with:
           name: Pinna2HRTF-macos
           path: build/release/Pinna2HRTF-macos.zip
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/release/Pinna2HRTF-macos.zip
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          submodules: recursive
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Subversion
+        shell: pwsh
+        run: choco install svn -y --no-progress
+
+      - name: Prepare external tools
+        shell: pwsh
+        run: .\Scripts\prepare_windows_external_tools.ps1
+
+      - name: Build portable Windows app
+        shell: pwsh
+        run: .\Scripts\build_windows_port.ps1
+
+      - name: Verify bundled Windows runtime
+        shell: pwsh
+        run: |
+          $paths = @(
+            "dist\windows\Pinna2HRTF\Pinna2HRTF.Windows.exe",
+            "dist\windows\Pinna2HRTF\External\bin\uv.exe",
+            "dist\windows\Pinna2HRTF\External\bin\NumCalc.exe",
+            "dist\windows\Pinna2HRTF\External\bin\hrtf_mesh_grading.exe",
+            "dist\windows\Pinna2HRTF\.venv\Scripts\python.exe",
+            "dist\windows\Pinna2HRTF\Python"
+          )
+          foreach ($path in $paths) {
+            if (-not (Test-Path $path)) {
+              throw "Missing bundled Windows runtime path: $path"
+            }
+          }
+
+      - name: Create zip
+        shell: pwsh
+        run: Compress-Archive -Path dist\windows\Pinna2HRTF -DestinationPath dist\windows\Pinna2HRTF-windows.zip -Force
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pinna2HRTF-windows
+          path: dist/windows/Pinna2HRTF-windows.zip
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/windows/Pinna2HRTF-windows.zip
