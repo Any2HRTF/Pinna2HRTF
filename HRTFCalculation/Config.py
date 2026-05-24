@@ -82,7 +82,8 @@ class PreprocessingConfig(BaseModel):
     head_max_height_scale: float = 1.53
     head_y_deformation: float = 0.0
     ear_cut_clearance_scale: float = 1.3
-    ear_cut_mode: Literal["ellipse", "projected_footprint"] = "ellipse"
+    ear_cut_mode: Literal["ellipse", "projected_footprint", "exact"] = "ellipse"
+    ear_canal_closer_mode: Literal["legacy", "interpolated"] = "legacy"
     projected_cut_margin: float = 10.0
     head_radius: float | None = None
     seam_smoothing_iterations: int = 5

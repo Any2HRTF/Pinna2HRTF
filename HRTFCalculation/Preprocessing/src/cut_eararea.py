@@ -15,6 +15,7 @@ September 2024
 import argparse
 import numpy as np
 import trimesh
+from matplotlib.path import Path as MplPath
 #import pyglet  # necessary for .show to work! Used for debugging only
 
 
@@ -106,6 +107,29 @@ def cut_eararea_projected_footprint(head, ear, ear_cut_clearance_scale=1.3, proj
     face_mask = ~(inside & side_mask)
     head.update_faces(face_mask)
     head.remove_unreferenced_vertices()
+    return head
+
+
+def _exact_cut(head, ear, side, contains_radius=0.5):
+    entities = ear.outline().entities
+    if len(entities) == 0:
+        raise Exception("The ear mesh has no boundary loop. Check for non-manifolds!")
+    boundary = max((entity.discrete(ear.vertices) for entity in entities), key=len)
+    closest_points, _, _ = trimesh.proximity.closest_point(head, boundary)
+    boundary_xz = np.column_stack([closest_points[:, 0], closest_points[:, 2]])
+    cutting_path = MplPath(boundary_xz)
+    face_centroids = head.triangles_center
+    centroids_xz = np.column_stack([face_centroids[:, 0], face_centroids[:, 2]])
+    inside_mask = cutting_path.contains_points(centroids_xz, radius=contains_radius)
+    if side == 'left':
+        y_mask = face_centroids[:, 1] >= 0
+    else:
+        y_mask = face_centroids[:, 1] <= 0
+    head.update_faces(~(inside_mask & y_mask))
+    head.remove_unreferenced_vertices()
+    components = head.split(only_watertight=False)
+    if len(components) > 1:
+        head = max(components, key=lambda c: len(c.faces))
     return head
 
 

@@ -102,8 +102,8 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             cut_eararea_projected_footprint(trimesh.load(dummy_head, process=False), trimesh.load(left_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, projected_cut_margin=settings.projected_cut_margin, side="left").export(left_cut)
             cut_eararea_projected_footprint(trimesh.load(dummy_head, process=False), trimesh.load(right_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, projected_cut_margin=settings.projected_cut_margin, side="right").export(right_cut)
         else:
-            cut_eararea(trimesh.load(dummy_head, process=False), trimesh.load(left_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="left").export(left_cut)
-            cut_eararea(trimesh.load(dummy_head, process=False), trimesh.load(right_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="right").export(right_cut)
+            cut_eararea(trimesh.load(dummy_head, process=False), trimesh.load(left_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="left", mode=settings.ear_cut_mode).export(left_cut)
+            cut_eararea(trimesh.load(dummy_head, process=False), trimesh.load(right_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="right", mode=settings.ear_cut_mode).export(right_cut)
         from .src.head_stitcher import head_stitcher
         head_stitcher(head_path=str(left_cut), ear_path=str(left_closed), export_path=str(left_stitched), seam_smoothing_iterations=settings.seam_smoothing_iterations, seam_smoothing_factor=settings.seam_smoothing_factor)
         head_stitcher(head_path=str(right_cut), ear_path=str(right_closed), export_path=str(right_stitched), seam_smoothing_iterations=settings.seam_smoothing_iterations, seam_smoothing_factor=settings.seam_smoothing_factor)
@@ -179,6 +179,8 @@ def preprocess():
     parser.add_argument('--Mesh2HRTF-path', type=str, required=True, help='Path to the location of the mesh2hrtf directory.')
     parser.add_argument('--Mesh2HRTF-Evaluation-Grid', type=str, default='/Users/felixperfler/Documents/ISF/2026/Pipeline Paper/Data/Resources/EvalGrid', help='Path to the evaluation grid to be used for Mesh2HRTF.')
     parser.add_argument('--ear-cut-clearance-scale', type=float, default=1.3)
+    parser.add_argument('--ear-cut-mode', choices=['ellipse', 'projected_footprint', 'exact'], default='ellipse')
+    parser.add_argument('--ear-canal-closer-mode', choices=['legacy', 'interpolated'], default='legacy')
     parser.add_argument('--head-radius', type=float, default=None, help='Optional lateral head radius in millimeters used to place pinnae before preprocessing.')
     parser.add_argument('--min-frequency', type=int, default=1000)
     parser.add_argument('--max-frequency', type=int, default=24000)
@@ -186,6 +188,8 @@ def preprocess():
     args = parser.parse_args()
     settings = PreprocessingConfig(
         ear_cut_clearance_scale=args.ear_cut_clearance_scale,
+        ear_cut_mode=args.ear_cut_mode,
+        ear_canal_closer_mode=args.ear_canal_closer_mode,
         head_radius=args.head_radius,
         min_frequency=args.min_frequency,
         max_frequency=args.max_frequency,
