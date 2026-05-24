@@ -52,15 +52,17 @@ Choose an output folder:
 
 ```sh
 OUT="runs/example"
+LEFT_MESH="/path/to/left.stl"
+RIGHT_MESH="/path/to/right.stl"
 mkdir -p "$OUT"
 ```
 
-Place or copy the input ears into the folders expected by inference:
+If you want to run mesh prediction first, place or copy the input ears into the folders expected by inference:
 
 ```sh
 mkdir -p "$OUT/Target STL Left" "$OUT/Target STL Right"
-cp /path/to/left.stl "$OUT/Target STL Left/left.stl"
-cp /path/to/right.stl "$OUT/Target STL Right/right.stl"
+cp "$LEFT_MESH" "$OUT/Target STL Left/left.stl"
+cp "$RIGHT_MESH" "$OUT/Target STL Right/right.stl"
 ```
 
 Run inference:
@@ -72,12 +74,14 @@ uv run hrtf-inference \
   --model_checkpoint "HRTFCalculation/Inference/resources/Local 3 Views.pth"
 ```
 
+Inference is optional. If you already have the left and right meshes you want to use, skip that step and pass them directly to preprocessing.
+
 Run preprocessing. This creates two Mesh2HRTF projects, one for each side:
 
 ```sh
 uv run hrtf-preprocessing \
-  --left-path "$OUT/Prediction STL Left/left.stl" \
-  --right-path "$OUT/Prediction STL Right/right.stl" \
+  --left-path "$LEFT_MESH" \
+  --right-path "$RIGHT_MESH" \
   --export-path "$OUT/project" \
   --mesh-grading-executable "External/bin/hrtf_mesh_grading" \
   --Mesh2HRTF-path "External/src/Mesh2HRTF/mesh2hrtf" \
