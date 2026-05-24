@@ -18,21 +18,48 @@ import trimesh
 #import pyglet  # necessary for .show to work! Used for debugging only
 
 
-def cut_eararea(head, ear, ear_cut_clearance_scale=1.3, side='auto'):
-    a = ( np.abs(np.max(ear.vertices[:,2]) - np.min(ear.vertices[:,2])) / 2 ) * ear_cut_clearance_scale
-    b = ( np.abs(np.max(ear.vertices[:,0]) - np.min(ear.vertices[:,0])) / 2 ) * ear_cut_clearance_scale*ear_cut_clearance_scale
-    
-    # compute center of the ear
-    offset = ( (np.max(ear.vertices[:,0])+np.min(ear.vertices[:,0]))/2, (np.max(ear.vertices[:,2])+np.min(ear.vertices[:,2]))/2)
+def cut_eararea(head, ear, ear_cut_clearance_scale=1.3, side='auto', mode='ellipse'):
+    """Cut an opening in `head` for the ear mesh.
 
-    # check on which side of the y axis the ear mesh is located
+    Parameters
+    ----------
+    head, ear : trimesh.Trimesh
+    ear_cut_clearance_scale : float
+        Only used when ``mode='ellipse'`` — multiplicative spacing around the
+        ear's bounding box.
+    side : {"auto", "left", "right"}
+    mode : {"ellipse", "exact"}
+        ``"ellipse"`` (default) preserves the original behaviour: cut along an
+        axis-aligned elliptical cylinder sized from the ear's bounding box.
+        ``"exact"`` projects the largest ear boundary loop onto the head and
+        cuts along that silhouette in the XZ plane, giving a hole that follows
+        the actual ear outline. Useful when the elliptical box is too large to
+        leave a clean stitching boundary.
+    """
+    if mode not in ('ellipse', 'exact'):
+        raise Exception(f"Unknown mode {mode!r}. Use 'ellipse' or 'exact'.")
+
+    # Resolve side once, then dispatch.
     if side == 'auto':
-        if ear.vertices[0,1] > 0:
+        if ear.vertices[0, 1] > 0:
             side = 'left'
         else:
             side = 'right'
     elif side not in ('left', 'right'):
         raise Exception("Inconclusive side parameter. Please use 'auto', 'left' or 'right'.")
+
+    if mode == 'ellipse':
+        return _ellipse_cut(head, ear, ear_cut_clearance_scale, side)
+    return _exact_cut(head, ear, side)
+
+
+def _ellipse_cut(head, ear, ear_cut_clearance_scale, side):
+    """Original behaviour: remove faces inside an axis-aligned elliptical cylinder."""
+    a = ( np.abs(np.max(ear.vertices[:,2]) - np.min(ear.vertices[:,2])) / 2 ) * ear_cut_clearance_scale
+    b = ( np.abs(np.max(ear.vertices[:,0]) - np.min(ear.vertices[:,0])) / 2 ) * ear_cut_clearance_scale*ear_cut_clearance_scale
+
+    # compute center of the ear
+    offset = ( (np.max(ear.vertices[:,0])+np.min(ear.vertices[:,0]))/2, (np.max(ear.vertices[:,2])+np.min(ear.vertices[:,2]))/2)
 
     # check if cylinder covers the whole ear
     ear_mask = elliptical_cylinder_mask(ear, a, b, offset, side=side)
