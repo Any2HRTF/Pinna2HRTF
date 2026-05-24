@@ -180,10 +180,16 @@ def preprocess():
     parser.add_argument('--Mesh2HRTF-Evaluation-Grid', type=str, default='/Users/felixperfler/Documents/ISF/2026/Pipeline Paper/Data/Resources/EvalGrid', help='Path to the evaluation grid to be used for Mesh2HRTF.')
     parser.add_argument('--ear-cut-clearance-scale', type=float, default=1.3)
     parser.add_argument('--head-radius', type=float, default=None, help='Optional lateral head radius in millimeters used to place pinnae before preprocessing.')
+    parser.add_argument('--min-frequency', type=int, default=1000)
+    parser.add_argument('--max-frequency', type=int, default=24000)
+    parser.add_argument('--frequency-step-count', type=int, default=129)
     args = parser.parse_args()
     settings = PreprocessingConfig(
         ear_cut_clearance_scale=args.ear_cut_clearance_scale,
         head_radius=args.head_radius,
+        min_frequency=args.min_frequency,
+        max_frequency=args.max_frequency,
+        frequency_step_count=args.frequency_step_count,
     )
     run_preprocessing_pipeline(
         left_path=args.left_path,

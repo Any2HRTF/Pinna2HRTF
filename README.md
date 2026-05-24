@@ -4,237 +4,174 @@
 
 # Pinna2HRTF
 
-Pinna2HRTF is a macOS app and Python pipeline for generating head-related transfer functions from left and right pinna meshes. It wraps the full workflow from PPM-based ear prediction through mesh preprocessing, Mesh2HRTF project creation, NumCalc execution, and SOFA postprocessing.
+Pinna2HRTF generates HRTFs from left and right pinna meshes. The recommended workflow is the command line: run each pipeline stage as its own command, keep the generated folders on disk, and resume individual stages when needed.
 
-The repository can be used in two ways:
+The pipeline can:
 
-- `Pinna2HRTF`, a native SwiftUI macOS app for project setup, staged execution, artifact browsing, mesh preview, logs, and environment setup.
-- `Pinna2HRTF.Windows`, a Windows desktop shell for the same shared Python pipeline.
-- `HRTFCalculation`, a `uv`-managed Python package with command line entry points for scripted and batch runs.
-
-## Features
-
-- Native macOS project manager for multiple HRTF runs.
-- Left and right input mesh selection with copy or reference handling.
-- PPM inference models bundled under `HRTFCalculation/Inference/resources`.
-- Config-driven staged pipeline execution:
-  - Inference
-  - Preprocessing
-  - NumCalc
-  - Postprocessing
-- Automatic output scanning for predicted ears, intermediate meshes, Mesh2HRTF projects, NumCalc results, and SOFA files.
-- Built-in mesh and image preview for generated artifacts.
-- Local NumCalc execution and SLURM array-job support from the Python config runner.
-- Release app packaging script that bundles the Swift app, Python pipeline, app icon, runtime environment, and external binaries when available.
+- predict complete left and right pinna meshes with the bundled PPM models
+- preprocess meshes into Mesh2HRTF projects
+- run NumCalc locally
+- merge the left and right projects into SOFA files and inspection plots
 
 ## Requirements
 
-- macOS 13 or newer for the native app.
-- Windows 10 or Windows 11 x64 for the Windows desktop shell.
-- Swift 5.9 or newer.
-- `uv`.
-- Python 3.11, managed through `uv`.
-- Mesh2HRTF and NumCalc.
-- `hrtf_mesh_grading`.
+- macOS or Linux with Python 3.11 through `uv`
+- `uv`
+- `NumCalc`
+- `hrtf_mesh_grading`
+- Mesh2HRTF sources for preprocessing
 
-The app looks for external tools in this order:
-
-- bundled `External/bin` inside the app or repository
-- tools available on `PATH`
-- installed tools under `~/Library/Application Support/Pinna2HRTF/External/bin`
-
-## Setup
-
-Install the Python environment from the repository root:
+Prepare the Python environment:
 
 ```sh
 uv sync
 ```
 
-The Python dependencies include the Mesh2HRTF and PPM packages from GitHub, so the first sync may take a while.
+Prepare native tools:
 
-Prepare external binaries in an `External/bin` folder when they are not already available on `PATH`:
+```sh
+Sources/Pinna2HRTF/Scripts/prepare_external_tools.sh
+```
+
+That script creates:
 
 ```text
 External/bin/uv
 External/bin/NumCalc
 External/bin/hrtf_mesh_grading
+External/src/Mesh2HRTF
 ```
 
-The app can also copy missing `PATH` tools into its application support dependency folder when you run environment setup from the UI.
+If `cmake` is not installed, the script bootstraps it through `uvx`.
 
-## Run The macOS App
+## CLI Workflow
 
-For development:
+The examples below pass paths and settings directly to each command. Paths may be absolute or relative.
+
+Choose an output folder:
 
 ```sh
-swift run Pinna2HRTF
+OUT="runs/example"
+mkdir -p "$OUT"
 ```
 
-In the app:
-
-1. Create a project.
-2. Select the left and right ear STL files.
-3. Choose an output folder.
-4. Check the environment panel for `uv`, `NumCalc`, and mesh grading.
-5. Run stages individually or use `Command-R` to run the next incomplete stage.
-6. Inspect generated meshes, plots, logs, and SOFA outputs from the artifact browser.
-
-Useful menu commands:
-
-- `Command-N`: new project
-- `Command-R`: run next stage
-- `Command-.`: stop the running stage
-- `Shift-Command-R`: refresh artifacts
-
-## Build A Release App
+Place or copy the input ears into the folders expected by inference:
 
 ```sh
-Sources/Pinna2HRTF/Scripts/build_release_app.sh
+mkdir -p "$OUT/Target STL Left" "$OUT/Target STL Right"
+cp /path/to/left.stl "$OUT/Target STL Left/left.stl"
+cp /path/to/right.stl "$OUT/Target STL Right/right.stl"
 ```
 
-The release bundle is written to:
+Run inference:
+
+```sh
+uv run hrtf-inference \
+  --data_dir "$OUT" \
+  --configuration "HRTFCalculation/Inference/resources/Local 3 Views.yaml" \
+  --model_checkpoint "HRTFCalculation/Inference/resources/Local 3 Views.pth"
+```
+
+Run preprocessing. This creates two Mesh2HRTF projects, one for each side:
+
+```sh
+uv run hrtf-preprocessing \
+  --left-path "$OUT/Prediction STL Left/left.stl" \
+  --right-path "$OUT/Prediction STL Right/right.stl" \
+  --export-path "$OUT/project" \
+  --mesh-grading-executable "External/bin/hrtf_mesh_grading" \
+  --Mesh2HRTF-path "External/src/Mesh2HRTF/mesh2hrtf" \
+  --Mesh2HRTF-Evaluation-Grid Default \
+  --min-frequency 1000 \
+  --max-frequency 8000 \
+  --frequency-step-count 2
+```
+
+This writes:
 
 ```text
-build/release/Pinna2HRTF.app
+runs/example/project-Left
+runs/example/project-Right
+runs/example/project-intermediates
 ```
 
-The script builds the Swift executable, copies the Python pipeline into the app resources, includes the app icon, copies available external binaries, installs the Python environment with `uv`, and writes the app `Info.plist`.
+Run NumCalc:
 
-## Run The Windows App
+```sh
+mkdir -p "$OUT/Projects"
+rm -rf "$OUT/Projects/Left" "$OUT/Projects/Right"
+cp -R "$OUT/project-Left" "$OUT/Projects/Left"
+cp -R "$OUT/project-Right" "$OUT/Projects/Right"
 
-The Windows app uses the shared Python pipeline and stores project state in:
+uv run hrtf-numcalc \
+  --project-path "$OUT/Projects" \
+  --numcalc-path "External/bin/NumCalc" \
+  --max-instances 1 \
+  --max-cpu-load 90
+```
+
+`hrtf-numcalc` is resumable. If one side or frequency already finished, Mesh2HRTF skips it.
+
+Generate SOFA files and plots:
+
+```sh
+uv run hrtf-sofa \
+  --left-project "$OUT/Projects/Left" \
+  --right-project "$OUT/Projects/Right" \
+  --output-dir "$OUT/HRTF" \
+  --overwrite
+```
+
+Expected final files:
 
 ```text
-%APPDATA%\Pinna2HRTF\projects.json
+runs/example/HRTF/HRIR_Default_merged.sofa
+runs/example/HRTF/HRTF_Default_merged.sofa
+runs/example/HRTF/HRIR_Default_merged_3D_horizontal_plane.jpeg
+runs/example/HRTF/HRIR_Default_merged_3D_median_plane.jpeg
 ```
 
-For a portable release, the zip bundles `uv.exe`, `NumCalc.exe`, `hrtf_mesh_grading.exe`, a managed Python 3.11 runtime, and the Python environment. The app looks for native tools in `External\bin` first, then on `PATH`. If a tool is missing, open the Environment panel and browse to the executable.
+## Config Runner
 
-On first run:
-
-1. Start `Pinna2HRTF.Windows.exe`.
-2. Open Environment and confirm the bundled tool paths if you moved the folder manually.
-3. Create a project, choose left and right STL meshes, and choose a save location.
-4. Run each stage or use Run Next.
-
-## Build A Windows Portable App
-
-From the repository root on Windows:
-
-```powershell
-.\Scripts\prepare_windows_external_tools.ps1
-.\Scripts\build_windows_port.ps1
-```
-
-The portable folder is written to:
-
-```text
-dist\windows\Pinna2HRTF
-```
-
-The build script runs `uv sync --no-dev --managed-python --python 3.11` inside the portable folder so the release can run the bundled pipeline without setting up Python on first launch. For a quick shell-only build during development, use:
-
-```powershell
-.\Scripts\build_windows_port.ps1 -SkipPythonEnvironment -AllowMissingExternalTools
-```
-
-The folder can be moved to a path with spaces. Reopen the Environment panel after moving it if external tool paths need to be updated.
-
-## Command Line Usage
-
-The command line runner is config based. Write a template first:
+There is also a YAML-based runner for app integration and scripted staged runs:
 
 ```sh
 uv run hrtf-run-config --write-template pinna2hrtf.yaml
-```
-
-Edit the paths and settings in `pinna2hrtf.yaml`, then run one stage:
-
-```sh
 uv run hrtf-run-config --config pinna2hrtf.yaml --stage inference
 uv run hrtf-run-config --config pinna2hrtf.yaml --stage preprocessing
 uv run hrtf-run-config --config pinna2hrtf.yaml --stage numcalc
 uv run hrtf-run-config --config pinna2hrtf.yaml --stage postprocessing
 ```
 
-Run every enabled stage:
+Use this when you prefer to keep all stage settings in one file. The stage-by-stage CLI commands above are the recommended workflow.
+
+## Experimental Apps
+
+Native apps exist, but they are experimental wrappers around the same Python pipeline.
+
+### macOS
+
+Build and run the packaged macOS app locally:
 
 ```sh
-uv run hrtf-run-config --config pinna2hrtf.yaml --stage all
+./script/build_and_run.sh
 ```
 
-Preview the selected actions without running them:
+This prepares external tools, builds `build/release/Pinna2HRTF.app`, embeds Python dependencies, and launches the app.
 
-```sh
-uv run hrtf-run-config --config pinna2hrtf.yaml --stage all --dry-run
+### Windows
+
+Build the portable Windows app from Windows:
+
+```powershell
+.\Scripts\prepare_windows_external_tools.ps1
+.\Scripts\build_windows_port.ps1
 ```
 
-The legacy entry points are still available:
-
-```sh
-uv run hrtf-inference --data_dir /path/to/Data
-uv run hrtf-preprocessing --left-path /path/to/left.stl --right-path /path/to/right.stl --export-path /path/to/output --mesh-grading-executable /path/to/hrtf_mesh_grading --Mesh2HRTF-path /path/to/Mesh2HRTF/mesh2hrtf
-uv run hrtf-postprocessing --data_dir /path/to/Data
-```
-
-Add `--head-radius 75` to `hrtf-preprocessing` only when the input pinnae need to be placed laterally before preprocessing.
-
-## Pipeline Outputs
-
-A typical project output folder contains:
+The portable app is written to:
 
 ```text
-Input/
-Target STL Left/
-Target STL Right/
-Prediction STL Left/
-Prediction STL Right/
-Prediction Parameters Left/
-Prediction Parameters Right/
-intermediates/
-Projects/
-HRTF/
-.pinna2hrtf_native_run.yaml
-```
-
-Important generated files include:
-
-- predicted ear meshes in `Prediction STL Left` and `Prediction STL Right`
-- closed ears, dummy head, cut heads, stitched heads, and graded heads in `intermediates`
-- Mesh2HRTF projects in `Projects/Left` and `Projects/Right`
-- merged SOFA files and HRTF plots in `HRTF`
-
-## Configuration Notes
-
-The app writes `.pinna2hrtf_native_run.yaml` into each project output folder before launching a stage. This is the same configuration format accepted by `hrtf-run-config`.
-
-Key settings include:
-
-- input ear paths and output directory
-- PPM model configuration and checkpoint
-- mesh grading executable
-- Mesh2HRTF path
-- evaluation grid
-- preprocessing frequency range and mesh parameters
-- optional `head_radius`, which laterally places the left and right pinnae at `+head_radius` and `-head_radius` before preprocessing; leave it empty to keep the input mesh positions unchanged
-- local or SLURM NumCalc mode
-- SOFA postprocessing output directory
-
-## Repository Layout
-
-```text
-HRTFCalculation/                 Python pipeline package
-HRTFCalculation/Inference/       PPM inference code and model resources
-HRTFCalculation/Preprocessing/   mesh preparation and Mesh2HRTF export
-HRTFCalculation/Postprocessing/  SOFA generation and merge helpers
-Sources/Pinna2HRTF/             SwiftUI macOS app
-Sources/Pinna2HRTF/Resources/   app icon assets
-Sources/Pinna2HRTF/Scripts/     packaging and external-tool scripts
-Sources/Pinna2HRTF.Windows/     Windows desktop shell
-Scripts/                        Windows portable build scripts
-Package.swift                   Swift package manifest
-pyproject.toml                  Python package and uv dependency metadata
+dist\windows\Pinna2HRTF
 ```
 
 ## Citation
