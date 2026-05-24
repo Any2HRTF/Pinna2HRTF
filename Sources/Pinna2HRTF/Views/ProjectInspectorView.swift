@@ -47,6 +47,10 @@ struct ProjectInspectorView: View {
                 SettingsDisclosure("Mesh2HRTF", systemImage: "waveform.path.ecg") {
                     Toggle("Use predictions for preprocessing", isOn: inferenceBoolBinding(\.usePredictionsForPreprocessing))
                     PathField("Evaluation grid", text: optionalPreprocessingBinding(\.evaluationGrid), mode: .directory)
+                    Toggle("Use custom head radius", isOn: useCustomHeadRadiusBinding)
+                    LabeledMillimeterSlider("Head radius", value: headRadiusBinding, range: 0...200)
+                        .disabled(!useCustomHeadRadiusBinding.wrappedValue)
+                        .opacity(useCustomHeadRadiusBinding.wrappedValue ? 1 : 0.55)
                     LabeledTextField("Min frequency", text: preprocessingBinding(\.minFrequency))
                     LabeledTextField("Max frequency", text: preprocessingBinding(\.maxFrequency))
                     LabeledTextField("Frequency steps", text: preprocessingBinding(\.frequencyStepCount))
@@ -117,6 +121,42 @@ struct ProjectInspectorView: View {
         Binding(
             get: { store.selectedProject?.settings.preprocessing[keyPath: keyPath] ?? "" },
             set: { value in store.updateSelectedProject { $0.settings.preprocessing[keyPath: keyPath] = value.isEmpty ? nil : value } }
+        )
+    }
+
+    var headRadiusBinding: Binding<Double> {
+        Binding(
+            get: {
+                guard let text = store.selectedProject?.settings.preprocessing.headRadius, let value = Double(text) else {
+                    return 0
+                }
+                return min(max(value, 0), 200)
+            },
+            set: { value in
+                let rounded = Int(min(max(value, 0), 200).rounded())
+                store.updateSelectedProject { project in
+                    project.settings.preprocessing.headRadius = "\(rounded)"
+                }
+            }
+        )
+    }
+
+    var useCustomHeadRadiusBinding: Binding<Bool> {
+        Binding(
+            get: {
+                guard let preprocessing = store.selectedProject?.settings.preprocessing else {
+                    return false
+                }
+                return preprocessing.useCustomHeadRadius ?? (preprocessing.headRadius != nil)
+            },
+            set: { value in
+                store.updateSelectedProject { project in
+                    project.settings.preprocessing.useCustomHeadRadius = value
+                    if value, project.settings.preprocessing.headRadius == nil {
+                        project.settings.preprocessing.headRadius = "0"
+                    }
+                }
+            }
         )
     }
 

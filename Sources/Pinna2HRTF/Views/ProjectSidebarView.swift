@@ -20,6 +20,10 @@ struct ProjectSidebarView: View {
                                 }
                             }
                     }
+                    .onMove { source, destination in
+                        store.projects.move(fromOffsets: source, toOffset: destination)
+                        store.persist()
+                    }
                 }
             }
         }

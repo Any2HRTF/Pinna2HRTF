@@ -32,9 +32,9 @@ if [[ -d "$EXTERNAL_ROOT/bin" ]]; then
   mkdir -p "$RESOURCES/External"
   cp -R "$EXTERNAL_ROOT/bin" "$RESOURCES/External/bin"
 fi
-if [[ -d "$REPO_ROOT/Paper/Data/Resources/EvalGrid" ]]; then
+if [[ -d "$REPO_ROOT/Data/Resources/EvalGrid" ]]; then
   mkdir -p "$RESOURCES/Data/Resources"
-  cp -R "$REPO_ROOT/Paper/Data/Resources/EvalGrid" "$RESOURCES/Data/Resources/EvalGrid"
+  cp -R "$REPO_ROOT/Data/Resources/EvalGrid" "$RESOURCES/Data/Resources/EvalGrid"
 fi
 if [[ -f "$ICON" ]]; then
   cp "$ICON" "$RESOURCES/app_icon.icns"

@@ -54,7 +54,7 @@ def boundary_components(bm):
     return components
 
 
-def fill_boundaries():
+def fill_boundaries(seam_smoothing_iterations=0, seam_smoothing_factor=0.35):
     obj = bpy.context.active_object
     if obj.type != 'MESH':
         raise TypeError("Active object is not a mesh")
@@ -63,11 +63,18 @@ def fill_boundaries():
     bm = bmesh.from_edit_mesh(obj.data)
 
     components = sorted(boundary_components(bm), key=len, reverse=True)
+    bridge_faces = []
     if len(components) >= 2:
         try:
-            bmesh.ops.bridge_loops(bm, edges=components[0] + components[1])
+            result = bmesh.ops.bridge_loops(bm, edges=components[0] + components[1])
+            bridge_faces = [face for face in result.get('faces', []) if isinstance(face, bmesh.types.BMFace)]
         except Exception:
             pass
+
+    if bridge_faces and seam_smoothing_iterations > 0:
+        seam_verts = sorted({vert for face in bridge_faces for vert in face.verts}, key=lambda vert: vert.index)
+        for _ in range(seam_smoothing_iterations):
+            bmesh.ops.smooth_vert(bm, verts=seam_verts, factor=seam_smoothing_factor, use_axis_x=True, use_axis_y=True, use_axis_z=True)
 
     components = boundary_components(bm)
     for component in components:
@@ -86,12 +93,12 @@ def fill_boundaries():
     bpy.ops.object.mode_set(mode='OBJECT')
 
 
-def head_stitcher(head_path, ear_path, export_path):
+def head_stitcher(head_path, ear_path, export_path, seam_smoothing_iterations=0, seam_smoothing_factor=0.35):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     head = load_stl(head_path, 'head')
     ear = load_stl(ear_path, 'ear')
     join_meshes([head, ear])
-    fill_boundaries()
+    fill_boundaries(seam_smoothing_iterations=seam_smoothing_iterations, seam_smoothing_factor=seam_smoothing_factor)
     bpy.ops.wm.stl_export(filepath=export_path)
 
     mesh = trimesh.load(export_path)
@@ -109,10 +116,12 @@ if __name__ == "__main__":
     parser.add_argument('--head_path', type=str, required=True, help='Path to the head mesh with cut out ears')
     parser.add_argument('--ear_path', type=str, required=True, help='Path to the ear mesh')
     parser.add_argument('--export_path', type=str, required=True, help='Path to save the stitched head to')
+    parser.add_argument('--seam-smoothing-iterations', type=int, default=0)
+    parser.add_argument('--seam-smoothing-factor', type=float, default=0.35)
     args = parser.parse_args()
 
     head_path = args.head_path
     ear_path = args.ear_path
     export_path = args.export_path
 
-    head_stitcher(head_path=head_path, ear_path=ear_path, export_path=export_path)
+    head_stitcher(head_path=head_path, ear_path=ear_path, export_path=export_path, seam_smoothing_iterations=args.seam_smoothing_iterations, seam_smoothing_factor=args.seam_smoothing_factor)

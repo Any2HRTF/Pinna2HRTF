@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import subprocess
 import shutil
 import tempfile
@@ -130,7 +131,7 @@ def run_numcalc_local(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
     if not config.paths.numcalc_executable.exists():
         raise FileNotFoundError(f"Missing NumCalc executable: {config.paths.numcalc_executable}")
     numcalc_executable = config.paths.numcalc_executable
-    if " " in str(numcalc_executable):
+    if " " in str(numcalc_executable) and platform.system() != "Windows":
         link_dir = Path(tempfile.gettempdir()) / "Pinna2HRTF"
         link_dir.mkdir(parents=True, exist_ok=True)
         link_path = link_dir / "NumCalc"
@@ -210,7 +211,8 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
     m2h.output2hrtf(str(right))
     m2h.merge_sofa_files([str(left), str(right)], savedir=str(output_dir))
     try:
-        m2h.inspect_sofa_files(str(output_dir), pattern="HRIR", plot="3D")
+        for plane in ["horizontal", "median"]:
+            m2h.inspect_sofa_files(str(output_dir), pattern="HRIR", plot="3D", plane=plane)
         logger(f"Wrote SOFA visualizations into {output_dir}")
     except Exception as error:
         logger(f"Could not write SOFA visualizations: {error}")
@@ -223,6 +225,51 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--write-template", type=str, help="Write a default config template and exit.")
     return parser.parse_args()
+
+
+def parse_numcalc_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--project-path", required=True)
+    parser.add_argument("--numcalc-path", required=True)
+    parser.add_argument("--max-instances", type=int, default=1)
+    parser.add_argument("--max-cpu-load", type=int, default=90)
+    return parser.parse_args()
+
+
+def numcalc_cli() -> None:
+    args = parse_numcalc_args()
+    import mesh2hrtf as m2h
+    m2h.manage_numcalc(
+        project_path=str(Path(args.project_path).expanduser().resolve()),
+        numcalc_path=str(Path(args.numcalc_path).expanduser().resolve()),
+        max_instances=args.max_instances,
+        max_cpu_load=args.max_cpu_load,
+        confirm_errors=False,
+    )
+
+
+def parse_sofa_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--left-project", required=True)
+    parser.add_argument("--right-project", required=True)
+    parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--overwrite", action="store_true")
+    return parser.parse_args()
+
+
+def sofa_cli() -> None:
+    args = parse_sofa_args()
+    import shutil
+    import mesh2hrtf as m2h
+    output_dir = Path(args.output_dir)
+    if output_dir.exists() and args.overwrite:
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    m2h.output2hrtf(args.left_project)
+    m2h.output2hrtf(args.right_project)
+    m2h.merge_sofa_files([args.left_project, args.right_project], savedir=str(output_dir))
+    for plane in ["horizontal", "median"]:
+        m2h.inspect_sofa_files(str(output_dir), pattern="HRIR", plot="3D", plane=plane)
 
 
 def cli() -> None:
