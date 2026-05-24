@@ -83,8 +83,8 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             json.dump(right_landmark, f, indent=2)
         logger(f"Left source landmark: {left_landmark['method']} at {[round(v, 3) for v in left_landmark['position']]}, confidence {left_landmark['confidence']:.2f}")
         logger(f"Right source landmark: {right_landmark['method']} at {[round(v, 3) for v in right_landmark['position']]}, confidence {right_landmark['confidence']:.2f}")
-        ear_canal_closer(left_ear).export(left_closed)
-        ear_canal_closer(right_ear).export(right_closed)
+        ear_canal_closer(left_ear, mode=settings.ear_canal_closer_mode).export(left_closed)
+        ear_canal_closer(right_ear, mode=settings.ear_canal_closer_mode).export(right_closed)
         head(
             left_ear,
             right_ear,
