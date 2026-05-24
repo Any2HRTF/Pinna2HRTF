@@ -50,12 +50,18 @@ if [[ ! -x "$BIN/hrtf_mesh_grading" ]]; then
     echo "pmp-library checkout is missing CMakeLists.txt"
     exit 1
   fi
-  if ! command -v cmake >/dev/null 2>&1; then
-    echo "cmake is required to build hrtf_mesh_grading"
+  if command -v cmake >/dev/null 2>&1; then
+    CMAKE=(cmake)
+  elif command -v uvx >/dev/null 2>&1; then
+    CMAKE=(uvx --from cmake cmake)
+  elif [[ -x "$BIN/uv" ]]; then
+    CMAKE=("$BIN/uv" tool run --from cmake cmake)
+  else
+    echo "cmake or uvx is required to build hrtf_mesh_grading"
     exit 1
   fi
-  cmake -S "$PMP_DIR" -B "$PMP_DIR/build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -Wno-dev
-  cmake --build "$PMP_DIR/build" --config Release --target hrtf_mesh_grading --parallel "$NCPU"
+  "${CMAKE[@]}" -S "$PMP_DIR" -B "$PMP_DIR/build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -Wno-dev
+  "${CMAKE[@]}" --build "$PMP_DIR/build" --config Release --target hrtf_mesh_grading --parallel "$NCPU"
   cp "$PMP_DIR/build/hrtf_mesh_grading" "$BIN/hrtf_mesh_grading"
   if [[ -f "$PMP_DIR/build/libpmp.1.2.1.dylib" ]]; then
     cp "$PMP_DIR/build/libpmp.1.2.1.dylib" "$BIN/libpmp.1.2.1.dylib"

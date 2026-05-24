@@ -19,3 +19,4 @@ AppData/
 .dotnet-install.ps1
 **/bin/
 **/obj/
+Test Data/

@@ -27,7 +27,10 @@ final class AppStore: ObservableObject {
         rootURL = Defaults.runtimeRoot
         packageURL = Defaults.pipelineRoot
         registryStore = ProjectRegistryStore(rootURL: rootURL, packageURL: packageURL)
-        let registry = AppStore.migrated(registryStore.load(), rootURL: rootURL, packageURL: packageURL)
+        var registry = AppStore.migrated(registryStore.load(), rootURL: rootURL, packageURL: packageURL)
+        if Defaults.isPackagedApp {
+            registry.environment = Defaults.environment(root: rootURL)
+        }
         projects = registry.projects
         selectedProjectID = registry.selectedProjectID ?? registry.projects.first?.id
         environment = registry.environment
