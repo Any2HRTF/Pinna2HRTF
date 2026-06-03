@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Media.Media3D;
@@ -27,6 +28,11 @@ public partial class MainWindow : Window
     ProjectRegistry registry = new();
     EnvironmentConfig environment = new();
     bool loading;
+    bool rotatingMesh;
+    System.Windows.Point lastMeshPointer;
+    double meshYaw;
+    double meshPitch = 23;
+    double meshDistance = 305;
     string packageRoot = "";
     string appData = "";
     string registryPath = "";
@@ -393,6 +399,8 @@ public partial class MainWindow : Window
             {
                 var model = MeshLoader.Load(artifact.Path);
                 MeshViewport.Children.Add(new ModelVisual3D { Content = model });
+                ResetMeshCamera();
+                MeshControlsHint.Visibility = Visibility.Visible;
                 ViewerPlaceholder.Visibility = Visibility.Collapsed;
             }
             catch (Exception error)
@@ -427,9 +435,82 @@ public partial class MainWindow : Window
             MeshViewport.Children.RemoveAt(2);
         ImagePreview.Source = null;
         ImagePreview.Visibility = Visibility.Collapsed;
+        MeshControlsHint.Visibility = Visibility.Collapsed;
         ViewerPlaceholder.Text = "No artifact selected";
         ViewerPlaceholder.Visibility = Visibility.Visible;
         SelectedArtifactText.Text = "Select an artifact";
+    }
+
+    void MeshViewportMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (MeshViewport.Children.Count <= 2)
+            return;
+        rotatingMesh = true;
+        lastMeshPointer = e.GetPosition(MeshViewport);
+        MeshViewport.CaptureMouse();
+        e.Handled = true;
+    }
+
+    void MeshViewportMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        StopMeshRotation();
+        e.Handled = true;
+    }
+
+    void MeshViewportMouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed)
+            StopMeshRotation();
+    }
+
+    void MeshViewportMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (!rotatingMesh || e.LeftButton != MouseButtonState.Pressed)
+            return;
+
+        var pointer = e.GetPosition(MeshViewport);
+        meshYaw += (pointer.X - lastMeshPointer.X) * 0.45;
+        meshPitch = Math.Clamp(meshPitch - (pointer.Y - lastMeshPointer.Y) * 0.45, -89, 89);
+        lastMeshPointer = pointer;
+        UpdateMeshCamera();
+    }
+
+    void MeshViewportMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (MeshViewport.Children.Count <= 2)
+            return;
+        meshDistance = Math.Clamp(meshDistance * Math.Pow(0.88, e.Delta / 120.0), 80, 1200);
+        UpdateMeshCamera();
+        e.Handled = true;
+    }
+
+    void StopMeshRotation()
+    {
+        rotatingMesh = false;
+        if (MeshViewport.IsMouseCaptured)
+            MeshViewport.ReleaseMouseCapture();
+    }
+
+    void ResetMeshCamera()
+    {
+        meshYaw = 0;
+        meshPitch = 23;
+        meshDistance = 305;
+        UpdateMeshCamera();
+    }
+
+    void UpdateMeshCamera()
+    {
+        var yaw = meshYaw * Math.PI / 180;
+        var pitch = meshPitch * Math.PI / 180;
+        var horizontalDistance = meshDistance * Math.Cos(pitch);
+        var position = new Point3D(
+            horizontalDistance * Math.Sin(yaw),
+            -horizontalDistance * Math.Cos(yaw),
+            meshDistance * Math.Sin(pitch));
+        MeshCamera.Position = position;
+        MeshCamera.LookDirection = new Vector3D(-position.X, -position.Y, -position.Z);
+        MeshCamera.UpDirection = new Vector3D(0, 0, 1);
     }
 
     void RunInferenceClicked(object sender, RoutedEventArgs e) => RunStage(Stage.Inference);
@@ -492,7 +573,7 @@ public partial class MainWindow : Window
             runningStages[project.Id] = stage;
             FailedStages(project.Id).Remove(stage);
             AppendLog($"Started {stage.Title} for {project.Name}");
-            process.Exited += (_, _) => Dispatcher.Invoke(() =>
+            process.Exited += (_, _) => Dispatcher.BeginInvoke(() =>
             {
                 var code = process.ExitCode;
                 if (code != 0)
@@ -510,7 +591,10 @@ public partial class MainWindow : Window
         catch (Exception error)
         {
             FailedStages(project.Id).Add(stage);
+            runningProcesses.Remove(project.Id);
+            runningStages.Remove(project.Id);
             AppendLog($"Could not start {stage.Title}: {error.Message}");
+            RefreshArtifacts();
         }
     }
 
@@ -538,7 +622,7 @@ public partial class MainWindow : Window
         process.ErrorDataReceived += (_, args) => AppendLog(args.Data);
         process.EnableRaisingEvents = true;
         AppendLog("Setting up Python environment");
-        process.Exited += (_, _) => Dispatcher.Invoke(() =>
+        process.Exited += (_, _) => Dispatcher.BeginInvoke(() =>
         {
             AppendLog(process.ExitCode == 0 ? "Environment setup finished" : $"Environment setup exited with status {process.ExitCode}");
             process.Dispose();
@@ -775,12 +859,16 @@ ui:
     {
         if (string.IsNullOrWhiteSpace(text))
             return;
-        Dispatcher.Invoke(() =>
+        void Append()
         {
             LogText.AppendText((LogText.Text.Length == 0 ? "" : Environment.NewLine) + text);
             LogText.ScrollToEnd();
             LogSummaryText.Text = text;
-        });
+        }
+        if (Dispatcher.CheckAccess())
+            Append();
+        else
+            Dispatcher.BeginInvoke(Append);
     }
 
     void RefreshEnvironmentStatus()
