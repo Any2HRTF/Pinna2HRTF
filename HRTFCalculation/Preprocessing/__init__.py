@@ -57,6 +57,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
         (work_dir / "left").mkdir(parents=True, exist_ok=True)
         (work_dir / "right").mkdir(parents=True, exist_ok=True)
     try:
+        logger("Loading input ear meshes")
         left_ear = trimesh.load(left_path)
         right_ear = trimesh.load(right_path)
         if settings.head_radius is not None:
@@ -83,8 +84,10 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             json.dump(right_landmark, f, indent=2)
         logger(f"Left source landmark: {left_landmark['method']} at {[round(v, 3) for v in left_landmark['position']]}, confidence {left_landmark['confidence']:.2f}")
         logger(f"Right source landmark: {right_landmark['method']} at {[round(v, 3) for v in right_landmark['position']]}, confidence {right_landmark['confidence']:.2f}")
+        logger("Closing ear canals")
         ear_canal_closer(left_ear, mode=settings.ear_canal_closer_mode).export(left_closed)
         ear_canal_closer(right_ear, mode=settings.ear_canal_closer_mode).export(right_closed)
+        logger("Creating dummy head mesh")
         head(
             left_ear,
             right_ear,
@@ -98,6 +101,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             min_width_scale=settings.head_min_width_scale,
             max_height_scale=settings.head_max_height_scale,
         )
+        logger("Cutting ear areas from dummy head")
         if settings.ear_cut_mode == "projected_footprint":
             cut_eararea_projected_footprint(trimesh.load(dummy_head, process=False), trimesh.load(left_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, projected_cut_margin=settings.projected_cut_margin, side="left").export(left_cut)
             cut_eararea_projected_footprint(trimesh.load(dummy_head, process=False), trimesh.load(right_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, projected_cut_margin=settings.projected_cut_margin, side="right").export(right_cut)
@@ -105,9 +109,13 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             cut_eararea(trimesh.load(dummy_head, process=False), trimesh.load(left_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="left", mode=settings.ear_cut_mode).export(left_cut)
             cut_eararea(trimesh.load(dummy_head, process=False), trimesh.load(right_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="right", mode=settings.ear_cut_mode).export(right_cut)
         from .src.head_stitcher import head_stitcher
+        logger("Stitching left ear to head")
         head_stitcher(head_path=str(left_cut), ear_path=str(left_closed), export_path=str(left_stitched), seam_smoothing_iterations=settings.seam_smoothing_iterations, seam_smoothing_factor=settings.seam_smoothing_factor)
+        logger("Stitching right ear to head")
         head_stitcher(head_path=str(right_cut), ear_path=str(right_closed), export_path=str(right_stitched), seam_smoothing_iterations=settings.seam_smoothing_iterations, seam_smoothing_factor=settings.seam_smoothing_factor)
+        logger("Grading left head mesh; this can take several minutes")
         subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-v', '-g', str(settings.mesh_gamma_left), '-h', str(settings.mesh_hole_size), '-s', 'left', '-i', str(left_stitched), '-o', str(left_graded)], check=True)
+        logger("Grading right head mesh; this can take several minutes")
         subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-v', '-g', str(settings.mesh_gamma_right), '-h', str(settings.mesh_hole_size), '-s', 'right', '-i', str(right_stitched), '-o', str(right_graded)], check=True)
         if left_project.exists():
             shutil.rmtree(left_project)
@@ -118,6 +126,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
                 shutil.rmtree(project)
         left_project.parent.mkdir(parents=True, exist_ok=True)
         from .src.material_assign_and_mesh2input import main as mesh2input_main
+        logger("Creating left Mesh2HRTF project")
         mesh2input_main(
             head=str(left_graded),
             title=settings.title,
@@ -141,6 +150,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             source_position=left_landmark["position"],
             source_assignment_mode=settings.source_assignment_mode,
         )
+        logger("Creating right Mesh2HRTF project")
         mesh2input_main(
             head=str(right_graded),
             title=settings.title,

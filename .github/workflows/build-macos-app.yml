@@ -92,6 +92,7 @@ jobs:
             "dist\windows\Pinna2HRTF\External\bin\uv.exe",
             "dist\windows\Pinna2HRTF\External\bin\NumCalc.exe",
             "dist\windows\Pinna2HRTF\External\bin\hrtf_mesh_grading.exe",
+            "dist\windows\Pinna2HRTF\External\src\Mesh2HRTF\mesh2hrtf\Mesh2Input\mesh2input.py",
             "dist\windows\Pinna2HRTF\.venv\Scripts\python.exe",
             "dist\windows\Pinna2HRTF\Python"
           )
