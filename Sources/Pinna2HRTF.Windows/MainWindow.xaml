@@ -46,9 +46,14 @@
           </Grid>
           <Border Grid.Row="1" BorderBrush="#e4e7ee" BorderThickness="0,1,0,0">
             <Grid>
-              <Viewport3D x:Name="MeshViewport" ClipToBounds="True">
+              <Viewport3D x:Name="MeshViewport" ClipToBounds="True"
+                          MouseLeftButtonDown="MeshViewportMouseLeftButtonDown"
+                          MouseLeftButtonUp="MeshViewportMouseLeftButtonUp"
+                          MouseMove="MeshViewportMouseMove"
+                          MouseWheel="MeshViewportMouseWheel"
+                          MouseLeave="MeshViewportMouseLeave">
                 <Viewport3D.Camera>
-                  <PerspectiveCamera Position="0,-280,120" LookDirection="0,280,-120" UpDirection="0,0,1" FieldOfView="38"/>
+                  <PerspectiveCamera x:Name="MeshCamera" Position="0,-280,120" LookDirection="0,280,-120" UpDirection="0,0,1" FieldOfView="38"/>
                 </Viewport3D.Camera>
                 <ModelVisual3D>
                   <ModelVisual3D.Content>
@@ -61,6 +66,10 @@
                   </ModelVisual3D.Content>
                 </ModelVisual3D>
               </Viewport3D>
+              <Border x:Name="MeshControlsHint" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="12"
+                      Padding="8,5" Background="#ccffffff" CornerRadius="4" Visibility="Collapsed">
+                <TextBlock Text="Drag to rotate  |  Mouse wheel to zoom" Foreground="#69717d" FontSize="12"/>
+              </Border>
               <Image x:Name="ImagePreview" Stretch="Uniform" Margin="18" Visibility="Collapsed"/>
               <TextBlock x:Name="ViewerPlaceholder" Text="No artifact selected" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#69717d" FontSize="18"/>
             </Grid>

@@ -130,23 +130,26 @@ def run_numcalc_local(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
             raise FileNotFoundError(f"Missing Mesh2HRTF project: {project_dir}")
     if not config.paths.numcalc_executable.exists():
         raise FileNotFoundError(f"Missing NumCalc executable: {config.paths.numcalc_executable}")
-    numcalc_executable = config.paths.numcalc_executable
-    if " " in str(numcalc_executable) and platform.system() != "Windows":
+    numcalc_path = config.paths.numcalc_executable
+    if platform.system() == "Windows" and numcalc_path.is_file():
+        numcalc_path = numcalc_path.parent
+        logger(f"Using Windows NumCalc runtime folder: {numcalc_path}")
+    elif " " in str(numcalc_path):
         link_dir = Path(tempfile.gettempdir()) / "Pinna2HRTF"
         link_dir.mkdir(parents=True, exist_ok=True)
         link_path = link_dir / "NumCalc"
         if link_path.exists() or link_path.is_symlink():
             link_path.unlink()
-        link_path.symlink_to(numcalc_executable)
-        numcalc_executable = link_path
-        logger(f"Using shell-safe NumCalc link: {numcalc_executable}")
+        link_path.symlink_to(numcalc_path)
+        numcalc_path = link_path
+        logger(f"Using shell-safe NumCalc link: {numcalc_path}")
     logger(f"Local NumCalc project root: {projects_root}")
     if dry_run:
         return
     import mesh2hrtf as m2h
     m2h.manage_numcalc(
         project_path=str(projects_root),
-        numcalc_path=str(numcalc_executable),
+        numcalc_path=str(numcalc_path),
         max_instances=config.numcalc.max_instances,
         max_cpu_load=config.numcalc.max_cpu_load,
         confirm_errors=False,
@@ -243,9 +246,12 @@ def parse_numcalc_args() -> argparse.Namespace:
 def numcalc_cli() -> None:
     args = parse_numcalc_args()
     import mesh2hrtf as m2h
+    numcalc_path = Path(args.numcalc_path).expanduser().resolve()
+    if platform.system() == "Windows" and numcalc_path.is_file():
+        numcalc_path = numcalc_path.parent
     m2h.manage_numcalc(
         project_path=str(Path(args.project_path).expanduser().resolve()),
-        numcalc_path=str(Path(args.numcalc_path).expanduser().resolve()),
+        numcalc_path=str(numcalc_path),
         max_instances=args.max_instances,
         max_cpu_load=args.max_cpu_load,
         confirm_errors=False,

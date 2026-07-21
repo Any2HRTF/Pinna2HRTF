@@ -12,9 +12,28 @@ if ([string]::IsNullOrWhiteSpace($ExternalRoot)) {
 $bin = Join-Path $ExternalRoot "bin"
 $src = Join-Path $ExternalRoot "src"
 $tools = Join-Path $src "mesh2hrtf-tools"
+$mesh2hrtf = Join-Path $src "Mesh2HRTF"
+$mesh2input = Join-Path $mesh2hrtf "mesh2hrtf\Mesh2Input\mesh2input.py"
 
 New-Item -ItemType Directory -Path $bin -Force | Out-Null
 New-Item -ItemType Directory -Path $src -Force | Out-Null
+
+if (-not (Test-Path $mesh2input)) {
+    if (Test-Path $mesh2hrtf) {
+        Remove-Item $mesh2hrtf -Recurse -Force
+    }
+    $git = Get-Command "git.exe" -ErrorAction SilentlyContinue
+    if (-not $git) {
+        $git = Get-Command "git" -ErrorAction SilentlyContinue
+    }
+    if (-not $git) {
+        throw "git is required to download Mesh2HRTF sources."
+    }
+    & $git.Source clone --depth 1 "https://github.com/Any2HRTF/Mesh2HRTF.git" $mesh2hrtf
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $mesh2input)) {
+        throw "Could not prepare Mesh2HRTF sources at $mesh2hrtf."
+    }
+}
 
 $uv = Join-Path $bin "uv.exe"
 if (-not (Test-Path $uv)) {
@@ -95,4 +114,4 @@ foreach ($name in $required) {
     }
 }
 
-Write-Host "Windows external tools prepared in $bin"
+Write-Host "Windows external tools and Mesh2HRTF sources prepared in $ExternalRoot"

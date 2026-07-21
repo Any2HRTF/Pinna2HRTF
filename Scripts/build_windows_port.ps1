@@ -11,12 +11,26 @@ $dist = Join-Path $root "dist\windows\Pinna2HRTF"
 $publish = Join-Path $windowsProject "bin\Release\net8.0-windows\win-x64\publish"
 $distExternal = Join-Path $dist "External"
 $distBin = Join-Path $distExternal "bin"
+$dotnet = Get-Command "dotnet.exe" -ErrorAction SilentlyContinue
+if (-not $dotnet) {
+    $dotnet = Get-Command "dotnet" -ErrorAction SilentlyContinue
+}
+$dotnetPath = $dotnet.Source
+if (-not $dotnet) {
+    $localDotnet = Join-Path $root ".dotnet\dotnet.exe"
+    if (Test-Path $localDotnet) {
+        $dotnetPath = $localDotnet
+    }
+}
+if (-not $dotnetPath) {
+    throw "dotnet is not on PATH and .dotnet\dotnet.exe was not found."
+}
 
 if (Test-Path $dist) {
     Remove-Item $dist -Recurse -Force
 }
 
-dotnet publish (Join-Path $windowsProject "Pinna2HRTF.Windows.csproj") -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false
+& $dotnetPath publish (Join-Path $windowsProject "Pinna2HRTF.Windows.csproj") -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false
 
 New-Item -ItemType Directory -Path $dist | Out-Null
 Copy-Item (Join-Path $publish "*") $dist -Recurse -Force
@@ -110,6 +124,11 @@ if ($missingExternalTools.Count -gt 0) {
     } else {
         throw $message
     }
+}
+
+$mesh2input = Join-Path $distExternal "src\Mesh2HRTF\mesh2hrtf\Mesh2Input\mesh2input.py"
+if (-not (Test-Path $mesh2input)) {
+    throw "Missing Mesh2HRTF sources: $mesh2input. Run Scripts\prepare_windows_external_tools.ps1 before building the portable app."
 }
 
 Copy-Item (Join-Path $root "README.md") (Join-Path $dist "README.md") -Force
