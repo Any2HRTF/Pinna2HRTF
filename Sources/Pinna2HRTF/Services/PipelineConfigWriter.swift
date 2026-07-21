@@ -33,10 +33,13 @@ enum PipelineConfigWriter {
         let inference = project.settings.inference
         let preprocessing = project.settings.preprocessing
         let numcalc = project.settings.numcalc
+        let postprocessing = project.settings.postprocessing ?? PostprocessingSettings()
         let selectedGrid = preprocessing.evaluationGrid?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let evaluationGrid = selectedGrid.isEmpty ? "Default" : selectedGrid
         let useCustomHeadRadius = preprocessing.useCustomHeadRadius ?? (preprocessing.headRadius != nil)
         let headRadius = useCustomHeadRadius ? "  head_radius: \(yamlNumber(preprocessing.headRadius) ?? "0")\n" : ""
+        let sourceAssignmentFaceCount = max(Int(preprocessing.sourceAssignmentFaceCount ?? "") ?? 6, 1)
+        let levelOffsetDB = yamlNumber(postprocessing.levelOffsetDB) ?? "-30"
         return """
         paths:
           left_ear: \(project.leftEar)
@@ -95,6 +98,7 @@ enum PipelineConfigWriter {
           air_density: "1.1839"
           material_search_paths: None
           source_assignment_tolerance: 2.0
+          source_assignment_face_count: \(sourceAssignmentFaceCount)
         numcalc:
           enabled: false
           mode: local
@@ -104,6 +108,8 @@ enum PipelineConfigWriter {
           enabled: false
           output_sofa_dir: \(output.appendingPathComponent("HRTF").path)
           overwrite: true
+          normalize: \(postprocessing.normalize ? "true" : "false")
+          level_offset_db: \(levelOffsetDB)
         ui:
           mesh_background: white
           show_axes: true

@@ -209,6 +209,10 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
     left, right = project_dirs(config)
     m2h.output2hrtf(str(left))
     m2h.output2hrtf(str(right))
+    if config.postprocessing.normalize:
+        from .Postprocessing.postprocessing import normalize_sofa_files
+        normalize_sofa_files(left / "Output2HRTF", config.postprocessing.level_offset_db)
+        normalize_sofa_files(right / "Output2HRTF", config.postprocessing.level_offset_db)
     m2h.merge_sofa_files([str(left), str(right)], savedir=str(output_dir))
     try:
         for plane in ["horizontal", "median"]:

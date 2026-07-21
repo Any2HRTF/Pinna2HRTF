@@ -1,9 +1,27 @@
 import os
 import shutil
 import argparse
+import glob
 
 import pandas as pd
 import mesh2hrtf as m2h
+import numpy as np
+import sofar as sf
+
+
+def normalize_sofa_files(output_dir, level_offset_db):
+    gain = 10 ** (level_offset_db / 20)
+    for sofa_path in glob.glob(f"{output_dir}/*.sofa"):
+        sofa = sf.read_sofa(sofa_path)
+        if hasattr(sofa, "Data_IR"):
+            sofa.Data_IR = np.asarray(sofa.Data_IR) * gain
+        if hasattr(sofa, "Data_Real"):
+            sofa.Data_Real = np.asarray(sofa.Data_Real) * gain
+        if hasattr(sofa, "Data_Imag"):
+            sofa.Data_Imag = np.asarray(sofa.Data_Imag) * gain
+        sofa.GLOBAL_Comment = f"{getattr(sofa, 'GLOBAL_Comment', '')} Broadband level offset of {level_offset_db:g} dB applied during Pinna2HRTF postprocessing.".strip()
+        sf.write_sofa(sofa_path, sofa)
+
 
 def main(args):
     print(f"------------------------------------------------------------------------------")
@@ -39,6 +57,8 @@ def main(args):
                     try:
                         path = f"{args.data_dir}/{scan_type} {direction}"
                         m2h.output2hrtf(f"{path}/{id}")
+                        if args.normalize:
+                            normalize_sofa_files(f"{path}/{id}/Output2HRTF", args.level_offset_db)
                         if os.path.isfile(f'{path}/{id}/Output2HRTF/report_issues.txt'):
                             failed_ids.append(
                             {
@@ -93,6 +113,8 @@ def main(args):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', required=True)
+    parser.add_argument('--normalize', action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument('--level-offset-db', type=float, default=-30)
     return parser.parse_args()
 
 def cli():

@@ -54,6 +54,17 @@ struct ProjectInspectorView: View {
                     LabeledTextField("Min frequency", text: preprocessingBinding(\.minFrequency))
                     LabeledTextField("Max frequency", text: preprocessingBinding(\.maxFrequency))
                     LabeledTextField("Frequency steps", text: preprocessingBinding(\.frequencyStepCount))
+                    HStack {
+                        Text("Microphone faces")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Stepper(value: sourceAssignmentFaceCountBinding, in: 1...100) {
+                            Text("\(sourceAssignmentFaceCountBinding.wrappedValue)")
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 28, alignment: .trailing)
+                        }
+                    }
                 }
                 SettingsDisclosure("Mesh Grading", systemImage: "ruler") {
                     LabeledTextField("Min edge length", text: preprocessingBinding(\.meshMinEdgeLength))
@@ -65,6 +76,12 @@ struct ProjectInspectorView: View {
                 SettingsDisclosure("NumCalc", systemImage: "cpu") {
                     LabeledTextField("Parallel instances", text: numcalcBinding(\.maxInstances))
                     LabeledTextField("CPU limit (%)", text: numcalcBinding(\.maxCPULoad))
+                }
+                SettingsDisclosure("Postprocessing", systemImage: "slider.horizontal.3") {
+                    Toggle("Normalize HRTFs", isOn: postprocessingNormalizeBinding)
+                    LabeledTextField("Level offset (dB)", text: postprocessingLevelOffsetBinding)
+                        .disabled(!postprocessingNormalizeBinding.wrappedValue)
+                        .opacity(postprocessingNormalizeBinding.wrappedValue ? 1 : 0.55)
                 }
             }
             .padding(.vertical, 4)
@@ -164,6 +181,46 @@ struct ProjectInspectorView: View {
         Binding(
             get: { store.selectedProject?.settings.numcalc[keyPath: keyPath] ?? "" },
             set: { value in store.updateSelectedProject { $0.settings.numcalc[keyPath: keyPath] = value } }
+        )
+    }
+
+    var sourceAssignmentFaceCountBinding: Binding<Int> {
+        Binding(
+            get: {
+                let value = Int(store.selectedProject?.settings.preprocessing.sourceAssignmentFaceCount ?? "") ?? 6
+                return min(max(value, 1), 100)
+            },
+            set: { value in
+                store.updateSelectedProject {
+                    $0.settings.preprocessing.sourceAssignmentFaceCount = "\(min(max(value, 1), 100))"
+                }
+            }
+        )
+    }
+
+    var postprocessingNormalizeBinding: Binding<Bool> {
+        Binding(
+            get: { store.selectedProject?.settings.postprocessing?.normalize ?? true },
+            set: { value in
+                store.updateSelectedProject {
+                    var settings = $0.settings.postprocessing ?? PostprocessingSettings()
+                    settings.normalize = value
+                    $0.settings.postprocessing = settings
+                }
+            }
+        )
+    }
+
+    var postprocessingLevelOffsetBinding: Binding<String> {
+        Binding(
+            get: { store.selectedProject?.settings.postprocessing?.levelOffsetDB ?? "-30" },
+            set: { value in
+                store.updateSelectedProject {
+                    var settings = $0.settings.postprocessing ?? PostprocessingSettings()
+                    settings.levelOffsetDB = value
+                    $0.settings.postprocessing = settings
+                }
+            }
         )
     }
 }

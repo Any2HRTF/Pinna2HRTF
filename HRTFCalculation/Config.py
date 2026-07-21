@@ -111,6 +111,7 @@ class PreprocessingConfig(BaseModel):
     material_search_paths: str = "None"
     source_assignment_tolerance: float = 2.0
     source_assignment_mode: Literal["landmark", "legacy_axis"] = "landmark"
+    source_assignment_face_count: int = Field(default=6, ge=1)
 
 
 class NumCalcConfig(BaseModel):
@@ -133,6 +134,8 @@ class PostprocessingConfig(BaseModel):
     enabled: bool = False
     output_sofa_dir: Path | None = None
     overwrite: bool = True
+    normalize: bool = True
+    level_offset_db: float = -30.0
 
 
 class UIConfig(BaseModel):

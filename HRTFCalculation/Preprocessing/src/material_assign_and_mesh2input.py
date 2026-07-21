@@ -38,7 +38,7 @@ def main(head, source_type=None, filepath=None, mesh2hrtf_path=None,
          title='PPM model generated HRTF', method='ML-FMM BEM',
          pictures=False, reference=True, computeHRIRs=True, unit='mm', speedOfSound='346.18',
          densityOfMedium='1.1839', evaluationGrids='/Users/felixperfler/Documents/ISF/2026/Pipeline Paper/Data/Resources/EvalGrid', materialSearchPaths="None",
-         tolerance=2, source_position=None, source_assignment_mode="landmark", sourceType=None, programPath=None, minFrequency=None, maxFrequency=None, frequencyVectorType=None, frequencyVectorValue=None):
+         tolerance=2, source_position=None, source_assignment_mode="landmark", source_face_count=6, sourceType=None, programPath=None, minFrequency=None, maxFrequency=None, frequencyVectorType=None, frequencyVectorValue=None):
     source_type = source_type or sourceType
     mesh2hrtf_path = mesh2hrtf_path or programPath
     if minFrequency is not None:
@@ -73,19 +73,21 @@ def main(head, source_type=None, filepath=None, mesh2hrtf_path=None,
     me.materials.append(m_skin)
     me.materials.append(m_le)
     me.materials.append(m_re)
+    centers = np.asarray([[f.calc_center_median().x, f.calc_center_median().y, f.calc_center_median().z] for f in bm.faces])
+    source_face_count = min(max(int(source_face_count), 1), len(bm.faces))
 
     if source_position is not None and source_assignment_mode == "landmark":
         source_position = np.asarray(source_position, dtype=float)
-        centers = np.asarray([[f.calc_center_median().x, f.calc_center_median().y, f.calc_center_median().z] for f in bm.faces])
-        index = int(np.argmin(np.linalg.norm(centers - source_position, axis=1)))
-        distance = float(np.linalg.norm(centers[index] - source_position))
+        distances = np.linalg.norm(centers - source_position, axis=1)
+        indices = np.argsort(distances, kind="stable")[:source_face_count]
+        material_index = 1 if source_type == "Left ear" or source_position[1] >= 0 else 2
         if source_type == "Left ear":
-            bm.faces[index].material_index = 1
+            material_index = 1
         elif source_type == "Right ear":
-            bm.faces[index].material_index = 2
-        else:
-            bm.faces[index].material_index = 1 if source_position[1] >= 0 else 2
-        print(f"assigned {source_type} source by landmark at face {index}, distance {distance:.3f} mm")
+            material_index = 2
+        for index in indices:
+            bm.faces[int(index)].material_index = material_index
+        print(f"assigned {source_type} source by landmark at faces {[int(index) for index in indices]}, maximum distance {float(distances[indices].max()):.3f} mm")
     else:
         left_index = None
         right_index = None
@@ -113,9 +115,13 @@ def main(head, source_type=None, filepath=None, mesh2hrtf_path=None,
                     right_y = med.y
                     right_index = f.index
 
-        bm.faces[left_index].material_index = 1
-        bm.faces[right_index].material_index = 2
-        print(f"assigned sources by legacy axis heuristic at faces {left_index} and {right_index}")
+        left_indices = np.argsort(np.linalg.norm(centers - centers[left_index], axis=1), kind="stable")[:source_face_count]
+        right_indices = np.argsort(np.linalg.norm(centers - centers[right_index], axis=1), kind="stable")[:source_face_count]
+        for index in left_indices:
+            bm.faces[int(index)].material_index = 1
+        for index in right_indices:
+            bm.faces[int(index)].material_index = 2
+        print(f"assigned sources by legacy axis heuristic at faces {[int(index) for index in left_indices]} and {[int(index) for index in right_indices]}")
 
     bm.to_mesh(me)
     bm.free()
@@ -165,6 +171,7 @@ if __name__ == "__main__":
     parser.add_argument('--frequencyVectorType', type=str, required=True, help='Type of frequency vector')
     parser.add_argument('--frequencyVectorValue', type=int, required=True, help='Value of frequency vector steps')
     parser.add_argument('--tolerance', type=float, required=False, default=3.5, help='Radius of tolerance for ear canal selection')
+    parser.add_argument('--source-face-count', type=int, required=False, default=6)
 
     args = parser.parse_args()
 
@@ -173,4 +180,4 @@ if __name__ == "__main__":
          unit=args.unit, speedOfSound=args.speedOfSound, densityOfMedium=args.densityOfMedium, evaluationGrids=args.evaluationGrids,
          materialSearchPaths=args.materialSearchPaths, minFrequency=int(args.minFrequency), maxFrequency=int(args.maxFrequency),
          frequencyVectorType=args.frequencyVectorType, frequencyVectorValue=int(args.frequencyVectorValue),
-         tolerance=args.tolerance)
+         tolerance=args.tolerance, source_face_count=args.source_face_count)

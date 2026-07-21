@@ -88,6 +88,7 @@ struct PreprocessingSettings: Codable, Equatable {
     var meshMaxError = "0.5"
     var meshGammaLeft = "0.15"
     var meshGammaRight = "0.2"
+    var sourceAssignmentFaceCount: String? = "6"
 }
 
 struct NumCalcSettings: Codable, Equatable {
@@ -95,10 +96,16 @@ struct NumCalcSettings: Codable, Equatable {
     var maxCPULoad = "90"
 }
 
+struct PostprocessingSettings: Codable, Equatable {
+    var normalize = true
+    var levelOffsetDB = "-30"
+}
+
 struct ProjectSettings: Codable, Equatable {
     var inference: InferenceSettings
     var preprocessing = PreprocessingSettings()
     var numcalc = NumCalcSettings()
+    var postprocessing: PostprocessingSettings? = PostprocessingSettings()
 }
 
 struct ProjectRecord: Identifiable, Codable, Equatable {

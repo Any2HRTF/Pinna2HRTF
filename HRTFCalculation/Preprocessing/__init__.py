@@ -140,6 +140,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             tolerance=settings.source_assignment_tolerance,
             source_position=left_landmark["position"],
             source_assignment_mode=settings.source_assignment_mode,
+            source_face_count=settings.source_assignment_face_count,
         )
         mesh2input_main(
             head=str(right_graded),
@@ -163,6 +164,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             tolerance=settings.source_assignment_tolerance,
             source_position=right_landmark["position"],
             source_assignment_mode=settings.source_assignment_mode,
+            source_face_count=settings.source_assignment_face_count,
         )
         logger(f"Preprocessing completed: {left_project} and {right_project}")
     finally:
@@ -185,6 +187,7 @@ def preprocess():
     parser.add_argument('--min-frequency', type=int, default=1000)
     parser.add_argument('--max-frequency', type=int, default=24000)
     parser.add_argument('--frequency-step-count', type=int, default=129)
+    parser.add_argument('--source-face-count', type=int, default=6)
     args = parser.parse_args()
     settings = PreprocessingConfig(
         ear_cut_clearance_scale=args.ear_cut_clearance_scale,
@@ -194,6 +197,7 @@ def preprocess():
         min_frequency=args.min_frequency,
         max_frequency=args.max_frequency,
         frequency_step_count=args.frequency_step_count,
+        source_assignment_face_count=args.source_face_count,
     )
     run_preprocessing_pipeline(
         left_path=args.left_path,
