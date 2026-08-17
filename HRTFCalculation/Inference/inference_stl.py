@@ -109,7 +109,7 @@ def get_camera_position(camera_jitter=False, cam_radius=0.18):
 
     return loc_cam, loc_cam_ref
 
-def get_model_input(path_to_mesh, views, depth, mirror) -> np.ndarray:
+def get_model_input(path_to_mesh, views, depth, mirror, initial_transform=None) -> np.ndarray:
     camera_positions, camera_position_reference = get_camera_position(cam_radius=0.2)
 
     tempdir = tempfile.TemporaryDirectory().name
@@ -127,8 +127,37 @@ def get_model_input(path_to_mesh, views, depth, mirror) -> np.ndarray:
             original_cloud = original_cloud.apply_transform(mirror_matrix)
 
         target_cloud = trimesh.load_mesh(f"{__DIR_PATH}/resources/PPM Default.stl")
-        matrix_trans, _ = mesh_other(original_cloud, target_cloud.vertices, scale=False)
-        matrix_scale, _, _ = icp(original_cloud.vertices, target_cloud, initial=matrix_trans, scale=True)
+        matrix_trans = initial_transform
+        alignment_method = "paired_left"
+        if matrix_trans is None:
+            np.random.seed(0)
+            matrix_trans, _ = mesh_other(original_cloud, target_cloud, scale=False)
+            alignment_method = "global"
+        initializations = [(alignment_method, matrix_trans)]
+        if np.linalg.det(matrix_trans[:3, :3]) < 0:
+            initializations = [
+                (f"{alignment_method}_corrected_{axis}", correction @ matrix_trans)
+                for axis, correction in {
+                    "x": np.diag([-1, 1, 1, 1]),
+                    "y": np.diag([1, -1, 1, 1]),
+                    "z": np.diag([1, 1, -1, 1]),
+                }.items()
+            ]
+        alignment = None
+        for method, initial in initializations:
+            matrix, _, cost = icp(
+                original_cloud.vertices,
+                target_cloud,
+                initial=initial,
+                scale=True,
+                reflection=False,
+            )
+            determinant = np.linalg.det(matrix[:3, :3])
+            if determinant > 0 and (alignment is None or cost < alignment[2]):
+                alignment = matrix, method, cost, determinant
+        if alignment is None:
+            raise RuntimeError(f"Could not find a proper alignment for {path_to_mesh}")
+        matrix_scale, alignment_method, alignment_cost, alignment_determinant = alignment
 
         new = original_cloud.apply_transform(matrix_scale)
 
@@ -180,9 +209,16 @@ def get_model_input(path_to_mesh, views, depth, mirror) -> np.ndarray:
     if depth:
         for i in depth_data:
             data.append(i)
-        return np.stack(data).astype(np.float32) / 255.0, matrix_scale, np.array(new.vertices)
-    else:
-        return np.stack(data).astype(np.float32) / 255.0, matrix_scale, np.array(new.vertices)
+    return (
+        np.stack(data).astype(np.float32) / 255.0,
+        matrix_scale,
+        np.array(new.vertices),
+        {
+            "method": alignment_method,
+            "cost": alignment_cost,
+            "determinant": alignment_determinant,
+        },
+    )
 
 def get_model_prediction(model, data):
     all_parameters = []
@@ -256,21 +292,37 @@ def main(args):
         },
     }
 
+    left_transforms = {}
     for direction in ["Left", "Right"]:
         data_dir = f"{args.data_dir}/{folders[direction]['target']}"
         if not os.path.isdir(data_dir):
             raise FileNotFoundError(f"BezierPPM target folder not found: {data_dir}")
 
-        for stl_file in os.listdir(data_dir):
+        for stl_file in sorted(os.listdir(data_dir)):
             if stl_file[-4:] != ".stl":
                 continue
             print(f"{data_dir}/{stl_file}")
 
-            data, transform_matrix, transformed_input = get_model_input(
+            stem = stl_file[:-4]
+            initial_transform = None
+            if direction == "Right":
+                initial_transform = left_transforms.get(stem)
+                if initial_transform is None and len(left_transforms) == 1:
+                    initial_transform = next(iter(left_transforms.values()))
+            data, transform_matrix, transformed_input, alignment = get_model_input(
                 path_to_mesh=f"{data_dir}/{stl_file}",
                 views=CONFIGURATION['model']['number_of_camera_views'],
                 depth=CONFIGURATION['model']['depth'],
-                mirror=True if direction == "Right" else False)
+                mirror=True if direction == "Right" else False,
+                initial_transform=initial_transform,
+            )
+            if direction == "Left":
+                left_transforms[stem] = transform_matrix
+            print(
+                f"{direction} alignment: {alignment['method']}, "
+                f"cost {alignment['cost']:.6f}, "
+                f"determinant {alignment['determinant']:.6f}"
+            )
             target_cloud = np.array(trimesh.load_mesh(f"{data_dir}/{stl_file}").vertices)
 
             prediction_ppm = get_model_prediction(model, data)
@@ -306,6 +358,9 @@ def main(args):
             out["File Path"] = f"{data_dir}/{stl_file}"
             out["ID"] = stl_file[:-4]
             out["Direction"] = direction
+            out["Alignment Method"] = alignment["method"]
+            out["Alignment Cost"] = alignment["cost"]
+            out["Alignment Determinant"] = alignment["determinant"]
             out["RMSE"] = np.sqrt(np.mean(minimal_distances_direction_1**2))
             out["Completeness 1mm"] = np.sum(minimal_distances_direction_1 < 1) / minimal_distances_direction_1.shape[0]
             out["Completeness 2mm"] = np.sum(minimal_distances_direction_1 < 2) / minimal_distances_direction_1.shape[0]
