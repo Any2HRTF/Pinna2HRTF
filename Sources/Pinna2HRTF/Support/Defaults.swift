@@ -106,8 +106,8 @@ enum Defaults {
     static func settings(packageRoot: URL) -> ProjectSettings {
         ProjectSettings(
             inference: InferenceSettings(
-                modelConfig: packageRoot.appendingPathComponent("HRTFCalculation/Inference/resources/Local 9 Views.yaml").path,
-                modelCheckpoint: packageRoot.appendingPathComponent("HRTFCalculation/Inference/resources/Local 9 Views.pth").path
+                modelConfig: packageRoot.appendingPathComponent("HRTFCalculation/Inference/resources/Local 3 Views.yaml").path,
+                modelCheckpoint: packageRoot.appendingPathComponent("HRTFCalculation/Inference/resources/Local 3 Views.pth").path
             )
         )
     }

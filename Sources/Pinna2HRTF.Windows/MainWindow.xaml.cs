@@ -289,8 +289,8 @@ public partial class MainWindow : Window
             {
                 Inference = new InferenceSettings
                 {
-                    ModelConfig = Path.Combine(resourceDir, "Local 9 Views.yaml"),
-                    ModelCheckpoint = Path.Combine(resourceDir, "Local 9 Views.pth")
+                    ModelConfig = Path.Combine(resourceDir, "Local 3 Views.yaml"),
+                    ModelCheckpoint = Path.Combine(resourceDir, "Local 3 Views.pth")
                 }
             }
         };

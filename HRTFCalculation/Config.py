@@ -57,8 +57,8 @@ class InferenceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
-    model_config_file: Path = Field(default_factory=lambda: default_resource("Local 9 Views.yaml"))
-    model_checkpoint: Path = Field(default_factory=lambda: default_resource("Local 9 Views.pth"))
+    model_config_file: Path = Field(default_factory=lambda: default_resource("Local 3 Views.yaml"))
+    model_checkpoint: Path = Field(default_factory=lambda: default_resource("Local 3 Views.pth"))
     target_left_folder: str = "Target STL Left"
     target_right_folder: str = "Target STL Right"
     prediction_left_folder: str = "Prediction STL Left"
