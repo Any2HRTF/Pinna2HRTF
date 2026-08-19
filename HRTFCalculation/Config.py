@@ -94,7 +94,7 @@ class PreprocessingConfig(BaseModel):
     mesh_gamma_left: float = 0.15
     mesh_gamma_right: float = 0.2
     mesh_hole_size: float = 0.2
-    skip_mesh_grading: bool = False
+    skip_mesh_grading: Literal[False] = False
     source_type_left: str = "Left ear"
     source_type_right: str = "Right ear"
     title: str = "HRTF Simulation"

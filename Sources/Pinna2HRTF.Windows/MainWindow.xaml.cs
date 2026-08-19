@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     readonly ObservableCollection<Artifact> artifacts = [];
     readonly Dictionary<Guid, Process> runningProcesses = [];
     readonly Dictionary<Guid, Stage> runningStages = [];
+    readonly Dictionary<Guid, Queue<Stage>> queuedStages = [];
     readonly Dictionary<Guid, HashSet<Stage>> failedStages = [];
     readonly JsonSerializerOptions jsonOptions = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
     ProjectRegistry registry = new();
@@ -44,7 +45,11 @@ public partial class MainWindow : Window
         InitializeComponent();
         ProjectList.ItemsSource = projects;
         ArtifactPicker.ItemsSource = artifacts;
-        statusTimer.Tick += (_, _) => RefreshNumCalcStatus();
+        statusTimer.Tick += (_, _) =>
+        {
+            RefreshNumCalcStatus();
+            RefreshPipelineStatus();
+        };
     }
 
     void WindowLoaded(object sender, RoutedEventArgs e)
@@ -61,6 +66,7 @@ public partial class MainWindow : Window
         RefreshEnvironmentStatus();
         statusTimer.Start();
         RefreshNumCalcStatus();
+        RefreshPipelineStatus();
     }
 
     void WindowClosing(object? sender, CancelEventArgs e)
@@ -178,7 +184,6 @@ public partial class MainWindow : Window
         MeshMaxErrorBox.Text = project?.Settings.Preprocessing.MeshMaxError ?? "0.5";
         MeshGammaLeftBox.Text = project?.Settings.Preprocessing.MeshGammaLeft ?? "0.15";
         MeshGammaRightBox.Text = project?.Settings.Preprocessing.MeshGammaRight ?? "0.2";
-        SkipMeshGradingBox.IsChecked = project?.Settings.Preprocessing.SkipMeshGrading ?? false;
         MaxInstancesBox.Text = project?.Settings.NumCalc.MaxInstances ?? "1";
         MaxCpuLoadBox.Text = project?.Settings.NumCalc.MaxCpuLoad ?? "90";
         AdaptiveFmmLengthBox.IsChecked = project?.Settings.NumCalc.AdaptiveFmmLength ?? true;
@@ -189,6 +194,7 @@ public partial class MainWindow : Window
         SelectModel(project);
         loading = false;
         RefreshEnvironmentStatus();
+        RefreshPipelineStatus();
     }
 
     void RefreshModelOptions()
@@ -246,13 +252,13 @@ public partial class MainWindow : Window
         project.Settings.Preprocessing.MeshMaxError = MeshMaxErrorBox.Text;
         project.Settings.Preprocessing.MeshGammaLeft = MeshGammaLeftBox.Text;
         project.Settings.Preprocessing.MeshGammaRight = MeshGammaRightBox.Text;
-        project.Settings.Preprocessing.SkipMeshGrading = SkipMeshGradingBox.IsChecked == true;
         project.Settings.NumCalc.MaxInstances = MaxInstancesBox.Text;
         project.Settings.NumCalc.MaxCpuLoad = MaxCpuLoadBox.Text;
         project.Settings.NumCalc.AdaptiveFmmLength = AdaptiveFmmLengthBox.IsChecked == true;
         Persist();
         RefreshProjectList();
         RefreshArtifacts();
+        RefreshPipelineStatus();
     }
 
     void EnvironmentEdited(object sender, RoutedEventArgs e)
@@ -265,6 +271,7 @@ public partial class MainWindow : Window
         environment.ExternalDir = ExternalBox.Text;
         Persist();
         RefreshEnvironmentStatus();
+        RefreshPipelineStatus();
     }
 
     void ModelSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -275,6 +282,7 @@ public partial class MainWindow : Window
         SelectedProject.Settings.Inference.ModelConfig = Path.Combine(resourceDir, $"Local {model}.yaml");
         SelectedProject.Settings.Inference.ModelCheckpoint = Path.Combine(resourceDir, $"Local {model}.pth");
         Persist();
+        RefreshPipelineStatus();
     }
 
     void CreateProjectClicked(object sender, RoutedEventArgs e) => CreateProject();
@@ -449,8 +457,8 @@ public partial class MainWindow : Window
 
     void ResetViewer()
     {
-        while (MeshViewport.Children.Count > 2)
-            MeshViewport.Children.RemoveAt(2);
+        while (MeshViewport.Children.Count > 4)
+            MeshViewport.Children.RemoveAt(4);
         ImagePreview.Source = null;
         ImagePreview.Visibility = Visibility.Collapsed;
         MeshControlsHint.Visibility = Visibility.Collapsed;
@@ -461,7 +469,7 @@ public partial class MainWindow : Window
 
     void MeshViewportMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (MeshViewport.Children.Count <= 2)
+        if (MeshViewport.Children.Count <= 4)
             return;
         rotatingMesh = true;
         lastMeshPointer = e.GetPosition(MeshViewport);
@@ -495,7 +503,7 @@ public partial class MainWindow : Window
 
     void MeshViewportMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (MeshViewport.Children.Count <= 2)
+        if (MeshViewport.Children.Count <= 4)
             return;
         meshDistance = Math.Clamp(meshDistance * Math.Pow(0.88, e.Delta / 120.0), 80, 1200);
         UpdateMeshCamera();
@@ -541,11 +549,16 @@ public partial class MainWindow : Window
         var project = SelectedProject;
         if (project == null)
             return;
-        var stage = Stage.GetValues().FirstOrDefault(stage => !StageIsComplete(stage, project), Stage.Postprocessing);
-        RunStage(stage);
+        var stage = AutomaticStages(project).FirstOrDefault(stage => !StageIsComplete(stage, project));
+        if (stage == null)
+        {
+            AppendLog($"All pipeline steps are complete for {project.Name}.");
+            return;
+        }
+        RunStage(stage, project);
     }
 
-    void RunStage(Stage stage)
+    void RunAllClicked(object sender, RoutedEventArgs e)
     {
         var project = SelectedProject;
         if (project == null)
@@ -558,9 +571,71 @@ public partial class MainWindow : Window
             AppendLog($"{project.Name} already has a running task.");
             return;
         }
+        var stages = AutomaticStages(project).Where(stage => !StageIsComplete(stage, project)).ToList();
+        if (stages.Count == 0)
+        {
+            AppendLog($"All pipeline steps are complete for {project.Name}.");
+            return;
+        }
+        queuedStages[project.Id] = new Queue<Stage>(stages.Skip(1));
+        AppendLog($"Run All queued for {project.Name}: {string.Join(" → ", stages.Select(stage => stage.Title))}");
+        RunStage(stages[0], project, true);
+    }
+
+    void RunStage(Stage stage, ProjectRecord? targetProject = null, bool continueQueued = false)
+    {
+        var project = targetProject ?? SelectedProject;
+        if (project == null)
+        {
+            AppendLog("Create or select a project before running.");
+            return;
+        }
+        if (runningProcesses.ContainsKey(project.Id))
+        {
+            AppendLog($"{project.Name} already has a running task.");
+            return;
+        }
+        if (!continueQueued)
+            queuedStages.Remove(project.Id);
         if ((string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar)) || string.IsNullOrWhiteSpace(project.SaveLocation))
         {
+            queuedStages.Remove(project.Id);
             AppendLog("Select at least one ear mesh and a save location before running.");
+            return;
+        }
+        if ((!string.IsNullOrWhiteSpace(project.LeftEar) && !File.Exists(project.LeftEar)) || (!string.IsNullOrWhiteSpace(project.RightEar) && !File.Exists(project.RightEar)))
+        {
+            queuedStages.Remove(project.Id);
+            AppendLog("One or more configured ear mesh files are missing.");
+            RefreshPipelineStatus();
+            return;
+        }
+        if (stage == Stage.Preprocessing && !File.Exists(environment.MeshGradingExecutable))
+        {
+            queuedStages.Remove(project.Id);
+            AppendLog("Mesh grading is required. Set up or select hrtf_mesh_grading.exe before preprocessing.");
+            RefreshPipelineStatus();
+            return;
+        }
+        if (stage == Stage.Preprocessing && !Directory.Exists(Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf")))
+        {
+            queuedStages.Remove(project.Id);
+            AppendLog("Mesh2HRTF sources are missing. Set up the environment before preprocessing.");
+            RefreshPipelineStatus();
+            return;
+        }
+        if (stage == Stage.Inference && (!File.Exists(project.Settings.Inference.ModelConfig) || !File.Exists(project.Settings.Inference.ModelCheckpoint)))
+        {
+            queuedStages.Remove(project.Id);
+            AppendLog("The selected inference model files are missing.");
+            RefreshPipelineStatus();
+            return;
+        }
+        if (stage == Stage.Numcalc && !File.Exists(environment.NumCalcExecutable))
+        {
+            queuedStages.Remove(project.Id);
+            AppendLog("NumCalc is missing. Set up or select NumCalc.exe before running NumCalc.");
+            RefreshPipelineStatus();
             return;
         }
         try
@@ -591,6 +666,7 @@ public partial class MainWindow : Window
             runningStages[project.Id] = stage;
             FailedStages(project.Id).Remove(stage);
             AppendLog($"Started {stage.Title} for {project.Name}");
+            RefreshPipelineStatus();
             process.Exited += (_, _) => Dispatcher.BeginInvoke(() =>
             {
                 var code = process.ExitCode;
@@ -601,6 +677,19 @@ public partial class MainWindow : Window
                 AppendLog(code == 0 ? $"{stage.Title} finished for {project.Name}" : $"{stage.Title} for {project.Name} exited with status {code}");
                 process.Dispose();
                 RefreshArtifacts();
+                RefreshPipelineStatus();
+                if (code == 0 && queuedStages.TryGetValue(project.Id, out var queue) && queue.Count > 0)
+                {
+                    var next = queue.Dequeue();
+                    RunStage(next, project, true);
+                }
+                else
+                {
+                    if (code != 0 && queuedStages.TryGetValue(project.Id, out var stoppedQueue) && stoppedQueue.Count > 0)
+                        AppendLog($"Run All stopped after {stage.Title} failed.");
+                    queuedStages.Remove(project.Id);
+                    RefreshPipelineStatus();
+                }
             });
             process.Start();
             process.BeginOutputReadLine();
@@ -611,8 +700,10 @@ public partial class MainWindow : Window
             FailedStages(project.Id).Add(stage);
             runningProcesses.Remove(project.Id);
             runningStages.Remove(project.Id);
+            queuedStages.Remove(project.Id);
             AppendLog($"Could not start {stage.Title}: {error.Message}");
             RefreshArtifacts();
+            RefreshPipelineStatus();
         }
     }
 
@@ -750,7 +841,7 @@ preprocessing:
   mesh_gamma_left: {preprocessing.MeshGammaLeft}
   mesh_gamma_right: {preprocessing.MeshGammaRight}
   mesh_hole_size: 0.2
-  skip_mesh_grading: {Bool(preprocessing.SkipMeshGrading ?? false)}
+  skip_mesh_grading: false
   source_type_left: Left ear
   source_type_right: Right ear
   title: {YamlScalar(project.Name)}
@@ -797,11 +888,13 @@ ui:
 
     void StopProject(ProjectRecord project)
     {
+        queuedStages.Remove(project.Id);
         if (runningProcesses.TryGetValue(project.Id, out var process))
         {
             TryTerminate(process);
             AppendLog("Termination requested.");
         }
+        RefreshPipelineStatus();
     }
 
     void TryTerminate(Process process)
@@ -861,6 +954,7 @@ ui:
         ResetViewer();
         RefreshArtifacts();
         AppendLog($"Reset generated outputs in {project.SaveLocation}");
+        RefreshPipelineStatus();
     }
 
     bool ContainsPath(string parent, string child)
@@ -907,6 +1001,75 @@ ui:
         var project = SelectedProject;
         NumCalcStatusText.Text = project == null ? "NumCalc: no project" : NumCalcStatus(project);
     }
+
+    void RefreshPipelineStatus()
+    {
+        var project = SelectedProject;
+        if (project == null)
+        {
+            BusyProgress.Visibility = Visibility.Collapsed;
+            BusyStatusText.Text = "Ready";
+            PipelineStatusText.Text = "No project selected";
+            return;
+        }
+        var stages = AutomaticStages(project);
+        var done = stages.Where(stage => StageIsComplete(stage, project)).Select(stage => stage.Title).ToList();
+        var running = runningStages.TryGetValue(project.Id, out var runningStage) ? runningStage : null;
+        var next = running == null
+            ? stages.FirstOrDefault(stage => !StageIsComplete(stage, project))
+            : stages.SkipWhile(stage => stage != running).Skip(1).FirstOrDefault(stage => !StageIsComplete(stage, project));
+        var missing = new List<string>();
+        if (string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar))
+            missing.Add("ear mesh");
+        if (!string.IsNullOrWhiteSpace(project.LeftEar) && !File.Exists(project.LeftEar))
+            missing.Add("left-ear file");
+        if (!string.IsNullOrWhiteSpace(project.RightEar) && !File.Exists(project.RightEar))
+            missing.Add("right-ear file");
+        if (string.IsNullOrWhiteSpace(project.SaveLocation))
+            missing.Add("save location");
+        if (BundledPythonExecutable() == null && !File.Exists(environment.UvExecutable))
+            missing.Add("Python runtime or uv");
+        if (next == Stage.Inference)
+        {
+            if (!File.Exists(project.Settings.Inference.ModelConfig))
+                missing.Add("model config");
+            if (!File.Exists(project.Settings.Inference.ModelCheckpoint))
+                missing.Add("model checkpoint");
+        }
+        if (next == Stage.Preprocessing && !File.Exists(environment.MeshGradingExecutable))
+            missing.Add("mesh grading executable");
+        if (next == Stage.Preprocessing && !Directory.Exists(Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf")))
+            missing.Add("Mesh2HRTF sources");
+        if (next == Stage.Numcalc && !File.Exists(environment.NumCalcExecutable))
+            missing.Add("NumCalc executable");
+        var failed = FailedStages(project.Id).Select(stage => stage.Title).ToList();
+        BusyProgress.Visibility = runningStages.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        if (running != null)
+            BusyStatusText.Text = $"Busy: {running.Title}";
+        else if (runningStages.Count > 0)
+        {
+            var other = runningStages.First();
+            var otherProject = projects.FirstOrDefault(candidate => candidate.Id == other.Key)?.Name ?? "another project";
+            BusyStatusText.Text = $"Busy: {otherProject} · {other.Value.Title}";
+        }
+        else
+            BusyStatusText.Text = "Ready";
+        var parts = new List<string>
+        {
+            $"Done: {(done.Count == 0 ? "none" : string.Join(", ", done))}",
+            $"Next: {(next?.Title ?? (running == null ? "complete" : "finishing"))}"
+        };
+        if (!InferenceIsAutomatic(project))
+            parts.Add("Inference: skipped");
+        if (missing.Count > 0)
+            parts.Add($"Missing: {string.Join(", ", missing.Distinct())}");
+        if (failed.Count > 0)
+            parts.Add($"Failed: {string.Join(", ", failed)}");
+        PipelineStatusText.Text = string.Join("  ·  ", parts);
+    }
+
+    bool InferenceIsAutomatic(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing && !string.IsNullOrWhiteSpace(project.LeftEar) && !string.IsNullOrWhiteSpace(project.RightEar);
+    Stage[] AutomaticStages(ProjectRecord project) => InferenceIsAutomatic(project) ? Stage.GetValues() : [Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing];
 
     string NumCalcStatus(ProjectRecord project)
     {
@@ -959,18 +1122,21 @@ ui:
     {
         var output = project.SaveLocation;
         if (stage == Stage.Inference)
-            return string.IsNullOrWhiteSpace(project.LeftEar) || string.IsNullOrWhiteSpace(project.RightEar) || (ContainsMesh(Path.Combine(output, project.Settings.Inference.PredictionLeftFolder)) && ContainsMesh(Path.Combine(output, project.Settings.Inference.PredictionRightFolder)));
+            return InferenceIsAutomatic(project) && ContainsMesh(Path.Combine(output, project.Settings.Inference.PredictionLeftFolder)) && ContainsMesh(Path.Combine(output, project.Settings.Inference.PredictionRightFolder));
         if (stage == Stage.Preprocessing)
             return (string.IsNullOrWhiteSpace(project.LeftEar) || (File.Exists(Path.Combine(output, "Projects", "Left", "parameters.json")) && File.Exists(Path.Combine(output, "intermediates", "left", "graded_head.ply")))) && (string.IsNullOrWhiteSpace(project.RightEar) || (File.Exists(Path.Combine(output, "Projects", "Right", "parameters.json")) && File.Exists(Path.Combine(output, "intermediates", "right", "graded_head.ply"))));
         if (stage == Stage.Numcalc)
-            return (string.IsNullOrWhiteSpace(project.LeftEar) || ContainsNumCalcOutput(Path.Combine(output, "Projects", "Left", "NumCalc", "source_1", "be.out"))) && (string.IsNullOrWhiteSpace(project.RightEar) || ContainsNumCalcOutput(Path.Combine(output, "Projects", "Right", "NumCalc", "source_1", "be.out")));
+        {
+            var leftTotal = NumCalcTotal(project, "Left");
+            var rightTotal = NumCalcTotal(project, "Right");
+            return (string.IsNullOrWhiteSpace(project.LeftEar) || (leftTotal > 0 && NumCalcCompleted(project, "Left") >= leftTotal)) && (string.IsNullOrWhiteSpace(project.RightEar) || (rightTotal > 0 && NumCalcCompleted(project, "Right") >= rightTotal));
+        }
         if (stage == Stage.Postprocessing)
             return Directory.Exists(Path.Combine(output, "HRTF")) && Directory.GetFiles(Path.Combine(output, "HRTF"), "*.sofa").Any();
         return false;
     }
 
     bool ContainsMesh(string folder) => Directory.Exists(folder) && Directory.GetFiles(folder).Any(IsMesh);
-    bool ContainsNumCalcOutput(string folder) => Directory.Exists(folder) && Directory.GetFiles(folder).Any(x => Path.GetFileName(x).StartsWith("be.", StringComparison.OrdinalIgnoreCase));
     bool IsMesh(string path) => string.Equals(Path.GetExtension(path), ".stl", StringComparison.OrdinalIgnoreCase) || string.Equals(Path.GetExtension(path), ".ply", StringComparison.OrdinalIgnoreCase);
 
     HashSet<Stage> FailedStages(Guid id)
@@ -1062,7 +1228,6 @@ class PreprocessingSettings
     public string MeshMaxError { get; set; } = "0.5";
     public string MeshGammaLeft { get; set; } = "0.15";
     public string MeshGammaRight { get; set; } = "0.2";
-    public bool? SkipMeshGrading { get; set; }
 }
 
 class NumCalcSettings
@@ -1078,7 +1243,10 @@ static class MeshLoader
     {
         var mesh = string.Equals(Path.GetExtension(path), ".ply", StringComparison.OrdinalIgnoreCase) ? LoadPly(path) : LoadStl(path);
         Center(mesh);
-        var material = new DiffuseMaterial(new SolidColorBrush(System.Windows.Media.Color.FromRgb(96, 145, 144)));
+        var material = new MaterialGroup();
+        material.Children.Add(new DiffuseMaterial(new SolidColorBrush(System.Windows.Media.Color.FromRgb(96, 145, 144))));
+        material.Children.Add(new SpecularMaterial(new SolidColorBrush(System.Windows.Media.Color.FromRgb(205, 225, 224)), 28));
+        material.Children.Add(new EmissiveMaterial(new SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 28, 28))));
         return new GeometryModel3D(mesh, material) { BackMaterial = material };
     }
 

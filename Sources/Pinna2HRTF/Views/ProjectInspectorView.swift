@@ -67,7 +67,9 @@ struct ProjectInspectorView: View {
                     }
                 }
                 SettingsDisclosure("Mesh Grading", systemImage: "ruler") {
-                    Toggle("Skip mesh grading", isOn: preprocessingBoolBinding(\.skipMeshGrading))
+                    Text("Required safety step")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     LabeledTextField("Min edge length", text: preprocessingBinding(\.meshMinEdgeLength))
                     LabeledTextField("Max edge length", text: preprocessingBinding(\.meshMaxEdgeLength))
                     LabeledTextField("Max error", text: preprocessingBinding(\.meshMaxError))

@@ -1,13 +1,17 @@
 <Window x:Class="Pinna2HRTF.Windows.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Pinna2HRTF" Icon="Resources/app_icon.ico" Width="1280" Height="820" MinWidth="1060" MinHeight="680"
+        Title="Pinna2HRTF" Icon="Resources/app_icon.ico" Width="1280" Height="820" MinWidth="900" MinHeight="680"
         Background="#f6f7f9" Loaded="WindowLoaded" Closing="WindowClosing">
   <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
     <Grid.ColumnDefinitions>
-      <ColumnDefinition Width="300"/>
-      <ColumnDefinition Width="*"/>
-      <ColumnDefinition Width="390"/>
+      <ColumnDefinition Width="280" MinWidth="210" MaxWidth="360"/>
+      <ColumnDefinition Width="*" MinWidth="300"/>
+      <ColumnDefinition Width="370" MinWidth="310" MaxWidth="460"/>
     </Grid.ColumnDefinitions>
     <Border Grid.Column="0" Background="#ffffff" BorderBrush="#d9dee8" BorderThickness="0,0,1,0">
       <DockPanel>
@@ -62,7 +66,17 @@
                 </ModelVisual3D>
                 <ModelVisual3D>
                   <ModelVisual3D.Content>
-                    <AmbientLight Color="#777777"/>
+                    <DirectionalLight Color="#d9e7ff" Direction="1,-2,-1"/>
+                  </ModelVisual3D.Content>
+                </ModelVisual3D>
+                <ModelVisual3D>
+                  <ModelVisual3D.Content>
+                    <DirectionalLight Color="#ffe9d2" Direction="0,1,2"/>
+                  </ModelVisual3D.Content>
+                </ModelVisual3D>
+                <ModelVisual3D>
+                  <ModelVisual3D.Content>
+                    <AmbientLight Color="#a8a8a8"/>
                   </ModelVisual3D.Content>
                 </ModelVisual3D>
               </Viewport3D>
@@ -90,7 +104,7 @@
             <TextBlock x:Name="LogSummaryText" Text="Live Log" FontWeight="SemiBold" VerticalAlignment="Center"/>
             <Button Grid.Column="1" Content="Clear" Click="ClearLogClicked"/>
           </Grid>
-          <TextBox x:Name="LogText" Grid.Row="1" Margin="10,0,10,10" BorderThickness="0" FontFamily="Consolas" FontSize="12" TextWrapping="NoWrap" AcceptsReturn="True" IsReadOnly="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+          <TextBox x:Name="LogText" Grid.Row="1" Margin="10,0,10,10" BorderThickness="0" FontFamily="Consolas" FontSize="12" TextWrapping="Wrap" AcceptsReturn="True" IsReadOnly="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"/>
         </Grid>
       </Border>
     </Grid>
@@ -144,7 +158,7 @@
           </Expander>
           <Expander Header="Mesh Grading" IsExpanded="False" Margin="0,8,0,0">
             <StackPanel Margin="0,8,0,0">
-              <CheckBox x:Name="SkipMeshGradingBox" Content="Skip mesh grading" Margin="0,0,0,8" Checked="ProjectEdited" Unchecked="ProjectEdited"/>
+              <TextBlock Text="Required safety step" Foreground="#69717d" Margin="0,0,0,8"/>
               <Label Content="Min edge length"/>
               <TextBox x:Name="MeshMinEdgeBox" TextChanged="ProjectEdited"/>
               <Label Content="Max edge length"/>
@@ -199,14 +213,30 @@
             <Button Content="Run NumCalc" Click="RunNumCalcClicked"/>
             <Button Content="Run Postprocess" Click="RunPostprocessingClicked"/>
             <Button Content="Run Next" Click="RunNextClicked"/>
+            <Button Content="Run All" Click="RunAllClicked"/>
             <Button Content="Stop" Click="StopClicked"/>
             <Button Content="Refresh" Click="RefreshClicked"/>
             <Button Content="Reset Outputs" Click="ResetOutputsClicked"/>
           </UniformGrid>
-          <TextBlock x:Name="NumCalcStatusText" Margin="0,10,0,0" Foreground="#69717d" TextTrimming="CharacterEllipsis"/>
+          <TextBlock x:Name="NumCalcStatusText" Margin="0,10,0,0" Foreground="#69717d" TextWrapping="Wrap"/>
           <Button Content="Remove Project" Margin="0,12,0,0" Click="RemoveProjectClicked"/>
         </StackPanel>
       </ScrollViewer>
+    </Border>
+    <GridSplitter Grid.Row="0" Grid.Column="0" Width="5" HorizontalAlignment="Right" Background="Transparent" ResizeDirection="Columns" ResizeBehavior="CurrentAndNext"/>
+    <GridSplitter Grid.Row="0" Grid.Column="2" Width="5" HorizontalAlignment="Left" Background="Transparent" ResizeDirection="Columns" ResizeBehavior="PreviousAndCurrent"/>
+    <Border Grid.Row="1" Grid.ColumnSpan="3" Background="#eef1f5" BorderBrush="#d9dee8" BorderThickness="0,1,0,0" Padding="12,7">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
+          <ProgressBar x:Name="BusyProgress" Width="72" Height="5" IsIndeterminate="True" Visibility="Collapsed" Margin="0,0,8,0"/>
+          <TextBlock x:Name="BusyStatusText" Text="Ready" FontWeight="SemiBold"/>
+        </StackPanel>
+        <TextBlock x:Name="PipelineStatusText" Grid.Column="1" Foreground="#4f5967" TextWrapping="Wrap" VerticalAlignment="Center"/>
+      </Grid>
     </Border>
   </Grid>
 </Window>
