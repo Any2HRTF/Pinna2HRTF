@@ -144,6 +144,7 @@
           </Expander>
           <Expander Header="Mesh Grading" IsExpanded="False" Margin="0,8,0,0">
             <StackPanel Margin="0,8,0,0">
+              <CheckBox x:Name="SkipMeshGradingBox" Content="Skip mesh grading" Margin="0,0,0,8" Checked="ProjectEdited" Unchecked="ProjectEdited"/>
               <Label Content="Min edge length"/>
               <TextBox x:Name="MeshMinEdgeBox" TextChanged="ProjectEdited"/>
               <Label Content="Max edge length"/>

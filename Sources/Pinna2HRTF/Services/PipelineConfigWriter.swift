@@ -43,6 +43,7 @@ enum PipelineConfigWriter {
         let useCustomHeadRadius = preprocessing.useCustomHeadRadius ?? (preprocessing.headRadius != nil)
         let headRadius = useCustomHeadRadius ? "  head_radius: \(yamlNumber(preprocessing.headRadius) ?? "0")\n" : ""
         let sourceAssignmentFaceCount = max(Int(preprocessing.sourceAssignmentFaceCount ?? "") ?? 6, 1)
+        let skipMeshGrading = preprocessing.skipMeshGrading ?? false
         let levelOffsetDB = yamlNumber(postprocessing.levelOffsetDB) ?? "-30"
         let leftEar = project.leftEar.isEmpty ? "null" : project.leftEar
         let rightEar = project.rightEar.isEmpty ? "null" : project.rightEar
@@ -88,6 +89,7 @@ enum PipelineConfigWriter {
           mesh_gamma_left: \(preprocessing.meshGammaLeft)
           mesh_gamma_right: \(preprocessing.meshGammaRight)
           mesh_hole_size: 0.2
+          skip_mesh_grading: \(skipMeshGrading ? "true" : "false")
           source_type_left: Left ear
           source_type_right: Right ear
           title: \(project.name)

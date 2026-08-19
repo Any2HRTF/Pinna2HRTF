@@ -67,6 +67,7 @@ struct ProjectInspectorView: View {
                     }
                 }
                 SettingsDisclosure("Mesh Grading", systemImage: "ruler") {
+                    Toggle("Skip mesh grading", isOn: preprocessingBoolBinding(\.skipMeshGrading))
                     LabeledTextField("Min edge length", text: preprocessingBinding(\.meshMinEdgeLength))
                     LabeledTextField("Max edge length", text: preprocessingBinding(\.meshMaxEdgeLength))
                     LabeledTextField("Max error", text: preprocessingBinding(\.meshMaxError))
@@ -142,6 +143,13 @@ struct ProjectInspectorView: View {
         Binding(
             get: { store.selectedProject?.settings.preprocessing[keyPath: keyPath] ?? "" },
             set: { value in store.updateSelectedProject { $0.settings.preprocessing[keyPath: keyPath] = value.isEmpty ? nil : value } }
+        )
+    }
+
+    func preprocessingBoolBinding(_ keyPath: WritableKeyPath<PreprocessingSettings, Bool?>) -> Binding<Bool> {
+        Binding(
+            get: { store.selectedProject?.settings.preprocessing[keyPath: keyPath] ?? false },
+            set: { value in store.updateSelectedProject { $0.settings.preprocessing[keyPath: keyPath] = value } }
         )
     }
 

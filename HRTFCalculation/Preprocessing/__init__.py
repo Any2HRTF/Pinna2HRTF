@@ -120,9 +120,13 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
                 continue
             logger(f"Stitching {side} ear to head")
             head_stitcher(head_path=str(cut[side]), ear_path=str(closed[side]), export_path=str(stitched[side]), seam_smoothing_iterations=settings.seam_smoothing_iterations, seam_smoothing_factor=settings.seam_smoothing_factor)
-            logger(f"Grading {side} head mesh; this can take several minutes")
-            gamma = settings.mesh_gamma_left if side == "left" else settings.mesh_gamma_right
-            subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-v', '-g', str(gamma), '-h', str(settings.mesh_hole_size), '-s', side, '-i', str(stitched[side]), '-o', str(graded[side])], check=True)
+            if settings.skip_mesh_grading:
+                logger(f"Skipping {side} mesh grading")
+                trimesh.load_mesh(stitched[side], process=False).export(graded[side])
+            else:
+                logger(f"Grading {side} head mesh; this can take several minutes")
+                gamma = settings.mesh_gamma_left if side == "left" else settings.mesh_gamma_right
+                subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-v', '-g', str(gamma), '-h', str(settings.mesh_hole_size), '-s', side, '-i', str(stitched[side]), '-o', str(graded[side])], check=True)
         for project in [projects_dir / "Left", projects_dir / "Right"] if output_dir is not None else []:
             if project.exists():
                 shutil.rmtree(project)

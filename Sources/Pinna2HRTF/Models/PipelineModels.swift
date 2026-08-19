@@ -88,6 +88,7 @@ struct PreprocessingSettings: Codable, Equatable {
     var meshMaxError = "0.5"
     var meshGammaLeft = "0.15"
     var meshGammaRight = "0.2"
+    var skipMeshGrading: Bool?
     var sourceAssignmentFaceCount: String? = "6"
 }
 

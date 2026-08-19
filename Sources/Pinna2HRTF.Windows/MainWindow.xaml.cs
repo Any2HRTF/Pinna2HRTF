@@ -178,6 +178,7 @@ public partial class MainWindow : Window
         MeshMaxErrorBox.Text = project?.Settings.Preprocessing.MeshMaxError ?? "0.5";
         MeshGammaLeftBox.Text = project?.Settings.Preprocessing.MeshGammaLeft ?? "0.15";
         MeshGammaRightBox.Text = project?.Settings.Preprocessing.MeshGammaRight ?? "0.2";
+        SkipMeshGradingBox.IsChecked = project?.Settings.Preprocessing.SkipMeshGrading ?? false;
         MaxInstancesBox.Text = project?.Settings.NumCalc.MaxInstances ?? "1";
         MaxCpuLoadBox.Text = project?.Settings.NumCalc.MaxCpuLoad ?? "90";
         AdaptiveFmmLengthBox.IsChecked = project?.Settings.NumCalc.AdaptiveFmmLength ?? true;
@@ -245,6 +246,7 @@ public partial class MainWindow : Window
         project.Settings.Preprocessing.MeshMaxError = MeshMaxErrorBox.Text;
         project.Settings.Preprocessing.MeshGammaLeft = MeshGammaLeftBox.Text;
         project.Settings.Preprocessing.MeshGammaRight = MeshGammaRightBox.Text;
+        project.Settings.Preprocessing.SkipMeshGrading = SkipMeshGradingBox.IsChecked == true;
         project.Settings.NumCalc.MaxInstances = MaxInstancesBox.Text;
         project.Settings.NumCalc.MaxCpuLoad = MaxCpuLoadBox.Text;
         project.Settings.NumCalc.AdaptiveFmmLength = AdaptiveFmmLengthBox.IsChecked == true;
@@ -748,6 +750,7 @@ preprocessing:
   mesh_gamma_left: {preprocessing.MeshGammaLeft}
   mesh_gamma_right: {preprocessing.MeshGammaRight}
   mesh_hole_size: 0.2
+  skip_mesh_grading: {Bool(preprocessing.SkipMeshGrading ?? false)}
   source_type_left: Left ear
   source_type_right: Right ear
   title: {YamlScalar(project.Name)}
@@ -1059,6 +1062,7 @@ class PreprocessingSettings
     public string MeshMaxError { get; set; } = "0.5";
     public string MeshGammaLeft { get; set; } = "0.15";
     public string MeshGammaRight { get; set; } = "0.2";
+    public bool? SkipMeshGrading { get; set; }
 }
 
 class NumCalcSettings
