@@ -104,9 +104,14 @@ def head_stitcher(head_path, ear_path, export_path, seam_smoothing_iterations=0,
     mesh = trimesh.load(export_path)
     components = mesh.split(only_watertight=False)
     if len(components) > 1:
-        if os.path.exists(export_path):
-            os.remove(export_path)
-        raise RuntimeError(f"Stitching failed: expected a single connected component, found {len(components)}.")
+        largest = max(components, key=lambda component: len(component.faces))
+        stray_faces = sum(len(component.faces) for component in components if component is not largest)
+        if stray_faces <= max(10, int(len(largest.faces) * 0.001)):
+            mesh = largest
+        else:
+            if os.path.exists(export_path):
+                os.remove(export_path)
+            raise RuntimeError(f"Stitching failed: expected a single connected component, found {len(components)}.")
     mesh.remove_unreferenced_vertices()
     mesh.export(export_path)
 

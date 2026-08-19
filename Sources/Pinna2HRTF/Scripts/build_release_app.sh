@@ -31,6 +31,14 @@ fi
 if [[ -d "$EXTERNAL_ROOT/bin" ]]; then
   mkdir -p "$RESOURCES/External"
   cp -R "$EXTERNAL_ROOT/bin" "$RESOURCES/External/bin"
+  if [[ "$(uname -s)" == "Darwin" && -x "$RESOURCES/External/bin/hrtf_mesh_grading" && -f "$RESOURCES/External/bin/libpmp.1.2.1.dylib" ]]; then
+    install_name_tool -change "@rpath/libpmp.1.2.1.dylib" "@loader_path/libpmp.1.2.1.dylib" "$RESOURCES/External/bin/hrtf_mesh_grading"
+  fi
+fi
+if [[ -d "$EXTERNAL_ROOT/src/Mesh2HRTF/mesh2hrtf" && -f "$EXTERNAL_ROOT/src/Mesh2HRTF/VERSION" ]]; then
+  mkdir -p "$RESOURCES/External/src/Mesh2HRTF"
+  cp -R "$EXTERNAL_ROOT/src/Mesh2HRTF/mesh2hrtf" "$RESOURCES/External/src/Mesh2HRTF/mesh2hrtf"
+  cp "$EXTERNAL_ROOT/src/Mesh2HRTF/VERSION" "$RESOURCES/External/src/Mesh2HRTF/VERSION"
 fi
 if [[ -d "$REPO_ROOT/Data/Resources/EvalGrid" ]]; then
   mkdir -p "$RESOURCES/Data/Resources"
@@ -102,8 +110,11 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
   <string>13.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSUserNotificationUsageDescription</key>
+  <string>Notify when a Pinna2HRTF pipeline stage completes.</string>
 </dict>
 </plist>
 PLIST
 chmod +x "$MACOS/Pinna2HRTF"
+codesign --force --deep --sign - "$APP_DIR"
 echo "$APP_DIR"

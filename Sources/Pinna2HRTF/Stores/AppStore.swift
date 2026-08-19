@@ -3,8 +3,9 @@ import SceneKit
 import ModelIO
 import SceneKit.ModelIO
 import AppKit
+import UserNotifications
 
-final class AppStore: ObservableObject {
+final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     @Published var projects: [ProjectRecord]
     @Published var selectedProjectID: UUID?
     @Published var environment: EnvironmentConfig
@@ -23,7 +24,7 @@ final class AppStore: ObservableObject {
     let packageURL: URL
     let registryStore: ProjectRegistryStore
 
-    init() {
+    override init() {
         rootURL = Defaults.runtimeRoot
         packageURL = Defaults.pipelineRoot
         registryStore = ProjectRegistryStore(rootURL: rootURL, packageURL: packageURL)
@@ -34,6 +35,8 @@ final class AppStore: ObservableObject {
         projects = registry.projects
         selectedProjectID = registry.selectedProjectID ?? registry.projects.first?.id
         environment = registry.environment
+        super.init()
+        configureNotifications()
         registryStore.save(ProjectRegistry(projects: projects, selectedProjectID: selectedProjectID, environment: environment))
         refreshArtifacts()
     }
@@ -212,8 +215,8 @@ final class AppStore: ObservableObject {
             appendLog("\(project.name) already has a running task.")
             return
         }
-        guard !project.leftEar.isEmpty, !project.rightEar.isEmpty, !project.saveLocation.isEmpty else {
-            appendLog("Select a left ear mesh, right ear mesh, and save location before running.")
+        guard (!project.leftEar.isEmpty || !project.rightEar.isEmpty), !project.saveLocation.isEmpty else {
+            appendLog("Select at least one ear mesh and a save location before running.")
             return
         }
         do {
@@ -264,6 +267,11 @@ final class AppStore: ObservableObject {
                 if process.terminationStatus != 0 {
                     store.failedStagesByProject[project.id, default: []].insert(stage)
                 }
+                if process.terminationStatus == 0 {
+                    store.notifyStageCompletion(stage, project: project)
+                } else {
+                    store.notifyStageFailure(stage, project: project, status: process.terminationStatus)
+                }
                 store.appendLog(process.terminationStatus == 0 ? "\(stage.title) finished for \(project.name)" : "\(stage.title) for \(project.name) exited with status \(process.terminationStatus)")
                 store.runningProcesses[project.id] = nil
                 store.runningStages[project.id] = nil
@@ -279,6 +287,61 @@ final class AppStore: ObservableObject {
             refreshArtifacts()
             appendLog("Could not start \(stage.title): \(error.localizedDescription)")
         }
+    }
+
+    func configureNotifications() {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound]) { [weak self] granted, error in
+            guard let self else { return }
+            Task { @MainActor in
+                if error != nil {
+                    self.appendLog("Primary desktop notifications unavailable; stage completions will use the macOS fallback.")
+                } else if !granted {
+                    self.appendLog("Desktop notifications are disabled in macOS settings.")
+                }
+            }
+        }
+    }
+
+    func notifyStageCompletion(_ stage: Stage, project: ProjectRecord) {
+        sendNotification(title: "\(stage.title) complete", body: "\(project.name): \(stage.title) finished successfully.")
+    }
+
+    func notifyStageFailure(_ stage: Stage, project: ProjectRecord, status: Int32) {
+        sendNotification(title: "\(stage.title) failed", body: "\(project.name): \(stage.title) exited with status \(status).")
+    }
+
+    func sendNotification(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let identifier = "Pinna2HRTF-\(UUID().uuidString)"
+        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { [weak self] error in
+            if error != nil {
+                Task { @MainActor in
+                    self?.appendLog("Primary completion notification failed; using the macOS fallback.")
+                    self?.sendFallbackNotification(title: title, body: body)
+                }
+            }
+        }
+    }
+
+    func sendFallbackNotification(title: String, body: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", "display notification \(appleScriptString(body)) with title \(appleScriptString(title))"]
+        try? process.run()
+    }
+
+    func appleScriptString(_ value: String) -> String {
+        "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
     }
 
     func setupEnvironment() {
@@ -449,7 +512,7 @@ final class AppStore: ObservableObject {
         ]
         for name in names {
             let url = output.appendingPathComponent(name)
-            if path(url, contains: URL(fileURLWithPath: project.leftEar)) || path(url, contains: URL(fileURLWithPath: project.rightEar)) {
+            if (!project.leftEar.isEmpty && path(url, contains: URL(fileURLWithPath: project.leftEar))) || (!project.rightEar.isEmpty && path(url, contains: URL(fileURLWithPath: project.rightEar))) {
                 appendLog("Skipped reset of \(url.path) because it contains a configured input mesh.")
                 continue
             }

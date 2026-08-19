@@ -4,14 +4,14 @@
 
 # Pinna2HRTF
 
-Pinna2HRTF generates HRTFs from left and right pinna meshes. The recommended workflow is the command line: run each pipeline stage as its own command, keep the generated folders on disk, and resume individual stages when needed.
+Pinna2HRTF generates HRTFs from left and right pinna meshes, or from a single left or right mesh. The recommended workflow is the command line: run each pipeline stage as its own command, keep the generated folders on disk, and resume individual stages when needed.
 
 The pipeline can:
 
 - predict complete left and right pinna meshes with the bundled PPM models
 - preprocess meshes into Mesh2HRTF projects
 - run NumCalc locally
-- merge the left and right projects into SOFA files and inspection plots
+- merge bilateral projects, or export a single-ear project, into SOFA files and inspection plots
 
 ## Requirements
 
@@ -76,7 +76,7 @@ uv run hrtf-inference \
 
 Inference is optional. If you already have the left and right meshes you want to use, skip that step and pass them directly to preprocessing.
 
-Run preprocessing. This creates two Mesh2HRTF projects, one for each side:
+Run preprocessing. Provide one or both mesh paths; only the configured sides become Mesh2HRTF projects:
 
 ```sh
 uv run hrtf-preprocessing \
@@ -115,6 +115,9 @@ uv run hrtf-numcalc \
 ```
 
 `hrtf-numcalc` is resumable. If one side or frequency already finished, Mesh2HRTF skips it.
+The local runner uses NumCalc RAM estimates to schedule frequency steps and enables adaptive FMM expansion lengths by default. This follows Kreuzer and Kasess, who show that adapting the expansion length to the local cluster radii avoids instability from non-uniform head meshes and can reduce memory and computation time. Use `--no-adaptive-fmm-length` only for an explicit baseline comparison.
+
+The underlying clustering and expansion behavior is discussed in [Effect of different clustering approaches on the multilevel fast multipole method for the Helmholtz equation](https://arxiv.org/html/2606.31771v1).
 
 Generate SOFA files and plots:
 

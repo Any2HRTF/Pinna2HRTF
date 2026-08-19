@@ -6,8 +6,12 @@ enum PipelineConfigWriter {
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         var prepared = project
         if project.inputHandling == .copy {
-            prepared.leftEar = try copyInput(project.leftEar, to: output.appendingPathComponent("Input/Left"))
-            prepared.rightEar = try copyInput(project.rightEar, to: output.appendingPathComponent("Input/Right"))
+            if !project.leftEar.isEmpty {
+                prepared.leftEar = try copyInput(project.leftEar, to: output.appendingPathComponent("Input/Left"))
+            }
+            if !project.rightEar.isEmpty {
+                prepared.rightEar = try copyInput(project.rightEar, to: output.appendingPathComponent("Input/Right"))
+            }
         }
         let configURL = output.appendingPathComponent(".pinna2hrtf_native_run.yaml")
         try yaml(project: prepared, environment: environment).write(to: configURL, atomically: true, encoding: .utf8)
@@ -40,10 +44,12 @@ enum PipelineConfigWriter {
         let headRadius = useCustomHeadRadius ? "  head_radius: \(yamlNumber(preprocessing.headRadius) ?? "0")\n" : ""
         let sourceAssignmentFaceCount = max(Int(preprocessing.sourceAssignmentFaceCount ?? "") ?? 6, 1)
         let levelOffsetDB = yamlNumber(postprocessing.levelOffsetDB) ?? "-30"
+        let leftEar = project.leftEar.isEmpty ? "null" : project.leftEar
+        let rightEar = project.rightEar.isEmpty ? "null" : project.rightEar
         return """
         paths:
-          left_ear: \(project.leftEar)
-          right_ear: \(project.rightEar)
+          left_ear: \(leftEar)
+          right_ear: \(rightEar)
           output_dir: \(project.saveLocation)
           external_deps_dir: \(environment.externalDir)
           numcalc_executable: \(environment.numcalcExecutable)
@@ -104,6 +110,7 @@ enum PipelineConfigWriter {
           mode: local
           max_instances: \(numcalc.maxInstances)
           max_cpu_load: \(numcalc.maxCPULoad)
+          adaptive_fmm_length: \(numcalc.adaptiveFmmLength ? "true" : "false")
         postprocessing:
           enabled: false
           output_sofa_dir: \(output.appendingPathComponent("HRTF").path)

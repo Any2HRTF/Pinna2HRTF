@@ -22,7 +22,7 @@ def log_default(message: str) -> None:
 
 
 def project_dirs(config: PipelineConfig) -> list[Path]:
-    return [config.paths.output_dir / "Projects" / "Left", config.paths.output_dir / "Projects" / "Right"]
+    return [config.paths.output_dir / "Projects" / side for side, path in (("Left", config.paths.left_ear), ("Right", config.paths.right_ear)) if path is not None]
 
 
 def run_from_config(config: PipelineConfig, stages: Iterable[str] | None = None, dry_run: bool = False, logger: Logger = log_default) -> None:
@@ -41,6 +41,9 @@ def run_from_config(config: PipelineConfig, stages: Iterable[str] | None = None,
 
 def run_inference(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
     logger(f"Running inference in {config.paths.output_dir}")
+    if config.paths.left_ear is None or config.paths.right_ear is None:
+        logger("Skipping inference because single-ear projects do not use the bilateral inference model.")
+        return
     logger(f"Left target folder: {config.inference.target_left_folder}")
     logger(f"Right target folder: {config.inference.target_right_folder}")
     if dry_run:
@@ -89,17 +92,23 @@ def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
     )
 
 
-def preprocessing_input_paths(config: PipelineConfig, logger: Logger) -> tuple[Path, Path]:
-    if not config.inference.use_predictions_for_preprocessing:
-        return config.paths.left_ear, config.paths.right_ear
-    left = predicted_stl(config.paths.output_dir / config.inference.prediction_left_folder, config.paths.left_ear.stem)
-    right = predicted_stl(config.paths.output_dir / config.inference.prediction_right_folder, config.paths.right_ear.stem)
-    if left is not None and right is not None:
-        logger(f"Using inferred left ear for preprocessing: {left}")
-        logger(f"Using inferred right ear for preprocessing: {right}")
-        return left, right
-    logger("No complete inferred STL pair found; preprocessing uses configured input ears.")
-    return config.paths.left_ear, config.paths.right_ear
+def preprocessing_input_paths(config: PipelineConfig, logger: Logger) -> tuple[Path | None, Path | None]:
+    inputs = []
+    for side, source, folder_name in [
+        ("left", config.paths.left_ear, config.inference.prediction_left_folder),
+        ("right", config.paths.right_ear, config.inference.prediction_right_folder),
+    ]:
+        if source is None:
+            inputs.append(None)
+            continue
+        selected = source
+        if config.inference.use_predictions_for_preprocessing:
+            predicted = predicted_stl(config.paths.output_dir / folder_name, source.stem)
+            if predicted is not None:
+                selected = predicted
+                logger(f"Using inferred {side} ear for preprocessing: {predicted}")
+        inputs.append(selected)
+    return inputs[0], inputs[1]
 
 
 def predicted_stl(folder: Path, preferred_stem: str) -> Path | None:
@@ -146,13 +155,17 @@ def run_numcalc_local(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
     logger(f"Local NumCalc project root: {projects_root}")
     if dry_run:
         return
-    import mesh2hrtf as m2h
-    m2h.manage_numcalc(
-        project_path=str(projects_root),
-        numcalc_path=str(numcalc_path),
-        max_instances=config.numcalc.max_instances,
+    from .NumCalc import run_local_numcalc
+    run_local_numcalc(
+        project_path=projects_root,
+        numcalc_path=numcalc_path,
+        max_ram_load_gb=config.numcalc.max_ram_load_gb,
+        ram_safety_factor=config.numcalc.ram_safety_factor,
         max_cpu_load=config.numcalc.max_cpu_load,
-        confirm_errors=False,
+        max_instances=config.numcalc.max_instances,
+        starting_order=config.numcalc.starting_order,
+        wait_time=config.numcalc.wait_time,
+        adaptive_fmm_length=config.numcalc.adaptive_fmm_length,
     )
 
 
@@ -184,6 +197,7 @@ def run_numcalc_slurm(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
 
 
 def slurm_worker_text(config: PipelineConfig) -> str:
+    adaptive_flag = "-adapt_fmmlength" if config.numcalc.adaptive_fmm_length else ""
     return "\n".join([
         "#!/usr/bin/env bash",
         "set -euo pipefail",
@@ -194,7 +208,7 @@ def slurm_worker_text(config: PipelineConfig) -> str:
         "OUTPUT_DIR=\"$SOURCE_DIR/be.out/be.$STEP\"",
         "if [[ -d \"$OUTPUT_DIR\" ]]; then exit 0; fi",
         "cd \"$SOURCE_DIR\"",
-        "\"$NUMCALC_EXE\" -istart \"$STEP\" -iend \"$STEP\" > \"NC${STEP}-${STEP}_log.txt\"",
+        f"\"$NUMCALC_EXE\" {adaptive_flag} -istart \"$STEP\" -iend \"$STEP\" > \"NC${{STEP}}-${{STEP}}_log.txt\"",
         "",
     ])
 
@@ -209,14 +223,19 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
     if output_dir.exists() and config.postprocessing.overwrite:
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    left, right = project_dirs(config)
-    m2h.output2hrtf(str(left))
-    m2h.output2hrtf(str(right))
+    projects = project_dirs(config)
+    for project in projects:
+        m2h.output2hrtf(str(project))
     if config.postprocessing.normalize:
         from .Postprocessing.postprocessing import normalize_sofa_files
-        normalize_sofa_files(left / "Output2HRTF", config.postprocessing.level_offset_db)
-        normalize_sofa_files(right / "Output2HRTF", config.postprocessing.level_offset_db)
-    m2h.merge_sofa_files([str(left), str(right)], savedir=str(output_dir))
+        for project in projects:
+            normalize_sofa_files(project / "Output2HRTF", config.postprocessing.level_offset_db)
+    if len(projects) == 2:
+        m2h.merge_sofa_files([str(project) for project in projects], savedir=str(output_dir))
+    else:
+        source_dir = projects[0] / "Output2HRTF"
+        for source in source_dir.glob("*.sofa"):
+            shutil.copy2(source, output_dir / source.name)
     try:
         for plane in ["horizontal", "median"]:
             m2h.inspect_sofa_files(str(output_dir), pattern="HRIR", plot="3D", plane=plane)
@@ -240,28 +259,37 @@ def parse_numcalc_args() -> argparse.Namespace:
     parser.add_argument("--numcalc-path", required=True)
     parser.add_argument("--max-instances", type=int, default=1)
     parser.add_argument("--max-cpu-load", type=int, default=90)
+    parser.add_argument("--max-ram-load-gb", type=float)
+    parser.add_argument("--ram-safety-factor", type=float, default=1.05)
+    parser.add_argument("--starting-order", choices=["high", "low", "alternate"], default="alternate")
+    parser.add_argument("--wait-time", type=int, default=15)
+    parser.add_argument("--adaptive-fmm-length", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
 
 
 def numcalc_cli() -> None:
     args = parse_numcalc_args()
-    import mesh2hrtf as m2h
     numcalc_path = Path(args.numcalc_path).expanduser().resolve()
     if platform.system() == "Windows" and numcalc_path.is_file():
         numcalc_path = numcalc_path.parent
-    m2h.manage_numcalc(
-        project_path=str(Path(args.project_path).expanduser().resolve()),
-        numcalc_path=str(numcalc_path),
+    from .NumCalc import run_local_numcalc
+    run_local_numcalc(
+        project_path=Path(args.project_path).expanduser().resolve(),
+        numcalc_path=numcalc_path,
+        max_ram_load_gb=args.max_ram_load_gb,
+        ram_safety_factor=args.ram_safety_factor,
         max_instances=args.max_instances,
         max_cpu_load=args.max_cpu_load,
-        confirm_errors=False,
+        starting_order=args.starting_order,
+        wait_time=args.wait_time,
+        adaptive_fmm_length=args.adaptive_fmm_length,
     )
 
 
 def parse_sofa_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--left-project", required=True)
-    parser.add_argument("--right-project", required=True)
+    parser.add_argument("--left-project")
+    parser.add_argument("--right-project")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
@@ -275,9 +303,16 @@ def sofa_cli() -> None:
     if output_dir.exists() and args.overwrite:
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    m2h.output2hrtf(args.left_project)
-    m2h.output2hrtf(args.right_project)
-    m2h.merge_sofa_files([args.left_project, args.right_project], savedir=str(output_dir))
+    projects = [project for project in (args.left_project, args.right_project) if project]
+    if not projects:
+        raise SystemExit("At least one project is required")
+    for project in projects:
+        m2h.output2hrtf(project)
+    if len(projects) == 2:
+        m2h.merge_sofa_files(projects, savedir=str(output_dir))
+    else:
+        for source in Path(projects[0]).joinpath("Output2HRTF").glob("*.sofa"):
+            shutil.copy2(source, output_dir / source.name)
     for plane in ["horizontal", "median"]:
         m2h.inspect_sofa_files(str(output_dir), pattern="HRIR", plot="3D", plane=plane)
 

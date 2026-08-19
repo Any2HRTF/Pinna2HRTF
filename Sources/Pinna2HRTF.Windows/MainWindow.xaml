@@ -100,12 +100,12 @@
           <TextBlock Text="Project" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,10"/>
           <Label Content="Project name"/>
           <TextBox x:Name="ProjectNameBox" TextChanged="ProjectEdited"/>
-          <Label Content="Left ear"/>
+          <Label Content="Left ear (optional)"/>
           <DockPanel>
             <Button DockPanel.Dock="Right" Content="Browse" Click="BrowseLeftEarClicked"/>
             <TextBox x:Name="LeftEarBox" TextChanged="ProjectEdited"/>
           </DockPanel>
-          <Label Content="Right ear"/>
+          <Label Content="Right ear (optional)"/>
           <DockPanel>
             <Button DockPanel.Dock="Right" Content="Browse" Click="BrowseRightEarClicked"/>
             <TextBox x:Name="RightEarBox" TextChanged="ProjectEdited"/>
@@ -115,6 +115,7 @@
             <Button DockPanel.Dock="Right" Content="Browse" Click="BrowseSaveLocationClicked"/>
             <TextBox x:Name="SaveLocationBox" TextChanged="ProjectEdited"/>
           </DockPanel>
+          <TextBlock Text="Choose at least one ear mesh." Margin="0,4,0,0" Foreground="#69717d"/>
           <CheckBox x:Name="CopyInputsBox" Content="Copy inputs into project" Margin="0,10,0,8" Checked="ProjectEdited" Unchecked="ProjectEdited"/>
           <Expander Header="Inference" IsExpanded="True" Margin="0,8,0,0">
             <StackPanel Margin="0,8,0,0">
@@ -161,6 +162,7 @@
               <TextBox x:Name="MaxInstancesBox" TextChanged="ProjectEdited"/>
               <Label Content="CPU limit (%)"/>
               <TextBox x:Name="MaxCpuLoadBox" TextChanged="ProjectEdited"/>
+              <CheckBox x:Name="AdaptiveFmmLengthBox" Content="Adaptive FMM expansion length" IsChecked="True" Checked="ProjectEdited" Unchecked="ProjectEdited"/>
             </StackPanel>
           </Expander>
           <Expander Header="Environment" IsExpanded="False" Margin="0,8,0,0">
@@ -200,6 +202,7 @@
             <Button Content="Refresh" Click="RefreshClicked"/>
             <Button Content="Reset Outputs" Click="ResetOutputsClicked"/>
           </UniformGrid>
+          <TextBlock x:Name="NumCalcStatusText" Margin="0,10,0,0" Foreground="#69717d" TextTrimming="CharacterEllipsis"/>
           <Button Content="Remove Project" Margin="0,12,0,0" Click="RemoveProjectClicked"/>
         </StackPanel>
       </ScrollViewer>

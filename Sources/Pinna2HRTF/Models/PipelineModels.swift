@@ -94,6 +94,22 @@ struct PreprocessingSettings: Codable, Equatable {
 struct NumCalcSettings: Codable, Equatable {
     var maxInstances = "1"
     var maxCPULoad = "90"
+    var adaptiveFmmLength = true
+
+    enum CodingKeys: String, CodingKey {
+        case maxInstances
+        case maxCPULoad
+        case adaptiveFmmLength
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        maxInstances = try container.decodeIfPresent(String.self, forKey: .maxInstances) ?? "1"
+        maxCPULoad = try container.decodeIfPresent(String.self, forKey: .maxCPULoad) ?? "90"
+        adaptiveFmmLength = try container.decodeIfPresent(Bool.self, forKey: .adaptiveFmmLength) ?? true
+    }
 }
 
 struct PostprocessingSettings: Codable, Equatable {

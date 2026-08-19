@@ -21,16 +21,20 @@ def pinna_y_center(ear):
 
 
 def place_pinnae_at_head_radius(left_ear, right_ear, head_radius):
-    left_ear.apply_translation((0, head_radius - pinna_y_center(left_ear), 0))
-    right_ear.apply_translation((0, -head_radius - pinna_y_center(right_ear), 0))
+    if left_ear is not None:
+        left_ear.apply_translation((0, head_radius - pinna_y_center(left_ear), 0))
+    if right_ear is not None:
+        right_ear.apply_translation((0, -head_radius - pinna_y_center(right_ear), 0))
 
 
 def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, mesh2hrtf_path, evaluation_grid, preprocessing=None, output_dir=None, export_path=None, logger=print):
     settings = preprocessing or PreprocessingConfig()
     if output_dir is None and export_path is None:
         raise ValueError("output_dir or export_path is required")
-    left_path = Path(left_path)
-    right_path = Path(right_path)
+    left_path = Path(left_path) if left_path else None
+    right_path = Path(right_path) if right_path else None
+    if left_path is None and right_path is None:
+        raise ValueError("At least one ear mesh is required")
     if output_dir is not None:
         output_dir = Path(output_dir)
         projects_dir = output_dir / "Projects"
@@ -48,45 +52,45 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
         work_dir = intermediates
         if work_dir.exists():
             shutil.rmtree(work_dir)
-        (work_dir / "left").mkdir(parents=True, exist_ok=True)
-        (work_dir / "right").mkdir(parents=True, exist_ok=True)
+        for side, path in (("left", left_path), ("right", right_path)):
+            if path is not None:
+                (work_dir / side).mkdir(parents=True, exist_ok=True)
         cleanup = None
     else:
         cleanup = tempfile.TemporaryDirectory()
         work_dir = Path(cleanup.name)
-        (work_dir / "left").mkdir(parents=True, exist_ok=True)
-        (work_dir / "right").mkdir(parents=True, exist_ok=True)
+        for side, path in (("left", left_path), ("right", right_path)):
+            if path is not None:
+                (work_dir / side).mkdir(parents=True, exist_ok=True)
     try:
         logger("Loading input ear meshes")
-        left_ear = trimesh.load(left_path)
-        right_ear = trimesh.load(right_path)
+        left_ear = trimesh.load(left_path) if left_path is not None else None
+        right_ear = trimesh.load(right_path) if right_path is not None else None
         if settings.head_radius is not None:
             place_pinnae_at_head_radius(left_ear, right_ear, settings.head_radius)
             logger(f"Placed pinnae at head radius: {settings.head_radius}")
-        left_ear.export(work_dir / "left" / "input_ear.stl")
-        right_ear.export(work_dir / "right" / "input_ear.stl")
-        left_closed = work_dir / "left" / "closed_ear.stl"
-        right_closed = work_dir / "right" / "closed_ear.stl"
-        left_landmark_path = work_dir / "left" / "source_landmark.json"
-        right_landmark_path = work_dir / "right" / "source_landmark.json"
+        ears = {"left": left_ear, "right": right_ear}
+        for side, ear in ears.items():
+            if ear is not None:
+                ear.export(work_dir / side / "input_ear.stl")
+        closed = {side: work_dir / side / "closed_ear.stl" for side, ear in ears.items() if ear is not None}
+        landmark_paths = {side: work_dir / side / "source_landmark.json" for side, ear in ears.items() if ear is not None}
         dummy_head = work_dir / "dummy_head.stl"
-        left_cut = work_dir / "left" / "cut_head.stl"
-        right_cut = work_dir / "right" / "cut_head.stl"
-        left_stitched = work_dir / "left" / "stitched_head.stl"
-        right_stitched = work_dir / "right" / "stitched_head.stl"
-        left_graded = work_dir / "left" / "graded_head.ply"
-        right_graded = work_dir / "right" / "graded_head.ply"
-        left_landmark = estimate_ear_canal_position(left_ear, side="left")
-        right_landmark = estimate_ear_canal_position(right_ear, side="right")
-        with open(left_landmark_path, "w") as f:
-            json.dump(left_landmark, f, indent=2)
-        with open(right_landmark_path, "w") as f:
-            json.dump(right_landmark, f, indent=2)
-        logger(f"Left source landmark: {left_landmark['method']} at {[round(v, 3) for v in left_landmark['position']]}, confidence {left_landmark['confidence']:.2f}")
-        logger(f"Right source landmark: {right_landmark['method']} at {[round(v, 3) for v in right_landmark['position']]}, confidence {right_landmark['confidence']:.2f}")
+        cut = {side: work_dir / side / "cut_head.stl" for side, ear in ears.items() if ear is not None}
+        stitched = {side: work_dir / side / "stitched_head.stl" for side, ear in ears.items() if ear is not None}
+        graded = {side: work_dir / side / "graded_head.ply" for side, ear in ears.items() if ear is not None}
+        landmarks = {}
+        for side, ear in ears.items():
+            if ear is None:
+                continue
+            landmarks[side] = estimate_ear_canal_position(ear, side=side)
+            with open(landmark_paths[side], "w") as f:
+                json.dump(landmarks[side], f, indent=2)
+            logger(f"{side.title()} source landmark: {landmarks[side]['method']} at {[round(v, 3) for v in landmarks[side]['position']]}, confidence {landmarks[side]['confidence']:.2f}")
         logger("Closing ear canals")
-        ear_canal_closer(left_ear, mode=settings.ear_canal_closer_mode).export(left_closed)
-        ear_canal_closer(right_ear, mode=settings.ear_canal_closer_mode).export(right_closed)
+        for side, ear in ears.items():
+            if ear is not None:
+                ear_canal_closer(ear, mode=settings.ear_canal_closer_mode).export(closed[side])
         logger("Creating dummy head mesh")
         head(
             left_ear,
@@ -102,81 +106,42 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             max_height_scale=settings.head_max_height_scale,
         )
         logger("Cutting ear areas from dummy head")
-        if settings.ear_cut_mode == "projected_footprint":
-            cut_eararea_projected_footprint(trimesh.load(dummy_head, process=False), trimesh.load(left_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, projected_cut_margin=settings.projected_cut_margin, side="left").export(left_cut)
-            cut_eararea_projected_footprint(trimesh.load(dummy_head, process=False), trimesh.load(right_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, projected_cut_margin=settings.projected_cut_margin, side="right").export(right_cut)
-        else:
-            cut_eararea(trimesh.load(dummy_head, process=False), trimesh.load(left_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="left", mode=settings.ear_cut_mode).export(left_cut)
-            cut_eararea(trimesh.load(dummy_head, process=False), trimesh.load(right_closed, process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side="right", mode=settings.ear_cut_mode).export(right_cut)
+        for side, ear in ears.items():
+            if ear is None:
+                continue
+            if settings.ear_cut_mode == "projected_footprint":
+                result = cut_eararea_projected_footprint(trimesh.load(dummy_head, process=False), trimesh.load(closed[side], process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, projected_cut_margin=settings.projected_cut_margin, side=side)
+            else:
+                result = cut_eararea(trimesh.load(dummy_head, process=False), trimesh.load(closed[side], process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side=side, mode=settings.ear_cut_mode)
+            result.export(cut[side])
         from .src.head_stitcher import head_stitcher
-        logger("Stitching left ear to head")
-        head_stitcher(head_path=str(left_cut), ear_path=str(left_closed), export_path=str(left_stitched), seam_smoothing_iterations=settings.seam_smoothing_iterations, seam_smoothing_factor=settings.seam_smoothing_factor)
-        logger("Stitching right ear to head")
-        head_stitcher(head_path=str(right_cut), ear_path=str(right_closed), export_path=str(right_stitched), seam_smoothing_iterations=settings.seam_smoothing_iterations, seam_smoothing_factor=settings.seam_smoothing_factor)
-        logger("Grading left head mesh; this can take several minutes")
-        subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-v', '-g', str(settings.mesh_gamma_left), '-h', str(settings.mesh_hole_size), '-s', 'left', '-i', str(left_stitched), '-o', str(left_graded)], check=True)
-        logger("Grading right head mesh; this can take several minutes")
-        subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-v', '-g', str(settings.mesh_gamma_right), '-h', str(settings.mesh_hole_size), '-s', 'right', '-i', str(right_stitched), '-o', str(right_graded)], check=True)
-        if left_project.exists():
-            shutil.rmtree(left_project)
-        if right_project.exists():
-            shutil.rmtree(right_project)
+        for side, ear in ears.items():
+            if ear is None:
+                continue
+            logger(f"Stitching {side} ear to head")
+            head_stitcher(head_path=str(cut[side]), ear_path=str(closed[side]), export_path=str(stitched[side]), seam_smoothing_iterations=settings.seam_smoothing_iterations, seam_smoothing_factor=settings.seam_smoothing_factor)
+            logger(f"Grading {side} head mesh; this can take several minutes")
+            gamma = settings.mesh_gamma_left if side == "left" else settings.mesh_gamma_right
+            subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-v', '-g', str(gamma), '-h', str(settings.mesh_hole_size), '-s', side, '-i', str(stitched[side]), '-o', str(graded[side])], check=True)
+        for project in [projects_dir / "Left", projects_dir / "Right"] if output_dir is not None else []:
+            if project.exists():
+                shutil.rmtree(project)
         for project in legacy_projects:
             if project.exists():
                 shutil.rmtree(project)
-        left_project.parent.mkdir(parents=True, exist_ok=True)
+        if output_dir is not None:
+            projects_dir.mkdir(parents=True, exist_ok=True)
         from .src.material_assign_and_mesh2input import main as mesh2input_main
-        logger("Creating left Mesh2HRTF project")
-        mesh2input_main(
-            head=str(left_graded),
-            title=settings.title,
-            source_type=settings.source_type_left,
-            filepath=str(left_project),
-            mesh2hrtf_path=str(mesh2hrtf_path),
-            evaluationGrids=str(evaluation_grid),
-            method=settings.method,
-            pictures=settings.pictures,
-            reference=settings.reference,
-            computeHRIRs=settings.compute_hrirs,
-            unit=settings.unit,
-            speedOfSound=settings.speed_of_sound,
-            densityOfMedium=settings.air_density,
-            materialSearchPaths=settings.material_search_paths,
-            min_frequency=settings.min_frequency,
-            max_frequency=settings.max_frequency,
-            frequency_vector_type=settings.frequency_vector_type,
-            frequency_step_count=settings.frequency_step_count,
-            tolerance=settings.source_assignment_tolerance,
-            source_position=left_landmark["position"],
-            source_assignment_mode=settings.source_assignment_mode,
-            source_face_count=settings.source_assignment_face_count,
-        )
-        logger("Creating right Mesh2HRTF project")
-        mesh2input_main(
-            head=str(right_graded),
-            title=settings.title,
-            source_type=settings.source_type_right,
-            filepath=str(right_project),
-            mesh2hrtf_path=str(mesh2hrtf_path),
-            evaluationGrids=str(evaluation_grid),
-            method=settings.method,
-            pictures=settings.pictures,
-            reference=settings.reference,
-            computeHRIRs=settings.compute_hrirs,
-            unit=settings.unit,
-            speedOfSound=settings.speed_of_sound,
-            densityOfMedium=settings.air_density,
-            materialSearchPaths=settings.material_search_paths,
-            min_frequency=settings.min_frequency,
-            max_frequency=settings.max_frequency,
-            frequency_vector_type=settings.frequency_vector_type,
-            frequency_step_count=settings.frequency_step_count,
-            tolerance=settings.source_assignment_tolerance,
-            source_position=right_landmark["position"],
-            source_assignment_mode=settings.source_assignment_mode,
-            source_face_count=settings.source_assignment_face_count,
-        )
-        logger(f"Preprocessing completed: {left_project} and {right_project}")
+        projects = {"left": left_project, "right": right_project}
+        source_types = {"left": settings.source_type_left, "right": settings.source_type_right}
+        for side, ear in ears.items():
+            if ear is None:
+                continue
+            logger(f"Creating {side} Mesh2HRTF project")
+            mesh2input_main(
+                head=str(graded[side]), title=settings.title, source_type=source_types[side], filepath=str(projects[side]), mesh2hrtf_path=str(mesh2hrtf_path), evaluationGrids=str(evaluation_grid), method=settings.method, pictures=settings.pictures, reference=settings.reference, computeHRIRs=settings.compute_hrirs, unit=settings.unit, speedOfSound=settings.speed_of_sound, densityOfMedium=settings.air_density, materialSearchPaths=settings.material_search_paths, min_frequency=settings.min_frequency, max_frequency=settings.max_frequency, frequency_vector_type=settings.frequency_vector_type, frequency_step_count=settings.frequency_step_count, tolerance=settings.source_assignment_tolerance, source_position=landmarks[side]["position"], source_assignment_mode=settings.source_assignment_mode, source_face_count=settings.source_assignment_face_count,
+            )
+        logger(f"Preprocessing completed: {', '.join(str(projects[side]) for side, ear in ears.items() if ear is not None)}")
     finally:
         if cleanup is not None:
             cleanup.cleanup()
@@ -184,8 +149,8 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
 
 def preprocess():
     parser = argparse.ArgumentParser(description="Run preprocessing from ears to Mesh2HRTF project folders.")
-    parser.add_argument('--left-path', type=str, required=True, help='Path to left ear mesh.')
-    parser.add_argument('--right-path', type=str, required=True, help='Path to right ear mesh.')
+    parser.add_argument('--left-path', type=str, help='Path to left ear mesh.')
+    parser.add_argument('--right-path', type=str, help='Path to right ear mesh.')
     parser.add_argument('--export-path', type=str, required=True,  help='Path to exported Mesh2HRTF Project.')
     parser.add_argument('--mesh-grading-executable', type=str, required=True, help='Path to the mesh_grading executable.')
     parser.add_argument('--Mesh2HRTF-path', type=str, required=True, help='Path to the location of the mesh2hrtf directory.')
@@ -199,6 +164,8 @@ def preprocess():
     parser.add_argument('--frequency-step-count', type=int, default=129)
     parser.add_argument('--source-face-count', type=int, default=6)
     args = parser.parse_args()
+    if not args.left_path and not args.right_path:
+        parser.error('At least one ear mesh path is required.')
     settings = PreprocessingConfig(
         ear_cut_clearance_scale=args.ear_cut_clearance_scale,
         ear_cut_mode=args.ear_cut_mode,

@@ -43,8 +43,8 @@ def executable_name(name: str) -> str:
 class PathsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    left_ear: Path = Field(default_factory=lambda: worktree_root() / "Data" / "03 Automatic Stitching" / "Input" / "Target STL Left" / "NH130.stl")
-    right_ear: Path = Field(default_factory=lambda: worktree_root() / "Data" / "03 Automatic Stitching" / "Input" / "Target STL Right" / "NH130.stl")
+    left_ear: Path | None = Field(default_factory=lambda: worktree_root() / "Data" / "03 Automatic Stitching" / "Input" / "Target STL Left" / "NH130.stl")
+    right_ear: Path | None = Field(default_factory=lambda: worktree_root() / "Data" / "03 Automatic Stitching" / "Input" / "Target STL Right" / "NH130.stl")
     output_dir: Path = Field(default_factory=lambda: worktree_root() / "Data" / "temp" / "GuiRun")
     external_deps_dir: Path = Field(default_factory=lambda: worktree_root() / "External")
     mesh2hrtf_path: Path | None = None
@@ -119,6 +119,11 @@ class NumCalcConfig(BaseModel):
 
     enabled: bool = False
     mode: Literal["local", "slurm"] = "local"
+    adaptive_fmm_length: bool = True
+    max_ram_load_gb: float | None = None
+    ram_safety_factor: float = 1.05
+    starting_order: Literal["high", "low", "alternate"] = "alternate"
+    wait_time: int = 15
     max_instances: int = 1
     max_cpu_load: int = 90
     memory: str = "64G"

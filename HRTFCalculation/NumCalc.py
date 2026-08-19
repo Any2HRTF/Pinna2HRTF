@@ -1,0 +1,96 @@
+from __future__ import annotations
+
+import os
+import shlex
+import shutil
+import stat
+import subprocess
+import tempfile
+import time
+from pathlib import Path
+
+import mesh2hrtf as m2h
+import psutil
+
+
+def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: float | None, ram_safety_factor: float, max_cpu_load: int, max_instances: int, starting_order: str, wait_time: int, adaptive_fmm_length: bool) -> None:
+    wrapper_dir: Path | None = None
+    executable = numcalc_path
+    if executable.is_dir():
+        candidate = executable / ("NumCalc.exe" if os.name == "nt" else "NumCalc")
+        if candidate.exists():
+            executable = candidate
+    adaptive_arguments = []
+    if adaptive_fmm_length and os.name != "nt":
+        wrapper_dir = Path(tempfile.mkdtemp(prefix="pinna2hrtf-numcalc-"))
+        executable = wrapper_dir / "NumCalc"
+        executable.write_text(f"#!/bin/sh\nexec {shlex.quote(str(numcalc_path))} -adapt_fmmlength \"$@\"\n", encoding="utf-8")
+        executable.chmod(executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    elif adaptive_fmm_length:
+        adaptive_arguments = ["-adapt_fmmlength"]
+    try:
+        projects = [project_path] if (project_path / "parameters.json").exists() else [path for path in project_path.iterdir() if (path / "parameters.json").exists()]
+        if not projects:
+            raise FileNotFoundError(f"No Mesh2HRTF projects found at {project_path}")
+        pending = []
+        for project in projects:
+            source_dirs = sorted(project.glob("NumCalc/source_*"))
+            for source_dir in source_dirs:
+                memory_file = source_dir / "Memory.txt"
+                if adaptive_fmm_length or not memory_file.exists():
+                    subprocess.run([str(executable), *adaptive_arguments, "-estimate_ram"], cwd=source_dir, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, check=True)
+                estimates = m2h.read_ram_estimates(str(source_dir))
+                for step, frequency, ram in estimates:
+                    output_dir = source_dir / "be.out" / f"be.{int(step)}"
+                    if not output_dir.exists():
+                        pending.append((float(ram), project, source_dir, int(step), frequency))
+        if starting_order == "high":
+            pending.sort(key=lambda item: item[0], reverse=True)
+        elif starting_order == "low":
+            pending.sort(key=lambda item: item[0])
+        else:
+            pending.sort(key=lambda item: item[0], reverse=True)
+            low_to_high = pending[::-1]
+            pending = [item for pair in zip(pending, low_to_high) for item in pair]
+            pending = list(dict.fromkeys(pending))
+        print(f"Running {len(pending)} unfinished frequency steps with adaptive FMM expansion length={adaptive_fmm_length}", flush=True)
+        total_ram = psutil.virtual_memory().total / 1073741824
+        ram_budget = max_ram_load_gb or total_ram
+        running = []
+        while pending or running:
+            finished = []
+            for item in running:
+                process, log_file, ram, project, step, frequency = item
+                return_code = process.poll()
+                if return_code is not None:
+                    log_file.close()
+                    if return_code != 0:
+                        raise RuntimeError(f"NumCalc failed for {project.name}, step {step}, frequency {frequency} Hz; see {log_file.name}")
+                    finished.append(item)
+            for item in finished:
+                running.remove(item)
+            while pending and len(running) < max_instances:
+                ram, project, source_dir, step, frequency = pending[0]
+                required_ram = ram * ram_safety_factor
+                used_ram = sum(item[2] * ram_safety_factor for item in running)
+                if used_ram + required_ram > ram_budget:
+                    break
+                if running and psutil.cpu_percent(interval=0.1) >= max_cpu_load:
+                    break
+                pending.pop(0)
+                log_path = source_dir / f"NC{step}-{step}_log.txt"
+                log_file = log_path.open("w", encoding="utf-8")
+                process = subprocess.Popen([str(executable), *adaptive_arguments, "-istart", str(step), "-iend", str(step)], cwd=source_dir, stdout=log_file, stderr=subprocess.STDOUT)
+                running.append((process, log_file, ram, project, step, frequency))
+                print(f"Started {project.name}, step {step}, {frequency:g} Hz, estimated {ram:.2f} GB", flush=True)
+            if pending and not running and pending[0][0] * ram_safety_factor > ram_budget:
+                raise MemoryError(f"The smallest pending NumCalc step requires {pending[0][0] * ram_safety_factor:.2f} GB, above the configured {ram_budget:.2f} GB budget")
+            if pending or running:
+                time.sleep(max(1, wait_time if running and len(running) == 1 and len(finished) == 0 else 1))
+    finally:
+        for process, log_file, _, _, _, _ in locals().get("running", []):
+            if process.poll() is None:
+                process.terminate()
+            log_file.close()
+        if wrapper_dir is not None:
+            shutil.rmtree(wrapper_dir, ignore_errors=True)

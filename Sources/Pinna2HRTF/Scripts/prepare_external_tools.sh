@@ -20,7 +20,12 @@ if [[ ! -x "$BIN/uv" ]]; then
   chmod +x "$BIN/uv"
 fi
 
-if [[ ! -x "$BIN/NumCalc" ]]; then
+NUMCALC_NEEDS_BUILD=true
+if [[ -x "$BIN/NumCalc" ]] && "$BIN/NumCalc" -h 2>/dev/null | grep -q -- "-adapt_fmmlength"; then
+  NUMCALC_NEEDS_BUILD=false
+fi
+
+if [[ "$NUMCALC_NEEDS_BUILD" == true ]]; then
   MESH2HRTF_SRC="$SRC/Mesh2HRTF"
   if [[ ! -d "$MESH2HRTF_SRC" ]]; then
     git clone --depth 1 https://github.com/Any2HRTF/Mesh2HRTF.git "$MESH2HRTF_SRC"
@@ -68,6 +73,10 @@ if [[ ! -x "$BIN/hrtf_mesh_grading" ]]; then
     ln -sf libpmp.1.2.1.dylib "$BIN/libpmp.dylib"
   fi
   chmod +x "$BIN/hrtf_mesh_grading"
+fi
+
+if [[ "$(uname -s)" == "Darwin" && -x "$BIN/hrtf_mesh_grading" && -f "$BIN/libpmp.1.2.1.dylib" ]]; then
+  install_name_tool -change "@rpath/libpmp.1.2.1.dylib" "@loader_path/libpmp.1.2.1.dylib" "$BIN/hrtf_mesh_grading"
 fi
 
 echo "$BIN"

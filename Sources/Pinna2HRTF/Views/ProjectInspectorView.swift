@@ -76,6 +76,7 @@ struct ProjectInspectorView: View {
                 SettingsDisclosure("NumCalc", systemImage: "cpu") {
                     LabeledTextField("Parallel instances", text: numcalcBinding(\.maxInstances))
                     LabeledTextField("CPU limit (%)", text: numcalcBinding(\.maxCPULoad))
+                    Toggle("Adaptive FMM expansion length", isOn: numcalcBoolBinding(\.adaptiveFmmLength))
                 }
                 SettingsDisclosure("Postprocessing", systemImage: "slider.horizontal.3") {
                     Toggle("Normalize HRTFs", isOn: postprocessingNormalizeBinding)
@@ -91,8 +92,11 @@ struct ProjectInspectorView: View {
     var requiredPanel: some View {
         VStack(alignment: .leading, spacing: 9) {
             LabeledTextField("Project name", text: projectStringBinding(\.name, refresh: false))
-            PathField("Left ear", text: projectStringBinding(\.leftEar), mode: .file)
-            PathField("Right ear", text: projectStringBinding(\.rightEar), mode: .file)
+            PathField("Left ear (optional)", text: projectStringBinding(\.leftEar), mode: .file)
+            PathField("Right ear (optional)", text: projectStringBinding(\.rightEar), mode: .file)
+            Text("Choose at least one ear mesh.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             PathField("Save location", text: projectStringBinding(\.saveLocation), mode: .directory)
         }
         .padding(10)
@@ -180,6 +184,13 @@ struct ProjectInspectorView: View {
     func numcalcBinding(_ keyPath: WritableKeyPath<NumCalcSettings, String>) -> Binding<String> {
         Binding(
             get: { store.selectedProject?.settings.numcalc[keyPath: keyPath] ?? "" },
+            set: { value in store.updateSelectedProject { $0.settings.numcalc[keyPath: keyPath] = value } }
+        )
+    }
+
+    func numcalcBoolBinding(_ keyPath: WritableKeyPath<NumCalcSettings, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { store.selectedProject?.settings.numcalc[keyPath: keyPath] ?? true },
             set: { value in store.updateSelectedProject { $0.settings.numcalc[keyPath: keyPath] = value } }
         )
     }

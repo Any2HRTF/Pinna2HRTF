@@ -4,13 +4,16 @@ enum ArtifactScanner {
     static func artifacts(for project: ProjectRecord) -> [Artifact] {
         let output = URL(fileURLWithPath: project.saveLocation)
         let settings = project.settings.inference
-        var next = [
-            Artifact(title: "Input left ear", url: URL(fileURLWithPath: project.leftEar)),
-            Artifact(title: "Input right ear", url: URL(fileURLWithPath: project.rightEar)),
-            Artifact(title: "Left simulation mesh", url: output.appendingPathComponent("intermediates/left/graded_head.ply")),
-            Artifact(title: "Right simulation mesh", url: output.appendingPathComponent("intermediates/right/graded_head.ply"))
-        ]
-        for pair in [("Generated left ear", output.appendingPathComponent(settings.predictionLeftFolder)), ("Generated right ear", output.appendingPathComponent(settings.predictionRightFolder))] {
+        var next: [Artifact] = []
+        if !project.leftEar.isEmpty {
+            next.append(Artifact(title: "Input left ear", url: URL(fileURLWithPath: project.leftEar)))
+            next.append(Artifact(title: "Left simulation mesh", url: output.appendingPathComponent("intermediates/left/graded_head.ply")))
+        }
+        if !project.rightEar.isEmpty {
+            next.append(Artifact(title: "Input right ear", url: URL(fileURLWithPath: project.rightEar)))
+            next.append(Artifact(title: "Right simulation mesh", url: output.appendingPathComponent("intermediates/right/graded_head.ply")))
+        }
+        for pair in [("Generated left ear", output.appendingPathComponent(settings.predictionLeftFolder), project.leftEar), ("Generated right ear", output.appendingPathComponent(settings.predictionRightFolder), project.rightEar)] where !pair.2.isEmpty {
             next.append(contentsOf: meshArtifacts(title: pair.0, folder: pair.1))
         }
         for plot in [
@@ -55,16 +58,31 @@ enum ArtifactScanner {
         return URL(fileURLWithPath: project.saveLocation).lastPathComponent
     }
 
+    static func numcalcStatus(for project: ProjectRecord) -> String {
+        let output = URL(fileURLWithPath: project.saveLocation)
+        let sides = [("Left", project.leftEar), ("Right", project.rightEar)].compactMap { side, ear in
+            ear.isEmpty ? nil : "\(side) \(numcalcCompleted(output.appendingPathComponent("Projects/\(side)")))/\(numcalcTotal(output.appendingPathComponent("Projects/\(side)")))"
+        }
+        return sides.isEmpty ? "NumCalc: no ear selected" : "NumCalc: " + sides.joined(separator: " · ")
+    }
+
     static func stageIsComplete(_ stage: Stage, project: ProjectRecord) -> Bool {
         let output = URL(fileURLWithPath: project.saveLocation)
         let settings = project.settings.inference
         switch stage {
         case .inference:
-            return containsMesh(output.appendingPathComponent(settings.predictionLeftFolder)) && containsMesh(output.appendingPathComponent(settings.predictionRightFolder))
+            if project.leftEar.isEmpty || project.rightEar.isEmpty { return true }
+            let leftDone = project.leftEar.isEmpty || containsMesh(output.appendingPathComponent(settings.predictionLeftFolder))
+            let rightDone = project.rightEar.isEmpty || containsMesh(output.appendingPathComponent(settings.predictionRightFolder))
+            return leftDone && rightDone
         case .preprocessing:
-            return fileExists(output.appendingPathComponent("Projects/Left/parameters.json")) && fileExists(output.appendingPathComponent("Projects/Right/parameters.json")) && fileExists(output.appendingPathComponent("intermediates/left/graded_head.ply")) && fileExists(output.appendingPathComponent("intermediates/right/graded_head.ply"))
+            let leftDone = project.leftEar.isEmpty || (fileExists(output.appendingPathComponent("Projects/Left/parameters.json")) && fileExists(output.appendingPathComponent("intermediates/left/graded_head.ply")))
+            let rightDone = project.rightEar.isEmpty || (fileExists(output.appendingPathComponent("Projects/Right/parameters.json")) && fileExists(output.appendingPathComponent("intermediates/right/graded_head.ply")))
+            return leftDone && rightDone
         case .numcalc:
-            return containsNumCalcOutput(output.appendingPathComponent("Projects/Left/NumCalc/source_1/be.out")) && containsNumCalcOutput(output.appendingPathComponent("Projects/Right/NumCalc/source_1/be.out"))
+            let leftDone = project.leftEar.isEmpty || containsNumCalcOutput(output.appendingPathComponent("Projects/Left/NumCalc/source_1/be.out"))
+            let rightDone = project.rightEar.isEmpty || containsNumCalcOutput(output.appendingPathComponent("Projects/Right/NumCalc/source_1/be.out"))
+            return leftDone && rightDone
         case .postprocessing:
             return containsSOFA(output.appendingPathComponent("HRTF"))
         }
@@ -87,5 +105,15 @@ enum ArtifactScanner {
     static func containsNumCalcOutput(_ url: URL) -> Bool {
         guard let files = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else { return false }
         return files.contains { $0.lastPathComponent.hasPrefix("be.") }
+    }
+
+    static func numcalcCompleted(_ project: URL) -> Int {
+        guard let files = try? FileManager.default.contentsOfDirectory(at: project.appendingPathComponent("NumCalc/source_1/be.out"), includingPropertiesForKeys: nil) else { return 0 }
+        return files.filter { $0.lastPathComponent.hasPrefix("be.") && Int($0.lastPathComponent.dropFirst(3)) != nil }.count
+    }
+
+    static func numcalcTotal(_ project: URL) -> Int {
+        guard let data = try? Data(contentsOf: project.appendingPathComponent("parameters.json")), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let total = object["numFrequencies"] as? Int else { return 0 }
+        return total
     }
 }

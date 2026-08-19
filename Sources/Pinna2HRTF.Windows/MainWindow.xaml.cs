@@ -13,6 +13,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Media.Media3D;
+using System.Windows.Threading;
 using Forms = System.Windows.Forms;
 
 namespace Pinna2HRTF.Windows;
@@ -36,12 +37,14 @@ public partial class MainWindow : Window
     string packageRoot = "";
     string appData = "";
     string registryPath = "";
+    readonly DispatcherTimer statusTimer = new() { Interval = TimeSpan.FromSeconds(2) };
 
     public MainWindow()
     {
         InitializeComponent();
         ProjectList.ItemsSource = projects;
         ArtifactPicker.ItemsSource = artifacts;
+        statusTimer.Tick += (_, _) => RefreshNumCalcStatus();
     }
 
     void WindowLoaded(object sender, RoutedEventArgs e)
@@ -56,10 +59,13 @@ public partial class MainWindow : Window
         LoadSelectedProject();
         RefreshArtifacts();
         RefreshEnvironmentStatus();
+        statusTimer.Start();
+        RefreshNumCalcStatus();
     }
 
     void WindowClosing(object? sender, CancelEventArgs e)
     {
+        statusTimer.Stop();
         foreach (var process in runningProcesses.Values.ToList())
             TryTerminate(process);
         Persist();
@@ -174,6 +180,7 @@ public partial class MainWindow : Window
         MeshGammaRightBox.Text = project?.Settings.Preprocessing.MeshGammaRight ?? "0.2";
         MaxInstancesBox.Text = project?.Settings.NumCalc.MaxInstances ?? "1";
         MaxCpuLoadBox.Text = project?.Settings.NumCalc.MaxCpuLoad ?? "90";
+        AdaptiveFmmLengthBox.IsChecked = project?.Settings.NumCalc.AdaptiveFmmLength ?? true;
         UvBox.Text = environment.UvExecutable;
         NumCalcBox.Text = environment.NumCalcExecutable;
         MeshGradingBox.Text = environment.MeshGradingExecutable;
@@ -240,6 +247,7 @@ public partial class MainWindow : Window
         project.Settings.Preprocessing.MeshGammaRight = MeshGammaRightBox.Text;
         project.Settings.NumCalc.MaxInstances = MaxInstancesBox.Text;
         project.Settings.NumCalc.MaxCpuLoad = MaxCpuLoadBox.Text;
+        project.Settings.NumCalc.AdaptiveFmmLength = AdaptiveFmmLengthBox.IsChecked == true;
         Persist();
         RefreshProjectList();
         RefreshArtifacts();
@@ -350,15 +358,23 @@ public partial class MainWindow : Window
         var settings = project.Settings.Inference;
         var list = new List<Artifact>
         {
-            new("Input left ear", project.LeftEar),
-            new("Input right ear", project.RightEar),
-            new("Left simulation mesh", Path.Combine(output, "intermediates", "left", "graded_head.ply")),
-            new("Right simulation mesh", Path.Combine(output, "intermediates", "right", "graded_head.ply")),
             new("Horizontal HRTF plot", Path.Combine(output, "HRTF", "HRIR_EvalGrid_merged_3D_horizontal_plane.jpeg")),
             new("Median HRTF plot", Path.Combine(output, "HRTF", "HRIR_EvalGrid_merged_3D_median_plane.jpeg"))
         };
-        AddMeshFolder(list, "Generated left ear", Path.Combine(output, settings.PredictionLeftFolder));
-        AddMeshFolder(list, "Generated right ear", Path.Combine(output, settings.PredictionRightFolder));
+        if (!string.IsNullOrWhiteSpace(project.LeftEar))
+        {
+            list.Add(new("Input left ear", project.LeftEar));
+            list.Add(new("Left simulation mesh", Path.Combine(output, "intermediates", "left", "graded_head.ply")));
+        }
+        if (!string.IsNullOrWhiteSpace(project.RightEar))
+        {
+            list.Add(new("Input right ear", project.RightEar));
+            list.Add(new("Right simulation mesh", Path.Combine(output, "intermediates", "right", "graded_head.ply")));
+        }
+        if (!string.IsNullOrWhiteSpace(project.LeftEar))
+            AddMeshFolder(list, "Generated left ear", Path.Combine(output, settings.PredictionLeftFolder));
+        if (!string.IsNullOrWhiteSpace(project.RightEar))
+            AddMeshFolder(list, "Generated right ear", Path.Combine(output, settings.PredictionRightFolder));
         return list;
     }
 
@@ -540,9 +556,9 @@ public partial class MainWindow : Window
             AppendLog($"{project.Name} already has a running task.");
             return;
         }
-        if (string.IsNullOrWhiteSpace(project.LeftEar) || string.IsNullOrWhiteSpace(project.RightEar) || string.IsNullOrWhiteSpace(project.SaveLocation))
+        if ((string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar)) || string.IsNullOrWhiteSpace(project.SaveLocation))
         {
-            AppendLog("Select a left ear mesh, right ear mesh, and save location before running.");
+            AppendLog("Select at least one ear mesh and a save location before running.");
             return;
         }
         try
@@ -660,8 +676,10 @@ public partial class MainWindow : Window
         var prepared = Clone(project);
         if (prepared.InputHandling == InputHandling.Copy)
         {
-            prepared.LeftEar = CopyInput(project.LeftEar, Path.Combine(project.SaveLocation, "Input", "Left"));
-            prepared.RightEar = CopyInput(project.RightEar, Path.Combine(project.SaveLocation, "Input", "Right"));
+            if (!string.IsNullOrWhiteSpace(project.LeftEar))
+                prepared.LeftEar = CopyInput(project.LeftEar, Path.Combine(project.SaveLocation, "Input", "Left"));
+            if (!string.IsNullOrWhiteSpace(project.RightEar))
+                prepared.RightEar = CopyInput(project.RightEar, Path.Combine(project.SaveLocation, "Input", "Right"));
         }
         var config = Path.Combine(project.SaveLocation, ".pinna2hrtf_native_run.yaml");
         File.WriteAllText(config, Yaml(prepared), Encoding.UTF8);
@@ -690,8 +708,8 @@ public partial class MainWindow : Window
         var headRadius = preprocessing.UseCustomHeadRadius == true ? $"  head_radius: {YamlNumber(preprocessing.HeadRadius) ?? "0"}\n" : "";
         return $"""
 paths:
-  left_ear: {YamlScalar(project.LeftEar)}
-  right_ear: {YamlScalar(project.RightEar)}
+  left_ear: {YamlPath(project.LeftEar)}
+  right_ear: {YamlPath(project.RightEar)}
   output_dir: {YamlScalar(project.SaveLocation)}
   external_deps_dir: {YamlScalar(environment.ExternalDir)}
   numcalc_executable: {YamlScalar(environment.NumCalcExecutable)}
@@ -751,6 +769,7 @@ numcalc:
   mode: local
   max_instances: {numcalc.MaxInstances}
   max_cpu_load: {numcalc.MaxCpuLoad}
+  adaptive_fmm_length: {Bool(numcalc.AdaptiveFmmLength)}
 postprocessing:
   enabled: false
   output_sofa_dir: {YamlScalar(Path.Combine(output, "HRTF"))}
@@ -762,6 +781,7 @@ ui:
     }
 
     string YamlScalar(string value) => $"'{value.Replace("'", "''")}'";
+    string YamlPath(string value) => string.IsNullOrWhiteSpace(value) ? "null" : YamlScalar(value);
     string Bool(bool value) => value ? "true" : "false";
     string? YamlNumber(string? value) => double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _) ? value : null;
     string QuoteArgument(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
@@ -879,6 +899,46 @@ ui:
         EnvironmentStatusText.Text = $"{uv}; {numcalc}; {grading}";
     }
 
+    void RefreshNumCalcStatus()
+    {
+        var project = SelectedProject;
+        NumCalcStatusText.Text = project == null ? "NumCalc: no project" : NumCalcStatus(project);
+    }
+
+    string NumCalcStatus(ProjectRecord project)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(project.LeftEar))
+            parts.Add($"Left {NumCalcCompleted(project, "Left")}/{NumCalcTotal(project, "Left")}");
+        if (!string.IsNullOrWhiteSpace(project.RightEar))
+            parts.Add($"Right {NumCalcCompleted(project, "Right")}/{NumCalcTotal(project, "Right")}");
+        return parts.Count == 0 ? "NumCalc: no ear selected" : "NumCalc: " + string.Join(" · ", parts);
+    }
+
+    int NumCalcCompleted(ProjectRecord project, string side)
+    {
+        var folder = Path.Combine(project.SaveLocation, "Projects", side, "NumCalc", "source_1", "be.out");
+        if (!Directory.Exists(folder))
+            return 0;
+        return Directory.GetDirectories(folder, "be.*").Count(path => int.TryParse(Path.GetFileName(path)[3..], out _));
+    }
+
+    int NumCalcTotal(ProjectRecord project, string side)
+    {
+        var parameters = Path.Combine(project.SaveLocation, "Projects", side, "parameters.json");
+        if (!File.Exists(parameters))
+            return 0;
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(parameters));
+            return document.RootElement.TryGetProperty("numFrequencies", out var value) && value.TryGetInt32(out var total) ? total : 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     string ArtifactSummary(ProjectRecord project)
     {
         if (StageIsComplete(Stage.Postprocessing, project))
@@ -896,11 +956,11 @@ ui:
     {
         var output = project.SaveLocation;
         if (stage == Stage.Inference)
-            return ContainsMesh(Path.Combine(output, project.Settings.Inference.PredictionLeftFolder)) && ContainsMesh(Path.Combine(output, project.Settings.Inference.PredictionRightFolder));
+            return string.IsNullOrWhiteSpace(project.LeftEar) || string.IsNullOrWhiteSpace(project.RightEar) || (ContainsMesh(Path.Combine(output, project.Settings.Inference.PredictionLeftFolder)) && ContainsMesh(Path.Combine(output, project.Settings.Inference.PredictionRightFolder)));
         if (stage == Stage.Preprocessing)
-            return File.Exists(Path.Combine(output, "Projects", "Left", "parameters.json")) && File.Exists(Path.Combine(output, "Projects", "Right", "parameters.json")) && File.Exists(Path.Combine(output, "intermediates", "left", "graded_head.ply")) && File.Exists(Path.Combine(output, "intermediates", "right", "graded_head.ply"));
+            return (string.IsNullOrWhiteSpace(project.LeftEar) || (File.Exists(Path.Combine(output, "Projects", "Left", "parameters.json")) && File.Exists(Path.Combine(output, "intermediates", "left", "graded_head.ply")))) && (string.IsNullOrWhiteSpace(project.RightEar) || (File.Exists(Path.Combine(output, "Projects", "Right", "parameters.json")) && File.Exists(Path.Combine(output, "intermediates", "right", "graded_head.ply"))));
         if (stage == Stage.Numcalc)
-            return ContainsNumCalcOutput(Path.Combine(output, "Projects", "Left", "NumCalc", "source_1", "be.out")) && ContainsNumCalcOutput(Path.Combine(output, "Projects", "Right", "NumCalc", "source_1", "be.out"));
+            return (string.IsNullOrWhiteSpace(project.LeftEar) || ContainsNumCalcOutput(Path.Combine(output, "Projects", "Left", "NumCalc", "source_1", "be.out"))) && (string.IsNullOrWhiteSpace(project.RightEar) || ContainsNumCalcOutput(Path.Combine(output, "Projects", "Right", "NumCalc", "source_1", "be.out")));
         if (stage == Stage.Postprocessing)
             return Directory.Exists(Path.Combine(output, "HRTF")) && Directory.GetFiles(Path.Combine(output, "HRTF"), "*.sofa").Any();
         return false;
@@ -1005,6 +1065,7 @@ class NumCalcSettings
 {
     public string MaxInstances { get; set; } = "1";
     public string MaxCpuLoad { get; set; } = "90";
+    public bool AdaptiveFmmLength { get; set; } = true;
 }
 
 static class MeshLoader

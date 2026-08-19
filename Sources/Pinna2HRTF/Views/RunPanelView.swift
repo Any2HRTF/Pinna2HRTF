@@ -4,6 +4,7 @@ struct RunPanelView: View {
     @ObservedObject var store: AppStore
 
     var body: some View {
+        TimelineView(.periodic(from: .now, by: 2)) { _ in
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Run")
@@ -11,6 +12,12 @@ struct RunPanelView: View {
                 Spacer()
                 Text(summary)
                     .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if let project = store.selectedProject {
+                Text(ArtifactScanner.numcalcStatus(for: project))
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -37,6 +44,7 @@ struct RunPanelView: View {
                     .frame(maxWidth: .infinity)
             }
             .disabled(selectedProjectIsRunning)
+        }
         }
         .buttonStyle(.bordered)
         .controlSize(.regular)

@@ -24,11 +24,7 @@ struct PipelineCommands: Commands {
             }
             .keyboardShortcut("n", modifiers: [.command])
         }
-        CommandMenu("Project") {
-            Button("New Project") {
-                commands?.createProject()
-            }
-
+        CommandGroup(after: .newItem) {
             Button("Remove Project") {
                 commands?.removeProject()
             }
