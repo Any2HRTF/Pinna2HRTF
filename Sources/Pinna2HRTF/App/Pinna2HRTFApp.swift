@@ -12,6 +12,19 @@ struct Pinna2HRTFApp: App {
         }
         .windowStyle(.titleBar)
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Pinna2HRTF") {
+                    let alert = NSAlert()
+                    alert.icon = NSApp.applicationIconImage
+                    alert.messageText = "Pinna2HRTF"
+                    alert.informativeText = "Version 0.1.0\n© 2026 Any2HRTF\n\nA desktop pipeline for ear-mesh preprocessing, Pinna2HRTF inference, Mesh2HRTF simulation, and SOFA export.\n\nProject: Any2HRTF / Pinna2HRTF\nhttps://github.com/Any2HRTF/Pinna2HRTF"
+                    alert.addButton(withTitle: "OK")
+                    alert.addButton(withTitle: "Open Project Website")
+                    if alert.runModal() == .alertSecondButtonReturn, let url = URL(string: "https://github.com/Any2HRTF/Pinna2HRTF") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
             PipelineCommands()
         }
     }
@@ -31,13 +44,6 @@ final class Pinna2HRTFAppDelegate: NSObject, NSApplicationDelegate {
     private func installMenuItems() {
         DispatchQueue.main.async {
             guard let mainMenu = NSApp.mainMenu else { return }
-            if let appMenu = mainMenu.items.first?.submenu {
-                let existingAboutItems = appMenu.items.filter { item in item.title.hasPrefix("About ") }
-                existingAboutItems.forEach { item in appMenu.removeItem(item) }
-                let aboutItem = NSMenuItem(title: "About Pinna2HRTF", action: #selector(Self.showAbout(_:)), keyEquivalent: "")
-                aboutItem.target = self
-                appMenu.insertItem(aboutItem, at: 0)
-            }
             let helpMenuItem = mainMenu.items.first(where: { $0.title == "Help" }) ?? NSMenuItem(title: "Help", action: nil, keyEquivalent: "")
             if helpMenuItem.submenu == nil {
                 helpMenuItem.submenu = NSMenu(title: "Help")
@@ -52,18 +58,6 @@ final class Pinna2HRTFAppDelegate: NSObject, NSApplicationDelegate {
                 helpItem.target = self
                 helpMenu.addItem(helpItem)
             }
-        }
-    }
-
-    @objc private func showAbout(_ sender: Any?) {
-        let alert = NSAlert()
-        alert.icon = NSApp.applicationIconImage
-        alert.messageText = "Pinna2HRTF"
-        alert.informativeText = "Version 0.1.0\n© 2026 Any2HRTF\n\nA desktop pipeline for ear-mesh preprocessing, Pinna2HRTF inference, Mesh2HRTF simulation, and SOFA export.\n\nProject: Any2HRTF / Pinna2HRTF\nhttps://github.com/Any2HRTF/Pinna2HRTF"
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Open Project Website")
-        if alert.runModal() == .alertSecondButtonReturn, let url = URL(string: "https://github.com/Any2HRTF/Pinna2HRTF") {
-            NSWorkspace.shared.open(url)
         }
     }
 
