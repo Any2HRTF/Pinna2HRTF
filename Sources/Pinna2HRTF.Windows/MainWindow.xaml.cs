@@ -287,6 +287,82 @@ public partial class MainWindow : Window
 
     void CreateProjectClicked(object sender, RoutedEventArgs e) => CreateProject();
 
+    void ImportProjectClicked(object sender, RoutedEventArgs e) => ImportProject();
+
+    void ImportProject()
+    {
+        using var dialog = new Forms.FolderBrowserDialog
+        {
+            Description = "Choose an existing Pinna2HRTF project folder.",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = false
+        };
+        if (dialog.ShowDialog(this) == Forms.DialogResult.OK)
+            ImportProject(dialog.SelectedPath);
+    }
+
+    void ImportProject(string folder)
+    {
+        var project = NewProject(projects.Count + 1);
+        project.Name = new DirectoryInfo(folder).Name;
+        project.LeftEar = ImportedMesh(folder, "Left");
+        project.RightEar = ImportedMesh(folder, "Right");
+        project.SaveLocation = folder;
+        project.InputHandling = InputHandling.Reference;
+        foreach (var configName in new[] { ".pinna2hrtf_native_run.yaml", "pipeline.yaml" })
+        {
+            var configPath = Path.Combine(folder, configName);
+            if (!File.Exists(configPath))
+                continue;
+            var section = "";
+            foreach (var line in File.ReadLines(configPath))
+            {
+                if (!line.StartsWith(" ") && line.EndsWith(":"))
+                    section = line[..^1];
+                var setting = line.Trim();
+                if (section == "inference" && (setting == "enabled: false" || setting == "use_predictions_for_preprocessing: false"))
+                    project.Settings.Inference.UsePredictionsForPreprocessing = false;
+            }
+        }
+        projects.Add(project);
+        failedStages[project.Id] = [];
+        ProjectList.SelectedItem = project;
+        Persist();
+        RefreshProjectList();
+        RefreshArtifacts();
+        var completed = Stage.GetValues().Where(stage => StageIsComplete(stage, project)).Select(stage => stage.Title).ToList();
+        AppendLog($"Imported project folder {folder}. Completed stages: {(completed.Count == 0 ? "none detected" : string.Join(", ", completed))}");
+    }
+
+    string ImportedMesh(string folder, string side)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(folder, "Input", side),
+            Path.Combine(folder, $"Target STL {side}"),
+            Path.Combine(folder, $"ICP STL {side}"),
+            Path.Combine(folder, $"Prediction STL {side}")
+        };
+        foreach (var candidate in candidates)
+        {
+            if (!Directory.Exists(candidate))
+                continue;
+            var files = Directory.EnumerateFiles(candidate).Where(IsMesh).OrderBy(path => path).ToList();
+            var exact = files.FirstOrDefault(path => string.Equals(Path.GetFileNameWithoutExtension(path), side, StringComparison.OrdinalIgnoreCase));
+            if (exact != null)
+                return exact;
+            if (files.Count > 0)
+                return files[0];
+        }
+        foreach (var extension in new[] { ".stl", ".ply" })
+        {
+            var candidate = Path.Combine(folder, side + extension);
+            if (File.Exists(candidate))
+                return candidate;
+        }
+        return "";
+    }
+
     void CreateProject()
     {
         var project = NewProject(projects.Count + 1);
@@ -1088,8 +1164,9 @@ ui:
     {
         var folder = Path.Combine(project.SaveLocation, "Projects", side, "NumCalc", "source_1", "be.out");
         if (!Directory.Exists(folder))
-            return 0;
-        return Directory.GetDirectories(folder, "be.*").Count(path => int.TryParse(Path.GetFileName(path)[3..], out _));
+            return ContainsOutput2HRTF(Path.Combine(project.SaveLocation, "Projects", side, "Output2HRTF")) ? NumCalcTotal(project, side) : 0;
+        var completed = Directory.GetDirectories(folder, "be.*").Count(path => int.TryParse(Path.GetFileName(path)[3..], out _));
+        return completed > 0 ? completed : ContainsOutput2HRTF(Path.Combine(project.SaveLocation, "Projects", side, "Output2HRTF")) ? NumCalcTotal(project, side) : 0;
     }
 
     int NumCalcTotal(ProjectRecord project, string side)
@@ -1125,14 +1202,16 @@ ui:
     {
         var output = project.SaveLocation;
         if (stage == Stage.Inference)
-            return InferenceIsAutomatic(project) && ContainsMesh(Path.Combine(output, project.Settings.Inference.PredictionLeftFolder)) && ContainsMesh(Path.Combine(output, project.Settings.Inference.PredictionRightFolder));
+            return !project.Settings.Inference.UsePredictionsForPreprocessing || (InferenceIsAutomatic(project) && ContainsMesh(Path.Combine(output, project.Settings.Inference.PredictionLeftFolder)) && ContainsMesh(Path.Combine(output, project.Settings.Inference.PredictionRightFolder)));
         if (stage == Stage.Preprocessing)
             return (string.IsNullOrWhiteSpace(project.LeftEar) || (File.Exists(Path.Combine(output, "Projects", "Left", "parameters.json")) && File.Exists(Path.Combine(output, "intermediates", "left", "graded_head.ply")))) && (string.IsNullOrWhiteSpace(project.RightEar) || (File.Exists(Path.Combine(output, "Projects", "Right", "parameters.json")) && File.Exists(Path.Combine(output, "intermediates", "right", "graded_head.ply"))));
         if (stage == Stage.Numcalc)
         {
             var leftTotal = NumCalcTotal(project, "Left");
             var rightTotal = NumCalcTotal(project, "Right");
-            return (string.IsNullOrWhiteSpace(project.LeftEar) || (leftTotal > 0 && NumCalcCompleted(project, "Left") >= leftTotal)) && (string.IsNullOrWhiteSpace(project.RightEar) || (rightTotal > 0 && NumCalcCompleted(project, "Right") >= rightTotal));
+            var leftDone = string.IsNullOrWhiteSpace(project.LeftEar) || (leftTotal > 0 && NumCalcCompleted(project, "Left") >= leftTotal) || ContainsOutput2HRTF(Path.Combine(output, "Projects", "Left", "Output2HRTF"));
+            var rightDone = string.IsNullOrWhiteSpace(project.RightEar) || (rightTotal > 0 && NumCalcCompleted(project, "Right") >= rightTotal) || ContainsOutput2HRTF(Path.Combine(output, "Projects", "Right", "Output2HRTF"));
+            return leftDone && rightDone;
         }
         if (stage == Stage.Postprocessing)
             return Directory.Exists(Path.Combine(output, "HRTF")) && Directory.GetFiles(Path.Combine(output, "HRTF"), "*.sofa").Any();
@@ -1140,6 +1219,7 @@ ui:
     }
 
     bool ContainsMesh(string folder) => Directory.Exists(folder) && Directory.GetFiles(folder).Any(IsMesh);
+    bool ContainsOutput2HRTF(string folder) => Directory.Exists(folder) && Directory.GetFiles(folder, "*.sofa").Any();
     bool IsMesh(string path) => string.Equals(Path.GetExtension(path), ".stl", StringComparison.OrdinalIgnoreCase) || string.Equals(Path.GetExtension(path), ".ply", StringComparison.OrdinalIgnoreCase);
 
     HashSet<Stage> FailedStages(Guid id)

@@ -74,6 +74,71 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         refreshArtifacts()
     }
 
+    func importProject() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Import"
+        panel.message = "Choose an existing Pinna2HRTF project folder."
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        importProject(from: folder)
+    }
+
+    func importProject(from folder: URL) {
+        var project = Defaults.newProject(packageRoot: packageURL, index: projects.count + 1)
+        project.name = folder.lastPathComponent
+        project.leftEar = importedMesh(in: folder, side: "Left")
+        project.rightEar = importedMesh(in: folder, side: "Right")
+        project.saveLocation = folder.path
+        project.inputHandling = .reference
+        for configName in [".pinna2hrtf_native_run.yaml", "pipeline.yaml"] {
+            let configURL = folder.appendingPathComponent(configName)
+            guard let config = try? String(contentsOf: configURL, encoding: .utf8) else { continue }
+            var section = ""
+            for line in config.components(separatedBy: .newlines) {
+                if !line.hasPrefix(" "), line.hasSuffix(":") {
+                    section = String(line.dropLast())
+                }
+                let setting = line.trimmingCharacters(in: .whitespaces)
+                if section == "inference" && (setting == "enabled: false" || setting == "use_predictions_for_preprocessing: false") {
+                    project.settings.inference.usePredictionsForPreprocessing = false
+                }
+            }
+        }
+        projects.append(project)
+        selectedProjectID = project.id
+        failedStagesByProject[project.id] = []
+        persist()
+        refreshArtifacts()
+        let completed = Stage.allCases.filter { ArtifactScanner.stageIsComplete($0, project: project) }.map(\.title)
+        let completedText = completed.isEmpty ? "none detected" : completed.joined(separator: ", ")
+        appendLog("Imported project folder \(folder.path). Completed stages: \(completedText)")
+    }
+
+    func importedMesh(in folder: URL, side: String) -> String {
+        let sideFolder = folder.appendingPathComponent("Input/\(side)")
+        let targetFolder = folder.appendingPathComponent("Target STL \(side)")
+        let inferenceFolder = folder.appendingPathComponent("Prediction STL \(side)")
+        let registrationFolder = folder.appendingPathComponent("ICP STL \(side)")
+        for candidate in [sideFolder, targetFolder, registrationFolder, inferenceFolder] {
+            guard let files = try? FileManager.default.contentsOfDirectory(at: candidate, includingPropertiesForKeys: nil) else { continue }
+            if let exact = files.first(where: { $0.deletingPathExtension().lastPathComponent.caseInsensitiveCompare(side) == .orderedSame && ["stl", "ply"].contains($0.pathExtension.lowercased()) }) {
+                return exact.path
+            }
+            if let mesh = files.first(where: { ["stl", "ply"].contains($0.pathExtension.lowercased()) }) {
+                return mesh.path
+            }
+        }
+        for name in [side, side.lowercased(), side.uppercased()] {
+            for suffix in ["stl", "ply"] {
+                let candidate = folder.appendingPathComponent("\(name).\(suffix)")
+                if FileManager.default.fileExists(atPath: candidate.path) { return candidate.path }
+            }
+        }
+        return ""
+    }
+
     func forgetSelectedProject() {
         guard let selectedProjectID else { return }
         runningProcesses[selectedProjectID]?.terminate()
@@ -169,6 +234,15 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let bounds = scene.rootNode.boundingBox
         let center = SCNVector3((bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2, (bounds.min.z + bounds.max.z) / 2)
         let maximumDimension = max(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z)
+        let darkMode = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        scene.background.contents = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
+        if let microphone = microphonePosition(for: url) {
+            let marker = SCNSphere(radius: max(maximumDimension * 0.006, 0.35))
+            marker.firstMaterial?.diffuse.contents = NSColor.systemOrange
+            let markerNode = SCNNode(geometry: marker)
+            markerNode.position = microphone
+            scene.rootNode.addChildNode(markerNode)
+        }
         let distance = max(maximumDimension * 1.7, 1)
         let targetNode = SCNNode()
         targetNode.position = center
@@ -196,6 +270,25 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         selectedImage = nil
         selectedScene = scene
         appendLog("Opened \(url.path)")
+    }
+
+    func microphonePosition(for meshURL: URL) -> SCNVector3? {
+        guard meshURL.lastPathComponent.caseInsensitiveCompare("graded_head.ply") == .orderedSame, let project = selectedProject else { return nil }
+        let side: String
+        if meshURL.path.lowercased().contains("/left/") {
+            side = "Left"
+        } else if meshURL.path.lowercased().contains("/right/") {
+            side = "Right"
+        } else {
+            return nil
+        }
+        let parametersURL = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Projects/\(side)/parameters.json")
+        guard let data = try? Data(contentsOf: parametersURL), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let values = object["sourceCenter"] as? [NSNumber], values.count == 3 else { return nil }
+        return SCNVector3(Float(values[0].doubleValue * 1000), Float(values[1].doubleValue * 1000), Float(values[2].doubleValue * 1000))
+    }
+
+    func updateSceneBackground(darkMode: Bool) {
+        selectedScene.background.contents = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
     }
 
     func openImage(_ url: URL) {

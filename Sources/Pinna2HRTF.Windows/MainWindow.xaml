@@ -19,9 +19,11 @@
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*"/>
             <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="Auto"/>
           </Grid.ColumnDefinitions>
           <TextBlock Text="Projects" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/>
           <Button Grid.Column="1" Content="New" Click="CreateProjectClicked"/>
+          <Button Grid.Column="2" Content="Import" Click="ImportProjectClicked" Margin="8,0,0,0"/>
         </Grid>
         <ListBox x:Name="ProjectList" Margin="10,0,10,10" BorderThickness="0" SelectionChanged="ProjectSelectionChanged" DisplayMemberPath="DisplayTitle"/>
       </DockPanel>

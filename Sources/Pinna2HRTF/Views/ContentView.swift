@@ -32,6 +32,7 @@ struct ContentView: View {
             canStopProject: selectedProjectIsRunning,
             canResetProject: selectedProject != nil && !selectedProjectIsRunning,
             createProject: { store.createProject() },
+            importProject: { store.importProject() },
             removeProject: { store.forgetSelectedProject() },
             runNextStage: { store.runNextStage() },
             runStage: { store.run(stage: $0) },

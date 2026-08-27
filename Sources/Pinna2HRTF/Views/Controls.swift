@@ -15,15 +15,31 @@ struct SettingsDisclosure<Content: View>: View {
     }
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            VStack(alignment: .leading, spacing: 9) {
-                content()
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.snappy) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "chevron.right")
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .frame(width: 18, height: 18)
+                    Label(title, systemImage: systemImage)
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .padding(.top, 8)
-            .padding(.leading, 2)
-        } label: {
-            Label(title, systemImage: systemImage)
-                .font(.subheadline.weight(.semibold))
+            .buttonStyle(.plain)
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 9) {
+                    content()
+                }
+                .padding(.top, 8)
+                .padding(.leading, 2)
+            }
         }
         .padding(10)
         .background(.background, in: RoundedRectangle(cornerRadius: 10))

@@ -37,6 +37,12 @@ struct ProjectSidebarView: View {
                     Image(systemName: "plus")
                 }
                 .help("New Project")
+                Button {
+                    store.importProject()
+                } label: {
+                    Image(systemName: "folder.badge.plus")
+                }
+                .help("Import Project Folder")
                 Button(role: .destructive) {
                     store.forgetSelectedProject()
                 } label: {

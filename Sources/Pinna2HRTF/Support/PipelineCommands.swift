@@ -6,6 +6,7 @@ struct PipelineCommandContext {
     var canStopProject: Bool
     var canResetProject: Bool
     var createProject: () -> Void
+    var importProject: () -> Void
     var removeProject: () -> Void
     var runNextStage: () -> Void
     var runStage: (Stage) -> Void
@@ -23,6 +24,10 @@ struct PipelineCommands: Commands {
                 commands?.createProject()
             }
             .keyboardShortcut("n", modifiers: [.command])
+            Button("Import Project…") {
+                commands?.importProject()
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
         }
         CommandGroup(after: .newItem) {
             Button("Remove Project") {

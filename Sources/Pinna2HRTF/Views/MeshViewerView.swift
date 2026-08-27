@@ -4,6 +4,7 @@ import SceneKit
 struct MeshViewerView: View {
     @ObservedObject var store: AppStore
     @Binding var logExpanded: Bool
+    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,6 +37,11 @@ struct MeshViewerView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    if store.selectedMesh?.lastPathComponent.caseInsensitiveCompare("graded_head.ply") == .orderedSame {
+                        Text("Orange marker: microphone position")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
                 }
                 Spacer()
                 Menu {
@@ -56,14 +62,28 @@ struct MeshViewerView: View {
             Divider()
             ZStack {
                 Rectangle()
-                    .fill(.background)
+                    .fill(colorScheme == .dark ? Color(nsColor: NSColor(calibratedWhite: 0.12, alpha: 1)) : Color(nsColor: NSColor(calibratedWhite: 0.93, alpha: 1)))
                 if let image = store.selectedImage {
                     Image(nsImage: image)
                         .resizable()
                         .scaledToFit()
                         .padding(18)
+                } else if store.selectedMesh == nil {
+                    VStack(spacing: 10) {
+                        Image(systemName: "cube.transparent")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.secondary)
+                        Text("Select an artifact")
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
                     SceneView(scene: store.selectedScene, options: [.allowsCameraControl, .autoenablesDefaultLighting])
+                        .onAppear {
+                            store.updateSceneBackground(darkMode: colorScheme == .dark)
+                        }
+                        .onChange(of: colorScheme) { newColorScheme in
+                            store.updateSceneBackground(darkMode: newColorScheme == .dark)
+                        }
                 }
             }
             .frame(maxHeight: .infinity)
