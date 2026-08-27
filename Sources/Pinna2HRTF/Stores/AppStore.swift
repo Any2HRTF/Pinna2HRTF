@@ -169,7 +169,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let bounds = scene.rootNode.boundingBox
         let center = SCNVector3((bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2, (bounds.min.z + bounds.max.z) / 2)
         let maximumDimension = max(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z)
-        let distance = max(maximumDimension * 1.55, 1)
+        let distance = max(maximumDimension * 1.7, 1)
         let targetNode = SCNNode()
         targetNode.position = center
         scene.rootNode.addChildNode(targetNode)
@@ -182,6 +182,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         cameraNode.position = SCNVector3(center.x, center.y + frontDirection * distance, center.z + maximumDimension * 0.12)
         let cameraConstraint = SCNLookAtConstraint(target: targetNode)
         cameraConstraint.isGimbalLockEnabled = true
+        cameraConstraint.worldUp = SCNVector3(0, 0, 1)
         cameraNode.constraints = [cameraConstraint]
         scene.rootNode.addChildNode(cameraNode)
         let light = SCNLight()

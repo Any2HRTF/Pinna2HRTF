@@ -18,6 +18,7 @@ if [[ -z "$APP_VERSION" ]]; then
   exit 1
 fi
 UV_BIN="$EXTERNAL_ROOT/bin/uv"
+export UV_CACHE_DIR="/private/tmp/pinna2hrtf-uv-cache"
 SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
 SDK_SWIFT_INTERFACE="$(find "$SDK_PATH/usr/lib/swift/Swift.swiftmodule" -name '*-apple-macos.swiftinterface' -print -quit)"
 SDK_SWIFT_VERSION="$(sed -n 's|// swift-compiler-version: Apple Swift version \([^ ]*\).*|\1|p' "$SDK_SWIFT_INTERFACE")"
