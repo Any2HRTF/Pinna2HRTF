@@ -68,7 +68,7 @@ cp "$RIGHT_MESH" "$OUT/Target STL Right/right.stl"
 Run inference:
 
 ```sh
-uv run hrtf-inference \
+uv run Pinna2HRTF inference \
   --data_dir "$OUT" \
   --configuration "HRTFCalculation/Inference/resources/Local 3 Views.yaml" \
   --model_checkpoint "HRTFCalculation/Inference/resources/Local 3 Views.pth"
@@ -79,7 +79,7 @@ Inference is optional. If you already have the left and right meshes you want to
 Run preprocessing. Provide one or both mesh paths; only the configured sides become Mesh2HRTF projects:
 
 ```sh
-uv run hrtf-preprocessing \
+uv run Pinna2HRTF preprocessing \
   --left-path "$LEFT_MESH" \
   --right-path "$RIGHT_MESH" \
   --export-path "$OUT/project" \
@@ -107,14 +107,14 @@ rm -rf "$OUT/Projects/Left" "$OUT/Projects/Right"
 cp -R "$OUT/project-Left" "$OUT/Projects/Left"
 cp -R "$OUT/project-Right" "$OUT/Projects/Right"
 
-uv run hrtf-numcalc \
+uv run Pinna2HRTF numcalc \
   --project-path "$OUT/Projects" \
   --numcalc-path "External/bin/NumCalc" \
   --max-instances 1 \
   --max-cpu-load 90
 ```
 
-`hrtf-numcalc` is resumable. If one side or frequency already finished, Mesh2HRTF skips it.
+`Pinna2HRTF numcalc` is resumable. If one side or frequency already finished, Mesh2HRTF skips it.
 The local runner uses NumCalc RAM estimates to schedule frequency steps and enables adaptive FMM expansion lengths by default. This follows Kreuzer and Kasess, who show that adapting the expansion length to the local cluster radii avoids instability from non-uniform head meshes and can reduce memory and computation time. Use `--no-adaptive-fmm-length` only for an explicit baseline comparison.
 
 The underlying clustering and expansion behavior is discussed in [Effect of different clustering approaches on the multilevel fast multipole method for the Helmholtz equation](https://arxiv.org/html/2606.31771v1).
@@ -122,7 +122,7 @@ The underlying clustering and expansion behavior is discussed in [Effect of diff
 Generate SOFA files and plots:
 
 ```sh
-uv run hrtf-sofa \
+uv run Pinna2HRTF sofa \
   --left-project "$OUT/Projects/Left" \
   --right-project "$OUT/Projects/Right" \
   --output-dir "$OUT/HRTF" \
@@ -143,11 +143,11 @@ runs/example/HRTF/HRIR_Default_merged_3D_median_plane.jpeg
 There is also a YAML-based runner for app integration and scripted staged runs:
 
 ```sh
-uv run hrtf-run-config --write-template pinna2hrtf.yaml
-uv run hrtf-run-config --config pinna2hrtf.yaml --stage inference
-uv run hrtf-run-config --config pinna2hrtf.yaml --stage preprocessing
-uv run hrtf-run-config --config pinna2hrtf.yaml --stage numcalc
-uv run hrtf-run-config --config pinna2hrtf.yaml --stage postprocessing
+uv run Pinna2HRTF run-config --write-template pinna2hrtf.yaml
+uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage inference
+uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage preprocessing
+uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage numcalc
+uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage postprocessing
 ```
 
 Use this when you prefer to keep all stage settings in one file. The stage-by-stage CLI commands above are the recommended workflow.

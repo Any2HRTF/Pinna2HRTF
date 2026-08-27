@@ -31,12 +31,7 @@ dependencies = [
 ]
 
 [project.scripts]
-hrtf-preprocessing = "HRTFCalculation.Preprocessing:preprocess"
-hrtf-inference = "HRTFCalculation.Inference.inference_stl:cli"
-hrtf-postprocessing = "HRTFCalculation.Postprocessing.postprocessing:cli"
-hrtf-run-config = "HRTFCalculation.RunConfig:cli"
-hrtf-numcalc = "HRTFCalculation.RunConfig:numcalc_cli"
-hrtf-sofa = "HRTFCalculation.RunConfig:sofa_cli"
+Pinna2HRTF = "HRTFCalculation.CLI:cli"
 
 [tool.setuptools.packages.find]
 where = ["."]

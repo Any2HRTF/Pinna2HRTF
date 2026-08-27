@@ -645,8 +645,8 @@ public partial class MainWindow : Window
             var bundledPython = BundledPythonExecutable();
             var executable = bundledPython ?? (File.Exists(environment.UvExecutable) ? environment.UvExecutable : "uv");
             var arguments = bundledPython != null
-                ? $"-m HRTFCalculation.RunConfig --config {QuoteArgument(config)} --stage {stage.Value}"
-                : $"run --no-sync python -m HRTFCalculation.RunConfig --config {QuoteArgument(config)} --stage {stage.Value}";
+                ? $"-m HRTFCalculation.CLI {stage.Value} --config {QuoteArgument(config)}"
+                : $"run --no-sync python -m HRTFCalculation.CLI {stage.Value} --config {QuoteArgument(config)}";
             var process = new Process();
             process.StartInfo = new ProcessStartInfo
             {

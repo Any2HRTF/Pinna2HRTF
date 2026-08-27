@@ -238,11 +238,11 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let process = Process()
         if Defaults.isPackagedApp {
             process.executableURL = runtimePythonURL
-            process.arguments = ["-m", "HRTFCalculation.RunConfig", "--config", configURL.path, "--stage", stage.rawValue]
+            process.arguments = ["-m", "HRTFCalculation.CLI", stage.rawValue, "--config", configURL.path]
         } else {
             let bundledUV = FileManager.default.isExecutableFile(atPath: environment.uvExecutable)
             process.executableURL = bundledUV ? URL(fileURLWithPath: environment.uvExecutable) : URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = bundledUV ? ["run", "--no-sync", "python", "-m", "HRTFCalculation.RunConfig", "--config", configURL.path, "--stage", stage.rawValue] : ["uv", "run", "--no-sync", "python", "-m", "HRTFCalculation.RunConfig", "--config", configURL.path, "--stage", stage.rawValue]
+            process.arguments = bundledUV ? ["run", "--no-sync", "python", "-m", "HRTFCalculation.CLI", stage.rawValue, "--config", configURL.path] : ["uv", "run", "--no-sync", "python", "-m", "HRTFCalculation.CLI", stage.rawValue, "--config", configURL.path]
         }
         process.currentDirectoryURL = executionPackageURL
         process.environment = processEnvironment()
