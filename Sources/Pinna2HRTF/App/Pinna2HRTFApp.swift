@@ -24,6 +24,7 @@ final class Pinna2HRTFAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        installMenuItems()
         disableShowAllTabs()
     }
 
@@ -60,7 +61,7 @@ final class Pinna2HRTFAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showAbout(_ sender: Any?) {
         let options: [NSApplication.AboutPanelOptionKey: Any] = [
             .applicationName: "Pinna2HRTF",
-            .applicationVersion: "Version 0.1.0",
+            .applicationVersion: "Version 0.1.0 · © 2026 Any2HRTF",
             .credits: NSAttributedString(string: "A desktop pipeline for ear-mesh preprocessing, Pinna2HRTF inference, Mesh2HRTF simulation, and SOFA export.\n\nProject: Any2HRTF / Pinna2HRTF\nhttps://github.com/Any2HRTF/Pinna2HRTF")
         ]
         NSApp.orderFrontStandardAboutPanel(options)
