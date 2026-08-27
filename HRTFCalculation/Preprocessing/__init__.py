@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import trimesh
 import tempfile
 import subprocess
@@ -83,7 +84,8 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
         for side, ear in ears.items():
             if ear is None:
                 continue
-            landmarks[side] = estimate_ear_canal_position(ear, side=side)
+            source_position = settings.source_position_left if side == "left" else settings.source_position_right
+            landmarks[side] = {"position": list(source_position), "method": "configured", "confidence": 1.0} if source_position is not None else estimate_ear_canal_position(ear, side=side)
             with open(landmark_paths[side], "w") as f:
                 json.dump(landmarks[side], f, indent=2)
             logger(f"{side.title()} source landmark: {landmarks[side]['method']} at {[round(v, 3) for v in landmarks[side]['position']]}, confidence {landmarks[side]['confidence']:.2f}")
@@ -122,7 +124,9 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             head_stitcher(head_path=str(cut[side]), ear_path=str(closed[side]), export_path=str(stitched[side]), seam_smoothing_iterations=settings.seam_smoothing_iterations, seam_smoothing_factor=settings.seam_smoothing_factor)
             logger(f"Grading {side} head mesh; this can take several minutes")
             gamma = settings.mesh_gamma_left if side == "left" else settings.mesh_gamma_right
-            subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-v', '-g', str(gamma), '-h', str(settings.mesh_hole_size), '-s', side, '-i', str(stitched[side]), '-o', str(graded[side])], check=True)
+            grading_env = os.environ.copy()
+            grading_env["DYLD_LIBRARY_PATH"] = os.pathsep.join(filter(None, [str(Path(mesh_grading_executable).parent), grading_env.get("DYLD_LIBRARY_PATH")]))
+            subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-v', '-g', str(gamma), '-h', str(settings.mesh_hole_size), '-s', side, '-i', str(stitched[side]), '-o', str(graded[side])], check=True, env=grading_env)
         for project in [projects_dir / "Left", projects_dir / "Right"] if output_dir is not None else []:
             if project.exists():
                 shutil.rmtree(project)
@@ -141,6 +145,15 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             mesh2input_main(
                 head=str(graded[side]), title=settings.title, source_type=source_types[side], filepath=str(projects[side]), mesh2hrtf_path=str(mesh2hrtf_path), evaluationGrids=str(evaluation_grid), method=settings.method, pictures=settings.pictures, reference=settings.reference, computeHRIRs=settings.compute_hrirs, unit=settings.unit, speedOfSound=settings.speed_of_sound, densityOfMedium=settings.air_density, materialSearchPaths=settings.material_search_paths, min_frequency=settings.min_frequency, max_frequency=settings.max_frequency, frequency_vector_type=settings.frequency_vector_type, frequency_step_count=settings.frequency_step_count, tolerance=settings.source_assignment_tolerance, source_position=landmarks[side]["position"], source_assignment_mode=settings.source_assignment_mode, source_face_count=settings.source_assignment_face_count,
             )
+            if landmarks[side]["method"] == "configured":
+                parameters_path = projects[side] / "parameters.json"
+                with parameters_path.open("r", encoding="utf-8") as file:
+                    parameters = json.load(file)
+                unit_factor = {"m": 1.0, "dm": 0.1, "cm": 0.01, "mm": 0.001}[settings.unit]
+                parameters["sourceCenter"] = [coordinate * unit_factor for coordinate in landmarks[side]["position"]]
+                with parameters_path.open("w", encoding="utf-8") as file:
+                    json.dump(parameters, file, indent=4)
+                logger(f"Set {side} receiver position exactly to {parameters['sourceCenter']} m")
         logger(f"Preprocessing completed: {', '.join(str(projects[side]) for side, ear in ears.items() if ear is not None)}")
     finally:
         if cleanup is not None:

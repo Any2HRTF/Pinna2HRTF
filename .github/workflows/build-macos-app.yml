@@ -37,6 +37,7 @@ jobs:
           lipo -archs build/release/Pinna2HRTF.app/Contents/MacOS/Pinna2HRTF | grep -qw arm64
           file build/release/Pinna2HRTF.app/Contents/Resources/External/bin/NumCalc | grep -qw arm64
           file build/release/Pinna2HRTF.app/Contents/Resources/External/bin/hrtf_mesh_grading | grep -qw arm64
+          build/release/Pinna2HRTF.app/Contents/Resources/.venv/bin/python build/release/Pinna2HRTF.app/Contents/Resources/.venv/bin/Pinna2HRTF --help
 
       - name: Ad-hoc sign app
         run: codesign --force --deep --sign - build/release/Pinna2HRTF.app
@@ -94,6 +95,7 @@ jobs:
             "dist\windows\Pinna2HRTF\External\bin\hrtf_mesh_grading.exe",
             "dist\windows\Pinna2HRTF\External\src\Mesh2HRTF\mesh2hrtf\Mesh2Input\mesh2input.py",
             "dist\windows\Pinna2HRTF\.venv\Scripts\python.exe",
+            "dist\windows\Pinna2HRTF\.venv\Scripts\Pinna2HRTF.exe",
             "dist\windows\Pinna2HRTF\Python"
           )
           foreach ($path in $paths) {

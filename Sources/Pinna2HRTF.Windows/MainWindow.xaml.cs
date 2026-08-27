@@ -366,11 +366,14 @@ public partial class MainWindow : Window
     {
         var output = project.SaveLocation;
         var settings = project.Settings.Inference;
-        var list = new List<Artifact>
-        {
-            new("Horizontal HRTF plot", Path.Combine(output, "HRTF", "HRIR_EvalGrid_merged_3D_horizontal_plane.jpeg")),
-            new("Median HRTF plot", Path.Combine(output, "HRTF", "HRIR_EvalGrid_merged_3D_median_plane.jpeg"))
-        };
+        var list = new List<Artifact>();
+        var hrtfFolder = Path.Combine(output, "HRTF");
+        if (Directory.Exists(hrtfFolder))
+            foreach (var plot in Directory.EnumerateFiles(hrtfFolder).Where(path => new[] { ".jpeg", ".jpg", ".png" }.Contains(Path.GetExtension(path).ToLowerInvariant())).OrderBy(path => Path.GetFileName(path)))
+            {
+                var name = Path.GetFileNameWithoutExtension(plot);
+                list.Add(new(name.Contains("horizontal", StringComparison.OrdinalIgnoreCase) ? "Horizontal HRTF plot" : name.Contains("median", StringComparison.OrdinalIgnoreCase) ? "Median HRTF plot" : name, plot));
+            }
         if (!string.IsNullOrWhiteSpace(project.LeftEar))
         {
             list.Add(new("Input left ear", project.LeftEar));
@@ -642,11 +645,11 @@ public partial class MainWindow : Window
         {
             Directory.CreateDirectory(project.SaveLocation);
             var config = PrepareConfig(project);
-            var bundledPython = BundledPythonExecutable();
-            var executable = bundledPython ?? (File.Exists(environment.UvExecutable) ? environment.UvExecutable : "uv");
-            var arguments = bundledPython != null
-                ? $"-m HRTFCalculation.CLI {stage.Value} --config {QuoteArgument(config)}"
-                : $"run --no-sync python -m HRTFCalculation.CLI {stage.Value} --config {QuoteArgument(config)}";
+            var bundledCommand = BundledCommandExecutable();
+            var executable = bundledCommand ?? (File.Exists(environment.UvExecutable) ? environment.UvExecutable : "uv");
+            var arguments = bundledCommand != null
+                ? $"{stage.Value} --config {QuoteArgument(config)}"
+                : $"run --no-sync Pinna2HRTF {stage.Value} --config {QuoteArgument(config)}";
             var process = new Process();
             process.StartInfo = new ProcessStartInfo
             {
@@ -758,9 +761,9 @@ public partial class MainWindow : Window
         startInfo.Environment["PATH"] = Path.Combine(environment.ExternalDir, "bin") + Path.PathSeparator + (startInfo.Environment.TryGetValue("PATH", out var path) ? path : "");
     }
 
-    string? BundledPythonExecutable()
+    string? BundledCommandExecutable()
     {
-        var candidate = Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
+        var candidate = Path.Combine(packageRoot, ".venv", "Scripts", "Pinna2HRTF.exe");
         return File.Exists(candidate) ? candidate : null;
     }
 

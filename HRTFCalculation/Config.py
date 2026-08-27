@@ -113,6 +113,8 @@ class PreprocessingConfig(BaseModel):
     source_assignment_tolerance: float = 2.0
     source_assignment_mode: Literal["landmark", "legacy_axis"] = "landmark"
     source_assignment_face_count: int = Field(default=6, ge=1)
+    source_position_left: tuple[float, float, float] | None = None
+    source_position_right: tuple[float, float, float] | None = None
 
 
 class NumCalcConfig(BaseModel):

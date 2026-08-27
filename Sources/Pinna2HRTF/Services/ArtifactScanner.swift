@@ -16,14 +16,12 @@ enum ArtifactScanner {
         for pair in [("Generated left ear", output.appendingPathComponent(settings.predictionLeftFolder), project.leftEar), ("Generated right ear", output.appendingPathComponent(settings.predictionRightFolder), project.rightEar)] where !pair.2.isEmpty {
             next.append(contentsOf: meshArtifacts(title: pair.0, folder: pair.1))
         }
-        for plot in [
-            ("Horizontal HRTF plot", "HRTF/HRIR_EvalGrid_merged_3D_horizontal_plane.jpeg"),
-            ("Median HRTF plot", "HRTF/HRIR_EvalGrid_merged_3D_median_plane.jpeg")
-        ] {
-            let hrtfPlot = output.appendingPathComponent(plot.1)
-            if FileManager.default.fileExists(atPath: hrtfPlot.path) {
-                next.append(Artifact(title: plot.0, url: hrtfPlot))
-            }
+        let hrtfFolder = output.appendingPathComponent("HRTF")
+        let plots = (try? FileManager.default.contentsOfDirectory(at: hrtfFolder, includingPropertiesForKeys: nil)) ?? []
+        for plot in plots.filter({ ["jpeg", "jpg", "png"].contains($0.pathExtension.lowercased()) }).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            let name = plot.deletingPathExtension().lastPathComponent.lowercased()
+            let title = name.contains("horizontal") ? "Horizontal HRTF plot" : name.contains("median") ? "Median HRTF plot" : plot.deletingPathExtension().lastPathComponent
+            next.append(Artifact(title: title, url: plot))
         }
         return next
     }

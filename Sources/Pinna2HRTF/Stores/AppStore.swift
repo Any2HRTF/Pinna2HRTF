@@ -166,19 +166,30 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             node.geometry?.firstMaterial?.roughness.contents = 0.72
             scene.rootNode.addChildNode(node)
         }
+        let bounds = scene.rootNode.boundingBox
+        let center = SCNVector3((bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2, (bounds.min.z + bounds.max.z) / 2)
+        let maximumDimension = max(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z)
+        let distance = max(maximumDimension * 1.55, 1)
+        let targetNode = SCNNode()
+        targetNode.position = center
+        scene.rootNode.addChildNode(targetNode)
         let camera = SCNCamera()
         camera.zFar = 10_000
+        camera.fieldOfView = 38
         let cameraNode = SCNNode()
         cameraNode.camera = camera
-        cameraNode.position = SCNVector3(0, -280, 120)
-        cameraNode.eulerAngles = SCNVector3(Float.pi / 2.8, 0, 0)
+        let frontDirection: CGFloat = url.path.lowercased().contains("left") ? 1 : -1
+        cameraNode.position = SCNVector3(center.x, center.y + frontDirection * distance, center.z + maximumDimension * 0.12)
+        let cameraConstraint = SCNLookAtConstraint(target: targetNode)
+        cameraConstraint.isGimbalLockEnabled = true
+        cameraNode.constraints = [cameraConstraint]
         scene.rootNode.addChildNode(cameraNode)
         let light = SCNLight()
         light.type = .omni
         light.intensity = 900
         let lightNode = SCNNode()
         lightNode.light = light
-        lightNode.position = SCNVector3(0, -180, 220)
+        lightNode.position = cameraNode.position
         scene.rootNode.addChildNode(lightNode)
         selectedMesh = url
         selectedImage = nil
@@ -221,8 +232,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
         do {
             try prepareRuntimeProject()
-            if Defaults.isPackagedApp && !FileManager.default.fileExists(atPath: runtimePythonURL.path) {
-                appendLog("Python runtime is missing from the app bundle.")
+            if Defaults.isPackagedApp && !FileManager.default.fileExists(atPath: runtimeCommandURL.path) {
+                appendLog("Pinna2HRTF runtime is missing from the app bundle.")
                 return
             }
             let configURL = try PipelineConfigWriter.prepare(project: project, environment: environment)
@@ -238,11 +249,11 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let process = Process()
         if Defaults.isPackagedApp {
             process.executableURL = runtimePythonURL
-            process.arguments = ["-m", "HRTFCalculation.CLI", stage.rawValue, "--config", configURL.path]
+            process.arguments = [runtimeCommandURL.path, stage.rawValue, "--config", configURL.path]
         } else {
             let bundledUV = FileManager.default.isExecutableFile(atPath: environment.uvExecutable)
             process.executableURL = bundledUV ? URL(fileURLWithPath: environment.uvExecutable) : URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = bundledUV ? ["run", "--no-sync", "python", "-m", "HRTFCalculation.CLI", stage.rawValue, "--config", configURL.path] : ["uv", "run", "--no-sync", "python", "-m", "HRTFCalculation.CLI", stage.rawValue, "--config", configURL.path]
+            process.arguments = bundledUV ? ["run", "--no-sync", "Pinna2HRTF", stage.rawValue, "--config", configURL.path] : ["uv", "run", "--no-sync", "Pinna2HRTF", stage.rawValue, "--config", configURL.path]
         }
         process.currentDirectoryURL = executionPackageURL
         process.environment = processEnvironment()
@@ -414,6 +425,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         Defaults.runtimeProjectURL.appendingPathComponent(".venv/bin/python")
     }
 
+    var runtimeCommandURL: URL {
+        Defaults.runtimeProjectURL.appendingPathComponent(".venv/bin/Pinna2HRTF")
+    }
+
     func prepareRuntimeProject() throws {
         guard Defaults.isPackagedApp else { return }
         let runtime = Defaults.runtimeProjectURL
@@ -438,7 +453,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     var runtimeProjectIsReady: Bool {
         FileManager.default.fileExists(atPath: Defaults.runtimeProjectURL.appendingPathComponent("HRTFCalculation/RunConfig.py").path) &&
-        FileManager.default.isExecutableFile(atPath: runtimePythonURL.path)
+        FileManager.default.isExecutableFile(atPath: runtimePythonURL.path) &&
+        FileManager.default.isExecutableFile(atPath: runtimeCommandURL.path)
     }
 
     func copyPathToolsIntoEnvironment() {

@@ -3,9 +3,9 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mesh2ppm-hrtf-calculation-pipeline"
-version = "0.1.0"
-description = "Add your description here"
+name = "pinna2hrtf"
+version = "1.0.0"
+description = "Calculate individualized HRTFs from pinna meshes."
 readme = "README.md"
 requires-python = "==3.11.*"
 dependencies = [

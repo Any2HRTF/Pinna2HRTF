@@ -14,15 +14,32 @@ struct Pinna2HRTFApp: App {
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About Pinna2HRTF") {
-                    let alert = NSAlert()
-                    alert.icon = NSApp.applicationIconImage
-                    alert.messageText = "Pinna2HRTF"
-                    alert.informativeText = "Version 0.1.0\n© 2026 Any2HRTF\n\nA desktop pipeline for ear-mesh preprocessing, Pinna2HRTF inference, Mesh2HRTF simulation, and SOFA export.\n\nProject: Any2HRTF / Pinna2HRTF\nhttps://github.com/Any2HRTF/Pinna2HRTF"
-                    alert.addButton(withTitle: "OK")
-                    alert.addButton(withTitle: "Open Project Website")
-                    if alert.runModal() == .alertSecondButtonReturn, let url = URL(string: "https://github.com/Any2HRTF/Pinna2HRTF") {
-                        NSWorkspace.shared.open(url)
+                    let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 460, height: 420), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+                    panel.title = "About Pinna2HRTF"
+                    panel.isReleasedWhenClosed = false
+                    panel.contentView = NSHostingView(rootView: VStack(spacing: 14) {
+                        Image(nsImage: NSApp.applicationIconImage)
+                            .resizable()
+                            .frame(width: 128, height: 128)
+                        Text("Pinna2HRTF")
+                            .font(.title.bold())
+                        Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0")")
+                        Text("© 2026 Any2HRTF")
+                            .foregroundStyle(.secondary)
+                        Text("A desktop pipeline for ear-mesh preprocessing, Pinna2HRTF inference, Mesh2HRTF simulation, and SOFA export.")
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 380)
+                        Button("Open Project Website") {
+                            NSWorkspace.shared.open(URL(string: "https://github.com/Any2HRTF/Pinna2HRTF")!)
+                        }
+                            .buttonStyle(.borderedProminent)
+                            .padding(.top, 8)
                     }
+                    .padding(28)
+                    .frame(width: 460, height: 392))
+                    appDelegate.aboutPanel = panel
+                    panel.center()
+                    panel.makeKeyAndOrderFront(nil)
                 }
             }
             PipelineCommands()
@@ -31,6 +48,8 @@ struct Pinna2HRTFApp: App {
 }
 
 final class Pinna2HRTFAppDelegate: NSObject, NSApplicationDelegate {
+    var aboutPanel: NSPanel?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMenuItems()
         disableShowAllTabs()

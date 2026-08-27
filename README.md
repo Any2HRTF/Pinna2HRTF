@@ -161,7 +161,7 @@ Native apps exist, but they are experimental wrappers around the same Python pip
 Build and run the packaged macOS app locally:
 
 ```sh
-./script/build_and_run.sh
+./Scripts/build_and_run.sh
 ```
 
 This prepares external tools, builds `build/release/Pinna2HRTF.app`, embeds Python dependencies, and launches the app.
