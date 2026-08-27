@@ -58,7 +58,12 @@ final class Pinna2HRTFAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showAbout(_ sender: Any?) {
-        NSApp.orderFrontStandardAboutPanel(sender)
+        let options: [NSApplication.AboutPanelOptionKey: Any] = [
+            .applicationName: "Pinna2HRTF",
+            .applicationVersion: "Version 0.1.0",
+            .credits: NSAttributedString(string: "A desktop pipeline for ear-mesh preprocessing, Pinna2HRTF inference, Mesh2HRTF simulation, and SOFA export.\n\nProject: Any2HRTF / Pinna2HRTF\nhttps://github.com/Any2HRTF/Pinna2HRTF")
+        ]
+        NSApp.orderFrontStandardAboutPanel(options)
     }
 
     @objc private func showHelp(_ sender: Any?) {
