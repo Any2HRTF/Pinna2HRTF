@@ -108,13 +108,23 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             max_height_scale=settings.head_max_height_scale,
         )
         logger("Cutting ear areas from dummy head")
+        dummy_head_mesh = trimesh.load(dummy_head, process=False)
+        closed_meshes = {
+            side: trimesh.load(closed[side], process=False)
+            for side, ear in ears.items()
+            if ear is not None
+        }
         for side, ear in ears.items():
             if ear is None:
                 continue
+            # cut_eararea mutates its head argument. Pass an independent copy
+            # so each ear is cut from a complete dummy head.
+            head_mesh = dummy_head_mesh.copy()
+            ear_mesh = closed_meshes[side]
             if settings.ear_cut_mode == "projected_footprint":
-                result = cut_eararea_projected_footprint(trimesh.load(dummy_head, process=False), trimesh.load(closed[side], process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, projected_cut_margin=settings.projected_cut_margin, side=side)
+                result = cut_eararea_projected_footprint(head_mesh, ear_mesh, ear_cut_clearance_scale=settings.ear_cut_clearance_scale, projected_cut_margin=settings.projected_cut_margin, side=side)
             else:
-                result = cut_eararea(trimesh.load(dummy_head, process=False), trimesh.load(closed[side], process=False), ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side=side, mode=settings.ear_cut_mode)
+                result = cut_eararea(head_mesh, ear_mesh, ear_cut_clearance_scale=settings.ear_cut_clearance_scale, side=side, mode=settings.ear_cut_mode)
             result.export(cut[side])
         from .src.head_stitcher import head_stitcher
         for side, ear in ears.items():

@@ -2,11 +2,15 @@ import os
 import shutil
 import argparse
 import glob
+import logging
 
 import pandas as pd
 import mesh2hrtf as m2h
 import numpy as np
 import sofar as sf
+
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_sofa_files(output_dir, level_offset_db):
@@ -41,7 +45,10 @@ def main(args):
         shutil.rmtree(f"{args.data_dir}/Prediction HRTF/")
         os.mkdir(f"{args.data_dir}/Prediction HRTF/")
 
-    ids = os.listdir(f"{args.data_dir}/Target Left/")
+    ids = [
+        entry for entry in os.listdir(f"{args.data_dir}/Target Left/")
+        if os.path.isdir(f"{args.data_dir}/Target Left/{entry}")
+    ]
     
     failed_ids = []
     all_ids = []
@@ -49,6 +56,7 @@ def main(args):
     for id in ids:
         all_ids.append(id)
         for scan_type in ["Target", "Prediction"]:
+            direction_failed = False
             try:
                 for direction in ["Left", "Right"]:
                     print(f"-------------------------------")
@@ -68,17 +76,20 @@ def main(args):
                                 "reason": "NumCalc non convergence"
                             }
                         )
-                    except:
-                        print(f"{direction} for {id} could not be calculated")
+                    except Exception as exc:
+                        direction_failed = True
+                        logger.exception("%s for %s (%s) could not be calculated", direction, id, scan_type)
                         failed_ids.append(
                             {
                                 "id": id,
                                 "direction": direction,
                                 "scan_type": scan_type,
-                                "reason": "other"
+                                "reason": f"{type(exc).__name__}: {exc}"
                             }
                         )
-                        
+                if direction_failed:
+                    continue
+
                 export_dir = f"{args.data_dir}/{scan_type} HRTF/{id}"
                 os.mkdir(export_dir)
                 m2h.merge_sofa_files(
@@ -87,18 +98,14 @@ def main(args):
                     )
                 for plane in ["horizontal", "median"]:
                     m2h.inspect_sofa_files(export_dir, pattern="HRIR", plot="3D", plane=plane)
-            except:
-                print(f"ID: {id} could not be calculated")
+            except Exception:
+                logger.exception("ID %s (%s) could not be merged", id, scan_type)
     
     failed_ids_df = pd.DataFrame(failed_ids)
     failed_ids_df.to_csv(f"{args.data_dir}/failed.csv")
 
     successfull_ids = []
-    try:
-        failed_ids = list(set(list(failed_ids_df["id"])))
-    except:
-        print("No failed calculations 🐩")
-        failed_ids = []
+    failed_ids = set(failed_ids_df["id"]) if not failed_ids_df.empty else set()
     for id in all_ids:
         if id in failed_ids:
             continue

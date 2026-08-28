@@ -7,6 +7,7 @@ import stat
 import subprocess
 import tempfile
 import time
+from collections import deque
 from pathlib import Path
 
 import mesh2hrtf as m2h
@@ -53,6 +54,7 @@ def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: f
             low_to_high = pending[::-1]
             pending = [item for pair in zip(pending, low_to_high) for item in pair]
             pending = list(dict.fromkeys(pending))
+        pending = deque(pending)
         print(f"Running {len(pending)} unfinished frequency steps with adaptive FMM expansion length={adaptive_fmm_length}", flush=True)
         total_ram = psutil.virtual_memory().total / 1073741824
         ram_budget = max_ram_load_gb or total_ram
@@ -77,7 +79,7 @@ def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: f
                     break
                 if running and psutil.cpu_percent(interval=0.1) >= max_cpu_load:
                     break
-                pending.pop(0)
+                pending.popleft()
                 log_path = source_dir / f"NC{step}-{step}_log.txt"
                 log_file = log_path.open("w", encoding="utf-8")
                 process = subprocess.Popen([str(executable), *adaptive_arguments, "-istart", str(step), "-iend", str(step)], cwd=source_dir, stdout=log_file, stderr=subprocess.STDOUT)
