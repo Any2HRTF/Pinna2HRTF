@@ -117,8 +117,6 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
         for side, ear in ears.items():
             if ear is None:
                 continue
-            # cut_eararea mutates its head argument. Pass an independent copy
-            # so each ear is cut from a complete dummy head.
             head_mesh = dummy_head_mesh.copy()
             ear_mesh = closed_meshes[side]
             if settings.ear_cut_mode == "projected_footprint":

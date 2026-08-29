@@ -38,7 +38,7 @@ def main(args):
     else:
         shutil.rmtree(f"{args.data_dir}/Target HRTF/")
         os.mkdir(f"{args.data_dir}/Target HRTF/")
-    
+
     if not os.path.isdir(f"{args.data_dir}/Prediction HRTF/"):
         os.mkdir(f"{args.data_dir}/Prediction HRTF/")
     else:
@@ -49,10 +49,10 @@ def main(args):
         entry for entry in os.listdir(f"{args.data_dir}/Target Left/")
         if os.path.isdir(f"{args.data_dir}/Target Left/{entry}")
     ]
-    
+
     failed_ids = []
     all_ids = []
-    
+
     for id in ids:
         all_ids.append(id)
         for scan_type in ["Target", "Prediction"]:
@@ -68,14 +68,15 @@ def main(args):
                         if args.normalize:
                             normalize_sofa_files(f"{path}/{id}/Output2HRTF", args.level_offset_db)
                         if os.path.isfile(f'{path}/{id}/Output2HRTF/report_issues.txt'):
+                            direction_failed = True
                             failed_ids.append(
-                            {
-                                "id": id,
-                                "direction": direction,
-                                "scan_type": scan_type,
-                                "reason": "NumCalc non convergence"
-                            }
-                        )
+                                {
+                                    "id": id,
+                                    "direction": direction,
+                                    "scan_type": scan_type,
+                                    "reason": "NumCalc non convergence"
+                                }
+                            )
                     except Exception as exc:
                         direction_failed = True
                         logger.exception("%s for %s (%s) could not be calculated", direction, id, scan_type)
@@ -98,9 +99,17 @@ def main(args):
                     )
                 for plane in ["horizontal", "median"]:
                     m2h.inspect_sofa_files(export_dir, pattern="HRIR", plot="3D", plane=plane)
-            except Exception:
+            except Exception as exc:
                 logger.exception("ID %s (%s) could not be merged", id, scan_type)
-    
+                failed_ids.append(
+                    {
+                        "id": id,
+                        "direction": "Binaural",
+                        "scan_type": scan_type,
+                        "reason": f"{type(exc).__name__}: {exc}"
+                    }
+                )
+
     failed_ids_df = pd.DataFrame(failed_ids)
     failed_ids_df.to_csv(f"{args.data_dir}/failed.csv")
 
@@ -111,10 +120,10 @@ def main(args):
             continue
         else:
             successfull_ids.append({"id": id})
-    
+
     pd.DataFrame(successfull_ids).to_csv(f"{args.data_dir}/successfull.csv")
     print(f"------------------------------------------------------------------------------")
-    print(f"\nPreprocessing completed for data in: {args.data_dir}\n")
+    print(f"\nPostprocessing completed for data in: {args.data_dir}\n")
     print(f"------------------------------------------------------------------------------")
 
 def parse_args():
