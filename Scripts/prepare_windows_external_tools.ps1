@@ -5,6 +5,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
+$mesh2hrtfCommit = "e45d0436a6fbeca3db13828cbae23ca109225be3"
 if ([string]::IsNullOrWhiteSpace($ExternalRoot)) {
     $ExternalRoot = Join-Path $root "External"
 }
@@ -35,6 +36,24 @@ if (-not (Test-Path $mesh2input)) {
     }
 }
 
+if (-not (Test-Path (Join-Path $mesh2hrtf ".git"))) {
+    throw "Mesh2HRTF source checkout is not a Git repository: $mesh2hrtf"
+}
+$git = Get-Command "git.exe" -ErrorAction SilentlyContinue
+if (-not $git) {
+    $git = Get-Command "git" -ErrorAction SilentlyContinue
+}
+if (-not $git) {
+    throw "git is required to verify Mesh2HRTF source revision."
+}
+& $git.Source -c safe.directory="$mesh2hrtf" -C $mesh2hrtf cat-file -e "$mesh2hrtfCommit^{commit}" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    & $git.Source -c safe.directory="$mesh2hrtf" -C $mesh2hrtf fetch --depth 1 origin $mesh2hrtfCommit
+    if ($LASTEXITCODE -ne 0) { throw "Could not fetch Mesh2HRTF commit $mesh2hrtfCommit." }
+}
+& $git.Source -c safe.directory="$mesh2hrtf" -C $mesh2hrtf checkout --detach $mesh2hrtfCommit
+if ($LASTEXITCODE -ne 0) { throw "Could not check out Mesh2HRTF commit $mesh2hrtfCommit." }
+
 $uv = Join-Path $bin "uv.exe"
 if (-not (Test-Path $uv)) {
     $uvCommand = Get-Command "uv.exe" -ErrorAction SilentlyContinue
@@ -44,66 +63,17 @@ if (-not (Test-Path $uv)) {
     Copy-Item $uvCommand.Source $uv -Force
 }
 
-$needsNumCalc = -not (Test-Path (Join-Path $bin "NumCalc.exe"))
-$needsGrading = -not (Test-Path (Join-Path $bin "hrtf_mesh_grading.exe"))
-if ($needsNumCalc -or $needsGrading) {
-    $svn = Get-Command "svn.exe" -ErrorAction SilentlyContinue
-    if (-not $svn) {
-        $svn = Get-Command "svn" -ErrorAction SilentlyContinue
-    }
-    if ($svn) {
-        if (Test-Path $tools) {
-            Remove-Item $tools -Recurse -Force
-        }
-        New-Item -ItemType Directory -Path $tools -Force | Out-Null
-
-        & $svn.Source export --force "https://svn.code.sf.net/p/mesh2hrtf-tools/code/NumCalc_WindowsExe" (Join-Path $tools "NumCalc_WindowsExe")
-        if ($LASTEXITCODE -ne 0) {
-            throw "Could not export NumCalc_WindowsExe from mesh2hrtf-tools."
-        }
-
-        & $svn.Source export --force "https://svn.code.sf.net/p/mesh2hrtf-tools/code/hrtf_mesh_grading_WindowsExe/bin" (Join-Path $tools "hrtf_mesh_grading_WindowsExe\bin")
-        if ($LASTEXITCODE -ne 0) {
-            throw "Could not export hrtf_mesh_grading_WindowsExe from mesh2hrtf-tools."
-        }
-
-        $numCalc = Get-ChildItem (Join-Path $tools "NumCalc_WindowsExe") -Recurse -File -Filter "NumCalc.exe" | Select-Object -First 1
-        if (-not $numCalc) {
-            throw "The downloaded Mesh2HRTF tools did not contain NumCalc.exe."
-        }
-        Copy-Item $numCalc.FullName (Join-Path $bin "NumCalc.exe") -Force
-
-        Get-ChildItem (Join-Path $tools "hrtf_mesh_grading_WindowsExe\bin") -File | ForEach-Object {
-            Copy-Item $_.FullName (Join-Path $bin $_.Name) -Force
-        }
-    } else {
-        $numCalcFiles = @(
-            "- run_NumCalc_instance.bat",
-            "NumCalc.exe",
-            "libgcc_s_seh-1.dll",
-            "libstdc++-6.dll",
-            "libwinpthread-1.dll",
-            "readme.txt"
-        )
-        foreach ($name in $numCalcFiles) {
-            $encoded = [Uri]::EscapeDataString($name).Replace("%2B", "%2B")
-            Invoke-WebRequest -Uri "https://sourceforge.net/p/mesh2hrtf-tools/code/ci/master/tree/NumCalc_WindowsExe/$encoded`?format=raw" -OutFile (Join-Path $bin $name) -UseBasicParsing
-        }
-
-        $gradingFiles = @(
-            "hrtf_mesh_grading.exe",
-            "libgcc_s_seh-1.dll",
-            "libpmp.dll",
-            "libpmp_vis.dll",
-            "libstdc++-6.dll",
-            "libwinpthread-1.dll",
-            "mpview.exe"
-        )
-        foreach ($name in $gradingFiles) {
-            $encoded = [Uri]::EscapeDataString($name).Replace("%2B", "%2B")
-            Invoke-WebRequest -Uri "https://sourceforge.net/p/mesh2hrtf-tools/code/ci/master/tree/hrtf_mesh_grading_WindowsExe/bin/$encoded`?format=raw" -OutFile (Join-Path $bin $name) -UseBasicParsing
-        }
-    }
+$numCalcPath = Join-Path $bin "NumCalc.exe"
+if (-not (Test-Path $numCalcPath)) {
+    throw "NumCalc.exe is not bundled. Build it from Mesh2HRTF commit $mesh2hrtfCommit and place it at $numCalcPath."
+}
+$help = (& $numCalcPath -h 2>&1 | Out-String)
+if ($LASTEXITCODE -ne 0 -or $help -notmatch "-adapt_fmmlength") {
+    throw "Bundled NumCalc.exe does not support the required Mesh2HRTF $mesh2hrtfCommit feature -adapt_fmmlength."
+}
+$revisionFile = Join-Path $bin "NumCalc.source-commit"
+if (-not (Test-Path $revisionFile) -or ((Get-Content -Raw $revisionFile).Trim() -ne $mesh2hrtfCommit)) {
+    throw "NumCalc.source-commit is missing or does not match Mesh2HRTF $mesh2hrtfCommit."
 }
 
 $required = @("uv.exe", "NumCalc.exe", "hrtf_mesh_grading.exe")

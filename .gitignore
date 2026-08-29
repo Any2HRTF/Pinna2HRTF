@@ -9,7 +9,7 @@ __pycache__/
 *.egg-info
 build/
 dist/
-External/
+External/*
 AppData/
 .appdata/
 .dotnet/
@@ -20,3 +20,8 @@ AppData/
 **/bin/
 **/obj/
 Test Data/
+!External/
+!External/bin/
+External/bin/*
+!External/bin/NumCalc.exe
+!External/bin/NumCalc.source-commit

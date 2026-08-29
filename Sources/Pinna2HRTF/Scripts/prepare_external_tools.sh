@@ -7,6 +7,7 @@ BIN="$EXTERNAL_ROOT/bin"
 SRC="$EXTERNAL_ROOT/src"
 NCPU="$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
 PMP_COMMIT="58283eee4749553345bf4eed74c87c889b03e06c"
+MESH2HRTF_COMMIT="e45d0436a6fbeca3db13828cbae23ca109225be3"
 
 mkdir -p "$BIN" "$SRC"
 
@@ -21,7 +22,7 @@ if [[ ! -x "$BIN/uv" ]]; then
 fi
 
 NUMCALC_NEEDS_BUILD=true
-if [[ -x "$BIN/NumCalc" ]] && "$BIN/NumCalc" -h 2>/dev/null | grep -q -- "-adapt_fmmlength"; then
+if [[ -x "$BIN/NumCalc" ]] && [[ -f "$BIN/NumCalc.source-commit" ]] && grep -q -- "$MESH2HRTF_COMMIT" "$BIN/NumCalc.source-commit" && "$BIN/NumCalc" -h 2>/dev/null | grep -q -- "-adapt_fmmlength"; then
   NUMCALC_NEEDS_BUILD=false
 fi
 
@@ -30,6 +31,14 @@ if [[ "$NUMCALC_NEEDS_BUILD" == true ]]; then
   if [[ ! -d "$MESH2HRTF_SRC" ]]; then
     git clone --depth 1 https://github.com/Any2HRTF/Mesh2HRTF.git "$MESH2HRTF_SRC"
   fi
+  if [[ ! -d "$MESH2HRTF_SRC/.git" ]]; then
+    echo "Mesh2HRTF source checkout is not a Git repository: $MESH2HRTF_SRC"
+    exit 1
+  fi
+  if ! git -C "$MESH2HRTF_SRC" cat-file -e "$MESH2HRTF_COMMIT^{commit}" 2>/dev/null; then
+    git -C "$MESH2HRTF_SRC" fetch --depth 1 origin "$MESH2HRTF_COMMIT"
+  fi
+  git -C "$MESH2HRTF_SRC" checkout --detach "$MESH2HRTF_COMMIT"
   if [[ ! -x "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/bin/NumCalc" ]]; then
     mkdir -p "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/bin"
     make -C "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/src" clean || true
@@ -37,6 +46,7 @@ if [[ "$NUMCALC_NEEDS_BUILD" == true ]]; then
   fi
   cp "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/bin/NumCalc" "$BIN/NumCalc"
   chmod +x "$BIN/NumCalc"
+  printf "%s\n" "$MESH2HRTF_COMMIT" > "$BIN/NumCalc.source-commit"
 fi
 
 if [[ ! -x "$BIN/hrtf_mesh_grading" ]]; then

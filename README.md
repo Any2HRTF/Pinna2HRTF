@@ -170,6 +170,8 @@ This prepares external tools, builds `build/release/Pinna2HRTF.app`, embeds Pyth
 
 Build the portable Windows app from Windows:
 
+The app bundles NumCalc built from Mesh2HRTF v1.3.0 (commit e45d0436a6fbeca3db13828cbae23ca109225be3); the Windows preparation script requires this bundled binary and does not use the obsolete SourceForge fallback. The macOS preparation script pins the same Mesh2HRTF revision.
+
 ```powershell
 .\Scripts\prepare_windows_external_tools.ps1
 .\Scripts\build_windows_port.ps1

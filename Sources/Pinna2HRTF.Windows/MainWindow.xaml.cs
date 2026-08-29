@@ -69,6 +69,27 @@ public partial class MainWindow : Window
         RefreshPipelineStatus();
     }
 
+    bool projectsExpanded = true;
+
+    void ProjectsToggleClicked(object sender, RoutedEventArgs e)
+    {
+        projectsExpanded = !projectsExpanded;
+        ProjectList.Visibility = projectsExpanded ? Visibility.Visible : Visibility.Collapsed;
+        ProjectsToggle.Content = projectsExpanded ? "‹" : "›";
+        ProjectsToggle.ToolTip = projectsExpanded ? "Collapse projects" : "Expand projects";
+    }
+
+    bool liveLogExpanded = true;
+
+    void LiveLogToggleClicked(object sender, RoutedEventArgs e)
+    {
+        liveLogExpanded = !liveLogExpanded;
+        LiveLogContent.Visibility = liveLogExpanded ? Visibility.Visible : Visibility.Collapsed;
+        LiveLogToggle.Content = liveLogExpanded ? "⌄" : "⌃";
+        if (LiveLogPanel.Parent is Grid grid && grid.RowDefinitions.Count > 2)
+            grid.RowDefinitions[2].Height = liveLogExpanded ? new GridLength(170) : GridLength.Auto;
+    }
+
     void WindowClosing(object? sender, CancelEventArgs e)
     {
         statusTimer.Stop();
@@ -159,7 +180,7 @@ public partial class MainWindow : Window
     void RefreshProjectList()
     {
         foreach (var project in projects)
-            project.DisplayTitle = $"{project.Name}  {ArtifactSummary(project)}";
+            project.StatusText = ArtifactSummary(project);
         ProjectList.Items.Refresh();
     }
 
@@ -297,7 +318,7 @@ public partial class MainWindow : Window
             UseDescriptionForTitle = true,
             ShowNewFolderButton = false
         };
-        if (dialog.ShowDialog(this) == Forms.DialogResult.OK)
+        if (dialog.ShowDialog() == Forms.DialogResult.OK)
             ImportProject(dialog.SelectedPath);
     }
 
@@ -1047,8 +1068,8 @@ ui:
 
     void ClearLogClicked(object sender, RoutedEventArgs e)
     {
+        e.Handled = true;
         LogText.Text = "";
-        LogSummaryText.Text = "Live Log";
     }
 
     void AppendLog(string? text)
@@ -1059,7 +1080,6 @@ ui:
         {
             LogText.AppendText((LogText.Text.Length == 0 ? "" : Environment.NewLine) + text);
             LogText.ScrollToEnd();
-            LogSummaryText.Text = text;
         }
         if (Dispatcher.CheckAccess())
             Append();
@@ -1078,7 +1098,7 @@ ui:
     void RefreshNumCalcStatus()
     {
         var project = SelectedProject;
-        NumCalcStatusText.Text = project == null ? "NumCalc: no project" : NumCalcStatus(project);
+        NumCalcStatusText.Text = project == null ? "No project selected" : NextStageSummary(project);
     }
 
     void RefreshPipelineStatus()
@@ -1089,6 +1109,7 @@ ui:
             BusyProgress.Visibility = Visibility.Collapsed;
             BusyStatusText.Text = "Ready";
             PipelineStatusText.Text = "No project selected";
+            RefreshStageStatus(null);
             return;
         }
         var stages = AutomaticStages(project);
@@ -1106,7 +1127,7 @@ ui:
             missing.Add("right-ear file");
         if (string.IsNullOrWhiteSpace(project.SaveLocation))
             missing.Add("save location");
-        if (BundledPythonExecutable() == null && !File.Exists(environment.UvExecutable))
+        if (!File.Exists(Path.Combine(packageRoot, ".venv", "Scripts", "python.exe")) && !File.Exists(environment.UvExecutable))
             missing.Add("Python runtime or uv");
         if (next == Stage.Inference)
         {
@@ -1145,6 +1166,28 @@ ui:
         if (failed.Count > 0)
             parts.Add($"Failed: {string.Join(", ", failed)}");
         PipelineStatusText.Text = string.Join("  ·  ", parts);
+        RefreshStageStatus(project);
+    }
+
+    void RefreshStageStatus(ProjectRecord? project)
+    {
+        var controls = new[] { InferenceStatusText, PreprocessingStatusText, NumCalcStageStatusText, PostprocessingStatusText };
+        var stages = Stage.GetValues();
+        for (var index = 0; index < stages.Length; index++)
+        {
+            if (project == null)
+            {
+                controls[index].Text = "—";
+                controls[index].Foreground = System.Windows.Media.Brushes.Gray;
+                continue;
+            }
+            var stage = stages[index];
+            var skipped = stage == Stage.Inference && !InferenceIsAutomatic(project);
+            var running = runningStages.TryGetValue(project.Id, out var active) && active == stage;
+            var failed = FailedStages(project.Id).Contains(stage);
+            controls[index].Text = skipped ? "Skipped" : running ? "Running…" : failed ? "Failed" : StageIsComplete(stage, project) ? "Done" : "Ready";
+            controls[index].Foreground = skipped ? System.Windows.Media.Brushes.Gray : running ? System.Windows.Media.Brushes.DarkOrange : failed ? System.Windows.Media.Brushes.Firebrick : StageIsComplete(stage, project) ? System.Windows.Media.Brushes.ForestGreen : System.Windows.Media.Brushes.Gray;
+        }
     }
 
     bool InferenceIsAutomatic(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing && !string.IsNullOrWhiteSpace(project.LeftEar) && !string.IsNullOrWhiteSpace(project.RightEar);
@@ -1193,9 +1236,20 @@ ui:
             return "Solved";
         if (StageIsComplete(Stage.Preprocessing, project))
             return "Projects ready";
+        if (!project.Settings.Inference.UsePredictionsForPreprocessing)
+            return "Inference skipped";
         if (StageIsComplete(Stage.Inference, project))
             return "Inference ready";
-        return string.IsNullOrWhiteSpace(project.SaveLocation) ? "" : Path.GetFileName(project.SaveLocation);
+        return NextStageSummary(project);
+    }
+
+    string NextStageSummary(ProjectRecord project)
+    {
+        var running = runningStages.TryGetValue(project.Id, out var active) ? active : null;
+        if (running != null)
+            return $"{running.Title}: Running";
+        var next = AutomaticStages(project).FirstOrDefault(stage => !StageIsComplete(stage, project));
+        return next == null ? "Complete" : $"{next.Title}: Ready";
     }
 
     bool StageIsComplete(Stage stage, ProjectRecord project)
@@ -1278,6 +1332,7 @@ class ProjectRecord
     public InputHandling InputHandling { get; set; } = InputHandling.Copy;
     public ProjectSettings Settings { get; set; } = new();
     [JsonIgnore] public string DisplayTitle { get; set; } = "";
+    [JsonIgnore] public string StatusText { get; set; } = "";
 }
 
 class ProjectSettings

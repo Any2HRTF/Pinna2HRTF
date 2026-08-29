@@ -27,7 +27,7 @@ dependencies = [
     "triangle==20250106",
     "trimesh>=4.6.3",
     "pybezierppm@git+https://github.com/Any2HRTF/PPM@cd8c224578808f5a729102068ceeed9d9ebe07dd",
-    "mesh2hrtf@git+https://github.com/Any2HRTF/Mesh2HRTF@703323980a7f8d6690c884bc2b678e8524c56c88",
+    "mesh2hrtf@git+https://github.com/Any2HRTF/Mesh2HRTF@e45d0436a6fbeca3db13828cbae23ca109225be3",
 ]
 
 [project.scripts]
