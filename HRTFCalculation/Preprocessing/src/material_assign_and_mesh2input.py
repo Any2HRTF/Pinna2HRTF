@@ -37,7 +37,7 @@ def main(head, source_type=None, filepath=None, mesh2hrtf_path=None,
          min_frequency=0, max_frequency=24000, frequency_vector_type="Num steps", frequency_step_count=129, 
          title='PPM model generated HRTF', method='ML-FMM BEM',
          pictures=False, reference=True, computeHRIRs=True, unit='mm', speedOfSound='346.18',
-         densityOfMedium='1.1839', evaluationGrids='/Users/felixperfler/Documents/ISF/2026/Pipeline Paper/Data/Resources/EvalGrid', materialSearchPaths="None",
+         densityOfMedium='1.1839', evaluationGrids='Default', materialSearchPaths="None",
          tolerance=2, source_position=None, source_assignment_mode="landmark", source_face_count=6, sourceType=None, programPath=None, minFrequency=None, maxFrequency=None, frequencyVectorType=None, frequencyVectorValue=None):
     source_type = source_type or sourceType
     mesh2hrtf_path = mesh2hrtf_path or programPath
@@ -164,7 +164,7 @@ if __name__ == "__main__":
     parser.add_argument('--unit', type=str, required=False, default='mm', help='Unit of measurement')
     parser.add_argument('--speedOfSound', type=str, required=False, default='346.18', help='Speed of sound in the medium')
     parser.add_argument('--densityOfMedium', type=str, required=False, default='1.1839', help='Density of the medium')
-    parser.add_argument('--evaluationGrids', type=str, required=False, default='/Users/felixperfler/Documents/ISF/2026/Pipeline Paper/Data/Resources/EvalGrid', help='Evaluation grids to use')
+    parser.add_argument('--evaluationGrids', type=str, required=False, default='Default', help='Evaluation grids to use')
     parser.add_argument('--materialSearchPaths', type=str, required=False, default="None", help='Material search paths')
     parser.add_argument('--minFrequency', type=int, required=True, help='Minimum frequency')
     parser.add_argument('--maxFrequency', type=int, required=True, help='Maximum frequency')

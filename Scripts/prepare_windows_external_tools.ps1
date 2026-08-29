@@ -54,15 +54,6 @@ if ($LASTEXITCODE -ne 0) {
 & $git.Source -c safe.directory="$mesh2hrtf" -C $mesh2hrtf checkout --detach $mesh2hrtfCommit
 if ($LASTEXITCODE -ne 0) { throw "Could not check out Mesh2HRTF commit $mesh2hrtfCommit." }
 
-$uv = Join-Path $bin "uv.exe"
-if (-not (Test-Path $uv)) {
-    $uvCommand = Get-Command "uv.exe" -ErrorAction SilentlyContinue
-    if (-not $uvCommand) {
-        throw "uv.exe is not on PATH. Install uv before preparing Windows external tools."
-    }
-    Copy-Item $uvCommand.Source $uv -Force
-}
-
 $numCalcPath = Join-Path $bin "NumCalc.exe"
 if (-not (Test-Path $numCalcPath)) {
     throw "NumCalc.exe is not bundled. Build it from Mesh2HRTF commit $mesh2hrtfCommit and place it at $numCalcPath."
@@ -76,7 +67,7 @@ if (-not (Test-Path $revisionFile) -or ((Get-Content -Raw $revisionFile).Trim() 
     throw "NumCalc.source-commit is missing or does not match Mesh2HRTF $mesh2hrtfCommit."
 }
 
-$required = @("uv.exe", "NumCalc.exe", "hrtf_mesh_grading.exe")
+$required = @("NumCalc.exe", "hrtf_mesh_grading.exe")
 foreach ($name in $required) {
     $path = Join-Path $bin $name
     if (-not (Test-Path $path)) {

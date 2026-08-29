@@ -16,7 +16,6 @@ import argparse
 import numpy as np
 import trimesh
 from matplotlib.path import Path as MplPath
-#import pyglet  # necessary for .show to work! Used for debugging only
 
 
 def cut_eararea(head, ear, ear_cut_clearance_scale=1.3, side='auto', mode='ellipse'):

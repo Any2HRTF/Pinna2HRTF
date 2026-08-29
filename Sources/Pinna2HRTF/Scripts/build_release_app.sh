@@ -17,7 +17,15 @@ fi
 if [[ -z "$APP_VERSION" ]]; then
   exit 1
 fi
-UV_BIN="$EXTERNAL_ROOT/bin/uv"
+UV_BIN="$(command -v uv || true)"
+if [[ ! -x "$UV_BIN" ]]; then
+  echo "uv is required to build the release app"
+  exit 1
+fi
+if [[ ! -f "$ROOT/uv.lock" ]]; then
+  echo "uv.lock is required to build the release app"
+  exit 1
+fi
 export UV_CACHE_DIR="/private/tmp/pinna2hrtf-uv-cache"
 SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
 SDK_SWIFT_INTERFACE="$(find "$SDK_PATH/usr/lib/swift/Swift.swiftmodule" -name '*-apple-macos.swiftinterface' -print -quit)"
@@ -37,13 +45,15 @@ mkdir -p "$MACOS" "$RESOURCES"
 cp "$SCRATCH/release/Pinna2HRTF" "$MACOS/Pinna2HRTF"
 cp -R "$ROOT/HRTFCalculation" "$RESOURCES/HRTFCalculation"
 cp "$ROOT/pyproject.toml" "$RESOURCES/pyproject.toml"
-if [[ -f "$ROOT/uv.lock" ]]; then
-  cp "$ROOT/uv.lock" "$RESOURCES/uv.lock"
-fi
+cp "$ROOT/uv.lock" "$RESOURCES/uv.lock"
 if [[ -d "$EXTERNAL_ROOT/bin" ]]; then
-  mkdir -p "$RESOURCES/External"
-  cp -R "$EXTERNAL_ROOT/bin" "$RESOURCES/External/bin"
-  for executable in uv NumCalc hrtf_mesh_grading; do
+  mkdir -p "$RESOURCES/External/bin"
+  for bundled_file in NumCalc NumCalc.source-commit hrtf_mesh_grading libpmp.1.2.1.dylib libpmp.dylib; do
+    if [[ -e "$EXTERNAL_ROOT/bin/$bundled_file" ]]; then
+      cp -P "$EXTERNAL_ROOT/bin/$bundled_file" "$RESOURCES/External/bin/$bundled_file"
+    fi
+  done
+  for executable in NumCalc hrtf_mesh_grading; do
     if [[ -f "$RESOURCES/External/bin/$executable" ]]; then
       chmod +x "$RESOURCES/External/bin/$executable"
     fi
@@ -57,35 +67,27 @@ if [[ -d "$EXTERNAL_ROOT/src/Mesh2HRTF/mesh2hrtf" && -f "$EXTERNAL_ROOT/src/Mesh
   cp -R "$EXTERNAL_ROOT/src/Mesh2HRTF/mesh2hrtf" "$RESOURCES/External/src/Mesh2HRTF/mesh2hrtf"
   cp "$EXTERNAL_ROOT/src/Mesh2HRTF/VERSION" "$RESOURCES/External/src/Mesh2HRTF/VERSION"
 fi
-if [[ -d "$REPO_ROOT/Data/Resources/EvalGrid" ]]; then
-  mkdir -p "$RESOURCES/Data/Resources"
-  cp -R "$REPO_ROOT/Data/Resources/EvalGrid" "$RESOURCES/Data/Resources/EvalGrid"
-fi
 if [[ -f "$ICON" ]]; then
   cp "$ICON" "$RESOURCES/app_icon.icns"
 fi
-if [[ ! -x "$UV_BIN" ]]; then
-  UV_BIN="$(command -v uv || true)"
-fi
-if [[ -x "$UV_BIN" ]]; then
-  cd "$RESOURCES"
-  GIT_CONFIG_COUNT=1 \
-  GIT_CONFIG_KEY_0="url.https://github.com/.insteadOf" \
-  GIT_CONFIG_VALUE_0="git@github.com:" \
-  UV_CACHE_DIR="/private/tmp/pinna2hrtf-uv-cache" \
-  "$UV_BIN" sync --no-dev --managed-python --python 3.11
-  cd "$ROOT"
-  PYTHON_REALPATH="$("$UV_BIN" run --project "$RESOURCES" --no-sync python -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$RESOURCES/.venv/bin/python")"
-  PYTHON_PREFIX="$(cd "$(dirname "$PYTHON_REALPATH")/.." && pwd)"
-  PYTHON_BUNDLE="$RESOURCES/Python/$(basename "$PYTHON_PREFIX")"
-  mkdir -p "$RESOURCES/Python"
-  rm -rf "$PYTHON_BUNDLE"
-  cp -R "$PYTHON_PREFIX" "$PYTHON_BUNDLE"
-  rm -f "$RESOURCES/.venv/bin/python" "$RESOURCES/.venv/bin/python3" "$RESOURCES/.venv/bin/python3.11"
-  ln -s "../../Python/$(basename "$PYTHON_PREFIX")/bin/python3.11" "$RESOURCES/.venv/bin/python"
-  ln -s "python" "$RESOURCES/.venv/bin/python3"
-  ln -s "python" "$RESOURCES/.venv/bin/python3.11"
-  "$UV_BIN" run --project "$RESOURCES" --no-sync python - "$RESOURCES/.venv/pyvenv.cfg" "$(basename "$PYTHON_PREFIX")" <<'PY'
+cd "$RESOURCES"
+GIT_CONFIG_COUNT=1 \
+GIT_CONFIG_KEY_0="url.https://github.com/.insteadOf" \
+GIT_CONFIG_VALUE_0="git@github.com:" \
+UV_CACHE_DIR="/private/tmp/pinna2hrtf-uv-cache" \
+"$UV_BIN" sync --locked --no-dev --no-install-project --managed-python --python 3.11
+cd "$ROOT"
+PYTHON_REALPATH="$("$RESOURCES/.venv/bin/python" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$RESOURCES/.venv/bin/python")"
+PYTHON_PREFIX="$(cd "$(dirname "$PYTHON_REALPATH")/.." && pwd)"
+PYTHON_BUNDLE="$RESOURCES/Python/$(basename "$PYTHON_PREFIX")"
+mkdir -p "$RESOURCES/Python"
+rm -rf "$PYTHON_BUNDLE"
+cp -R "$PYTHON_PREFIX" "$PYTHON_BUNDLE"
+rm -f "$RESOURCES/.venv/bin/python" "$RESOURCES/.venv/bin/python3" "$RESOURCES/.venv/bin/python3.11"
+ln -s "../../Python/$(basename "$PYTHON_PREFIX")/bin/python3.11" "$RESOURCES/.venv/bin/python"
+ln -s "python" "$RESOURCES/.venv/bin/python3"
+ln -s "python" "$RESOURCES/.venv/bin/python3.11"
+"$PYTHON_BUNDLE/bin/python3.11" - "$RESOURCES/.venv/pyvenv.cfg" "$(basename "$PYTHON_PREFIX")" <<'PY'
 from pathlib import Path
 import sys
 path = Path(sys.argv[1])
@@ -95,11 +97,15 @@ next_lines = []
 for line in lines:
     if line.startswith("home = "):
         next_lines.append(f"home = ../../Python/{name}/bin")
+    elif line.startswith("uv = "):
+        continue
     else:
         next_lines.append(line)
 path.write_text("\n".join(next_lines) + "\n")
 PY
-fi
+find "$RESOURCES/.venv/bin" -mindepth 1 -maxdepth 1 ! -name python ! -name python3 ! -name python3.11 -exec rm -rf {} +
+find "$RESOURCES" -type d -name __pycache__ -prune -exec rm -rf {} +
+find "$RESOURCES" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
