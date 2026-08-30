@@ -71,23 +71,32 @@ public partial class MainWindow : Window
 
     bool projectsExpanded = true;
 
-    void ProjectsToggleClicked(object sender, RoutedEventArgs e)
+    void ProjectsExpanded(object sender, RoutedEventArgs e) => SetProjectsExpanded(true);
+    void ProjectsCollapsed(object sender, RoutedEventArgs e) => SetProjectsExpanded(false);
+    void SetProjectsExpanded(bool expanded)
     {
-        projectsExpanded = !projectsExpanded;
-        ProjectList.Visibility = projectsExpanded ? Visibility.Visible : Visibility.Collapsed;
-        ProjectsToggle.Content = projectsExpanded ? "‹" : "›";
-        ProjectsToggle.ToolTip = projectsExpanded ? "Collapse projects" : "Expand projects";
+        if (ProjectsColumn == null || ProjectList == null) return;
+        projectsExpanded = expanded;
+        ProjectList.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        ProjectsColumn.Width = expanded ? new GridLength(280) : new GridLength(40);
+        ProjectsHeaderGrid.Margin = expanded ? new Thickness(10, 8, 10, 8) : new Thickness(0, 8, 0, 8);
+        ProjectsTitle.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        NewProjectButton.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        ImportProjectButton.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        DeleteProjectButton.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        ProjectsToggle.ToolTip = expanded ? "Collapse projects" : "Expand projects";
     }
 
     bool liveLogExpanded = true;
 
-    void LiveLogToggleClicked(object sender, RoutedEventArgs e)
+    void LiveLogExpanded(object sender, RoutedEventArgs e) => SetLiveLogExpanded(true);
+    void LiveLogCollapsed(object sender, RoutedEventArgs e) => SetLiveLogExpanded(false);
+    void SetLiveLogExpanded(bool expanded)
     {
-        liveLogExpanded = !liveLogExpanded;
-        LiveLogContent.Visibility = liveLogExpanded ? Visibility.Visible : Visibility.Collapsed;
-        LiveLogToggle.Content = liveLogExpanded ? "⌄" : "⌃";
-        if (LiveLogPanel.Parent is Grid grid && grid.RowDefinitions.Count > 2)
-            grid.RowDefinitions[2].Height = liveLogExpanded ? new GridLength(170) : GridLength.Auto;
+        if (LiveLogPanel == null || LiveLogContent == null) return;
+        liveLogExpanded = expanded;
+        LiveLogContent.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        if (LiveLogPanel.Parent is Grid grid && grid.RowDefinitions.Count > 2) grid.RowDefinitions[2].Height = expanded ? new GridLength(170) : GridLength.Auto;
     }
 
     void WindowClosing(object? sender, CancelEventArgs e)
@@ -639,10 +648,19 @@ public partial class MainWindow : Window
         MeshCamera.UpDirection = new Vector3D(0, 0, 1);
     }
 
-    void RunInferenceClicked(object sender, RoutedEventArgs e) => RunStage(Stage.Inference);
-    void RunPreprocessingClicked(object sender, RoutedEventArgs e) => RunStage(Stage.Preprocessing);
-    void RunNumCalcClicked(object sender, RoutedEventArgs e) => RunStage(Stage.Numcalc);
-    void RunPostprocessingClicked(object sender, RoutedEventArgs e) => RunStage(Stage.Postprocessing);
+    void RunInferenceClicked(object sender, RoutedEventArgs e) => RunOrStop(Stage.Inference);
+    void RunPreprocessingClicked(object sender, RoutedEventArgs e) => RunOrStop(Stage.Preprocessing);
+    void RunNumCalcClicked(object sender, RoutedEventArgs e) => RunOrStop(Stage.Numcalc);
+    void RunPostprocessingClicked(object sender, RoutedEventArgs e) => RunOrStop(Stage.Postprocessing);
+
+    void RunOrStop(Stage stage)
+    {
+        var project = SelectedProject;
+        if (project != null && runningStages.TryGetValue(project.Id, out var active) && active == stage)
+            StopProject(project);
+        else
+            RunStage(stage);
+    }
 
     void RunNextClicked(object sender, RoutedEventArgs e)
     {
@@ -742,11 +760,8 @@ public partial class MainWindow : Window
         {
             Directory.CreateDirectory(project.SaveLocation);
             var config = PrepareConfig(project);
-            var bundledCommand = BundledCommandExecutable();
-            var executable = bundledCommand ?? (File.Exists(environment.UvExecutable) ? environment.UvExecutable : "uv");
-            var arguments = bundledCommand != null
-                ? $"{stage.Value} --config {QuoteArgument(config)}"
-                : $"run --no-sync Pinna2HRTF {stage.Value} --config {QuoteArgument(config)}";
+            var executable = Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
+            var arguments = $"-m HRTFCalculation.CLI {stage.Value} --config {QuoteArgument(config)}";
             var process = new Process();
             process.StartInfo = new ProcessStartInfo
             {
@@ -1188,6 +1203,18 @@ ui:
             controls[index].Text = skipped ? "Skipped" : running ? "Running…" : failed ? "Failed" : StageIsComplete(stage, project) ? "Done" : "Ready";
             controls[index].Foreground = skipped ? System.Windows.Media.Brushes.Gray : running ? System.Windows.Media.Brushes.DarkOrange : failed ? System.Windows.Media.Brushes.Firebrick : StageIsComplete(stage, project) ? System.Windows.Media.Brushes.ForestGreen : System.Windows.Media.Brushes.Gray;
         }
+        UpdateRunButtons(project);
+    }
+
+    void UpdateRunButtons(ProjectRecord? project)
+    {
+        var buttons = new[] { RunInferenceButton, RunPreprocessingButton, RunNumCalcButton, RunPostprocessingButton };
+        var active = project != null && runningStages.TryGetValue(project.Id, out var stage) ? stage : (Stage?)null;
+        for (var i = 0; i < buttons.Length; i++)
+        {
+            buttons[i].Content = active == Stage.GetValues()[i] ? "Stop" : "Run";
+            buttons[i].IsEnabled = active == null || active == Stage.GetValues()[i];
+        }
     }
 
     bool InferenceIsAutomatic(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing && !string.IsNullOrWhiteSpace(project.LeftEar) && !string.IsNullOrWhiteSpace(project.RightEar);
@@ -1517,3 +1544,17 @@ static class MeshLoader
 
     static double Parse(string value) => double.Parse(value, CultureInfo.InvariantCulture);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
