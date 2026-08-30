@@ -15,7 +15,6 @@ September 2024
 import argparse
 import numpy as np
 import trimesh
-import pyglet  # necessary for .show to work!
 
 
 def head(left_ear, right_ear, export_path, radius_scale=1.01, width_scale=1.5, height_scale=1.5, y_deformation=0.0, adaptive_ovalness=True, ovalness_strength=0.08, min_width_scale=1.48, max_height_scale=1.53):

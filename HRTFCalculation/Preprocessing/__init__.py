@@ -117,8 +117,6 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
         for side, ear in ears.items():
             if ear is None:
                 continue
-            # cut_eararea mutates its head argument. Pass an independent copy
-            # so each ear is cut from a complete dummy head.
             head_mesh = dummy_head_mesh.copy()
             ear_mesh = closed_meshes[side]
             if settings.ear_cut_mode == "projected_footprint":
@@ -177,7 +175,7 @@ def preprocess():
     parser.add_argument('--export-path', type=str, required=True,  help='Path to exported Mesh2HRTF Project.')
     parser.add_argument('--mesh-grading-executable', type=str, required=True, help='Path to the mesh_grading executable.')
     parser.add_argument('--Mesh2HRTF-path', type=str, required=True, help='Path to the location of the mesh2hrtf directory.')
-    parser.add_argument('--Mesh2HRTF-Evaluation-Grid', type=str, default='/Users/felixperfler/Documents/ISF/2026/Pipeline Paper/Data/Resources/EvalGrid', help='Path to the evaluation grid to be used for Mesh2HRTF.')
+    parser.add_argument('--Mesh2HRTF-Evaluation-Grid', type=str, default='Default', help='Name or path of the evaluation grid to be used for Mesh2HRTF.')
     parser.add_argument('--ear-cut-clearance-scale', type=float, default=1.3)
     parser.add_argument('--ear-cut-mode', choices=['ellipse', 'projected_footprint', 'exact'], default='ellipse')
     parser.add_argument('--ear-canal-closer-mode', choices=['legacy', 'interpolated'], default='legacy')

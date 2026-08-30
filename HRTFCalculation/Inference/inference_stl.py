@@ -3,8 +3,7 @@ import argparse
 import os
 import torch
 import numpy as np
-import cv2
-os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
+from PIL import Image
 import trimesh
 from trimesh.registration import icp
 from trimesh.transformations import reflection_matrix
@@ -23,6 +22,17 @@ except ImportError:
     from src.math_helpers import get_quaternion_from_rotation_matrix, compute_rotation_matrix_from_ortho6d
 
 __DIR_PATH = os.path.dirname(os.path.realpath(__file__))
+
+def read_grayscale_image(path):
+    if path.lower().endswith(".exr"):
+        image = bpy.data.images.load(path, check_existing=False)
+        width, height = image.size
+        pixels = np.asarray(image.pixels[:], dtype=np.float32).reshape(height, width, 4)
+        result = np.flipud(pixels[:, :, 0]).copy()
+        bpy.data.images.remove(image)
+        return result
+    with Image.open(path) as image:
+        return np.asarray(image.convert("L"))
 
 def jaccard(P, Q, res=0.5):
     """
@@ -227,9 +237,9 @@ def get_model_input(path_to_mesh, views, depth, mirror, initial_transforms=None,
                 depth=depth
             )
 
-            data.append(cv2.imread(tempdir+'/img.png', 0))
+            data.append(read_grayscale_image(tempdir+'/img.png'))
             if depth:
-                depth_data.append(cv2.imread(tempdir+'/img.exr', 0))
+                depth_data.append(read_grayscale_image(tempdir+'/img.exr'))
 
     if depth:
         for i in depth_data:

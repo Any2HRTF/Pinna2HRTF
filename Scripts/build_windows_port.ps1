@@ -15,7 +15,7 @@ $dotnet = Get-Command "dotnet.exe" -ErrorAction SilentlyContinue
 if (-not $dotnet) {
     $dotnet = Get-Command "dotnet" -ErrorAction SilentlyContinue
 }
-$dotnetPath = $dotnet.Source
+$dotnetPath = if ($dotnet) { $dotnet.Source } else { "" }
 if (-not $dotnet) {
     $localDotnet = Join-Path $root ".dotnet\dotnet.exe"
     if (Test-Path $localDotnet) {
@@ -37,27 +37,38 @@ Copy-Item (Join-Path $publish "*") $dist -Recurse -Force
 Copy-Item (Join-Path $root "HRTFCalculation") (Join-Path $dist "HRTFCalculation") -Recurse -Force
 Copy-Item (Join-Path $root "pyproject.toml") (Join-Path $dist "pyproject.toml") -Force
 
-if (Test-Path (Join-Path $root "uv.lock")) {
-    Copy-Item (Join-Path $root "uv.lock") (Join-Path $dist "uv.lock") -Force
+if (-not (Test-Path (Join-Path $root "uv.lock"))) {
+    throw "uv.lock is required to build the portable Windows app."
 }
+Copy-Item (Join-Path $root "uv.lock") (Join-Path $dist "uv.lock") -Force
 
-if (Test-Path (Join-Path $root "External")) {
-    Copy-Item (Join-Path $root "External") $distExternal -Recurse -Force
-} else {
-    New-Item -ItemType Directory -Path $distBin | Out-Null
+New-Item -ItemType Directory -Path $distBin -Force | Out-Null
+$sourceExternal = Join-Path $root "External"
+foreach ($name in @("NumCalc.exe", "NumCalc.source-commit", "hrtf_mesh_grading.exe")) {
+    $source = Join-Path (Join-Path $sourceExternal "bin") $name
+    if (Test-Path $source) {
+        Copy-Item $source (Join-Path $distBin $name) -Force
+    }
 }
-
-$uv = Join-Path $distBin "uv.exe"
-if (-not (Test-Path $uv)) {
-    $uvCommand = Get-Command "uv.exe" -ErrorAction SilentlyContinue
-    if ($uvCommand) {
-        Copy-Item $uvCommand.Source $uv -Force
+$sourceMesh2Hrtf = Join-Path $sourceExternal "src\Mesh2HRTF"
+$distMesh2Hrtf = Join-Path $distExternal "src\Mesh2HRTF"
+if (Test-Path (Join-Path $sourceMesh2Hrtf "mesh2hrtf")) {
+    New-Item -ItemType Directory -Path $distMesh2Hrtf -Force | Out-Null
+    Copy-Item (Join-Path $sourceMesh2Hrtf "mesh2hrtf") (Join-Path $distMesh2Hrtf "mesh2hrtf") -Recurse -Force
+    if (Test-Path (Join-Path $sourceMesh2Hrtf "VERSION")) {
+        Copy-Item (Join-Path $sourceMesh2Hrtf "VERSION") (Join-Path $distMesh2Hrtf "VERSION") -Force
     }
 }
 
+$uvCommand = Get-Command "uv.exe" -ErrorAction SilentlyContinue
+if (-not $uvCommand) {
+    $uvCommand = Get-Command "uv" -ErrorAction SilentlyContinue
+}
+$uv = if ($uvCommand) { $uvCommand.Source } else { "" }
+
 if (-not $SkipPythonEnvironment) {
-    if (-not (Test-Path $uv)) {
-        throw "uv.exe was not found in External\bin or on PATH. Install uv before building the portable runtime, or pass -SkipPythonEnvironment for a shell-only build."
+    if ([string]::IsNullOrWhiteSpace($uv)) {
+        throw "uv is not on PATH. Install uv before building the portable runtime, or pass -SkipPythonEnvironment for a shell-only build."
     }
 
     Push-Location $dist
@@ -68,7 +79,7 @@ if (-not $SkipPythonEnvironment) {
         $env:GIT_CONFIG_COUNT = "1"
         $env:GIT_CONFIG_KEY_0 = "url.https://github.com/.insteadOf"
         $env:GIT_CONFIG_VALUE_0 = "git@github.com:"
-        & $uv sync --no-dev --managed-python --python 3.11
+        & $uv sync --locked --no-dev --no-install-project --managed-python --python 3.11
         if ($LASTEXITCODE -ne 0) {
             throw "uv sync failed with exit code $LASTEXITCODE"
         }
@@ -104,14 +115,22 @@ if (-not $SkipPythonEnvironment) {
                 elseif ($_ -like "base-executable = *") { "base-executable = $relativePythonExe" }
                 elseif ($_ -like "base-prefix = *") { "base-prefix = $relativePythonHome" }
                 elseif ($_ -like "base-exec-prefix = *") { "base-exec-prefix = $relativePythonHome" }
+                elseif ($_ -like "uv = *") { $null }
                 else { $_ }
             }
             Set-Content -Path $pyvenv -Value $lines -Encoding UTF8
         }
+        Get-ChildItem (Join-Path $dist ".venv\Scripts") -Force | Where-Object { $_.Name -notmatch '^python(w|3|3\.11)?\.exe$' } | Remove-Item -Recurse -Force
     }
     finally {
         Pop-Location
     }
+}
+
+Get-ChildItem $dist -Directory -Recurse -Force | Where-Object { $_.Name -eq "__pycache__" } | Sort-Object { $_.FullName.Length } -Descending | Remove-Item -Recurse -Force
+Get-ChildItem $dist -File -Recurse -Force | Where-Object { $_.Extension -in @(".pyc", ".pyo") } | Remove-Item -Force
+if (Test-Path (Join-Path $distBin "uv.exe")) {
+    throw "uv.exe must not be included in the portable Windows app."
 }
 
 $missingExternalTools = @("NumCalc.exe", "hrtf_mesh_grading.exe") | Where-Object {

@@ -13,7 +13,9 @@ struct EnvironmentPanelView: View {
                     .font(.caption)
                     .foregroundStyle(allToolsReady ? .green : .red)
             }
-            ToolStatusRow("UV", path: store.environment.uvExecutable)
+            if !Defaults.isPackagedApp {
+                ToolStatusRow("UV", path: store.environment.uvExecutable)
+            }
             ToolStatusRow("NumCalc", path: store.environment.numcalcExecutable)
             ToolStatusRow("Mesh grading", path: store.environment.meshGradingExecutable)
             if !Defaults.isPackagedApp {
@@ -36,7 +38,7 @@ struct EnvironmentPanelView: View {
     }
 
     var allToolsReady: Bool {
-        FileManager.default.isExecutableFile(atPath: store.environment.uvExecutable) &&
+        (Defaults.isPackagedApp || FileManager.default.isExecutableFile(atPath: store.environment.uvExecutable)) &&
         FileManager.default.isExecutableFile(atPath: store.environment.numcalcExecutable) &&
         FileManager.default.isExecutableFile(atPath: store.environment.meshGradingExecutable)
     }

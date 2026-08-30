@@ -58,7 +58,33 @@ public partial class MainWindow : Window
         appData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Pinna2HRTF");
         registryPath = Path.Combine(appData, "projects.json");
         Directory.CreateDirectory(appData);
+        Directory.CreateDirectory(Path.Combine(appData, "Cache", "matplotlib"));
+        Directory.CreateDirectory(Path.Combine(appData, "Cache", "python"));
+        Directory.CreateDirectory(Path.Combine(appData, "Blender", "config"));
+        Directory.CreateDirectory(Path.Combine(appData, "Blender", "scripts"));
+        Directory.CreateDirectory(Path.Combine(appData, "Blender", "datafiles"));
+        if (BundledPythonExecutable() != null)
+        {
+            var obsoleteUvCache = Path.Combine(appData, "Cache", "uv");
+            if (Directory.Exists(obsoleteUvCache))
+                Directory.Delete(obsoleteUvCache, true);
+        }
         LoadRegistry();
+        if (BundledPythonExecutable() != null)
+        {
+            environment = DefaultEnvironment();
+            var resources = Path.Combine(packageRoot, "HRTFCalculation", "Inference", "resources");
+            foreach (var project in projects)
+            {
+                var bundledConfig = Path.Combine(resources, Path.GetFileName(project.Settings.Inference.ModelConfig));
+                var bundledCheckpoint = Path.Combine(resources, Path.GetFileName(project.Settings.Inference.ModelCheckpoint));
+                if ((project.Settings.Inference.ModelConfig.Contains("HRTFCalculation", StringComparison.OrdinalIgnoreCase) || !File.Exists(project.Settings.Inference.ModelConfig)) && File.Exists(bundledConfig))
+                    project.Settings.Inference.ModelConfig = bundledConfig;
+                if ((project.Settings.Inference.ModelCheckpoint.Contains("HRTFCalculation", StringComparison.OrdinalIgnoreCase) || !File.Exists(project.Settings.Inference.ModelCheckpoint)) && File.Exists(bundledCheckpoint))
+                    project.Settings.Inference.ModelCheckpoint = bundledCheckpoint;
+            }
+            Persist();
+        }
         RefreshModelOptions();
         RefreshProjectList();
         LoadSelectedProject();
@@ -867,15 +893,21 @@ public partial class MainWindow : Window
     void ApplyProcessEnvironment(ProcessStartInfo startInfo)
     {
         startInfo.Environment["PINNA2HRTF_ROOT"] = Directory.GetParent(packageRoot)?.FullName ?? packageRoot;
-        startInfo.Environment["UV_CACHE_DIR"] = Path.Combine(appData, "Cache", "uv");
         startInfo.Environment["MPLCONFIGDIR"] = Path.Combine(appData, "Cache", "matplotlib");
+        startInfo.Environment["PYTHONPYCACHEPREFIX"] = Path.Combine(appData, "Cache", "python");
+        startInfo.Environment["PYTHONNOUSERSITE"] = "1";
+        startInfo.Environment["BLENDER_USER_CONFIG"] = Path.Combine(appData, "Blender", "config");
+        startInfo.Environment["BLENDER_USER_SCRIPTS"] = Path.Combine(appData, "Blender", "scripts");
+        startInfo.Environment["BLENDER_USER_DATAFILES"] = Path.Combine(appData, "Blender", "datafiles");
+        if (BundledPythonExecutable() == null)
+            startInfo.Environment["UV_CACHE_DIR"] = Path.Combine(appData, "Cache", "uv");
         startInfo.Environment["PYTHONPATH"] = packageRoot;
         startInfo.Environment["PATH"] = Path.Combine(environment.ExternalDir, "bin") + Path.PathSeparator + (startInfo.Environment.TryGetValue("PATH", out var path) ? path : "");
     }
 
-    string? BundledCommandExecutable()
+    string? BundledPythonExecutable()
     {
-        var candidate = Path.Combine(packageRoot, ".venv", "Scripts", "Pinna2HRTF.exe");
+        var candidate = Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
         return File.Exists(candidate) ? candidate : null;
     }
 
@@ -1104,10 +1136,10 @@ ui:
 
     void RefreshEnvironmentStatus()
     {
-        var uv = File.Exists(environment.UvExecutable) ? "uv found" : "uv missing";
         var numcalc = File.Exists(environment.NumCalcExecutable) ? "NumCalc found" : "NumCalc missing";
         var grading = File.Exists(environment.MeshGradingExecutable) ? "mesh grading found" : "mesh grading missing";
-        EnvironmentStatusText.Text = $"{uv}; {numcalc}; {grading}";
+        var runtime = BundledPythonExecutable() != null ? "bundled Python found" : File.Exists(environment.UvExecutable) ? "development uv found" : "Python runtime missing";
+        EnvironmentStatusText.Text = $"{runtime}; {numcalc}; {grading}";
     }
 
     void RefreshNumCalcStatus()

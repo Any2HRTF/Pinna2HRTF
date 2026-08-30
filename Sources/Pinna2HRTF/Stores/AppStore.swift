@@ -28,6 +28,11 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         rootURL = Defaults.runtimeRoot
         packageURL = Defaults.pipelineRoot
         registryStore = ProjectRegistryStore(rootURL: rootURL, packageURL: packageURL)
+        if Defaults.isPackagedApp {
+            for obsolete in [Defaults.runtimeProjectURL, Defaults.appDataURL.appendingPathComponent("Cache/uv", isDirectory: true)] {
+                try? FileManager.default.removeItem(at: obsolete)
+            }
+        }
         var registry = AppStore.migrated(registryStore.load(), rootURL: rootURL, packageURL: packageURL)
         if Defaults.isPackagedApp {
             registry.environment = Defaults.environment(root: rootURL)
@@ -326,10 +331,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
         do {
             try prepareRuntimeProject()
-            if Defaults.isPackagedApp && !FileManager.default.fileExists(atPath: runtimeCommandURL.path) {
-                appendLog("Pinna2HRTF runtime is missing from the app bundle.")
-                return
-            }
             let configURL = try PipelineConfigWriter.prepare(project: project, environment: environment)
             startProcess(stage: stage, project: project, configURL: configURL)
         } catch {
@@ -343,7 +344,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let process = Process()
         if Defaults.isPackagedApp {
             process.executableURL = runtimePythonURL
-            process.arguments = [runtimeCommandURL.path, stage.rawValue, "--config", configURL.path]
+            process.arguments = ["-m", "HRTFCalculation", stage.rawValue, "--config", configURL.path]
         } else {
             let bundledUV = FileManager.default.isExecutableFile(atPath: environment.uvExecutable)
             process.executableURL = bundledUV ? URL(fileURLWithPath: environment.uvExecutable) : URL(fileURLWithPath: "/usr/bin/env")
@@ -466,7 +467,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let process = Process()
         let bundledUV = FileManager.default.isExecutableFile(atPath: environment.uvExecutable)
         guard bundledUV || Defaults.which("uv") != nil else {
-            appendLog("UV is missing. Install uv or use a release app that bundles it, then run Set Up again.")
+            appendLog("UV is missing. Install uv for development or use the self-contained release app.")
             return
         }
         process.executableURL = bundledUV ? URL(fileURLWithPath: environment.uvExecutable) : URL(fileURLWithPath: "/usr/bin/env")
@@ -504,51 +505,42 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     func processEnvironment() -> [String: String] {
         var values = ProcessInfo.processInfo.environment
         values["PINNA2HRTF_ROOT"] = rootURL.path
-        values["UV_CACHE_DIR"] = Defaults.appDataURL.appendingPathComponent("Cache/uv").path
         values["MPLCONFIGDIR"] = Defaults.appDataURL.appendingPathComponent("Cache/matplotlib").path
+        values["PYTHONPYCACHEPREFIX"] = Defaults.appDataURL.appendingPathComponent("Cache/python").path
+        values["PYTHONNOUSERSITE"] = "1"
+        values["BLENDER_USER_CONFIG"] = Defaults.appDataURL.appendingPathComponent("Blender/config").path
+        values["BLENDER_USER_SCRIPTS"] = Defaults.appDataURL.appendingPathComponent("Blender/scripts").path
+        values["BLENDER_USER_DATAFILES"] = Defaults.appDataURL.appendingPathComponent("Blender/datafiles").path
+        if !Defaults.isPackagedApp {
+            values["UV_CACHE_DIR"] = Defaults.appDataURL.appendingPathComponent("Cache/uv").path
+        }
         values["PYTHONPATH"] = executionPackageURL.path
         values["PATH"] = URL(fileURLWithPath: environment.externalDir).appendingPathComponent("bin").path + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + (values["PATH"] ?? "")
         return values
     }
 
     var executionPackageURL: URL {
-        Defaults.isPackagedApp ? Defaults.runtimeProjectURL : packageURL
+        packageURL
     }
 
     var runtimePythonURL: URL {
-        Defaults.runtimeProjectURL.appendingPathComponent(".venv/bin/python")
-    }
-
-    var runtimeCommandURL: URL {
-        Defaults.runtimeProjectURL.appendingPathComponent(".venv/bin/Pinna2HRTF")
+        packageURL.appendingPathComponent(".venv/bin/python")
     }
 
     func prepareRuntimeProject() throws {
         guard Defaults.isPackagedApp else { return }
-        let runtime = Defaults.runtimeProjectURL
-        if !runningProcesses.isEmpty || environmentProcess != nil {
-            if runtimeProjectIsReady {
-                return
-            }
-            throw NSError(domain: "Pinna2HRTF", code: 1, userInfo: [NSLocalizedDescriptionKey: "The bundled runtime is not ready. Wait for the running task to finish, then start again."])
+        for directory in ["Cache/matplotlib", "Cache/python", "Blender/config", "Blender/scripts", "Blender/datafiles"] {
+            try FileManager.default.createDirectory(at: Defaults.appDataURL.appendingPathComponent(directory, isDirectory: true), withIntermediateDirectories: true)
         }
-        try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: true)
-        let entries = ["HRTFCalculation", "pyproject.toml", "uv.lock", ".venv", "Python"]
-        for entry in entries {
-            let source = packageURL.appendingPathComponent(entry)
-            let target = runtime.appendingPathComponent(entry)
-            guard FileManager.default.fileExists(atPath: source.path) else { continue }
-            if FileManager.default.fileExists(atPath: target.path) {
-                try FileManager.default.removeItem(at: target)
-            }
-            try FileManager.default.copyItem(at: source, to: target)
+        if !runtimeProjectIsReady {
+            throw NSError(domain: "Pinna2HRTF", code: 1, userInfo: [NSLocalizedDescriptionKey: "The bundled Python runtime is missing or incomplete."])
         }
     }
 
     var runtimeProjectIsReady: Bool {
-        FileManager.default.fileExists(atPath: Defaults.runtimeProjectURL.appendingPathComponent("HRTFCalculation/RunConfig.py").path) &&
-        FileManager.default.isExecutableFile(atPath: runtimePythonURL.path) &&
-        FileManager.default.isExecutableFile(atPath: runtimeCommandURL.path)
+        FileManager.default.fileExists(atPath: packageURL.appendingPathComponent("HRTFCalculation/RunConfig.py").path) &&
+        FileManager.default.fileExists(atPath: packageURL.appendingPathComponent("HRTFCalculation/__main__.py").path) &&
+        FileManager.default.isExecutableFile(atPath: runtimePythonURL.path)
     }
 
     func copyPathToolsIntoEnvironment() {
@@ -674,6 +666,17 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             updated.saveLocation = migratedPath(updated.saveLocation, replacements: replacements)
             updated.settings.inference.modelConfig = migratedPath(updated.settings.inference.modelConfig, replacements: replacements)
             updated.settings.inference.modelCheckpoint = migratedPath(updated.settings.inference.modelCheckpoint, replacements: replacements)
+            if Defaults.isPackagedApp {
+                let resources = packageURL.appendingPathComponent("HRTFCalculation/Inference/resources", isDirectory: true)
+                let bundledConfig = resources.appendingPathComponent(URL(fileURLWithPath: updated.settings.inference.modelConfig).lastPathComponent)
+                let bundledCheckpoint = resources.appendingPathComponent(URL(fileURLWithPath: updated.settings.inference.modelCheckpoint).lastPathComponent)
+                if (updated.settings.inference.modelConfig.contains("HRTFCalculation/Inference/resources/") || !FileManager.default.fileExists(atPath: updated.settings.inference.modelConfig)), FileManager.default.fileExists(atPath: bundledConfig.path) {
+                    updated.settings.inference.modelConfig = bundledConfig.path
+                }
+                if (updated.settings.inference.modelCheckpoint.contains("HRTFCalculation/Inference/resources/") || !FileManager.default.fileExists(atPath: updated.settings.inference.modelCheckpoint)), FileManager.default.fileExists(atPath: bundledCheckpoint.path) {
+                    updated.settings.inference.modelCheckpoint = bundledCheckpoint.path
+                }
+            }
             return updated
         }
         return next

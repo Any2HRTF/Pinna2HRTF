@@ -11,16 +11,6 @@ MESH2HRTF_COMMIT="e45d0436a6fbeca3db13828cbae23ca109225be3"
 
 mkdir -p "$BIN" "$SRC"
 
-if [[ ! -x "$BIN/uv" ]]; then
-  UV_SOURCE="$(command -v uv || true)"
-  if [[ -z "$UV_SOURCE" ]]; then
-    echo "uv is not on PATH"
-    exit 1
-  fi
-  cp "$UV_SOURCE" "$BIN/uv"
-  chmod +x "$BIN/uv"
-fi
-
 NUMCALC_NEEDS_BUILD=true
 if [[ -x "$BIN/NumCalc" ]] && [[ -f "$BIN/NumCalc.source-commit" ]] && grep -q -- "$MESH2HRTF_COMMIT" "$BIN/NumCalc.source-commit" && "$BIN/NumCalc" -h 2>/dev/null | grep -q -- "-adapt_fmmlength"; then
   NUMCALC_NEEDS_BUILD=false
@@ -69,8 +59,8 @@ if [[ ! -x "$BIN/hrtf_mesh_grading" ]]; then
     CMAKE=(cmake)
   elif command -v uvx >/dev/null 2>&1; then
     CMAKE=(uvx --from cmake cmake)
-  elif [[ -x "$BIN/uv" ]]; then
-    CMAKE=("$BIN/uv" tool run --from cmake cmake)
+  elif command -v uv >/dev/null 2>&1; then
+    CMAKE=(uv tool run --from cmake cmake)
   else
     echo "cmake or uvx is required to build hrtf_mesh_grading"
     exit 1

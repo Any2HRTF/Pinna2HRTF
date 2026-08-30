@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Sources/Pinna2HRTF/Resources/app_icon.png" alt="Pinna2HRTF icon" width="128" height="128">
+  <img src="icon.png" alt="Pinna2HRTF icon" width="128" height="128">
 </p>
 
 # Pinna2HRTF
@@ -13,7 +13,7 @@ The pipeline can:
 - run NumCalc locally
 - merge bilateral projects, or export a single-ear project, into SOFA files and inspection plots
 
-## Requirements
+## Command-line Requirements
 
 - macOS or Linux with Python 3.11 through `uv`
 - `uv`
@@ -36,13 +36,12 @@ Sources/Pinna2HRTF/Scripts/prepare_external_tools.sh
 That script creates:
 
 ```text
-External/bin/uv
 External/bin/NumCalc
 External/bin/hrtf_mesh_grading
 External/src/Mesh2HRTF
 ```
 
-If `cmake` is not installed, the script bootstraps it through `uvx`.
+If `cmake` is not installed, the script bootstraps it through the developer's `uv` installation. `uv` is used to build and develop Pinna2HRTF, but it is not included in either app download.
 
 ## CLI Workflow
 
@@ -152,11 +151,15 @@ uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage postprocessing
 
 Use this when you prefer to keep all stage settings in one file. The stage-by-stage CLI commands above are the recommended workflow.
 
-## Experimental Apps
+## Desktop Apps
 
-Native apps exist, but they are experimental wrappers around the same Python pipeline.
+The desktop apps are self-contained wrappers around the same Python pipeline. They include Python 3.11, PyTorch, Blender's Python module, all four inference models, NumCalc, mesh grading, Mesh2HRTF preprocessing sources, and the evaluation grid. After download, they run offline and do not require Python or `uv` on the destination computer.
 
 ### macOS
+
+The macOS app supports Apple Silicon Macs. Unzip the download, move `Pinna2HRTF.app` to Applications or any other folder, and open it. The app is ad-hoc signed rather than notarized, so macOS may require Control-clicking the app, choosing Open, and confirming Open the first time. Moving the app later does not invalidate its embedded runtime.
+
+Projects and writable caches are stored separately in `~/Library/Application Support/Pinna2HRTF`, so replacing or moving the app does not remove projects and does not modify the app bundle.
 
 Build and run the packaged macOS app locally:
 
@@ -164,9 +167,11 @@ Build and run the packaged macOS app locally:
 ./Scripts/build_and_run.sh
 ```
 
-This prepares external tools, builds `build/release/Pinna2HRTF.app`, embeds Python dependencies, and launches the app.
+This requires `uv`, prepares external tools, builds `build/release/Pinna2HRTF.app`, embeds the offline runtime, and launches the app. The distributable zip is produced by the GitHub release workflow.
 
 ### Windows
+
+The Windows app supports x64 Windows. Extract the complete `Pinna2HRTF-windows.zip` archive to any writable folder and run `Pinna2HRTF.Windows.exe`. Keep the extracted folder together; no Python or `uv` installation is required.
 
 Build the portable Windows app from Windows:
 
@@ -182,6 +187,8 @@ The portable app is written to:
 ```text
 dist\windows\Pinna2HRTF
 ```
+
+Both packaged apps invoke the pipeline through their bundled Python module rather than a generated command launcher, so the downloads do not retain paths from the build machine. `uv` remains a reproducible build-time tool only.
 
 ## Citation
 

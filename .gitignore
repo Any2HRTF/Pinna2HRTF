@@ -1,7 +1,6 @@
 .venv/
 .build/
 .DS_Store
-uv.lock
 .python-version
 Data/
 DataARI/
