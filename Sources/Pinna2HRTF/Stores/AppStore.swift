@@ -666,6 +666,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             updated.saveLocation = migratedPath(updated.saveLocation, replacements: replacements)
             updated.settings.inference.modelConfig = migratedPath(updated.settings.inference.modelConfig, replacements: replacements)
             updated.settings.inference.modelCheckpoint = migratedPath(updated.settings.inference.modelCheckpoint, replacements: replacements)
+            updated.settings.preprocessing.frequencyStepCount = "\(max(Int(updated.settings.preprocessing.frequencyStepCount) ?? 129, 2))"
             if Defaults.isPackagedApp {
                 let resources = packageURL.appendingPathComponent("HRTFCalculation/Inference/resources", isDirectory: true)
                 let bundledConfig = resources.appendingPathComponent(URL(fileURLWithPath: updated.settings.inference.modelConfig).lastPathComponent)

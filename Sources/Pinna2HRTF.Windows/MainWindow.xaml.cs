@@ -70,6 +70,8 @@ public partial class MainWindow : Window
                 Directory.Delete(obsoleteUvCache, true);
         }
         LoadRegistry();
+        foreach (var project in projects)
+            project.Settings.Preprocessing.FrequencyStepCount = Math.Max(int.TryParse(project.Settings.Preprocessing.FrequencyStepCount, out var steps) ? steps : 129, 2).ToString();
         if (BundledPythonExecutable() != null)
         {
             environment = DefaultEnvironment();
@@ -945,6 +947,7 @@ public partial class MainWindow : Window
         var preprocessing = project.Settings.Preprocessing;
         var numcalc = project.Settings.NumCalc;
         var evaluationGrid = string.IsNullOrWhiteSpace(preprocessing.EvaluationGrid) ? "Default" : preprocessing.EvaluationGrid;
+        var frequencyStepCount = Math.Max(int.TryParse(preprocessing.FrequencyStepCount, out var steps) ? steps : 129, 2);
         var headRadius = preprocessing.UseCustomHeadRadius == true ? $"  head_radius: {YamlNumber(preprocessing.HeadRadius) ?? "0"}\n" : "";
         return $"""
 paths:
@@ -996,7 +999,7 @@ preprocessing:
   min_frequency: {preprocessing.MinFrequency}
   max_frequency: {preprocessing.MaxFrequency}
   frequency_vector_type: Num steps
-  frequency_step_count: {preprocessing.FrequencyStepCount}
+  frequency_step_count: {frequencyStepCount}
   compute_hrirs: true
   pictures: false
   reference: true
@@ -1576,7 +1579,6 @@ static class MeshLoader
 
     static double Parse(string value) => double.Parse(value, CultureInfo.InvariantCulture);
 }
-
 
 
 

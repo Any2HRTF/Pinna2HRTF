@@ -157,7 +157,7 @@
               <TextBox x:Name="MinFrequencyBox" TextChanged="ProjectEdited"/>
               <Label Content="Max frequency"/>
               <TextBox x:Name="MaxFrequencyBox" TextChanged="ProjectEdited"/>
-              <Label Content="Frequency steps"/>
+              <Label Content="Frequency steps (minimum 2)"/>
               <TextBox x:Name="FrequencyStepsBox" TextChanged="ProjectEdited"/>
             </StackPanel>
           </Expander>

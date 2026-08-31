@@ -53,7 +53,17 @@ struct ProjectInspectorView: View {
                         .opacity(useCustomHeadRadiusBinding.wrappedValue ? 1 : 0.55)
                     LabeledTextField("Min frequency", text: preprocessingBinding(\.minFrequency))
                     LabeledTextField("Max frequency", text: preprocessingBinding(\.maxFrequency))
-                    LabeledTextField("Frequency steps", text: preprocessingBinding(\.frequencyStepCount))
+                    HStack {
+                        Text("Frequency steps")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Stepper(value: frequencyStepCountBinding, in: 2...10000) {
+                            Text("\(frequencyStepCountBinding.wrappedValue)")
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 44, alignment: .trailing)
+                        }
+                    }
                     HStack {
                         Text("Microphone faces")
                             .font(.caption.weight(.medium))
@@ -214,6 +224,20 @@ struct ProjectInspectorView: View {
             set: { value in
                 store.updateSelectedProject {
                     $0.settings.preprocessing.sourceAssignmentFaceCount = "\(min(max(value, 1), 100))"
+                }
+            }
+        )
+    }
+
+    var frequencyStepCountBinding: Binding<Int> {
+        Binding(
+            get: {
+                let value = Int(store.selectedProject?.settings.preprocessing.frequencyStepCount ?? "") ?? 129
+                return min(max(value, 2), 10000)
+            },
+            set: { value in
+                store.updateSelectedProject {
+                    $0.settings.preprocessing.frequencyStepCount = "\(min(max(value, 2), 10000))"
                 }
             }
         )

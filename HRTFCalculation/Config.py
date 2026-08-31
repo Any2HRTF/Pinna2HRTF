@@ -102,7 +102,7 @@ class PreprocessingConfig(BaseModel):
     min_frequency: int = 0
     max_frequency: int = 24000
     frequency_vector_type: str = "Num steps"
-    frequency_step_count: int = 129
+    frequency_step_count: int = Field(default=129, ge=2)
     compute_hrirs: bool = True
     pictures: bool = False
     reference: bool = True

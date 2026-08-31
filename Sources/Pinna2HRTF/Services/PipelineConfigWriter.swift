@@ -43,6 +43,7 @@ enum PipelineConfigWriter {
         let useCustomHeadRadius = preprocessing.useCustomHeadRadius ?? (preprocessing.headRadius != nil)
         let headRadius = useCustomHeadRadius ? "  head_radius: \(yamlNumber(preprocessing.headRadius) ?? "0")\n" : ""
         let sourceAssignmentFaceCount = max(Int(preprocessing.sourceAssignmentFaceCount ?? "") ?? 6, 1)
+        let frequencyStepCount = max(Int(preprocessing.frequencyStepCount) ?? 129, 2)
         let levelOffsetDB = yamlNumber(postprocessing.levelOffsetDB) ?? "-30"
         let leftEar = project.leftEar.isEmpty ? "null" : project.leftEar
         let rightEar = project.rightEar.isEmpty ? "null" : project.rightEar
@@ -96,7 +97,7 @@ enum PipelineConfigWriter {
           min_frequency: \(preprocessing.minFrequency)
           max_frequency: \(preprocessing.maxFrequency)
           frequency_vector_type: Num steps
-          frequency_step_count: \(preprocessing.frequencyStepCount)
+          frequency_step_count: \(frequencyStepCount)
           compute_hrirs: true
           pictures: false
           reference: true
