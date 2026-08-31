@@ -14,6 +14,10 @@ struct ProjectSidebarView: View {
                         ProjectRow(project: project)
                             .tag(project.id)
                             .contextMenu {
+                                Button("Duplicate Project") {
+                                    store.selectedProjectID = project.id
+                                    store.duplicateSelectedProject()
+                                }
                                 Button("Remove Project") {
                                     store.selectedProjectID = project.id
                                     store.forgetSelectedProject()
@@ -37,18 +41,25 @@ struct ProjectSidebarView: View {
                     Image(systemName: "plus")
                 }
                 .help("New Project")
-                Button {
-                    store.importProject()
-                } label: {
-                    Image(systemName: "folder.badge.plus")
-                }
-                .help("Import Project Folder")
                 Button(role: .destructive) {
                     store.forgetSelectedProject()
                 } label: {
                     Image(systemName: "minus")
                 }
                 .help("Remove Project")
+                .disabled(store.selectedProject == nil)
+                Button {
+                    store.importProject()
+                } label: {
+                    Image(systemName: "folder.badge.plus")
+                }
+                .help("Import Project Folder")
+                Button {
+                    store.duplicateSelectedProject()
+                } label: {
+                    Image(systemName: "plus.square.on.square")
+                }
+                .help("Duplicate Project")
                 .disabled(store.selectedProject == nil)
                 Spacer()
                 Text(projectCountText)

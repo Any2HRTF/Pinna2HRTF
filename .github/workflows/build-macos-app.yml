@@ -50,6 +50,7 @@ jobs:
           cache="$RUNNER_TEMP/pinna2hrtf-smoke"
           mkdir -p "$cache/matplotlib" "$cache/python" "$cache/blender/config" "$cache/blender/scripts" "$cache/blender/datafiles"
           MPLCONFIGDIR="$cache/matplotlib" PYTHONPYCACHEPREFIX="$cache/python" PYTHONNOUSERSITE=1 BLENDER_USER_CONFIG="$cache/blender/config" BLENDER_USER_SCRIPTS="$cache/blender/scripts" BLENDER_USER_DATAFILES="$cache/blender/datafiles" PYTHONPATH="$resources" "$resources/.venv/bin/python" -m HRTFCalculation --help
+          PYTHONPATH="$resources" "$resources/.venv/bin/python" -c 'from HRTFCalculation.Config import PreprocessingConfig; s = PreprocessingConfig(); assert s.mesh_gamma == 0.2 and s.mesh_gamma_opposite == 0.1; assert not hasattr(s, "mesh_gamma_left") and not hasattr(s, "mesh_gamma_right") and not hasattr(s, "mesh_hole_size")'
 
       - name: Verify relocated app
         run: |
@@ -143,6 +144,10 @@ jobs:
           & "$root\.venv\Scripts\python.exe" -m HRTFCalculation --help
           if ($LASTEXITCODE -ne 0) {
             throw "Bundled Windows Python smoke test failed."
+          }
+          & "$root\.venv\Scripts\python.exe" -c "from HRTFCalculation.Config import PreprocessingConfig; s = PreprocessingConfig(); assert s.mesh_gamma == 0.2 and s.mesh_gamma_opposite == 0.1; assert not hasattr(s, 'mesh_gamma_left') and not hasattr(s, 'mesh_gamma_right') and not hasattr(s, 'mesh_hole_size')"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Bundled Windows mesh grading schema check failed."
           }
 
       - name: Verify relocated Windows app

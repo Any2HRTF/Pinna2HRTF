@@ -10,7 +10,7 @@ enum Stage: String, CaseIterable, Identifiable, Codable {
 
     var title: String {
         switch self {
-        case .inference: "Inference"
+        case .inference: "BezierPPM Inference"
         case .preprocessing: "Preprocessing"
         case .numcalc: "NumCalc"
         case .postprocessing: "Postprocess"
@@ -69,10 +69,10 @@ struct EnvironmentConfig: Codable, Equatable {
 struct InferenceSettings: Codable, Equatable {
     var modelConfig: String
     var modelCheckpoint: String
-    var targetLeftFolder = "Target STL Left"
-    var targetRightFolder = "Target STL Right"
-    var predictionLeftFolder = "Prediction STL Left"
-    var predictionRightFolder = "Prediction STL Right"
+    var targetLeftFolder = "Input/Left"
+    var targetRightFolder = "Input/Right"
+    var predictionLeftFolder = "Intermediates/Left"
+    var predictionRightFolder = "Intermediates/Right"
     var usePredictionsForPreprocessing = true
 }
 
@@ -86,8 +86,8 @@ struct PreprocessingSettings: Codable, Equatable {
     var meshMinEdgeLength = "0.5"
     var meshMaxEdgeLength = "10.0"
     var meshMaxError = "0.5"
-    var meshGammaLeft = "0.15"
-    var meshGammaRight = "0.2"
+    var meshGamma = "0.2"
+    var meshGammaOpposite = "0.1"
     var skipMeshGrading: Bool?
     var sourceAssignmentFaceCount: String? = "6"
 }

@@ -14,13 +14,15 @@ struct Pinna2HRTFApp: App {
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About Pinna2HRTF") {
-                    let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 460, height: 420), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+                    let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 460, height: 360), styleMask: [.titled, .closable], backing: .buffered, defer: false)
                     panel.title = "About Pinna2HRTF"
                     panel.isReleasedWhenClosed = false
-                    panel.contentView = NSHostingView(rootView: VStack(spacing: 14) {
-                        Image(nsImage: NSApp.applicationIconImage)
+                    let aboutImage = NSImage(contentsOfFile: Defaults.pipelineRoot.appendingPathComponent("icon.png").path) ?? NSApp.applicationIconImage ?? NSImage(size: NSSize(width: 1, height: 1))
+                    panel.contentView = NSHostingView(rootView: VStack(spacing: 8) {
+                        Image(nsImage: aboutImage)
                             .resizable()
-                            .frame(width: 128, height: 128)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 220, height: 130)
                         Text("Pinna2HRTF")
                             .font(.title.bold())
                         Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0")")
@@ -29,14 +31,9 @@ struct Pinna2HRTFApp: App {
                         Text("A desktop pipeline for ear-mesh preprocessing, Pinna2HRTF inference, Mesh2HRTF simulation, and SOFA export.")
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: 380)
-                        Button("Open Project Website") {
-                            NSWorkspace.shared.open(URL(string: "https://github.com/Any2HRTF/Pinna2HRTF")!)
-                        }
-                            .buttonStyle(.borderedProminent)
-                            .padding(.top, 8)
                     }
-                    .padding(28)
-                    .frame(width: 460, height: 392))
+                    .padding(20)
+                    .frame(width: 460, height: 330))
                     appDelegate.aboutPanel = panel
                     panel.center()
                     panel.makeKeyAndOrderFront(nil)

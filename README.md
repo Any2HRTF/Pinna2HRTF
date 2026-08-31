@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="icon.png" alt="Pinna2HRTF icon" width="128" height="128">
+  <img src="icon.png" alt="Pinna2HRTF icon" width="256">
 </p>
 
 # Pinna2HRTF
@@ -59,9 +59,9 @@ mkdir -p "$OUT"
 If you want to run mesh prediction first, place or copy the input ears into the folders expected by inference:
 
 ```sh
-mkdir -p "$OUT/Target STL Left" "$OUT/Target STL Right"
-cp "$LEFT_MESH" "$OUT/Target STL Left/left.stl"
-cp "$RIGHT_MESH" "$OUT/Target STL Right/right.stl"
+mkdir -p "$OUT/Input/Left" "$OUT/Input/Right"
+cp "$LEFT_MESH" "$OUT/Input/Left/left.stl"
+cp "$RIGHT_MESH" "$OUT/Input/Right/right.stl"
 ```
 
 Run inference:
@@ -74,6 +74,10 @@ uv run Pinna2HRTF inference \
 ```
 
 Inference is optional. If you already have the left and right meshes you want to use, skip that step and pass them directly to preprocessing.
+
+For the app and config-driven workflow, a project contains `Input/`, one `Intermediates/` folder with only `Left/` and `Right/` side folders for generated meshes and working data, `Projects/` for Mesh2HRTF simulations, and one `HRTF/` folder containing the finished SOFA files and plots.
+
+The side folders contain preprocessing files plus prefixed inference outputs such as `Prediction_Left.stl`, `ICP_Left.stl`, and `Prediction_Parameters_Left.csv`; the shared `Results Inference.csv` stays directly in `Intermediates/`.
 
 Run preprocessing. Provide one or both mesh paths; only the configured sides become Mesh2HRTF projects:
 
@@ -95,7 +99,7 @@ This writes:
 ```text
 runs/example/project-Left
 runs/example/project-Right
-runs/example/project-intermediates
+runs/example/project-Intermediates
 ```
 
 Run NumCalc:

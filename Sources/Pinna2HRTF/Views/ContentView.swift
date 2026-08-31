@@ -28,11 +28,13 @@ struct ContentView: View {
         let selectedProjectIsRunning = selectedProject.map { store.runningProcesses[$0.id] != nil } ?? false
         return PipelineCommandContext(
             canRemoveProject: selectedProject != nil,
+            canDuplicateProject: selectedProject != nil,
             canRunProject: selectedProject != nil && !selectedProjectIsRunning,
             canStopProject: selectedProjectIsRunning,
             canResetProject: selectedProject != nil && !selectedProjectIsRunning,
             createProject: { store.createProject() },
             importProject: { store.importProject() },
+            duplicateProject: { store.duplicateSelectedProject() },
             removeProject: { store.forgetSelectedProject() },
             runNextStage: { store.runNextStage() },
             runStage: { store.run(stage: $0) },

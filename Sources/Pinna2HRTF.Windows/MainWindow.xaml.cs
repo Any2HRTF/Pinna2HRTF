@@ -33,8 +33,11 @@ public partial class MainWindow : Window
     bool rotatingMesh;
     System.Windows.Point lastMeshPointer;
     double meshYaw;
-    double meshPitch = 23;
-    double meshDistance = 305;
+    double meshPitch;
+    double meshDistance;
+    Point3D meshCenter;
+    double meshMaximumDimension = 180;
+    double meshFrontDirection = -1;
     string packageRoot = "";
     string appData = "";
     string registryPath = "";
@@ -45,6 +48,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         ProjectList.ItemsSource = projects;
         ArtifactPicker.ItemsSource = artifacts;
+        SystemEvents.UserPreferenceChanged += UserPreferenceChanged;
         statusTimer.Tick += (_, _) =>
         {
             RefreshNumCalcStatus();
@@ -71,7 +75,24 @@ public partial class MainWindow : Window
         }
         LoadRegistry();
         foreach (var project in projects)
+        {
             project.Settings.Preprocessing.FrequencyStepCount = Math.Max(int.TryParse(project.Settings.Preprocessing.FrequencyStepCount, out var steps) ? steps : 129, 2).ToString();
+            if (project.Settings.Inference.TargetLeftFolder == "Target STL Left") project.Settings.Inference.TargetLeftFolder = "Input/Left";
+            if (project.Settings.Inference.TargetRightFolder == "Target STL Right") project.Settings.Inference.TargetRightFolder = "Input/Right";
+            if (project.Settings.Inference.PredictionLeftFolder == "Prediction STL Left") project.Settings.Inference.PredictionLeftFolder = "Intermediates/Left";
+            if (project.Settings.Inference.PredictionRightFolder == "Prediction STL Right") project.Settings.Inference.PredictionRightFolder = "Intermediates/Right";
+            if (project.Settings.Inference.PredictionLeftFolder == "Intermediates/Prediction STL Left") project.Settings.Inference.PredictionLeftFolder = "Intermediates/Left";
+            if (project.Settings.Inference.PredictionRightFolder == "Intermediates/Prediction STL Right") project.Settings.Inference.PredictionRightFolder = "Intermediates/Right";
+            var projectDirectories = Directory.Exists(project.SaveLocation) ? Directory.EnumerateDirectories(project.SaveLocation).ToArray() : Array.Empty<string>();
+            var legacyIntermediates = projectDirectories.FirstOrDefault(path => Path.GetFileName(path) == "intermediates");
+            var currentIntermediates = projectDirectories.FirstOrDefault(path => Path.GetFileName(path) == "Intermediates");
+            if (legacyIntermediates != null && currentIntermediates == null)
+            {
+                var migrationPath = Path.Combine(project.SaveLocation, ".pinna2hrtf-intermediates-migration");
+                Directory.Move(legacyIntermediates, migrationPath);
+                Directory.Move(migrationPath, Path.Combine(project.SaveLocation, "Intermediates"));
+            }
+        }
         if (BundledPythonExecutable() != null)
         {
             environment = DefaultEnvironment();
@@ -91,7 +112,7 @@ public partial class MainWindow : Window
         RefreshProjectList();
         LoadSelectedProject();
         RefreshArtifacts();
-        RefreshEnvironmentStatus();
+        UpdateViewerAppearance();
         statusTimer.Start();
         RefreshNumCalcStatus();
         RefreshPipelineStatus();
@@ -111,6 +132,7 @@ public partial class MainWindow : Window
         ProjectsTitle.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
         NewProjectButton.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
         ImportProjectButton.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        DuplicateProjectButton.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
         DeleteProjectButton.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
         ProjectsToggle.ToolTip = expanded ? "Collapse projects" : "Expand projects";
     }
@@ -130,9 +152,22 @@ public partial class MainWindow : Window
     void WindowClosing(object? sender, CancelEventArgs e)
     {
         statusTimer.Stop();
+        SystemEvents.UserPreferenceChanged -= UserPreferenceChanged;
         foreach (var process in runningProcesses.Values.ToList())
             TryTerminate(process);
         Persist();
+    }
+
+    void UserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e) => Dispatcher.BeginInvoke(() => UpdateViewerAppearance());
+
+    void UpdateViewerAppearance()
+    {
+        var darkMode = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")?.GetValue("AppsUseLightTheme") is int value && value == 0;
+        MeshViewerBackground.Background = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#1f1f1f" : "#edf3f2"));
+        MeshViewerBackground.BorderBrush = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#3b3b3b" : "#dbe5e3"));
+        ViewerPlaceholder.Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#c8c8c8" : "#69717d"));
+        MeshControlsHint.Background = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#cc2b2b2b" : "#ccffffff"));
+        MeshControlsHintText.Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#c8c8c8" : "#69717d"));
     }
 
     void LoadRegistry()
@@ -219,6 +254,7 @@ public partial class MainWindow : Window
         foreach (var project in projects)
             project.StatusText = ArtifactSummary(project);
         ProjectList.Items.Refresh();
+        DuplicateProjectButton.IsEnabled = SelectedProject != null;
     }
 
     void LoadSelectedProject()
@@ -229,7 +265,6 @@ public partial class MainWindow : Window
         LeftEarBox.Text = project?.LeftEar ?? "";
         RightEarBox.Text = project?.RightEar ?? "";
         SaveLocationBox.Text = project?.SaveLocation ?? "";
-        CopyInputsBox.IsChecked = project?.InputHandling != InputHandling.Reference;
         UsePredictionsBox.IsChecked = project?.Settings.Inference.UsePredictionsForPreprocessing ?? true;
         EvaluationGridBox.Text = project?.Settings.Preprocessing.EvaluationGrid ?? "";
         UseHeadRadiusBox.IsChecked = project?.Settings.Preprocessing.UseCustomHeadRadius ?? project?.Settings.Preprocessing.HeadRadius != null;
@@ -237,21 +272,20 @@ public partial class MainWindow : Window
         MinFrequencyBox.Text = project?.Settings.Preprocessing.MinFrequency ?? "0";
         MaxFrequencyBox.Text = project?.Settings.Preprocessing.MaxFrequency ?? "24000";
         FrequencyStepsBox.Text = project?.Settings.Preprocessing.FrequencyStepCount ?? "129";
+        SourceAssignmentFaceCountBox.Text = project?.Settings.Preprocessing.SourceAssignmentFaceCount ?? "6";
         MeshMinEdgeBox.Text = project?.Settings.Preprocessing.MeshMinEdgeLength ?? "0.5";
         MeshMaxEdgeBox.Text = project?.Settings.Preprocessing.MeshMaxEdgeLength ?? "10.0";
         MeshMaxErrorBox.Text = project?.Settings.Preprocessing.MeshMaxError ?? "0.5";
-        MeshGammaLeftBox.Text = project?.Settings.Preprocessing.MeshGammaLeft ?? "0.15";
-        MeshGammaRightBox.Text = project?.Settings.Preprocessing.MeshGammaRight ?? "0.2";
+        MeshGammaBox.Text = project?.Settings.Preprocessing.MeshGamma ?? "0.2";
+        MeshGammaOppositeBox.Text = project?.Settings.Preprocessing.MeshGammaOpposite ?? "0.1";
         MaxInstancesBox.Text = project?.Settings.NumCalc.MaxInstances ?? "1";
         MaxCpuLoadBox.Text = project?.Settings.NumCalc.MaxCpuLoad ?? "90";
         AdaptiveFmmLengthBox.IsChecked = project?.Settings.NumCalc.AdaptiveFmmLength ?? true;
-        UvBox.Text = environment.UvExecutable;
-        NumCalcBox.Text = environment.NumCalcExecutable;
-        MeshGradingBox.Text = environment.MeshGradingExecutable;
-        ExternalBox.Text = environment.ExternalDir;
+        NormalizeHrtfsBox.IsChecked = project?.Settings.Postprocessing?.Normalize ?? true;
+        LevelOffsetBox.Text = project?.Settings.Postprocessing?.LevelOffsetDB ?? "-30";
+        LevelOffsetBox.IsEnabled = NormalizeHrtfsBox.IsChecked == true;
         SelectModel(project);
         loading = false;
-        RefreshEnvironmentStatus();
         RefreshPipelineStatus();
     }
 
@@ -297,7 +331,6 @@ public partial class MainWindow : Window
         project.LeftEar = LeftEarBox.Text;
         project.RightEar = RightEarBox.Text;
         project.SaveLocation = SaveLocationBox.Text;
-        project.InputHandling = CopyInputsBox.IsChecked == true ? InputHandling.Copy : InputHandling.Reference;
         project.Settings.Inference.UsePredictionsForPreprocessing = UsePredictionsBox.IsChecked == true;
         project.Settings.Preprocessing.EvaluationGrid = string.IsNullOrWhiteSpace(EvaluationGridBox.Text) ? null : EvaluationGridBox.Text;
         project.Settings.Preprocessing.UseCustomHeadRadius = UseHeadRadiusBox.IsChecked == true;
@@ -305,30 +338,22 @@ public partial class MainWindow : Window
         project.Settings.Preprocessing.MinFrequency = MinFrequencyBox.Text;
         project.Settings.Preprocessing.MaxFrequency = MaxFrequencyBox.Text;
         project.Settings.Preprocessing.FrequencyStepCount = FrequencyStepsBox.Text;
+        project.Settings.Preprocessing.SourceAssignmentFaceCount = SourceAssignmentFaceCountBox.Text;
         project.Settings.Preprocessing.MeshMinEdgeLength = MeshMinEdgeBox.Text;
         project.Settings.Preprocessing.MeshMaxEdgeLength = MeshMaxEdgeBox.Text;
         project.Settings.Preprocessing.MeshMaxError = MeshMaxErrorBox.Text;
-        project.Settings.Preprocessing.MeshGammaLeft = MeshGammaLeftBox.Text;
-        project.Settings.Preprocessing.MeshGammaRight = MeshGammaRightBox.Text;
+        project.Settings.Preprocessing.MeshGamma = MeshGammaBox.Text;
+        project.Settings.Preprocessing.MeshGammaOpposite = MeshGammaOppositeBox.Text;
         project.Settings.NumCalc.MaxInstances = MaxInstancesBox.Text;
         project.Settings.NumCalc.MaxCpuLoad = MaxCpuLoadBox.Text;
         project.Settings.NumCalc.AdaptiveFmmLength = AdaptiveFmmLengthBox.IsChecked == true;
+        project.Settings.Postprocessing ??= new PostprocessingSettings();
+        project.Settings.Postprocessing.Normalize = NormalizeHrtfsBox.IsChecked == true;
+        project.Settings.Postprocessing.LevelOffsetDB = LevelOffsetBox.Text;
+        LevelOffsetBox.IsEnabled = NormalizeHrtfsBox.IsChecked == true;
         Persist();
         RefreshProjectList();
         RefreshArtifacts();
-        RefreshPipelineStatus();
-    }
-
-    void EnvironmentEdited(object sender, RoutedEventArgs e)
-    {
-        if (loading)
-            return;
-        environment.UvExecutable = UvBox.Text;
-        environment.NumCalcExecutable = NumCalcBox.Text;
-        environment.MeshGradingExecutable = MeshGradingBox.Text;
-        environment.ExternalDir = ExternalBox.Text;
-        Persist();
-        RefreshEnvironmentStatus();
         RefreshPipelineStatus();
     }
 
@@ -346,6 +371,8 @@ public partial class MainWindow : Window
     void CreateProjectClicked(object sender, RoutedEventArgs e) => CreateProject();
 
     void ImportProjectClicked(object sender, RoutedEventArgs e) => ImportProject();
+
+    void DuplicateProjectClicked(object sender, RoutedEventArgs e) => DuplicateProject();
 
     void ImportProject()
     {
@@ -367,7 +394,15 @@ public partial class MainWindow : Window
         project.RightEar = ImportedMesh(folder, "Right");
         project.SaveLocation = folder;
         project.InputHandling = InputHandling.Reference;
-        foreach (var configName in new[] { ".pinna2hrtf_native_run.yaml", "pipeline.yaml" })
+        var legacyIntermediates = Directory.EnumerateDirectories(folder).FirstOrDefault(path => Path.GetFileName(path) == "intermediates");
+        var currentIntermediates = Directory.EnumerateDirectories(folder).FirstOrDefault(path => Path.GetFileName(path) == "Intermediates");
+        if (legacyIntermediates != null && currentIntermediates == null)
+        {
+            var migrationPath = Path.Combine(folder, ".pinna2hrtf-intermediates-migration");
+            Directory.Move(legacyIntermediates, migrationPath);
+            Directory.Move(migrationPath, Path.Combine(folder, "Intermediates"));
+        }
+        foreach (var configName in new[] { "Project Settings.yaml", ".pinna2hrtf_native_run.yaml", "pipeline.yaml" })
         {
             var configPath = Path.Combine(folder, configName);
             if (!File.Exists(configPath))
@@ -397,6 +432,9 @@ public partial class MainWindow : Window
         var candidates = new[]
         {
             Path.Combine(folder, "Input", side),
+            Path.Combine(folder, "Intermediates", side),
+            Path.Combine(folder, "Intermediates", $"Prediction STL {side}"),
+            Path.Combine(folder, "Intermediates", $"ICP STL {side}"),
             Path.Combine(folder, $"Target STL {side}"),
             Path.Combine(folder, $"ICP STL {side}"),
             Path.Combine(folder, $"Prediction STL {side}")
@@ -429,6 +467,36 @@ public partial class MainWindow : Window
         ProjectList.SelectedItem = project;
         Persist();
         RefreshProjectList();
+    }
+
+    void DuplicateProject()
+    {
+        var selected = SelectedProject;
+        if (selected == null)
+            return;
+        var duplicate = Clone(selected);
+        duplicate.Id = Guid.NewGuid();
+        duplicate.Name = $"{selected.Name} Copy";
+        if (!string.IsNullOrWhiteSpace(selected.SaveLocation))
+        {
+            var original = new DirectoryInfo(selected.SaveLocation);
+            var parent = original.Parent?.FullName ?? selected.SaveLocation;
+            var baseName = string.IsNullOrWhiteSpace(original.Name) ? "Project" : original.Name;
+            var duplicateLocation = Path.Combine(parent, $"{baseName} Copy");
+            var suffix = 2;
+            while (Directory.Exists(duplicateLocation))
+            {
+                duplicateLocation = Path.Combine(parent, $"{baseName} Copy {suffix}");
+                suffix++;
+            }
+            duplicate.SaveLocation = duplicateLocation;
+        }
+        projects.Add(duplicate);
+        failedStages[duplicate.Id] = [];
+        ProjectList.SelectedItem = duplicate;
+        Persist();
+        RefreshProjectList();
+        RefreshArtifacts();
     }
 
     ProjectRecord NewProject(int index)
@@ -464,12 +532,8 @@ public partial class MainWindow : Window
 
     void BrowseLeftEarClicked(object sender, RoutedEventArgs e) => BrowseFile(LeftEarBox, "Mesh files|*.stl;*.ply|All files|*.*");
     void BrowseRightEarClicked(object sender, RoutedEventArgs e) => BrowseFile(RightEarBox, "Mesh files|*.stl;*.ply|All files|*.*");
-    void BrowseUvClicked(object sender, RoutedEventArgs e) => BrowseFile(UvBox, "uv|uv.exe|Executables|*.exe|All files|*.*");
-    void BrowseNumCalcClicked(object sender, RoutedEventArgs e) => BrowseFile(NumCalcBox, "NumCalc|NumCalc.exe|Executables|*.exe|All files|*.*");
-    void BrowseMeshGradingClicked(object sender, RoutedEventArgs e) => BrowseFile(MeshGradingBox, "Mesh grading|hrtf_mesh_grading.exe|Executables|*.exe|All files|*.*");
     void BrowseSaveLocationClicked(object sender, RoutedEventArgs e) => BrowseFolder(SaveLocationBox);
     void BrowseEvaluationGridClicked(object sender, RoutedEventArgs e) => BrowseFolder(EvaluationGridBox);
-    void BrowseExternalClicked(object sender, RoutedEventArgs e) => BrowseFolder(ExternalBox);
 
     void BrowseFile(System.Windows.Controls.TextBox box, string filter)
     {
@@ -511,25 +575,25 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(project.LeftEar))
         {
             list.Add(new("Input left ear", project.LeftEar));
-            list.Add(new("Left simulation mesh", Path.Combine(output, "intermediates", "left", "graded_head.ply")));
+            list.Add(new("Left simulation mesh", Path.Combine(output, "Intermediates", "Left", "graded_head.ply")));
         }
         if (!string.IsNullOrWhiteSpace(project.RightEar))
         {
             list.Add(new("Input right ear", project.RightEar));
-            list.Add(new("Right simulation mesh", Path.Combine(output, "intermediates", "right", "graded_head.ply")));
+            list.Add(new("Right simulation mesh", Path.Combine(output, "Intermediates", "Right", "graded_head.ply")));
         }
         if (!string.IsNullOrWhiteSpace(project.LeftEar))
-            AddMeshFolder(list, "Generated left ear", Path.Combine(output, settings.PredictionLeftFolder));
+            AddMeshFolder(list, "Predicted left ear", Path.Combine(output, settings.PredictionLeftFolder), true);
         if (!string.IsNullOrWhiteSpace(project.RightEar))
-            AddMeshFolder(list, "Generated right ear", Path.Combine(output, settings.PredictionRightFolder));
+            AddMeshFolder(list, "Predicted right ear", Path.Combine(output, settings.PredictionRightFolder), true);
         return list;
     }
 
-    void AddMeshFolder(List<Artifact> list, string title, string folder)
+    void AddMeshFolder(List<Artifact> list, string title, string folder, bool predictionsOnly = false)
     {
         if (!Directory.Exists(folder))
             return;
-        var files = Directory.GetFiles(folder).Where(IsMesh).OrderBy(x => x).ToList();
+        var files = Directory.GetFiles(folder).Where(path => IsMesh(path) && (!predictionsOnly || Path.GetFileName(path).StartsWith("Prediction_", StringComparison.OrdinalIgnoreCase))).OrderBy(x => x).ToList();
         if (files.Count == 1)
         {
             list.Add(new Artifact(title, files[0]));
@@ -560,8 +624,23 @@ public partial class MainWindow : Window
         {
             try
             {
-                var model = MeshLoader.Load(artifact.Path);
+                var model = MeshLoader.Load(artifact.Path, out var originalCenter, out var meshScale);
+                var bounds = model.Bounds;
+                meshCenter = new Point3D((bounds.X + bounds.SizeX / 2), (bounds.Y + bounds.SizeY / 2), (bounds.Z + bounds.SizeZ / 2));
+                meshMaximumDimension = Math.Max(bounds.SizeX, Math.Max(bounds.SizeY, bounds.SizeZ));
+                meshFrontDirection = artifact.Path.Contains("left", StringComparison.OrdinalIgnoreCase) ? 1 : -1;
                 MeshViewport.Children.Add(new ModelVisual3D { Content = model });
+                if (MicrophonePosition(artifact.Path) is Point3D microphone)
+                {
+                    var transformedMicrophone = new Point3D(
+                        (microphone.X - originalCenter.X) * meshScale,
+                        (microphone.Y - originalCenter.Y) * meshScale,
+                        (microphone.Z - originalCenter.Z) * meshScale);
+                    var markerMaterial = new MaterialGroup();
+                    markerMaterial.Children.Add(new DiffuseMaterial(new SolidColorBrush(System.Windows.Media.Color.FromRgb(255, 149, 0))));
+                    markerMaterial.Children.Add(new EmissiveMaterial(new SolidColorBrush(System.Windows.Media.Color.FromRgb(255, 149, 0))));
+                    MeshViewport.Children.Add(new ModelVisual3D { Content = new GeometryModel3D(MeshLoader.CreateSphere(transformedMicrophone, Math.Max(meshMaximumDimension * 0.006, 0.35)), markerMaterial) { BackMaterial = markerMaterial } });
+                }
                 ResetMeshCamera();
                 MeshControlsHint.Visibility = Visibility.Visible;
                 ViewerPlaceholder.Visibility = Visibility.Collapsed;
@@ -656,9 +735,9 @@ public partial class MainWindow : Window
 
     void ResetMeshCamera()
     {
-        meshYaw = 0;
-        meshPitch = 23;
-        meshDistance = 305;
+        meshYaw = meshFrontDirection > 0 ? 180 : 0;
+        meshDistance = Math.Max(meshMaximumDimension * 1.7, 1);
+        meshPitch = Math.Atan2(meshMaximumDimension * 0.12, meshDistance) * 180 / Math.PI;
         UpdateMeshCamera();
     }
 
@@ -668,12 +747,36 @@ public partial class MainWindow : Window
         var pitch = meshPitch * Math.PI / 180;
         var horizontalDistance = meshDistance * Math.Cos(pitch);
         var position = new Point3D(
-            horizontalDistance * Math.Sin(yaw),
-            -horizontalDistance * Math.Cos(yaw),
-            meshDistance * Math.Sin(pitch));
+            meshCenter.X + horizontalDistance * Math.Sin(yaw),
+            meshCenter.Y - horizontalDistance * Math.Cos(yaw),
+            meshCenter.Z + meshDistance * Math.Sin(pitch));
         MeshCamera.Position = position;
-        MeshCamera.LookDirection = new Vector3D(-position.X, -position.Y, -position.Z);
+        MeshCamera.LookDirection = new Vector3D(meshCenter.X - position.X, meshCenter.Y - position.Y, meshCenter.Z - position.Z);
         MeshCamera.UpDirection = new Vector3D(0, 0, 1);
+    }
+
+    Point3D? MicrophonePosition(string meshPath)
+    {
+        if (!string.Equals(Path.GetFileName(meshPath), "graded_head.ply", StringComparison.OrdinalIgnoreCase) || SelectedProject == null)
+            return null;
+        var side = meshPath.Contains("left", StringComparison.OrdinalIgnoreCase) ? "Left" : meshPath.Contains("right", StringComparison.OrdinalIgnoreCase) ? "Right" : "";
+        if (side.Length == 0)
+            return null;
+        var parametersPath = Path.Combine(SelectedProject.SaveLocation, "Projects", side, "parameters.json");
+        if (!File.Exists(parametersPath))
+            return null;
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(parametersPath));
+            if (!document.RootElement.TryGetProperty("sourceCenter", out var values) || values.ValueKind != JsonValueKind.Array || values.GetArrayLength() != 3)
+                return null;
+            var coordinates = values.EnumerateArray().Select(value => value.GetDouble() * 1000).ToArray();
+            return new Point3D(coordinates[0], coordinates[1], coordinates[2]);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     void RunInferenceClicked(object sender, RoutedEventArgs e) => RunOrStop(Stage.Inference);
@@ -850,48 +953,6 @@ public partial class MainWindow : Window
         }
     }
 
-    void SetupEnvironmentClicked(object sender, RoutedEventArgs e)
-    {
-        if (runningProcesses.Values.Any())
-        {
-            AppendLog("Stop running tasks before setting up the environment.");
-            return;
-        }
-        var executable = File.Exists(environment.UvExecutable) ? environment.UvExecutable : "uv";
-        var process = new Process();
-        process.StartInfo = new ProcessStartInfo
-        {
-            FileName = executable,
-            Arguments = "sync",
-            WorkingDirectory = packageRoot,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        ApplyProcessEnvironment(process.StartInfo);
-        process.OutputDataReceived += (_, args) => AppendLog(args.Data);
-        process.ErrorDataReceived += (_, args) => AppendLog(args.Data);
-        process.EnableRaisingEvents = true;
-        AppendLog("Setting up Python environment");
-        process.Exited += (_, _) => Dispatcher.BeginInvoke(() =>
-        {
-            AppendLog(process.ExitCode == 0 ? "Environment setup finished" : $"Environment setup exited with status {process.ExitCode}");
-            process.Dispose();
-            RefreshEnvironmentStatus();
-        });
-        try
-        {
-            process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-        }
-        catch (Exception error)
-        {
-            AppendLog($"Could not start environment setup: {error.Message}");
-        }
-    }
-
     void ApplyProcessEnvironment(ProcessStartInfo startInfo)
     {
         startInfo.Environment["PINNA2HRTF_ROOT"] = Directory.GetParent(packageRoot)?.FullName ?? packageRoot;
@@ -923,7 +984,7 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(project.RightEar))
                 prepared.RightEar = CopyInput(project.RightEar, Path.Combine(project.SaveLocation, "Input", "Right"));
         }
-        var config = Path.Combine(project.SaveLocation, ".pinna2hrtf_native_run.yaml");
+        var config = Path.Combine(project.SaveLocation, "Project Settings.yaml");
         File.WriteAllText(config, Yaml(prepared), Encoding.UTF8);
         return config;
     }
@@ -946,9 +1007,12 @@ public partial class MainWindow : Window
         var inference = project.Settings.Inference;
         var preprocessing = project.Settings.Preprocessing;
         var numcalc = project.Settings.NumCalc;
+        var postprocessing = project.Settings.Postprocessing ?? new PostprocessingSettings();
         var evaluationGrid = string.IsNullOrWhiteSpace(preprocessing.EvaluationGrid) ? "Default" : preprocessing.EvaluationGrid;
         var frequencyStepCount = Math.Max(int.TryParse(preprocessing.FrequencyStepCount, out var steps) ? steps : 129, 2);
+        var sourceAssignmentFaceCount = Math.Clamp(int.TryParse(preprocessing.SourceAssignmentFaceCount, out var faces) ? faces : 6, 1, 100);
         var headRadius = preprocessing.UseCustomHeadRadius == true ? $"  head_radius: {YamlNumber(preprocessing.HeadRadius) ?? "0"}\n" : "";
+        var levelOffsetDB = YamlNumber(postprocessing.LevelOffsetDB) ?? "-30";
         return $"""
 paths:
   left_ear: {YamlPath(project.LeftEar)}
@@ -966,8 +1030,8 @@ inference:
   target_right_folder: {YamlScalar(inference.TargetRightFolder)}
   prediction_left_folder: {YamlScalar(inference.PredictionLeftFolder)}
   prediction_right_folder: {YamlScalar(inference.PredictionRightFolder)}
-  prediction_parameters_left_folder: Prediction Parameters Left
-  prediction_parameters_right_folder: Prediction Parameters Right
+  prediction_parameters_left_folder: Intermediates/Left
+  prediction_parameters_right_folder: Intermediates/Right
   use_predictions_for_preprocessing: {Bool(inference.UsePredictionsForPreprocessing)}
 preprocessing:
   enabled: true
@@ -988,9 +1052,8 @@ preprocessing:
   mesh_min_edge_length: {preprocessing.MeshMinEdgeLength}
   mesh_max_edge_length: {preprocessing.MeshMaxEdgeLength}
   mesh_max_error: {preprocessing.MeshMaxError}
-  mesh_gamma_left: {preprocessing.MeshGammaLeft}
-  mesh_gamma_right: {preprocessing.MeshGammaRight}
-  mesh_hole_size: 0.2
+  mesh_gamma: {preprocessing.MeshGamma}
+  mesh_gamma_opposite: {preprocessing.MeshGammaOpposite}
   skip_mesh_grading: false
   source_type_left: Left ear
   source_type_right: Right ear
@@ -1008,6 +1071,7 @@ preprocessing:
   air_density: "1.1839"
   material_search_paths: None
   source_assignment_tolerance: 2.0
+  source_assignment_face_count: {sourceAssignmentFaceCount}
 numcalc:
   enabled: false
   mode: local
@@ -1018,6 +1082,8 @@ postprocessing:
   enabled: false
   output_sofa_dir: {YamlScalar(Path.Combine(output, "HRTF"))}
   overwrite: true
+  normalize: {Bool(postprocessing.Normalize)}
+  level_offset_db: {levelOffsetDB}
 ui:
   mesh_background: white
   show_axes: true
@@ -1074,11 +1140,21 @@ ui:
             project.Settings.Inference.PredictionRightFolder,
             "Prediction Parameters Left",
             "Prediction Parameters Right",
+            "Intermediates",
+            "Target STL Left",
+            "Target STL Right",
+            "ICP STL Left",
+            "ICP STL Right",
+            "Prediction STL Left",
+            "Prediction STL Right",
+            "Prediction Parameters Left",
+            "Prediction Parameters Right",
             "intermediates",
             "Projects",
             "HRTF",
             "Results Inference.csv",
-            ".pinna2hrtf_native_run.yaml"
+            ".pinna2hrtf_native_run.yaml",
+            "Project Settings.yaml"
         };
         foreach (var name in names)
         {
@@ -1135,14 +1211,6 @@ ui:
             Append();
         else
             Dispatcher.BeginInvoke(Append);
-    }
-
-    void RefreshEnvironmentStatus()
-    {
-        var numcalc = File.Exists(environment.NumCalcExecutable) ? "NumCalc found" : "NumCalc missing";
-        var grading = File.Exists(environment.MeshGradingExecutable) ? "mesh grading found" : "mesh grading missing";
-        var runtime = BundledPythonExecutable() != null ? "bundled Python found" : File.Exists(environment.UvExecutable) ? "development uv found" : "Python runtime missing";
-        EnvironmentStatusText.Text = $"{runtime}; {numcalc}; {grading}";
     }
 
     void RefreshNumCalcStatus()
@@ -1210,7 +1278,7 @@ ui:
             $"Next: {(next?.Title ?? (running == null ? "complete" : "finishing"))}"
         };
         if (!InferenceIsAutomatic(project))
-            parts.Add("Inference: skipped");
+            parts.Add("BezierPPM Inference: skipped");
         if (missing.Count > 0)
             parts.Add($"Missing: {string.Join(", ", missing.Distinct())}");
         if (failed.Count > 0)
@@ -1299,9 +1367,9 @@ ui:
         if (StageIsComplete(Stage.Preprocessing, project))
             return "Projects ready";
         if (!project.Settings.Inference.UsePredictionsForPreprocessing)
-            return "Inference skipped";
+            return "BezierPPM Inference skipped";
         if (StageIsComplete(Stage.Inference, project))
-            return "Inference ready";
+            return "BezierPPM Inference ready";
         return NextStageSummary(project);
     }
 
@@ -1320,7 +1388,7 @@ ui:
         if (stage == Stage.Inference)
             return !project.Settings.Inference.UsePredictionsForPreprocessing || (InferenceIsAutomatic(project) && ContainsMesh(Path.Combine(output, project.Settings.Inference.PredictionLeftFolder)) && ContainsMesh(Path.Combine(output, project.Settings.Inference.PredictionRightFolder)));
         if (stage == Stage.Preprocessing)
-            return (string.IsNullOrWhiteSpace(project.LeftEar) || (File.Exists(Path.Combine(output, "Projects", "Left", "parameters.json")) && File.Exists(Path.Combine(output, "intermediates", "left", "graded_head.ply")))) && (string.IsNullOrWhiteSpace(project.RightEar) || (File.Exists(Path.Combine(output, "Projects", "Right", "parameters.json")) && File.Exists(Path.Combine(output, "intermediates", "right", "graded_head.ply"))));
+            return (string.IsNullOrWhiteSpace(project.LeftEar) || (File.Exists(Path.Combine(output, "Projects", "Left", "parameters.json")) && File.Exists(Path.Combine(output, "Intermediates", "Left", "graded_head.ply")))) && (string.IsNullOrWhiteSpace(project.RightEar) || (File.Exists(Path.Combine(output, "Projects", "Right", "parameters.json")) && File.Exists(Path.Combine(output, "Intermediates", "Right", "graded_head.ply"))));
         if (stage == Stage.Numcalc)
         {
             var leftTotal = NumCalcTotal(project, "Left");
@@ -1359,7 +1427,7 @@ record Artifact(string Title, string Path)
 
 record Stage(string Value, string Title)
 {
-    public static readonly Stage Inference = new("inference", "Inference");
+    public static readonly Stage Inference = new("inference", "BezierPPM Inference");
     public static readonly Stage Preprocessing = new("preprocessing", "Preprocessing");
     public static readonly Stage Numcalc = new("numcalc", "NumCalc");
     public static readonly Stage Postprocessing = new("postprocessing", "Postprocess");
@@ -1402,16 +1470,17 @@ class ProjectSettings
     public InferenceSettings Inference { get; set; } = new();
     public PreprocessingSettings Preprocessing { get; set; } = new();
     public NumCalcSettings NumCalc { get; set; } = new();
+    public PostprocessingSettings? Postprocessing { get; set; } = new();
 }
 
 class InferenceSettings
 {
     public string ModelConfig { get; set; } = "";
     public string ModelCheckpoint { get; set; } = "";
-    public string TargetLeftFolder { get; set; } = "Target STL Left";
-    public string TargetRightFolder { get; set; } = "Target STL Right";
-    public string PredictionLeftFolder { get; set; } = "Prediction STL Left";
-    public string PredictionRightFolder { get; set; } = "Prediction STL Right";
+    public string TargetLeftFolder { get; set; } = "Input/Left";
+    public string TargetRightFolder { get; set; } = "Input/Right";
+    public string PredictionLeftFolder { get; set; } = "Intermediates/Left";
+    public string PredictionRightFolder { get; set; } = "Intermediates/Right";
     public bool UsePredictionsForPreprocessing { get; set; } = true;
 }
 
@@ -1423,11 +1492,18 @@ class PreprocessingSettings
     public string? EvaluationGrid { get; set; }
     public string? HeadRadius { get; set; }
     public bool? UseCustomHeadRadius { get; set; }
+    public string SourceAssignmentFaceCount { get; set; } = "6";
     public string MeshMinEdgeLength { get; set; } = "0.5";
     public string MeshMaxEdgeLength { get; set; } = "10.0";
     public string MeshMaxError { get; set; } = "0.5";
-    public string MeshGammaLeft { get; set; } = "0.15";
-    public string MeshGammaRight { get; set; } = "0.2";
+    public string MeshGamma { get; set; } = "0.2";
+    public string MeshGammaOpposite { get; set; } = "0.1";
+}
+
+class PostprocessingSettings
+{
+    public bool Normalize { get; set; } = true;
+    public string LevelOffsetDB { get; set; } = "-30";
 }
 
 class NumCalcSettings
@@ -1439,15 +1515,48 @@ class NumCalcSettings
 
 static class MeshLoader
 {
-    public static Model3D Load(string path)
+    public static Model3D Load(string path, out Point3D center, out double scale)
     {
         var mesh = string.Equals(Path.GetExtension(path), ".ply", StringComparison.OrdinalIgnoreCase) ? LoadPly(path) : LoadStl(path);
-        Center(mesh);
+        Center(mesh, out center, out scale);
         var material = new MaterialGroup();
         material.Children.Add(new DiffuseMaterial(new SolidColorBrush(System.Windows.Media.Color.FromRgb(96, 145, 144))));
         material.Children.Add(new SpecularMaterial(new SolidColorBrush(System.Windows.Media.Color.FromRgb(205, 225, 224)), 28));
         material.Children.Add(new EmissiveMaterial(new SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 28, 28))));
         return new GeometryModel3D(mesh, material) { BackMaterial = material };
+    }
+
+    public static Model3D Load(string path) => Load(path, out _, out _);
+
+    public static MeshGeometry3D CreateSphere(Point3D center, double radius)
+    {
+        var mesh = new MeshGeometry3D();
+        const int slices = 16;
+        const int stacks = 8;
+        for (var stack = 0; stack <= stacks; stack++)
+        {
+            var phi = Math.PI * stack / stacks;
+            var z = Math.Cos(phi);
+            var ringRadius = Math.Sin(phi);
+            for (var slice = 0; slice <= slices; slice++)
+            {
+                var theta = 2 * Math.PI * slice / slices;
+                mesh.Positions.Add(new Point3D(center.X + radius * ringRadius * Math.Cos(theta), center.Y + radius * ringRadius * Math.Sin(theta), center.Z + radius * z));
+            }
+        }
+        for (var stack = 0; stack < stacks; stack++)
+            for (var slice = 0; slice < slices; slice++)
+            {
+                var first = stack * (slices + 1) + slice;
+                var second = first + slices + 1;
+                mesh.TriangleIndices.Add(first);
+                mesh.TriangleIndices.Add(second);
+                mesh.TriangleIndices.Add(first + 1);
+                mesh.TriangleIndices.Add(first + 1);
+                mesh.TriangleIndices.Add(second);
+                mesh.TriangleIndices.Add(second + 1);
+            }
+        return mesh;
     }
 
     static MeshGeometry3D LoadStl(string path)
@@ -1558,18 +1667,22 @@ static class MeshLoader
         return mesh;
     }
 
-    static void Center(MeshGeometry3D mesh)
+    static void Center(MeshGeometry3D mesh, out Point3D center, out double scale)
     {
         if (mesh.Positions.Count == 0)
+        {
+            center = new Point3D();
+            scale = 1;
             return;
+        }
         var minX = mesh.Positions.Min(p => p.X);
         var maxX = mesh.Positions.Max(p => p.X);
         var minY = mesh.Positions.Min(p => p.Y);
         var maxY = mesh.Positions.Max(p => p.Y);
         var minZ = mesh.Positions.Min(p => p.Z);
         var maxZ = mesh.Positions.Max(p => p.Z);
-        var center = new Vector3D((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
-        var scale = 180 / Math.Max(Math.Max(maxX - minX, maxY - minY), Math.Max(maxZ - minZ, 1));
+        center = new Point3D((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
+        scale = 180 / Math.Max(Math.Max(maxX - minX, maxY - minY), Math.Max(maxZ - minZ, 1));
         for (var i = 0; i < mesh.Positions.Count; i++)
         {
             var p = mesh.Positions[i] - center;
@@ -1579,16 +1692,3 @@ static class MeshLoader
 
     static double Parse(string value) => double.Parse(value, CultureInfo.InvariantCulture);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-

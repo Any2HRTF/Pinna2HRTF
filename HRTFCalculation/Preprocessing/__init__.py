@@ -42,27 +42,57 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
         left_project = projects_dir / "Left"
         right_project = projects_dir / "Right"
         legacy_projects = [projects_dir / "project-Left", projects_dir / "project-Right"]
-        intermediates = output_dir / "intermediates"
+        intermediates = output_dir / "Intermediates"
+        entries = list(output_dir.iterdir()) if output_dir.exists() else []
+        legacy_intermediates = next((entry for entry in entries if entry.name == "intermediates"), None)
+        current_intermediates = next((entry for entry in entries if entry.name == "Intermediates"), None)
+        if legacy_intermediates is not None and current_intermediates is None:
+            migration_path = output_dir / ".pinna2hrtf-intermediates-migration"
+            legacy_intermediates.rename(migration_path)
+            migration_path.rename(intermediates)
+        elif legacy_intermediates is not None and current_intermediates is not legacy_intermediates:
+            shutil.rmtree(legacy_intermediates)
     else:
         export_prefix = Path(export_path)
         left_project = Path(f"{export_prefix}-Left")
         right_project = Path(f"{export_prefix}-Right")
         legacy_projects = []
-        intermediates = Path(f"{export_prefix}-intermediates")
+        intermediates = Path(f"{export_prefix}-Intermediates")
+    side_dirs = {"left": intermediates / "Left", "right": intermediates / "Right"}
+    for name in ["Prediction STL Left", "Prediction STL Right", "Prediction Parameters Left", "Prediction Parameters Right", "ICP STL Left", "ICP STL Right"]:
+        legacy_path = intermediates / name
+        if legacy_path.is_dir():
+            shutil.rmtree(legacy_path)
+    entries = list(intermediates.iterdir()) if intermediates.exists() else []
+    for side in ("left", "right"):
+        legacy_side = next((entry for entry in entries if entry.name == side), None)
+        current_side = next((entry for entry in entries if entry.name == side.title()), None)
+        if legacy_side is not None and current_side is None:
+            migration_path = intermediates / f".pinna2hrtf-{side}-migration"
+            legacy_side.rename(migration_path)
+            migration_path.rename(side_dirs[side])
+        elif legacy_side is not None and current_side is not legacy_side:
+            shutil.rmtree(legacy_side)
     if settings.write_intermediates:
         work_dir = intermediates
-        if work_dir.exists():
-            shutil.rmtree(work_dir)
+        work_dir.mkdir(parents=True, exist_ok=True)
+        for side_dir in side_dirs.values():
+            side_dir.mkdir(parents=True, exist_ok=True)
+            for name in ["input_ear.stl", "source_landmark.json", "closed_ear.stl", "cut_head.stl", "stitched_head.stl", "graded_head.ply", "dummy_head.stl"]:
+                path = side_dir / name
+                if path.exists():
+                    path.unlink()
         for side, path in (("left", left_path), ("right", right_path)):
             if path is not None:
-                (work_dir / side).mkdir(parents=True, exist_ok=True)
+                side_dirs[side].mkdir(parents=True, exist_ok=True)
         cleanup = None
     else:
         cleanup = tempfile.TemporaryDirectory()
         work_dir = Path(cleanup.name)
+        side_dirs = {"left": work_dir / "Left", "right": work_dir / "Right"}
         for side, path in (("left", left_path), ("right", right_path)):
             if path is not None:
-                (work_dir / side).mkdir(parents=True, exist_ok=True)
+                side_dirs[side].mkdir(parents=True, exist_ok=True)
     try:
         logger("Loading input ear meshes")
         left_ear = trimesh.load(left_path) if left_path is not None else None
@@ -73,13 +103,13 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
         ears = {"left": left_ear, "right": right_ear}
         for side, ear in ears.items():
             if ear is not None:
-                ear.export(work_dir / side / "input_ear.stl")
-        closed = {side: work_dir / side / "closed_ear.stl" for side, ear in ears.items() if ear is not None}
-        landmark_paths = {side: work_dir / side / "source_landmark.json" for side, ear in ears.items() if ear is not None}
-        dummy_head = work_dir / "dummy_head.stl"
-        cut = {side: work_dir / side / "cut_head.stl" for side, ear in ears.items() if ear is not None}
-        stitched = {side: work_dir / side / "stitched_head.stl" for side, ear in ears.items() if ear is not None}
-        graded = {side: work_dir / side / "graded_head.ply" for side, ear in ears.items() if ear is not None}
+                ear.export(side_dirs[side] / "input_ear.stl")
+        closed = {side: side_dirs[side] / "closed_ear.stl" for side, ear in ears.items() if ear is not None}
+        landmark_paths = {side: side_dirs[side] / "source_landmark.json" for side, ear in ears.items() if ear is not None}
+        dummy_head = side_dirs["left"] / "dummy_head.stl"
+        cut = {side: side_dirs[side] / "cut_head.stl" for side, ear in ears.items() if ear is not None}
+        stitched = {side: side_dirs[side] / "stitched_head.stl" for side, ear in ears.items() if ear is not None}
+        graded = {side: side_dirs[side] / "graded_head.ply" for side, ear in ears.items() if ear is not None}
         landmarks = {}
         for side, ear in ears.items():
             if ear is None:
@@ -131,10 +161,11 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             logger(f"Stitching {side} ear to head")
             head_stitcher(head_path=str(cut[side]), ear_path=str(closed[side]), export_path=str(stitched[side]), seam_smoothing_iterations=settings.seam_smoothing_iterations, seam_smoothing_factor=settings.seam_smoothing_factor)
             logger(f"Grading {side} head mesh; this can take several minutes")
-            gamma = settings.mesh_gamma_left if side == "left" else settings.mesh_gamma_right
+            gamma_l = settings.mesh_gamma if side == "left" else settings.mesh_gamma_opposite
+            gamma_r = settings.mesh_gamma_opposite if side == "left" else settings.mesh_gamma
             grading_env = os.environ.copy()
             grading_env["DYLD_LIBRARY_PATH"] = os.pathsep.join(filter(None, [str(Path(mesh_grading_executable).parent), grading_env.get("DYLD_LIBRARY_PATH")]))
-            subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-v', '-g', str(gamma), '-h', str(settings.mesh_hole_size), '-s', side, '-i', str(stitched[side]), '-o', str(graded[side])], check=True, env=grading_env)
+            subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-v', '-g', str(gamma_l), '-h', str(gamma_r), '-s', side, '-i', str(stitched[side]), '-o', str(graded[side])], check=True, env=grading_env)
         for project in [projects_dir / "Left", projects_dir / "Right"] if output_dir is not None else []:
             if project.exists():
                 shutil.rmtree(project)

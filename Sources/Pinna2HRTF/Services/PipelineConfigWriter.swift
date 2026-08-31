@@ -13,7 +13,7 @@ enum PipelineConfigWriter {
                 prepared.rightEar = try copyInput(project.rightEar, to: output.appendingPathComponent("Input/Right"))
             }
         }
-        let configURL = output.appendingPathComponent(".pinna2hrtf_native_run.yaml")
+        let configURL = output.appendingPathComponent("Project Settings.yaml")
         try yaml(project: prepared, environment: environment).write(to: configURL, atomically: true, encoding: .utf8)
         return configURL
     }
@@ -64,8 +64,8 @@ enum PipelineConfigWriter {
           target_right_folder: \(inference.targetRightFolder)
           prediction_left_folder: \(inference.predictionLeftFolder)
           prediction_right_folder: \(inference.predictionRightFolder)
-          prediction_parameters_left_folder: Prediction Parameters Left
-          prediction_parameters_right_folder: Prediction Parameters Right
+          prediction_parameters_left_folder: Intermediates/Left
+          prediction_parameters_right_folder: Intermediates/Right
           use_predictions_for_preprocessing: \(inference.usePredictionsForPreprocessing ? "true" : "false")
         preprocessing:
           enabled: true
@@ -86,9 +86,8 @@ enum PipelineConfigWriter {
           mesh_min_edge_length: \(preprocessing.meshMinEdgeLength)
           mesh_max_edge_length: \(preprocessing.meshMaxEdgeLength)
           mesh_max_error: \(preprocessing.meshMaxError)
-          mesh_gamma_left: \(preprocessing.meshGammaLeft)
-          mesh_gamma_right: \(preprocessing.meshGammaRight)
-          mesh_hole_size: 0.2
+          mesh_gamma: \(preprocessing.meshGamma)
+          mesh_gamma_opposite: \(preprocessing.meshGammaOpposite)
           skip_mesh_grading: false
           source_type_left: Left ear
           source_type_right: Right ear

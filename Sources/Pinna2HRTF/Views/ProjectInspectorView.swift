@@ -41,11 +41,10 @@ struct ProjectInspectorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 requiredPanel
-                SettingsDisclosure("Inference", systemImage: "wand.and.stars") {
+                SettingsDisclosure("BezierPPM Inference", systemImage: "wand.and.stars") {
                     ModelPicker(selection: modelNameBinding, options: store.modelOptions)
                 }
                 SettingsDisclosure("Mesh2HRTF", systemImage: "waveform.path.ecg") {
-                    Toggle("Use predictions for preprocessing", isOn: inferenceBoolBinding(\.usePredictionsForPreprocessing))
                     PathField("Evaluation grid", text: optionalPreprocessingBinding(\.evaluationGrid), mode: .directory)
                     Toggle("Use custom head radius", isOn: useCustomHeadRadiusBinding)
                     LabeledMillimeterSlider("Head radius", value: headRadiusBinding, range: 0...200)
@@ -83,8 +82,8 @@ struct ProjectInspectorView: View {
                     LabeledTextField("Min edge length", text: preprocessingBinding(\.meshMinEdgeLength))
                     LabeledTextField("Max edge length", text: preprocessingBinding(\.meshMaxEdgeLength))
                     LabeledTextField("Max error", text: preprocessingBinding(\.meshMaxError))
-                    LabeledTextField("Gamma left", text: preprocessingBinding(\.meshGammaLeft))
-                    LabeledTextField("Gamma right", text: preprocessingBinding(\.meshGammaRight))
+                    LabeledTextField("Gamma", text: preprocessingBinding(\.meshGamma))
+                    LabeledTextField("Gamma opposite", text: preprocessingBinding(\.meshGammaOpposite))
                 }
                 SettingsDisclosure("NumCalc", systemImage: "cpu") {
                     LabeledTextField("Parallel instances", text: numcalcBinding(\.maxInstances))
@@ -111,6 +110,7 @@ struct ProjectInspectorView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             PathField("Save location", text: projectStringBinding(\.saveLocation), mode: .directory)
+            Toggle("Use BezierPPM", isOn: inferenceBoolBinding(\.usePredictionsForPreprocessing))
         }
         .padding(10)
         .background(.background, in: RoundedRectangle(cornerRadius: 10))

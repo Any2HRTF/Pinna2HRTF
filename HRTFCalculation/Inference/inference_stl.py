@@ -319,20 +319,24 @@ def main(args):
 
     folders = {
         "Left": {
-            "target": getattr(args, "target_left_folder", "Target STL Left"),
-            "prediction": getattr(args, "prediction_left_folder", "Prediction STL Left"),
-            "parameters": getattr(args, "prediction_parameters_left_folder", "Prediction Parameters Left"),
+            "target": getattr(args, "target_left_folder", "Input/Left"),
+            "prediction": getattr(args, "prediction_left_folder", "Intermediates/Left"),
+            "parameters": getattr(args, "prediction_parameters_left_folder", "Intermediates/Left"),
         },
         "Right": {
-            "target": getattr(args, "target_right_folder", "Target STL Right"),
-            "prediction": getattr(args, "prediction_right_folder", "Prediction STL Right"),
-            "parameters": getattr(args, "prediction_parameters_right_folder", "Prediction Parameters Right"),
+            "target": getattr(args, "target_right_folder", "Input/Right"),
+            "prediction": getattr(args, "prediction_right_folder", "Intermediates/Right"),
+            "parameters": getattr(args, "prediction_parameters_right_folder", "Intermediates/Right"),
         },
     }
+    intermediates = getattr(args, "intermediates_folder", "Intermediates")
+
+    def output_path(path):
+        return path if os.path.isabs(path) else os.path.join(args.data_dir, path)
 
     left_alignments = {}
     for direction in ["Left", "Right"]:
-        data_dir = f"{args.data_dir}/{folders[direction]['target']}"
+        data_dir = output_path(folders[direction]["target"])
         if not os.path.isdir(data_dir):
             raise FileNotFoundError(f"BezierPPM target folder not found: {data_dir}")
 
@@ -353,7 +357,7 @@ def main(args):
                 depth=CONFIGURATION['model']['depth'],
                 mirror=True if direction == "Right" else False,
                 initial_transforms=[("paired_left", paired_alignment[0])] if paired_alignment else None,
-                transformed_output_path=f"{args.data_dir}/ICP STL {direction}/{stl_file}",
+                transformed_output_path=os.path.join(output_path(intermediates), direction, f"ICP_{stl_file}"),
             )
             if direction == "Left":
                 left_alignments[stem] = (transform_matrix, alignment["determinant"])
@@ -370,10 +374,10 @@ def main(args):
             tempdir = tempfile.mkdtemp()
             BezierPPM(from_dict=prediction_ppm).export_stl(file=f"{tempdir}/{stl_file[:-4]}.stl")
 
-            prediction_parameters_dir = f"{args.data_dir}/{folders[direction]['parameters']}"
+            prediction_parameters_dir = output_path(folders[direction]["parameters"])
             if not os.path.isdir(prediction_parameters_dir):
                 os.makedirs(prediction_parameters_dir)
-            BezierPPM(from_dict=prediction_ppm).export_csv(file=f"{prediction_parameters_dir}/{stl_file[:-4]}.csv")
+            BezierPPM(from_dict=prediction_ppm).export_csv(file=f"{prediction_parameters_dir}/Prediction_Parameters_{stl_file[:-4]}.csv")
 
             predicted_cloud = trimesh.load_mesh(f"{tempdir}/{stl_file[:-4]}.stl")
             predicted_cloud = predicted_cloud.apply_transform(np.linalg.inv(transform_matrix))
@@ -382,10 +386,10 @@ def main(args):
                 mirror_matrix = reflection_matrix(np.array([0,0,0,0]), np.array([0,1,0]))
                 predicted_cloud = predicted_cloud.apply_transform(mirror_matrix)
 
-            prediction_stl_dir = f"{args.data_dir}/{folders[direction]['prediction']}"
+            prediction_stl_dir = output_path(folders[direction]["prediction"])
             if not os.path.isdir(prediction_stl_dir):
                 os.makedirs(prediction_stl_dir)
-            predicted_cloud.export(f"{prediction_stl_dir}/{stl_file[:-4]}.stl")
+            predicted_cloud.export(f"{prediction_stl_dir}/Prediction_{stl_file[:-4]}.stl")
             predicted_cloud = np.array(predicted_cloud.vertices)
 
             minimal_distances_direction_1 = minimal_distances(predicted_cloud, target_cloud)
@@ -429,19 +433,20 @@ def main(args):
                 out[f"RMSE {region}"] = np.sqrt(np.mean(distances_region**2))
             prediciton_df.append(out)
 
-    pd.DataFrame(prediciton_df).to_csv(f"{args.data_dir}/Results Inference.csv")
+    pd.DataFrame(prediciton_df).to_csv(os.path.join(output_path(intermediates), "Results Inference.csv"))
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--configuration', required=False, default=f'{__DIR_PATH}/resources/Local 3 Views.yaml', help='Path to configuration file.')
     parser.add_argument('--data_dir', required=True, help='Path to directory containg the stl files.')
     parser.add_argument('--model_checkpoint', required=False, default=f'{__DIR_PATH}/resources/Local 3 Views.pth', help='Path to model checkpoint file.')
-    parser.add_argument('--target_left_folder', required=False, default='Target STL Left')
-    parser.add_argument('--target_right_folder', required=False, default='Target STL Right')
-    parser.add_argument('--prediction_left_folder', required=False, default='Prediction STL Left')
-    parser.add_argument('--prediction_right_folder', required=False, default='Prediction STL Right')
-    parser.add_argument('--prediction_parameters_left_folder', required=False, default='Prediction Parameters Left')
-    parser.add_argument('--prediction_parameters_right_folder', required=False, default='Prediction Parameters Right')
+    parser.add_argument('--target_left_folder', required=False, default='Input/Left')
+    parser.add_argument('--target_right_folder', required=False, default='Input/Right')
+    parser.add_argument('--prediction_left_folder', required=False, default='Intermediates/Left')
+    parser.add_argument('--prediction_right_folder', required=False, default='Intermediates/Right')
+    parser.add_argument('--prediction_parameters_left_folder', required=False, default='Intermediates/Left')
+    parser.add_argument('--prediction_parameters_right_folder', required=False, default='Intermediates/Right')
+    parser.add_argument('--intermediates_folder', required=False, default='Intermediates')
     return parser.parse_args()
 
 def cli():
