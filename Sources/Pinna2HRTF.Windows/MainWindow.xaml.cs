@@ -786,7 +786,7 @@ public partial class MainWindow : Window
         {
             Directory.CreateDirectory(project.SaveLocation);
             var config = PrepareConfig(project);
-            var executable = Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
+            var executable = Directory.GetFiles(Path.Combine(packageRoot, "Python"), "python.exe", SearchOption.AllDirectories).FirstOrDefault() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
             var arguments = $"-m HRTFCalculation.CLI {stage.Value} --config {QuoteArgument(config)}";
             var process = new Process();
             process.StartInfo = new ProcessStartInfo
@@ -901,7 +901,7 @@ public partial class MainWindow : Window
         startInfo.Environment["BLENDER_USER_DATAFILES"] = Path.Combine(appData, "Blender", "datafiles");
         if (BundledPythonExecutable() == null)
             startInfo.Environment["UV_CACHE_DIR"] = Path.Combine(appData, "Cache", "uv");
-        startInfo.Environment["PYTHONPATH"] = packageRoot;
+        startInfo.Environment["PYTHONPATH"] = packageRoot + Path.PathSeparator + Path.Combine(packageRoot, ".venv", "Lib", "site-packages");
         startInfo.Environment["PATH"] = Path.Combine(environment.ExternalDir, "bin") + Path.PathSeparator + (startInfo.Environment.TryGetValue("PATH", out var path) ? path : "");
     }
 
@@ -1576,6 +1576,7 @@ static class MeshLoader
 
     static double Parse(string value) => double.Parse(value, CultureInfo.InvariantCulture);
 }
+
 
 
 
