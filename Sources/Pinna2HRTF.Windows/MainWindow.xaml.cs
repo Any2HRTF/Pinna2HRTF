@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     readonly Dictionary<Guid, Queue<Stage>> queuedStages = [];
     readonly Dictionary<Guid, HashSet<Stage>> failedStages = [];
     readonly Dictionary<Guid, string> projectLogs = [];
+    readonly Dictionary<Guid, ProjectViewerState> viewerStates = [];
     readonly Dictionary<string, SettingHelpEntry> settingHelp = [];
     readonly JsonSerializerOptions jsonOptions = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
     ProjectRegistry registry = new();
@@ -40,9 +41,12 @@ public partial class MainWindow : Window
     Point3D meshCenter;
     double meshMaximumDimension = 180;
     double meshFrontDirection = -1;
+    string? selectedArtifactPath;
     string packageRoot = "";
     string appData = "";
     string registryPath = "";
+    string viewerStatePath = "";
+    bool refreshingArtifacts;
     readonly DispatcherTimer statusTimer = new() { Interval = TimeSpan.FromSeconds(2) };
 
     public MainWindow()
@@ -64,6 +68,7 @@ public partial class MainWindow : Window
         LoadSettingHelp();
         appData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Pinna2HRTF");
         registryPath = Path.Combine(appData, "projects.json");
+        viewerStatePath = Path.Combine(appData, "viewer-state.json");
         Directory.CreateDirectory(appData);
         Directory.CreateDirectory(Path.Combine(appData, "Cache", "matplotlib"));
         Directory.CreateDirectory(Path.Combine(appData, "Cache", "python"));
@@ -77,6 +82,7 @@ public partial class MainWindow : Window
                 Directory.Delete(obsoleteUvCache, true);
         }
         LoadRegistry();
+        LoadViewerStates();
         foreach (var project in projects)
         {
             project.Settings.Preprocessing.FrequencyStepCount = Math.Max(int.TryParse(project.Settings.Preprocessing.FrequencyStepCount, out var steps) ? steps : 129, 2).ToString();
@@ -262,6 +268,30 @@ public partial class MainWindow : Window
         File.WriteAllText(registryPath, JsonSerializer.Serialize(registry, jsonOptions));
     }
 
+    void LoadViewerStates()
+    {
+        if (!File.Exists(viewerStatePath))
+            return;
+        try
+        {
+            var loaded = JsonSerializer.Deserialize<Dictionary<Guid, ProjectViewerState>>(File.ReadAllText(viewerStatePath), jsonOptions);
+            if (loaded != null)
+                foreach (var pair in loaded)
+                    viewerStates[pair.Key] = pair.Value;
+        }
+        catch
+        {
+            viewerStates.Clear();
+        }
+    }
+
+    void SaveViewerStates()
+    {
+        if (string.IsNullOrWhiteSpace(viewerStatePath))
+            return;
+        File.WriteAllText(viewerStatePath, JsonSerializer.Serialize(viewerStates, jsonOptions));
+    }
+
     string FindPackageRoot()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
@@ -381,7 +411,6 @@ public partial class MainWindow : Window
         Persist();
         LoadSelectedProjectLog();
         LoadSelectedProject();
-        ResetViewer();
         RefreshArtifacts();
     }
 
@@ -622,13 +651,21 @@ public partial class MainWindow : Window
 
     void RefreshArtifacts()
     {
+        var selectedPath = SelectedProject != null && viewerStates.TryGetValue(SelectedProject.Id, out var state) ? state.SelectedArtifactPath : null;
+        refreshingArtifacts = true;
         artifacts.Clear();
         if (SelectedProject != null)
         {
             foreach (var artifact in ArtifactsFor(SelectedProject).Where(a => a.Exists))
                 artifacts.Add(artifact);
         }
+        ArtifactPicker.SelectedItem = artifacts.FirstOrDefault(artifact => artifact.Path == selectedPath);
+        refreshingArtifacts = false;
         RefreshProjectList();
+        if (ArtifactPicker.SelectedItem is Artifact artifact)
+            OpenArtifact(artifact);
+        else
+            ResetViewer();
     }
 
     List<Artifact> ArtifactsFor(ProjectRecord project)
@@ -676,6 +713,8 @@ public partial class MainWindow : Window
 
     void ArtifactSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (refreshingArtifacts)
+            return;
         if (ArtifactPicker.SelectedItem is not Artifact artifact)
             return;
         OpenArtifact(artifact);
@@ -683,8 +722,10 @@ public partial class MainWindow : Window
 
     void OpenArtifact(Artifact artifact)
     {
-        SelectedArtifactText.Text = artifact.Path;
         ResetViewer();
+        selectedArtifactPath = artifact.Path;
+        RememberSelectedArtifact(artifact.Path);
+        SelectedArtifactText.Text = artifact.Path;
         if (artifact.IsImage)
         {
             ImagePreview.Source = new BitmapImage(new Uri(artifact.Path));
@@ -752,6 +793,7 @@ public partial class MainWindow : Window
         ViewerPlaceholder.Text = "No artifact selected";
         ViewerPlaceholder.Visibility = Visibility.Visible;
         SelectedArtifactText.Text = "Select an artifact";
+        selectedArtifactPath = null;
     }
 
     void MeshViewportMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -794,6 +836,7 @@ public partial class MainWindow : Window
             return;
         meshDistance = Math.Clamp(meshDistance * Math.Pow(0.88, e.Delta / 120.0), 80, 1200);
         UpdateMeshCamera();
+        SaveMeshCamera();
         e.Handled = true;
     }
 
@@ -802,14 +845,50 @@ public partial class MainWindow : Window
         rotatingMesh = false;
         if (MeshViewport.IsMouseCaptured)
             MeshViewport.ReleaseMouseCapture();
+        SaveMeshCamera();
     }
 
     void ResetMeshCamera()
     {
-        meshYaw = meshFrontDirection > 0 ? 180 : 0;
-        meshDistance = Math.Max(meshMaximumDimension * 1.7, 1);
-        meshPitch = Math.Atan2(meshMaximumDimension * 0.12, meshDistance) * 180 / Math.PI;
+        if (SelectedProject != null && selectedArtifactPath != null && viewerStates.TryGetValue(SelectedProject.Id, out var projectState) && projectState.CameraByArtifact.TryGetValue(selectedArtifactPath, out var cameraState))
+        {
+            meshYaw = cameraState.Yaw;
+            meshPitch = cameraState.Pitch;
+            meshDistance = cameraState.Distance;
+        }
+        else
+        {
+            meshYaw = meshFrontDirection > 0 ? 180 : 0;
+            meshDistance = Math.Max(meshMaximumDimension * 1.7, 1);
+            meshPitch = Math.Atan2(meshMaximumDimension * 0.12, meshDistance) * 180 / Math.PI;
+        }
         UpdateMeshCamera();
+    }
+
+    void RememberSelectedArtifact(string path)
+    {
+        if (SelectedProject == null)
+            return;
+        if (!viewerStates.TryGetValue(SelectedProject.Id, out var state))
+        {
+            state = new ProjectViewerState();
+            viewerStates[SelectedProject.Id] = state;
+        }
+        state.SelectedArtifactPath = path;
+        SaveViewerStates();
+    }
+
+    void SaveMeshCamera()
+    {
+        if (SelectedProject == null || selectedArtifactPath == null || MeshViewport.Children.Count <= 4)
+            return;
+        if (!viewerStates.TryGetValue(SelectedProject.Id, out var state))
+        {
+            state = new ProjectViewerState();
+            viewerStates[SelectedProject.Id] = state;
+        }
+        state.CameraByArtifact[selectedArtifactPath] = new MeshCameraState { Yaw = meshYaw, Pitch = meshPitch, Distance = meshDistance };
+        SaveViewerStates();
     }
 
     void UpdateMeshCamera()
@@ -1523,6 +1602,19 @@ class ProjectRegistry
     public List<ProjectRecord> Projects { get; set; } = [];
     public Guid? SelectedProjectID { get; set; }
     public EnvironmentConfig Environment { get; set; } = new();
+}
+
+class ProjectViewerState
+{
+    public string? SelectedArtifactPath { get; set; }
+    public Dictionary<string, MeshCameraState> CameraByArtifact { get; set; } = [];
+}
+
+class MeshCameraState
+{
+    public double Yaw { get; set; }
+    public double Pitch { get; set; }
+    public double Distance { get; set; }
 }
 
 class SettingHelpEntry

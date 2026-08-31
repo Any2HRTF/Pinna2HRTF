@@ -59,6 +59,17 @@ struct Artifact: Identifiable, Hashable {
     var systemImage: String { isImage ? "photo" : "cube" }
 }
 
+struct ViewerCameraState: Codable, Equatable {
+    var x: Double
+    var y: Double
+    var z: Double
+}
+
+struct ProjectViewerState: Codable, Equatable {
+    var selectedArtifactPath: String?
+    var cameraByArtifact: [String: ViewerCameraState] = [:]
+}
+
 struct EnvironmentConfig: Codable, Equatable {
     var uvExecutable: String
     var numcalcExecutable: String

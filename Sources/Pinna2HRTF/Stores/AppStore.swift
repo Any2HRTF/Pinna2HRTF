@@ -13,6 +13,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published var selectedMesh: URL?
     @Published var selectedImage: NSImage?
     @Published var selectedScene = SCNScene()
+    @Published var selectedCameraState: ViewerCameraState?
     @Published var artifacts: [Artifact] = []
     @Published var stageStates: [Stage: StageState] = Dictionary(uniqueKeysWithValues: Stage.allCases.map { ($0, .ready) })
     @Published var runningProcesses: [UUID: Process] = [:]
@@ -20,6 +21,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published var environmentProcess: Process?
     @Published var failedStagesByProject: [UUID: Set<Stage>] = [:]
     private var logTextByProject: [UUID: String] = [:]
+    private var viewerStateByProject: [UUID: ProjectViewerState] = [:]
+    private var selectedCameraCenter = SCNVector3Zero
+    private var selectedCameraScale: Double = 1
 
     let rootURL: URL
     let packageURL: URL
@@ -41,10 +45,12 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         projects = registry.projects
         selectedProjectID = registry.selectedProjectID ?? registry.projects.first?.id
         environment = registry.environment
+        viewerStateByProject = Self.loadViewerStates()
         super.init()
         configureNotifications()
         registryStore.save(ProjectRegistry(projects: projects, selectedProjectID: selectedProjectID, environment: environment))
         refreshArtifacts()
+        restoreViewer()
     }
 
     var selectedProject: ProjectRecord? {
@@ -242,10 +248,21 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         stageStates = ArtifactScanner.stageStates(for: selectedProject, runningStage: runningStages[selectedProject.id], failedStages: failedStagesByProject[selectedProject.id] ?? [])
     }
 
+    func restoreViewer() {
+        guard let project = selectedProject, let path = viewerStateByProject[project.id]?.selectedArtifactPath, let artifact = artifacts.first(where: { $0.url.path == path && $0.exists }) else {
+            resetViewer()
+            return
+        }
+        openArtifact(artifact)
+    }
+
     func resetViewer() {
         selectedMesh = nil
         selectedImage = nil
         selectedScene = SCNScene()
+        selectedCameraState = nil
+        selectedCameraCenter = SCNVector3Zero
+        selectedCameraScale = 1
     }
 
     func openArtifact(_ artifact: Artifact) {
@@ -294,7 +311,16 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let cameraNode = SCNNode()
         cameraNode.camera = camera
         let frontDirection: CGFloat = url.path.lowercased().contains("left") ? 1 : -1
-        cameraNode.position = SCNVector3(center.x, center.y + frontDirection * distance, center.z + maximumDimension * 0.12)
+        let defaultPosition = SCNVector3(center.x, center.y + frontDirection * distance, center.z + maximumDimension * 0.12)
+        let savedCamera = selectedProjectID.flatMap { viewerStateByProject[$0]?.cameraByArtifact[url.path] }
+        let cameraPosition: SCNVector3
+        if let savedCamera {
+            let scale = Double(maximumDimension)
+            cameraPosition = SCNVector3(CGFloat(Double(center.x) + savedCamera.x * scale), CGFloat(Double(center.y) + savedCamera.y * scale), CGFloat(Double(center.z) + savedCamera.z * scale))
+        } else {
+            cameraPosition = defaultPosition
+        }
+        cameraNode.position = cameraPosition
         let cameraConstraint = SCNLookAtConstraint(target: targetNode)
         cameraConstraint.isGimbalLockEnabled = true
         cameraConstraint.worldUp = SCNVector3(0, 0, 1)
@@ -310,6 +336,11 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         selectedMesh = url
         selectedImage = nil
         selectedScene = scene
+        selectedCameraCenter = center
+        selectedCameraScale = Double(maximumDimension)
+        let scale = selectedCameraScale
+        selectedCameraState = savedCamera ?? ViewerCameraState(x: (Double(cameraPosition.x) - Double(center.x)) / scale, y: (Double(cameraPosition.y) - Double(center.y)) / scale, z: (Double(cameraPosition.z) - Double(center.z)) / scale)
+        rememberSelectedArtifact(url)
         appendLog("Opened \(url.path)")
     }
 
@@ -340,7 +371,35 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         selectedMesh = url
         selectedImage = image
         selectedScene = SCNScene()
+        selectedCameraState = nil
+        rememberSelectedArtifact(url)
         appendLog("Opened \(url.path)")
+    }
+
+    func updateCameraPosition(_ position: SCNVector3) {
+        guard let projectID = selectedProjectID, let selectedMesh, selectedMesh.isFileURL, ["stl", "ply"].contains(selectedMesh.pathExtension.lowercased()), selectedCameraScale > 0 else { return }
+        let state = ViewerCameraState(x: (Double(position.x) - Double(selectedCameraCenter.x)) / selectedCameraScale, y: (Double(position.y) - Double(selectedCameraCenter.y)) / selectedCameraScale, z: (Double(position.z) - Double(selectedCameraCenter.z)) / selectedCameraScale)
+        guard state != selectedCameraState else { return }
+        selectedCameraState = state
+        viewerStateByProject[projectID, default: ProjectViewerState(selectedArtifactPath: selectedMesh.path)].cameraByArtifact[selectedMesh.path] = state
+        saveViewerStates()
+    }
+
+    private func rememberSelectedArtifact(_ url: URL) {
+        guard let projectID = selectedProjectID else { return }
+        viewerStateByProject[projectID, default: ProjectViewerState(selectedArtifactPath: nil)].selectedArtifactPath = url.path
+        saveViewerStates()
+    }
+
+    private func saveViewerStates() {
+        guard let data = try? JSONEncoder.pretty.encode(viewerStateByProject) else { return }
+        try? data.write(to: Defaults.appDataURL.appendingPathComponent("viewer-state.json"), options: .atomic)
+    }
+
+    private static func loadViewerStates() -> [UUID: ProjectViewerState] {
+        let url = Defaults.appDataURL.appendingPathComponent("viewer-state.json")
+        guard let data = try? Data(contentsOf: url), let states = try? JSONDecoder().decode([UUID: ProjectViewerState].self, from: data) else { return [:] }
+        return states
     }
 
     func runNextStage() {

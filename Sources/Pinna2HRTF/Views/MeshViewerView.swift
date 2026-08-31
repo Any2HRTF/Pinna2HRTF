@@ -1,5 +1,6 @@
 import SwiftUI
 import SceneKit
+import AppKit
 
 struct MeshViewerView: View {
     @ObservedObject var store: AppStore
@@ -77,7 +78,9 @@ struct MeshViewerView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    SceneView(scene: store.selectedScene, options: [.allowsCameraControl, .autoenablesDefaultLighting])
+                    PersistentSceneView(scene: store.selectedScene, cameraState: $store.selectedCameraState, darkMode: colorScheme == .dark) { position in
+                        store.updateCameraPosition(position)
+                    }
                         .onAppear {
                             store.updateSceneBackground(darkMode: colorScheme == .dark)
                         }
@@ -139,5 +142,59 @@ struct MeshViewerView: View {
         if !store.runningProcesses.isEmpty || store.environmentProcess != nil { return "Running" }
         if store.logText.isEmpty { return "No output yet" }
         return store.logText.split(separator: "\n").last.map(String.init) ?? "Ready"
+    }
+}
+
+struct PersistentSceneView: NSViewRepresentable {
+    let scene: SCNScene
+    @Binding var cameraState: ViewerCameraState?
+    let darkMode: Bool
+    let cameraPositionChanged: (SCNVector3) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(cameraState: $cameraState, cameraPositionChanged: cameraPositionChanged)
+    }
+
+    func makeNSView(context: Context) -> SCNView {
+        let view = SCNView()
+        view.scene = scene
+        view.allowsCameraControl = true
+        view.autoenablesDefaultLighting = true
+        view.backgroundColor = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
+        view.delegate = context.coordinator
+        context.coordinator.scene = scene
+        return view
+    }
+
+    func updateNSView(_ view: SCNView, context: Context) {
+        context.coordinator.cameraState = $cameraState
+        context.coordinator.cameraPositionChanged = cameraPositionChanged
+        if view.scene !== scene {
+            view.scene = scene
+            context.coordinator.scene = scene
+            context.coordinator.lastPosition = nil
+        }
+        view.backgroundColor = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
+    }
+
+    final class Coordinator: NSObject, SCNSceneRendererDelegate {
+        var cameraState: Binding<ViewerCameraState?>
+        var cameraPositionChanged: (SCNVector3) -> Void
+        weak var scene: SCNScene?
+        var lastPosition: SCNVector3?
+
+        init(cameraState: Binding<ViewerCameraState?>, cameraPositionChanged: @escaping (SCNVector3) -> Void) {
+            self.cameraState = cameraState
+            self.cameraPositionChanged = cameraPositionChanged
+        }
+
+        func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {
+            guard let position = renderer.pointOfView?.presentation.position else { return }
+            if let lastPosition, abs(lastPosition.x - position.x) < 0.001, abs(lastPosition.y - position.y) < 0.001, abs(lastPosition.z - position.z) < 0.001 { return }
+            lastPosition = position
+            DispatchQueue.main.async { [weak self] in
+                self?.cameraPositionChanged(position)
+            }
+        }
     }
 }
