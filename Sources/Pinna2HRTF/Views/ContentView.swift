@@ -18,6 +18,7 @@ struct ContentView: View {
         .focusedSceneValue(\.pipelineCommands, commandContext)
         .onChange(of: store.selectedProjectID) { _ in
             store.persist()
+            store.loadSelectedProjectLog()
             store.resetViewer()
             store.refreshArtifacts()
         }

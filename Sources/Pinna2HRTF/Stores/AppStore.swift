@@ -19,6 +19,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published var runningStages: [UUID: Stage] = [:]
     @Published var environmentProcess: Process?
     @Published var failedStagesByProject: [UUID: Set<Stage>] = [:]
+    private var logTextByProject: [UUID: String] = [:]
 
     let rootURL: URL
     let packageURL: URL
@@ -184,6 +185,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         runningProcesses[selectedProjectID] = nil
         runningStages[selectedProjectID] = nil
         failedStagesByProject[selectedProjectID] = nil
+        logTextByProject[selectedProjectID] = nil
         projects.removeAll { $0.id == selectedProjectID }
         self.selectedProjectID = projects.first?.id
         persist()
@@ -398,7 +400,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
             guard let store = self else { return }
-            Task { @MainActor in store.appendLog(text.trimmingCharacters(in: .newlines)) }
+            Task { @MainActor in store.appendLog(text.trimmingCharacters(in: .newlines), for: project.id) }
         }
         process.terminationHandler = { [weak self] process in
             guard let store = self else { return }
@@ -412,7 +414,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 } else {
                     store.notifyStageFailure(stage, project: project, status: process.terminationStatus)
                 }
-                store.appendLog(process.terminationStatus == 0 ? "\(stage.title) finished for \(project.name)" : "\(stage.title) for \(project.name) exited with status \(process.terminationStatus)")
+                store.appendLog(process.terminationStatus == 0 ? "\(stage.title) finished for \(project.name)" : "\(stage.title) for \(project.name) exited with status \(process.terminationStatus)", for: project.id)
                 store.runningProcesses[project.id] = nil
                 store.runningStages[project.id] = nil
                 store.refreshArtifacts()
@@ -425,7 +427,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             runningProcesses[project.id] = nil
             runningStages[project.id] = nil
             refreshArtifacts()
-            appendLog("Could not start \(stage.title): \(error.localizedDescription)")
+            appendLog("Could not start \(stage.title): \(error.localizedDescription)", for: project.id)
         }
     }
 
@@ -498,6 +500,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         if !Defaults.isPackagedApp {
             copyPathToolsIntoEnvironment()
         }
+        let logProjectID = selectedProjectID
         let process = Process()
         let bundledUV = FileManager.default.isExecutableFile(atPath: environment.uvExecutable)
         guard bundledUV || Defaults.which("uv") != nil else {
@@ -517,13 +520,13 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
             guard let store = self else { return }
-            Task { @MainActor in store.appendLog(text.trimmingCharacters(in: .newlines)) }
+            Task { @MainActor in store.appendLog(text.trimmingCharacters(in: .newlines), for: logProjectID) }
         }
         process.terminationHandler = { [weak self] process in
             guard let store = self else { return }
             Task { @MainActor in
                 pipe.fileHandleForReading.readabilityHandler = nil
-                store.appendLog(process.terminationStatus == 0 ? "Environment setup finished" : "Environment setup exited with status \(process.terminationStatus)")
+                store.appendLog(process.terminationStatus == 0 ? "Environment setup finished" : "Environment setup exited with status \(process.terminationStatus)", for: logProjectID)
                 store.environmentProcess = nil
                 store.refreshArtifacts()
             }
@@ -671,9 +674,25 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         appendLog("Reset generated outputs in \(output.path)")
     }
 
-    func appendLog(_ text: String) {
+    func loadSelectedProjectLog() {
+        logText = selectedProjectID.flatMap { logTextByProject[$0] } ?? ""
+    }
+
+    func clearSelectedProjectLog() {
+        guard let selectedProjectID else { return }
+        logTextByProject[selectedProjectID] = ""
+        logText = ""
+    }
+
+    func appendLog(_ text: String, for projectID: UUID? = nil) {
         guard !text.isEmpty else { return }
-        logText += logText.isEmpty ? text : "\n\(text)"
+        guard let projectID = projectID ?? selectedProjectID else { return }
+        let current = logTextByProject[projectID] ?? ""
+        let updated = current.isEmpty ? text : "\(current)\n\(text)"
+        logTextByProject[projectID] = updated
+        if projectID == selectedProjectID {
+            logText = updated
+        }
     }
 
     static func migrated(_ registry: ProjectRegistry, rootURL: URL, packageURL: URL) -> ProjectRegistry {

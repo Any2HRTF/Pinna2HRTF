@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     readonly Dictionary<Guid, Stage> runningStages = [];
     readonly Dictionary<Guid, Queue<Stage>> queuedStages = [];
     readonly Dictionary<Guid, HashSet<Stage>> failedStages = [];
+    readonly Dictionary<Guid, string> projectLogs = [];
     readonly JsonSerializerOptions jsonOptions = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
     ProjectRegistry registry = new();
     EnvironmentConfig environment = new();
@@ -317,9 +318,17 @@ public partial class MainWindow : Window
     void ProjectSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         Persist();
+        LoadSelectedProjectLog();
         LoadSelectedProject();
         ResetViewer();
         RefreshArtifacts();
+    }
+
+    void LoadSelectedProjectLog()
+    {
+        var project = SelectedProject;
+        LogText.Text = project != null && projectLogs.TryGetValue(project.Id, out var log) ? log : "";
+        LogText.ScrollToEnd();
     }
 
     void ProjectEdited(object sender, RoutedEventArgs e)
@@ -521,6 +530,7 @@ public partial class MainWindow : Window
         if (SelectedProject == null)
             return;
         StopProject(SelectedProject);
+        projectLogs.Remove(SelectedProject.Id);
         projects.Remove(SelectedProject);
         if (projects.Count == 0)
             CreateProject();
@@ -801,7 +811,7 @@ public partial class MainWindow : Window
         var stage = AutomaticStages(project).FirstOrDefault(stage => !StageIsComplete(stage, project));
         if (stage == null)
         {
-            AppendLog($"All pipeline steps are complete for {project.Name}.");
+            AppendLog($"All pipeline steps are complete for {project.Name}.", project.Id);
             return;
         }
         RunStage(stage, project);
@@ -812,22 +822,22 @@ public partial class MainWindow : Window
         var project = SelectedProject;
         if (project == null)
         {
-            AppendLog("Create or select a project before running.");
+            AppendLog("Create or select a project before running.", project.Id);
             return;
         }
         if (runningProcesses.ContainsKey(project.Id))
         {
-            AppendLog($"{project.Name} already has a running task.");
+            AppendLog($"{project.Name} already has a running task.", project.Id);
             return;
         }
         var stages = AutomaticStages(project).Where(stage => !StageIsComplete(stage, project)).ToList();
         if (stages.Count == 0)
         {
-            AppendLog($"All pipeline steps are complete for {project.Name}.");
+            AppendLog($"All pipeline steps are complete for {project.Name}.", project.Id);
             return;
         }
         queuedStages[project.Id] = new Queue<Stage>(stages.Skip(1));
-        AppendLog($"Run All queued for {project.Name}: {string.Join(" → ", stages.Select(stage => stage.Title))}");
+        AppendLog($"Run All queued for {project.Name}: {string.Join(" → ", stages.Select(stage => stage.Title))}", project.Id);
         RunStage(stages[0], project, true);
     }
 
@@ -836,12 +846,12 @@ public partial class MainWindow : Window
         var project = targetProject ?? SelectedProject;
         if (project == null)
         {
-            AppendLog("Create or select a project before running.");
+            AppendLog("Create or select a project before running.", project.Id);
             return;
         }
         if (runningProcesses.ContainsKey(project.Id))
         {
-            AppendLog($"{project.Name} already has a running task.");
+            AppendLog($"{project.Name} already has a running task.", project.Id);
             return;
         }
         if (!continueQueued)
@@ -849,41 +859,41 @@ public partial class MainWindow : Window
         if ((string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar)) || string.IsNullOrWhiteSpace(project.SaveLocation))
         {
             queuedStages.Remove(project.Id);
-            AppendLog("Select at least one ear mesh and a save location before running.");
+            AppendLog("Select at least one ear mesh and a save location before running.", project.Id);
             return;
         }
         if ((!string.IsNullOrWhiteSpace(project.LeftEar) && !File.Exists(project.LeftEar)) || (!string.IsNullOrWhiteSpace(project.RightEar) && !File.Exists(project.RightEar)))
         {
             queuedStages.Remove(project.Id);
-            AppendLog("One or more configured ear mesh files are missing.");
+            AppendLog("One or more configured ear mesh files are missing.", project.Id);
             RefreshPipelineStatus();
             return;
         }
         if (stage == Stage.Preprocessing && !File.Exists(environment.MeshGradingExecutable))
         {
             queuedStages.Remove(project.Id);
-            AppendLog("Mesh grading is required. Set up or select hrtf_mesh_grading.exe before preprocessing.");
+            AppendLog("Mesh grading is required. Set up or select hrtf_mesh_grading.exe before preprocessing.", project.Id);
             RefreshPipelineStatus();
             return;
         }
         if (stage == Stage.Preprocessing && !Directory.Exists(Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf")))
         {
             queuedStages.Remove(project.Id);
-            AppendLog("Mesh2HRTF sources are missing. Set up the environment before preprocessing.");
+            AppendLog("Mesh2HRTF sources are missing. Set up the environment before preprocessing.", project.Id);
             RefreshPipelineStatus();
             return;
         }
         if (stage == Stage.Inference && (!File.Exists(project.Settings.Inference.ModelConfig) || !File.Exists(project.Settings.Inference.ModelCheckpoint)))
         {
             queuedStages.Remove(project.Id);
-            AppendLog("The selected inference model files are missing.");
+            AppendLog("The selected inference model files are missing.", project.Id);
             RefreshPipelineStatus();
             return;
         }
         if (stage == Stage.Numcalc && !File.Exists(environment.NumCalcExecutable))
         {
             queuedStages.Remove(project.Id);
-            AppendLog("NumCalc is missing. Set up or select NumCalc.exe before running NumCalc.");
+            AppendLog("NumCalc is missing. Set up or select NumCalc.exe before running NumCalc.", project.Id);
             RefreshPipelineStatus();
             return;
         }
@@ -905,13 +915,13 @@ public partial class MainWindow : Window
                 CreateNoWindow = true
             };
             ApplyProcessEnvironment(process.StartInfo);
-            process.OutputDataReceived += (_, args) => AppendLog(args.Data);
-            process.ErrorDataReceived += (_, args) => AppendLog(args.Data);
+            process.OutputDataReceived += (_, args) => AppendLog(args.Data, project.Id);
+            process.ErrorDataReceived += (_, args) => AppendLog(args.Data, project.Id);
             process.EnableRaisingEvents = true;
             runningProcesses[project.Id] = process;
             runningStages[project.Id] = stage;
             FailedStages(project.Id).Remove(stage);
-            AppendLog($"Started {stage.Title} for {project.Name}");
+            AppendLog($"Started {stage.Title} for {project.Name}", project.Id);
             RefreshPipelineStatus();
             process.Exited += (_, _) => Dispatcher.BeginInvoke(() =>
             {
@@ -920,7 +930,7 @@ public partial class MainWindow : Window
                     FailedStages(project.Id).Add(stage);
                 runningProcesses.Remove(project.Id);
                 runningStages.Remove(project.Id);
-                AppendLog(code == 0 ? $"{stage.Title} finished for {project.Name}" : $"{stage.Title} for {project.Name} exited with status {code}");
+                AppendLog(code == 0 ? $"{stage.Title} finished for {project.Name}" : $"{stage.Title} for {project.Name} exited with status {code}", project.Id);
                 process.Dispose();
                 RefreshArtifacts();
                 RefreshPipelineStatus();
@@ -932,7 +942,7 @@ public partial class MainWindow : Window
                 else
                 {
                     if (code != 0 && queuedStages.TryGetValue(project.Id, out var stoppedQueue) && stoppedQueue.Count > 0)
-                        AppendLog($"Run All stopped after {stage.Title} failed.");
+                        AppendLog($"Run All stopped after {stage.Title} failed.", project.Id);
                     queuedStages.Remove(project.Id);
                     RefreshPipelineStatus();
                 }
@@ -947,7 +957,7 @@ public partial class MainWindow : Window
             runningProcesses.Remove(project.Id);
             runningStages.Remove(project.Id);
             queuedStages.Remove(project.Id);
-            AppendLog($"Could not start {stage.Title}: {error.Message}");
+            AppendLog($"Could not start {stage.Title}: {error.Message}", project.Id);
             RefreshArtifacts();
             RefreshPipelineStatus();
         }
@@ -1108,7 +1118,7 @@ ui:
         if (runningProcesses.TryGetValue(project.Id, out var process))
         {
             TryTerminate(process);
-            AppendLog("Termination requested.");
+            AppendLog("Termination requested.", project.Id);
         }
         RefreshPipelineStatus();
     }
@@ -1161,7 +1171,7 @@ ui:
             var path = Path.Combine(project.SaveLocation, name);
             if (ContainsPath(path, project.LeftEar) || ContainsPath(path, project.RightEar))
             {
-                AppendLog($"Skipped reset of {path} because it contains a configured input mesh.");
+                AppendLog($"Skipped reset of {path} because it contains a configured input mesh.", project.Id);
                 continue;
             }
             try
@@ -1173,13 +1183,13 @@ ui:
             }
             catch (Exception error)
             {
-                AppendLog($"Could not reset {path}: {error.Message}");
+                AppendLog($"Could not reset {path}: {error.Message}", project.Id);
             }
         }
         failedStages[project.Id] = [];
         ResetViewer();
         RefreshArtifacts();
-        AppendLog($"Reset generated outputs in {project.SaveLocation}");
+        AppendLog($"Reset generated outputs in {project.SaveLocation}", project.Id);
         RefreshPipelineStatus();
     }
 
@@ -1195,17 +1205,28 @@ ui:
     void ClearLogClicked(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
+        if (SelectedProject != null)
+            projectLogs[SelectedProject.Id] = "";
         LogText.Text = "";
     }
 
-    void AppendLog(string? text)
+    void AppendLog(string? text, Guid? projectId = null)
     {
         if (string.IsNullOrWhiteSpace(text))
             return;
+        var targetProjectID = projectId ?? SelectedProject?.Id;
+        if (targetProjectID == null)
+            return;
         void Append()
         {
-            LogText.AppendText((LogText.Text.Length == 0 ? "" : Environment.NewLine) + text);
-            LogText.ScrollToEnd();
+            var current = projectLogs.TryGetValue(targetProjectID.Value, out var log) ? log : "";
+            var updated = current.Length == 0 ? text : current + Environment.NewLine + text;
+            projectLogs[targetProjectID.Value] = updated;
+            if (SelectedProject?.Id == targetProjectID)
+            {
+                LogText.Text = updated;
+                LogText.ScrollToEnd();
+            }
         }
         if (Dispatcher.CheckAccess())
             Append();

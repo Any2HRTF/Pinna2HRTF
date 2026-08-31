@@ -107,7 +107,7 @@ struct MeshViewerView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Button("Clear") { store.logText = "" }
+                Button("Clear") { store.clearSelectedProjectLog() }
                     .buttonStyle(.borderless)
                     .disabled(store.logText.isEmpty)
             }
