@@ -15,6 +15,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="Resources\app_icon.ico" />
-    <None Include="..\ProjectSettingHelp.json" Link="ProjectSettingHelp.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\ProjectSettingHelp.json" Link="ProjectSettingHelp.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

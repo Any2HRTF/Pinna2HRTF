@@ -10,6 +10,7 @@ using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Runtime.InteropServices;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Media.Media3D;
@@ -29,7 +30,7 @@ public partial class MainWindow : Window
     readonly Dictionary<Guid, string> projectLogs = [];
     readonly Dictionary<Guid, ProjectViewerState> viewerStates = [];
     readonly Dictionary<string, SettingHelpEntry> settingHelp = [];
-    readonly JsonSerializerOptions jsonOptions = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
+    readonly JsonSerializerOptions jsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true, Converters = { new JsonStringEnumConverter() } };
     ProjectRegistry registry = new();
     EnvironmentConfig environment = new();
     bool loading;
@@ -162,7 +163,7 @@ public partial class MainWindow : Window
     {
         if (runningProcesses.Count > 0)
         {
-            var result = MessageBox.Show(this, "A pipeline task is still running. Quitting will stop it and may leave incomplete outputs. Quit anyway?", "Quit Pinna2HRTF", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            var result = System.Windows.MessageBox.Show(this, "A pipeline task is still running. Quitting will stop it and may leave incomplete outputs. Quit anyway?", "Quit Pinna2HRTF", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
             if (result != MessageBoxResult.Yes)
             {
                 e.Cancel = true;
@@ -195,7 +196,7 @@ public partial class MainWindow : Window
 
     void SettingInfoClicked(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button button || button.Tag is not string id || !settingHelp.TryGetValue(id, out var entry))
+        if (sender is not System.Windows.Controls.Button button || button.Tag is not string id || !settingHelp.TryGetValue(id, out var entry))
             return;
         SettingHelpTitle.Text = entry.Title;
         SettingHelpDescription.Text = entry.Description;
@@ -208,13 +209,13 @@ public partial class MainWindow : Window
 
     void PublicationClicked(object sender, RoutedEventArgs e)
     {
-        if (sender is Button button && button.Tag is string url)
+        if (sender is System.Windows.Controls.Button button && button.Tag is string url)
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     }
 
     void UserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e) => Dispatcher.BeginInvoke(() => UpdateViewerAppearance());
 
-    void WindowPreviewKeyDown(object sender, KeyEventArgs e)
+    void WindowPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (e.Key == Key.Escape && SettingHelpPopup.IsOpen)
         {
@@ -226,7 +227,30 @@ public partial class MainWindow : Window
     void UpdateViewerAppearance()
     {
         var darkMode = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")?.GetValue("AppsUseLightTheme") is int value && value == 0;
+        UpdateTitleBar(darkMode);
+        SetThemeBrush("AppBackgroundBrush", darkMode ? "#191919" : "#f3f6f5");
+        SetThemeBrush("PanelBackgroundBrush", darkMode ? "#202020" : "#ffffff");
+        SetThemeBrush("SettingsBackgroundBrush", darkMode ? "#191919" : "#fbfbfc");
+        SetThemeBrush("InputBackgroundBrush", darkMode ? "#2f2f2f" : "#ffffff");
+        SetThemeBrush("PrimaryTextBrush", darkMode ? "#e6e6e6" : "#1a1a1a");
+        SetThemeBrush("SecondaryTextBrush", darkMode ? "#9b9b9b" : "#69717d");
+        SetThemeBrush("BorderBrush", darkMode ? "#3a3a3a" : "#d9dee8");
+        SetThemeBrush("ComboSelectedBrush", darkMode ? "#3a3a3a" : "#d9eaf0");
+        SetThemeBrush("ComboHoverBrush", darkMode ? "#333333" : "#edf3f5");
         MeshViewerBackground.Background = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#1f1f1f" : "#edf3f2"));
+        Background = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#202020" : "#f3f6f5"));
+        var panelBrush = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#2b2b2b" : "#ffffff"));
+        ProjectsPane.Background = panelBrush; ArtifactCard.Background = panelBrush; LiveLogHeader.Background = panelBrush; LiveLogContent.Background = panelBrush;
+        LogText.Background = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#202020" : "#ffffff"));
+        LogText.Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#e6e6e6" : "#1a1a1a"));
+        var inputBackground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#2f2f2f" : "#ffffff"));
+        var inputForeground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#e6e6e6" : "#1a1a1a"));
+        foreach (var input in new[] { ProjectNameBox, LeftEarBox, RightEarBox, SaveLocationBox, EvaluationGridBox, HeadRadiusBox, MinFrequencyBox, MaxFrequencyBox, FrequencyStepsBox, SourceAssignmentFaceCountBox, MeshMinEdgeBox, MeshMaxEdgeBox, MeshMaxErrorBox, MeshGammaBox, MeshGammaOppositeBox, MaxInstancesBox, MaxCpuLoadBox, LevelOffsetBox })
+        {
+            input.Background = inputBackground; input.Foreground = inputForeground;
+        }
+        SettingsPane.Background = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#252525" : "#fbfbfc"));
+        Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#f2f2f2" : "#1a1a1a"));
         MeshViewerBackground.BorderBrush = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#3b3b3b" : "#dbe5e3"));
         ViewerPlaceholder.Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#c8c8c8" : "#69717d"));
         MeshControlsHint.Background = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#cc2b2b2b" : "#ccffffff"));
@@ -236,6 +260,21 @@ public partial class MainWindow : Window
         SettingHelpTitle.Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#f0f0f0" : "#20242a"));
         SettingHelpDescription.Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#d0d0d0" : "#3f4854"));
         SettingHelpPublicationsLabel.Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#c8c8c8" : "#69717d"));
+    }
+
+    [DllImport("dwmapi.dll")]
+    static extern int DwmSetWindowAttribute(IntPtr hwnd, uint attribute, ref int value, uint size);
+    void UpdateTitleBar(bool darkMode)
+    {
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero) return;
+        var value = darkMode ? 1 : 0;
+        _ = DwmSetWindowAttribute(hwnd, 20, ref value, sizeof(int));
+    }
+
+    void SetThemeBrush(string key, string hex)
+    {
+        Resources[key] = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex));
     }
 
     void LoadRegistry()
@@ -344,7 +383,10 @@ public partial class MainWindow : Window
     void RefreshProjectList()
     {
         foreach (var project in projects)
-            project.StatusText = ArtifactSummary(project);
+        {
+            project.IsRunning = runningProcesses.ContainsKey(project.Id);
+            project.StatusText = NextStageSummary(project);
+        }
         ProjectList.Items.Refresh();
         DuplicateProjectButton.IsEnabled = SelectedProject != null;
     }
@@ -662,8 +704,8 @@ public partial class MainWindow : Window
         ArtifactPicker.SelectedItem = artifacts.FirstOrDefault(artifact => artifact.Path == selectedPath);
         refreshingArtifacts = false;
         RefreshProjectList();
-        if (ArtifactPicker.SelectedItem is Artifact artifact)
-            OpenArtifact(artifact);
+        if (ArtifactPicker.SelectedItem is Artifact selectedArtifact)
+            OpenArtifact(selectedArtifact);
         else
             ResetViewer();
     }
@@ -962,7 +1004,7 @@ public partial class MainWindow : Window
         var project = SelectedProject;
         if (project == null)
         {
-            AppendLog("Create or select a project before running.", project.Id);
+            AppendLog("Create or select a project before running.");
             return;
         }
         if (runningProcesses.ContainsKey(project.Id))
@@ -986,7 +1028,7 @@ public partial class MainWindow : Window
         var project = targetProject ?? SelectedProject;
         if (project == null)
         {
-            AppendLog("Create or select a project before running.", project.Id);
+            AppendLog("Create or select a project before running.");
             return;
         }
         if (runningProcesses.ContainsKey(project.Id))
@@ -1385,69 +1427,13 @@ ui:
         var project = SelectedProject;
         if (project == null)
         {
-            BusyProgress.Visibility = Visibility.Collapsed;
-            BusyStatusText.Text = "Ready";
-            PipelineStatusText.Text = "No project selected";
             RefreshStageStatus(null);
+            RefreshProjectList();
             return;
         }
-        var stages = AutomaticStages(project);
-        var done = stages.Where(stage => StageIsComplete(stage, project)).Select(stage => stage.Title).ToList();
-        var running = runningStages.TryGetValue(project.Id, out var runningStage) ? runningStage : null;
-        var next = running == null
-            ? stages.FirstOrDefault(stage => !StageIsComplete(stage, project))
-            : stages.SkipWhile(stage => stage != running).Skip(1).FirstOrDefault(stage => !StageIsComplete(stage, project));
-        var missing = new List<string>();
-        if (string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar))
-            missing.Add("ear mesh");
-        if (!string.IsNullOrWhiteSpace(project.LeftEar) && !File.Exists(project.LeftEar))
-            missing.Add("left-ear file");
-        if (!string.IsNullOrWhiteSpace(project.RightEar) && !File.Exists(project.RightEar))
-            missing.Add("right-ear file");
-        if (string.IsNullOrWhiteSpace(project.SaveLocation))
-            missing.Add("save location");
-        if (!File.Exists(Path.Combine(packageRoot, ".venv", "Scripts", "python.exe")) && !File.Exists(environment.UvExecutable))
-            missing.Add("Python runtime or uv");
-        if (next == Stage.Inference)
-        {
-            if (!File.Exists(project.Settings.Inference.ModelConfig))
-                missing.Add("model config");
-            if (!File.Exists(project.Settings.Inference.ModelCheckpoint))
-                missing.Add("model checkpoint");
-        }
-        if (next == Stage.Preprocessing && !File.Exists(environment.MeshGradingExecutable))
-            missing.Add("mesh grading executable");
-        if (next == Stage.Preprocessing && !Directory.Exists(Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf")))
-            missing.Add("Mesh2HRTF sources");
-        if (next == Stage.Numcalc && !File.Exists(environment.NumCalcExecutable))
-            missing.Add("NumCalc executable");
-        var failed = FailedStages(project.Id).Select(stage => stage.Title).ToList();
-        BusyProgress.Visibility = runningStages.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        if (running != null)
-            BusyStatusText.Text = $"Busy: {running.Title}";
-        else if (runningStages.Count > 0)
-        {
-            var other = runningStages.First();
-            var otherProject = projects.FirstOrDefault(candidate => candidate.Id == other.Key)?.Name ?? "another project";
-            BusyStatusText.Text = $"Busy: {otherProject} · {other.Value.Title}";
-        }
-        else
-            BusyStatusText.Text = "Ready";
-        var parts = new List<string>
-        {
-            $"Done: {(done.Count == 0 ? "none" : string.Join(", ", done))}",
-            $"Next: {(next?.Title ?? (running == null ? "complete" : "finishing"))}"
-        };
-        if (!InferenceIsAutomatic(project))
-            parts.Add("BezierPPM Inference: skipped");
-        if (missing.Count > 0)
-            parts.Add($"Missing: {string.Join(", ", missing.Distinct())}");
-        if (failed.Count > 0)
-            parts.Add($"Failed: {string.Join(", ", failed)}");
-        PipelineStatusText.Text = string.Join("  ·  ", parts);
         RefreshStageStatus(project);
+        RefreshProjectList();
     }
-
     void RefreshStageStatus(ProjectRecord? project)
     {
         var controls = new[] { InferenceStatusText, PreprocessingStatusText, NumCalcStageStatusText, PostprocessingStatusText };
@@ -1651,6 +1637,7 @@ class ProjectRecord
     public ProjectSettings Settings { get; set; } = new();
     [JsonIgnore] public string DisplayTitle { get; set; } = "";
     [JsonIgnore] public string StatusText { get; set; } = "";
+    [JsonIgnore] public bool IsRunning { get; set; }
 }
 
 class ProjectSettings
