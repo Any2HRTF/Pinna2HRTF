@@ -22,6 +22,7 @@
           <StackPanel Grid.Column="1" Orientation="Horizontal">
             <Button x:Name="NewProjectButton" Content="&#xE710;" FontFamily="Segoe MDL2 Assets" Width="34" Margin="0" ToolTip="New project" Click="CreateProjectClicked"/>
             <Button x:Name="ImportProjectButton" Content="&#xE896;" FontFamily="Segoe MDL2 Assets" Width="34" ToolTip="Import project" Click="ImportProjectClicked" Margin="6,0,0,0"/>
+            <Button x:Name="DuplicateProjectButton" Content="&#xE8C8;" FontFamily="Segoe MDL2 Assets" Width="34" ToolTip="Duplicate selected project" Click="DuplicateProjectClicked" Margin="6,0,0,0"/>
             <Button x:Name="DeleteProjectButton" Content="&#xE74D;" FontFamily="Segoe MDL2 Assets" Width="34" ToolTip="Delete selected project" Click="RemoveProjectClicked" Margin="6,0,0,0"/>
             <Expander x:Name="ProjectsToggle" Width="26" Height="26" Margin="6,0,0,0" ExpandDirection="Right" IsExpanded="True" Expanded="ProjectsExpanded" Collapsed="ProjectsCollapsed" ToolTip="Collapse projects"/>
           </StackPanel>
@@ -54,7 +55,7 @@
             </StackPanel>
             <ComboBox x:Name="ArtifactPicker" Grid.Column="1" VerticalAlignment="Center" SelectionChanged="ArtifactSelectionChanged" DisplayMemberPath="Title"/>
           </Grid>
-          <Border Grid.Row="1" Background="#edf3f2" BorderBrush="#dbe5e3" BorderThickness="0,1,0,0">
+          <Border x:Name="MeshViewerBackground" Grid.Row="1" Background="#edf3f2" BorderBrush="#dbe5e3" BorderThickness="0,1,0,0">
             <Grid>
               <Viewport3D x:Name="MeshViewport" ClipToBounds="True"
                           MouseLeftButtonDown="MeshViewportMouseLeftButtonDown"
@@ -88,7 +89,7 @@
               </Viewport3D>
               <Border x:Name="MeshControlsHint" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="12"
                       Padding="8,5" Background="#ccffffff" CornerRadius="4" Visibility="Collapsed">
-                <TextBlock Text="Drag to rotate  |  Mouse wheel to zoom" Foreground="#69717d" FontSize="12"/>
+                <TextBlock x:Name="MeshControlsHintText" Text="Drag to rotate  |  Mouse wheel to zoom" Foreground="#69717d" FontSize="12"/>
               </Border>
               <Image x:Name="ImagePreview" Stretch="Uniform" Margin="18" Visibility="Collapsed"/>
               <TextBlock x:Name="ViewerPlaceholder" Text="No artifact selected" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#69717d" FontSize="18"/>
@@ -135,12 +136,11 @@
             <TextBox x:Name="SaveLocationBox" TextChanged="ProjectEdited"/>
           </DockPanel>
           <TextBlock Text="Choose at least one ear mesh." Margin="0,4,0,0" Foreground="#69717d"/>
-          <CheckBox x:Name="CopyInputsBox" Content="Copy inputs into project" Margin="0,10,0,8" Checked="ProjectEdited" Unchecked="ProjectEdited"/>
-          <Expander Header="Inference" IsExpanded="False" Margin="0,8,0,0">
+          <CheckBox x:Name="UsePredictionsBox" Content="Use BezierPPM" Margin="0,2,0,8" Checked="ProjectEdited" Unchecked="ProjectEdited"/>
+          <Expander Header="BezierPPM Inference" IsExpanded="False" Margin="0,8,0,0">
             <StackPanel Margin="0,8,0,0">
               <Label Content="Model"/>
               <ComboBox x:Name="ModelPicker" SelectionChanged="ModelSelectionChanged"/>
-              <CheckBox x:Name="UsePredictionsBox" Content="Use predictions for preprocessing" Margin="0,8,0,0" Checked="ProjectEdited" Unchecked="ProjectEdited"/>
             </StackPanel>
           </Expander>
           <Expander Header="Mesh2HRTF" IsExpanded="False" Margin="0,8,0,0">
@@ -157,8 +157,10 @@
               <TextBox x:Name="MinFrequencyBox" TextChanged="ProjectEdited"/>
               <Label Content="Max frequency"/>
               <TextBox x:Name="MaxFrequencyBox" TextChanged="ProjectEdited"/>
-              <Label Content="Frequency steps"/>
+              <Label Content="Frequency steps (minimum 2)"/>
               <TextBox x:Name="FrequencyStepsBox" TextChanged="ProjectEdited"/>
+              <Label Content="Microphone faces"/>
+              <TextBox x:Name="SourceAssignmentFaceCountBox" TextChanged="ProjectEdited"/>
             </StackPanel>
           </Expander>
           <Expander Header="Mesh Grading" IsExpanded="False" Margin="0,8,0,0">
@@ -170,10 +172,10 @@
               <TextBox x:Name="MeshMaxEdgeBox" TextChanged="ProjectEdited"/>
               <Label Content="Max error"/>
               <TextBox x:Name="MeshMaxErrorBox" TextChanged="ProjectEdited"/>
-              <Label Content="Gamma left"/>
-              <TextBox x:Name="MeshGammaLeftBox" TextChanged="ProjectEdited"/>
-              <Label Content="Gamma right"/>
-              <TextBox x:Name="MeshGammaRightBox" TextChanged="ProjectEdited"/>
+              <Label Content="Gamma"/>
+              <TextBox x:Name="MeshGammaBox" TextChanged="ProjectEdited"/>
+              <Label Content="Gamma opposite"/>
+              <TextBox x:Name="MeshGammaOppositeBox" TextChanged="ProjectEdited"/>
             </StackPanel>
           </Expander>
           <Expander Header="NumCalc" IsExpanded="False" Margin="0,8,0,0">
@@ -185,31 +187,11 @@
               <CheckBox x:Name="AdaptiveFmmLengthBox" Content="Adaptive FMM expansion length" IsChecked="True" Checked="ProjectEdited" Unchecked="ProjectEdited"/>
             </StackPanel>
           </Expander>
-
-          <Expander Header="Environment" IsExpanded="False" Visibility="Collapsed" Margin="0,8,0,0">
+          <Expander Header="Postprocessing" IsExpanded="False" Margin="0,8,0,0">
             <StackPanel Margin="0,8,0,0">
-              <Label Content="uv"/>
-              <DockPanel>
-                <Button DockPanel.Dock="Right" Content="Browse" Click="BrowseUvClicked"/>
-                <TextBox x:Name="UvBox" TextChanged="EnvironmentEdited"/>
-              </DockPanel>
-              <Label Content="NumCalc"/>
-              <DockPanel>
-                <Button DockPanel.Dock="Right" Content="Browse" Click="BrowseNumCalcClicked"/>
-                <TextBox x:Name="NumCalcBox" TextChanged="EnvironmentEdited"/>
-              </DockPanel>
-              <Label Content="Mesh grading"/>
-              <DockPanel>
-                <Button DockPanel.Dock="Right" Content="Browse" Click="BrowseMeshGradingClicked"/>
-                <TextBox x:Name="MeshGradingBox" TextChanged="EnvironmentEdited"/>
-              </DockPanel>
-              <Label Content="External directory"/>
-              <DockPanel>
-                <Button DockPanel.Dock="Right" Content="Browse" Click="BrowseExternalClicked"/>
-                <TextBox x:Name="ExternalBox" TextChanged="EnvironmentEdited"/>
-              </DockPanel>
-              <TextBlock x:Name="EnvironmentStatusText" Margin="0,8,0,0" Foreground="#69717d"/>
-              <Button Content="Set Up Environment" Margin="0,8,0,0" Click="SetupEnvironmentClicked"/>
+              <CheckBox x:Name="NormalizeHrtfsBox" Content="Normalize HRTFs" Checked="ProjectEdited" Unchecked="ProjectEdited"/>
+              <Label Content="Level offset (dB)"/>
+              <TextBox x:Name="LevelOffsetBox" TextChanged="ProjectEdited"/>
             </StackPanel>
           </Expander>
         </StackPanel>
@@ -219,7 +201,7 @@
           <StackPanel Margin="0,0,0,4">
             <Grid Margin="0,3">
               <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-              <TextBlock Text="Inference" VerticalAlignment="Center"/>
+              <TextBlock Text="BezierPPM Inference" VerticalAlignment="Center"/>
               <TextBlock x:Name="InferenceStatusText" Grid.Column="1" Margin="10,0,12,0" VerticalAlignment="Center" Foreground="#69717d"/>
               <Button x:Name="RunInferenceButton" Grid.Column="2" Content="Run" Click="RunInferenceClicked" Padding="12,3"/>
             </Grid>

@@ -7,14 +7,14 @@ enum ArtifactScanner {
         var next: [Artifact] = []
         if !project.leftEar.isEmpty {
             next.append(Artifact(title: "Input left ear", url: URL(fileURLWithPath: project.leftEar)))
-            next.append(Artifact(title: "Left simulation mesh", url: output.appendingPathComponent("intermediates/left/graded_head.ply")))
+            next.append(Artifact(title: "Left simulation mesh", url: output.appendingPathComponent("Intermediates/Left/graded_head.ply")))
         }
         if !project.rightEar.isEmpty {
             next.append(Artifact(title: "Input right ear", url: URL(fileURLWithPath: project.rightEar)))
-            next.append(Artifact(title: "Right simulation mesh", url: output.appendingPathComponent("intermediates/right/graded_head.ply")))
+            next.append(Artifact(title: "Right simulation mesh", url: output.appendingPathComponent("Intermediates/Right/graded_head.ply")))
         }
-        for pair in [("Generated left ear", output.appendingPathComponent(settings.predictionLeftFolder), project.leftEar), ("Generated right ear", output.appendingPathComponent(settings.predictionRightFolder), project.rightEar)] where !pair.2.isEmpty {
-            next.append(contentsOf: meshArtifacts(title: pair.0, folder: pair.1))
+        for pair in [("Predicted left ear", output.appendingPathComponent(settings.predictionLeftFolder), project.leftEar), ("Predicted right ear", output.appendingPathComponent(settings.predictionRightFolder), project.rightEar)] where !pair.2.isEmpty {
+            next.append(contentsOf: predictionArtifacts(title: pair.0, folder: pair.1))
         }
         let hrtfFolder = output.appendingPathComponent("HRTF")
         let plots = (try? FileManager.default.contentsOfDirectory(at: hrtfFolder, includingPropertiesForKeys: nil)) ?? []
@@ -29,6 +29,15 @@ enum ArtifactScanner {
     static func meshArtifacts(title: String, folder: URL) -> [Artifact] {
         guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return [] }
         let meshes = files.filter { ["stl", "ply"].contains($0.pathExtension.lowercased()) }.sorted { $0.path < $1.path }
+        if meshes.count == 1, let file = meshes.first {
+            return [Artifact(title: title, url: file)]
+        }
+        return meshes.map { Artifact(title: "\(title) - \($0.deletingPathExtension().lastPathComponent)", url: $0) }
+    }
+
+    static func predictionArtifacts(title: String, folder: URL) -> [Artifact] {
+        guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return [] }
+        let meshes = files.filter { $0.lastPathComponent.hasPrefix("Prediction_") && ["stl", "ply"].contains($0.pathExtension.lowercased()) }.sorted { $0.path < $1.path }
         if meshes.count == 1, let file = meshes.first {
             return [Artifact(title: title, url: file)]
         }
@@ -52,7 +61,7 @@ enum ArtifactScanner {
         if states[.postprocessing] == .done { return "Postprocessed" }
         if states[.numcalc] == .done { return "Solved" }
         if states[.preprocessing] == .done { return "Projects ready" }
-        if states[.inference] == .done { return "Inference ready" }
+        if states[.inference] == .done { return "BezierPPM Inference ready" }
         return URL(fileURLWithPath: project.saveLocation).lastPathComponent
     }
 
@@ -75,8 +84,8 @@ enum ArtifactScanner {
             let rightDone = project.rightEar.isEmpty || containsMesh(output.appendingPathComponent(settings.predictionRightFolder))
             return leftDone && rightDone
         case .preprocessing:
-            let leftDone = project.leftEar.isEmpty || (fileExists(output.appendingPathComponent("Projects/Left/parameters.json")) && fileExists(output.appendingPathComponent("intermediates/left/graded_head.ply")))
-            let rightDone = project.rightEar.isEmpty || (fileExists(output.appendingPathComponent("Projects/Right/parameters.json")) && fileExists(output.appendingPathComponent("intermediates/right/graded_head.ply")))
+            let leftDone = project.leftEar.isEmpty || (fileExists(output.appendingPathComponent("Projects/Left/parameters.json")) && fileExists(output.appendingPathComponent("Intermediates/Left/graded_head.ply")))
+            let rightDone = project.rightEar.isEmpty || (fileExists(output.appendingPathComponent("Projects/Right/parameters.json")) && fileExists(output.appendingPathComponent("Intermediates/Right/graded_head.ply")))
             return leftDone && rightDone
         case .numcalc:
             let leftDone = project.leftEar.isEmpty || containsNumCalcOutput(output.appendingPathComponent("Projects/Left/NumCalc/source_1/be.out")) || containsOutput2HRTF(output.appendingPathComponent("Projects/Left/Output2HRTF"))

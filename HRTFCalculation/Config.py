@@ -59,12 +59,12 @@ class InferenceConfig(BaseModel):
     enabled: bool = False
     model_config_file: Path = Field(default_factory=lambda: default_resource("Local 3 Views.yaml"))
     model_checkpoint: Path = Field(default_factory=lambda: default_resource("Local 3 Views.pth"))
-    target_left_folder: str = "Target STL Left"
-    target_right_folder: str = "Target STL Right"
-    prediction_left_folder: str = "Prediction STL Left"
-    prediction_right_folder: str = "Prediction STL Right"
-    prediction_parameters_left_folder: str = "Prediction Parameters Left"
-    prediction_parameters_right_folder: str = "Prediction Parameters Right"
+    target_left_folder: str = "Input/Left"
+    target_right_folder: str = "Input/Right"
+    prediction_left_folder: str = "Intermediates/Left"
+    prediction_right_folder: str = "Intermediates/Right"
+    prediction_parameters_left_folder: str = "Intermediates/Left"
+    prediction_parameters_right_folder: str = "Intermediates/Right"
     use_predictions_for_preprocessing: bool = True
 
 
@@ -91,9 +91,8 @@ class PreprocessingConfig(BaseModel):
     mesh_min_edge_length: float = 0.5
     mesh_max_edge_length: float = 10.0
     mesh_max_error: float = 0.5
-    mesh_gamma_left: float = 0.15
-    mesh_gamma_right: float = 0.2
-    mesh_hole_size: float = 0.2
+    mesh_gamma: float = 0.2
+    mesh_gamma_opposite: float = 0.1
     skip_mesh_grading: Literal[False] = False
     source_type_left: str = "Left ear"
     source_type_right: str = "Right ear"
@@ -102,7 +101,7 @@ class PreprocessingConfig(BaseModel):
     min_frequency: int = 0
     max_frequency: int = 24000
     frequency_vector_type: str = "Num steps"
-    frequency_step_count: int = 129
+    frequency_step_count: int = Field(default=129, ge=2)
     compute_hrirs: bool = True
     pictures: bool = False
     reference: bool = True
@@ -175,6 +174,16 @@ class PipelineConfig(BaseModel):
                     setattr(section, name, resolve_path(value, base))
                 elif value is not None and name.endswith(("_file", "_checkpoint", "_dir", "_project", "_config")) and isinstance(value, Path):
                     setattr(section, name, resolve_path(value, base))
+        inference_folder_replacements = {
+            "Intermediates/Prediction STL Left": "Intermediates/Left",
+            "Intermediates/Prediction STL Right": "Intermediates/Right",
+            "Intermediates/Prediction Parameters Left": "Intermediates/Left",
+            "Intermediates/Prediction Parameters Right": "Intermediates/Right",
+        }
+        for name in ("prediction_left_folder", "prediction_right_folder", "prediction_parameters_left_folder", "prediction_parameters_right_folder"):
+            value = getattr(clone.inference, name)
+            if value in inference_folder_replacements:
+                setattr(clone.inference, name, inference_folder_replacements[value])
         if clone.paths.mesh2hrtf_path is None:
             clone.paths.mesh2hrtf_path = clone.paths.external_deps_dir / "src" / "Mesh2HRTF" / "mesh2hrtf"
         if clone.paths.numcalc_executable is None:

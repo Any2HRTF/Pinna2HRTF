@@ -44,32 +44,40 @@ def run_inference(config: PipelineConfig, dry_run: bool, logger: Logger) -> None
     if config.paths.left_ear is None or config.paths.right_ear is None:
         logger("Skipping inference because single-ear projects do not use the bilateral inference model.")
         return
-    logger(f"Left target folder: {config.inference.target_left_folder}")
-    logger(f"Right target folder: {config.inference.target_right_folder}")
+    logger(f"Left input mesh: {config.paths.left_ear}")
+    logger(f"Right input mesh: {config.paths.right_ear}")
     if dry_run:
         return
     config.paths.output_dir.mkdir(parents=True, exist_ok=True)
-    left_target = config.paths.output_dir / config.inference.target_left_folder
-    right_target = config.paths.output_dir / config.inference.target_right_folder
-    left_target.mkdir(parents=True, exist_ok=True)
-    right_target.mkdir(parents=True, exist_ok=True)
-    for source, target in [
-        (config.paths.left_ear, left_target / config.paths.left_ear.name),
-        (config.paths.right_ear, right_target / config.paths.right_ear.name),
-    ]:
-        if source.resolve() != target.resolve():
-            shutil.copyfile(source, target)
     from .Inference.inference_stl import main
+    legacy_folders = [
+        "Target STL Left", "Target STL Right", "ICP STL Left", "ICP STL Right",
+        "Prediction STL Left", "Prediction STL Right", "Prediction Parameters Left", "Prediction Parameters Right",
+        "Results Inference.csv"
+    ]
+    legacy_folders.extend([
+        "Intermediates/Prediction STL Left", "Intermediates/Prediction STL Right",
+        "Intermediates/Prediction Parameters Left", "Intermediates/Prediction Parameters Right",
+        "Intermediates/ICP STL Left", "Intermediates/ICP STL Right"
+    ])
+    input_paths = [config.paths.left_ear.resolve(), config.paths.right_ear.resolve()]
+    for name in legacy_folders:
+        legacy_path = config.paths.output_dir / name
+        if legacy_path.is_dir() and not any(legacy_path.resolve() in path.parents for path in input_paths):
+            shutil.rmtree(legacy_path)
+        elif legacy_path.is_file() and legacy_path.resolve() not in input_paths:
+            legacy_path.unlink()
     args = SimpleNamespace(
         configuration=str(config.inference.model_config_file),
         model_checkpoint=str(config.inference.model_checkpoint),
         data_dir=str(config.paths.output_dir),
-        target_left_folder=config.inference.target_left_folder,
-        target_right_folder=config.inference.target_right_folder,
+        target_left_folder=str(config.paths.left_ear.parent),
+        target_right_folder=str(config.paths.right_ear.parent),
         prediction_left_folder=config.inference.prediction_left_folder,
         prediction_right_folder=config.inference.prediction_right_folder,
         prediction_parameters_left_folder=config.inference.prediction_parameters_left_folder,
         prediction_parameters_right_folder=config.inference.prediction_parameters_right_folder,
+        intermediates_folder="Intermediates",
     )
     main(args)
 
@@ -114,9 +122,12 @@ def preprocessing_input_paths(config: PipelineConfig, logger: Logger) -> tuple[P
 def predicted_stl(folder: Path, preferred_stem: str) -> Path | None:
     if not folder.exists():
         return None
-    preferred = folder / f"{preferred_stem}.stl"
+    preferred = folder / f"Prediction_{preferred_stem}.stl"
     if preferred.exists():
         return preferred
+    legacy_preferred = folder / f"{preferred_stem}.stl"
+    if legacy_preferred.exists():
+        return legacy_preferred
     files = sorted(path for path in folder.iterdir() if path.suffix.lower() == ".stl")
     if len(files) == 1:
         return files[0]

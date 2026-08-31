@@ -12,11 +12,37 @@ final class ProjectRegistryStore {
     }
 
     func load() -> ProjectRegistry {
-        if let data = try? Data(contentsOf: url), let registry = try? JSONDecoder().decode(ProjectRegistry.self, from: data) {
-            return registry
+        if let data = try? Data(contentsOf: url) {
+            if let registry = try? JSONDecoder().decode(ProjectRegistry.self, from: data) {
+                return registry
+            }
+            if let object = try? JSONSerialization.jsonObject(with: data), let migratedObject = Self.migrateLegacyMeshSettings(object), let migratedData = try? JSONSerialization.data(withJSONObject: migratedObject), let registry = try? JSONDecoder().decode(ProjectRegistry.self, from: migratedData) {
+                return registry
+            }
         }
         let environment = Defaults.environment(root: rootURL)
         return ProjectRegistry(projects: [], selectedProjectID: nil, environment: environment)
+    }
+
+    static func migrateLegacyMeshSettings(_ value: Any) -> Any? {
+        if var dictionary = value as? [String: Any] {
+            if dictionary["meshGammaLeft"] != nil || dictionary["meshGammaRight"] != nil {
+                if dictionary["meshGamma"] == nil { dictionary["meshGamma"] = "0.2" }
+                if dictionary["meshGammaOpposite"] == nil { dictionary["meshGammaOpposite"] = "0.1" }
+                dictionary.removeValue(forKey: "meshGammaLeft")
+                dictionary.removeValue(forKey: "meshGammaRight")
+            }
+            for key in dictionary.keys {
+                if let nested = dictionary[key], let migrated = migrateLegacyMeshSettings(nested) {
+                    dictionary[key] = migrated
+                }
+            }
+            return dictionary
+        }
+        if let array = value as? [Any] {
+            return array.compactMap(migrateLegacyMeshSettings)
+        }
+        return value
     }
 
     func save(_ registry: ProjectRegistry) {

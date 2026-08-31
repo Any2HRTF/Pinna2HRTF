@@ -41,11 +41,10 @@ struct ProjectInspectorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 requiredPanel
-                SettingsDisclosure("Inference", systemImage: "wand.and.stars") {
+                SettingsDisclosure("BezierPPM Inference", systemImage: "wand.and.stars") {
                     ModelPicker(selection: modelNameBinding, options: store.modelOptions)
                 }
                 SettingsDisclosure("Mesh2HRTF", systemImage: "waveform.path.ecg") {
-                    Toggle("Use predictions for preprocessing", isOn: inferenceBoolBinding(\.usePredictionsForPreprocessing))
                     PathField("Evaluation grid", text: optionalPreprocessingBinding(\.evaluationGrid), mode: .directory)
                     Toggle("Use custom head radius", isOn: useCustomHeadRadiusBinding)
                     LabeledMillimeterSlider("Head radius", value: headRadiusBinding, range: 0...200)
@@ -53,7 +52,17 @@ struct ProjectInspectorView: View {
                         .opacity(useCustomHeadRadiusBinding.wrappedValue ? 1 : 0.55)
                     LabeledTextField("Min frequency", text: preprocessingBinding(\.minFrequency))
                     LabeledTextField("Max frequency", text: preprocessingBinding(\.maxFrequency))
-                    LabeledTextField("Frequency steps", text: preprocessingBinding(\.frequencyStepCount))
+                    HStack {
+                        Text("Frequency steps")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Stepper(value: frequencyStepCountBinding, in: 2...10000) {
+                            Text("\(frequencyStepCountBinding.wrappedValue)")
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 44, alignment: .trailing)
+                        }
+                    }
                     HStack {
                         Text("Microphone faces")
                             .font(.caption.weight(.medium))
@@ -73,8 +82,8 @@ struct ProjectInspectorView: View {
                     LabeledTextField("Min edge length", text: preprocessingBinding(\.meshMinEdgeLength))
                     LabeledTextField("Max edge length", text: preprocessingBinding(\.meshMaxEdgeLength))
                     LabeledTextField("Max error", text: preprocessingBinding(\.meshMaxError))
-                    LabeledTextField("Gamma left", text: preprocessingBinding(\.meshGammaLeft))
-                    LabeledTextField("Gamma right", text: preprocessingBinding(\.meshGammaRight))
+                    LabeledTextField("Gamma", text: preprocessingBinding(\.meshGamma))
+                    LabeledTextField("Gamma opposite", text: preprocessingBinding(\.meshGammaOpposite))
                 }
                 SettingsDisclosure("NumCalc", systemImage: "cpu") {
                     LabeledTextField("Parallel instances", text: numcalcBinding(\.maxInstances))
@@ -101,6 +110,7 @@ struct ProjectInspectorView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             PathField("Save location", text: projectStringBinding(\.saveLocation), mode: .directory)
+            Toggle("Use BezierPPM", isOn: inferenceBoolBinding(\.usePredictionsForPreprocessing))
         }
         .padding(10)
         .background(.background, in: RoundedRectangle(cornerRadius: 10))
@@ -214,6 +224,20 @@ struct ProjectInspectorView: View {
             set: { value in
                 store.updateSelectedProject {
                     $0.settings.preprocessing.sourceAssignmentFaceCount = "\(min(max(value, 1), 100))"
+                }
+            }
+        )
+    }
+
+    var frequencyStepCountBinding: Binding<Int> {
+        Binding(
+            get: {
+                let value = Int(store.selectedProject?.settings.preprocessing.frequencyStepCount ?? "") ?? 129
+                return min(max(value, 2), 10000)
+            },
+            set: { value in
+                store.updateSelectedProject {
+                    $0.settings.preprocessing.frequencyStepCount = "\(min(max(value, 2), 10000))"
                 }
             }
         )

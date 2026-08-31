@@ -2,11 +2,13 @@ import SwiftUI
 
 struct PipelineCommandContext {
     var canRemoveProject: Bool
+    var canDuplicateProject: Bool
     var canRunProject: Bool
     var canStopProject: Bool
     var canResetProject: Bool
     var createProject: () -> Void
     var importProject: () -> Void
+    var duplicateProject: () -> Void
     var removeProject: () -> Void
     var runNextStage: () -> Void
     var runStage: (Stage) -> Void
@@ -30,6 +32,12 @@ struct PipelineCommands: Commands {
             .keyboardShortcut("o", modifiers: [.command, .shift])
         }
         CommandGroup(after: .newItem) {
+            Button("Duplicate Project") {
+                commands?.duplicateProject()
+            }
+            .keyboardShortcut("d", modifiers: [.command])
+            .disabled(commands?.canDuplicateProject != true)
+
             Button("Remove Project") {
                 commands?.removeProject()
             }

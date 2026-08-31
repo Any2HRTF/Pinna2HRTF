@@ -19,6 +19,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published var runningStages: [UUID: Stage] = [:]
     @Published var environmentProcess: Process?
     @Published var failedStagesByProject: [UUID: Set<Stage>] = [:]
+    private var logTextByProject: [UUID: String] = [:]
 
     let rootURL: URL
     let packageURL: URL
@@ -79,6 +80,29 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         refreshArtifacts()
     }
 
+    func duplicateSelectedProject() {
+        guard let selectedProject else { return }
+        var duplicate = selectedProject
+        duplicate.id = UUID()
+        duplicate.name = "\(selectedProject.name) Copy"
+        if !selectedProject.saveLocation.isEmpty {
+            let originalURL = URL(fileURLWithPath: selectedProject.saveLocation)
+            let baseName = originalURL.lastPathComponent.isEmpty ? "Project" : originalURL.lastPathComponent
+            var duplicateURL = originalURL.deletingLastPathComponent().appendingPathComponent("\(baseName) Copy", isDirectory: true)
+            var suffix = 2
+            while FileManager.default.fileExists(atPath: duplicateURL.path) {
+                duplicateURL = originalURL.deletingLastPathComponent().appendingPathComponent("\(baseName) Copy \(suffix)", isDirectory: true)
+                suffix += 1
+            }
+            duplicate.saveLocation = duplicateURL.path
+        }
+        projects.append(duplicate)
+        selectedProjectID = duplicate.id
+        failedStagesByProject[duplicate.id] = []
+        persist()
+        refreshArtifacts()
+    }
+
     func importProject() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -97,7 +121,15 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         project.rightEar = importedMesh(in: folder, side: "Right")
         project.saveLocation = folder.path
         project.inputHandling = .reference
-        for configName in [".pinna2hrtf_native_run.yaml", "pipeline.yaml"] {
+        let entries = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+        let legacyIntermediates = entries?.first(where: { $0.lastPathComponent == "intermediates" })
+        let currentIntermediates = entries?.first(where: { $0.lastPathComponent == "Intermediates" })
+        if let legacyIntermediates, currentIntermediates == nil {
+            let migrationPath = folder.appendingPathComponent(".pinna2hrtf-intermediates-migration")
+            try? FileManager.default.moveItem(at: legacyIntermediates, to: migrationPath)
+            try? FileManager.default.moveItem(at: migrationPath, to: folder.appendingPathComponent("Intermediates"))
+        }
+        for configName in ["Project Settings.yaml", ".pinna2hrtf_native_run.yaml", "pipeline.yaml"] {
             let configURL = folder.appendingPathComponent(configName)
             guard let config = try? String(contentsOf: configURL, encoding: .utf8) else { continue }
             var section = ""
@@ -123,10 +155,13 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func importedMesh(in folder: URL, side: String) -> String {
         let sideFolder = folder.appendingPathComponent("Input/\(side)")
+        let intermediateFolder = folder.appendingPathComponent("Intermediates/\(side)")
+        let intermediateInferenceFolder = folder.appendingPathComponent("Intermediates/Prediction STL \(side)")
+        let intermediateRegistrationFolder = folder.appendingPathComponent("Intermediates/ICP STL \(side)")
         let targetFolder = folder.appendingPathComponent("Target STL \(side)")
         let inferenceFolder = folder.appendingPathComponent("Prediction STL \(side)")
         let registrationFolder = folder.appendingPathComponent("ICP STL \(side)")
-        for candidate in [sideFolder, targetFolder, registrationFolder, inferenceFolder] {
+        for candidate in [sideFolder, intermediateFolder, intermediateInferenceFolder, intermediateRegistrationFolder, targetFolder, registrationFolder, inferenceFolder] {
             guard let files = try? FileManager.default.contentsOfDirectory(at: candidate, includingPropertiesForKeys: nil) else { continue }
             if let exact = files.first(where: { $0.deletingPathExtension().lastPathComponent.caseInsensitiveCompare(side) == .orderedSame && ["stl", "ply"].contains($0.pathExtension.lowercased()) }) {
                 return exact.path
@@ -150,6 +185,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         runningProcesses[selectedProjectID] = nil
         runningStages[selectedProjectID] = nil
         failedStagesByProject[selectedProjectID] = nil
+        logTextByProject[selectedProjectID] = nil
         projects.removeAll { $0.id == selectedProjectID }
         self.selectedProjectID = projects.first?.id
         persist()
@@ -364,7 +400,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
             guard let store = self else { return }
-            Task { @MainActor in store.appendLog(text.trimmingCharacters(in: .newlines)) }
+            Task { @MainActor in store.appendLog(text.trimmingCharacters(in: .newlines), for: project.id) }
         }
         process.terminationHandler = { [weak self] process in
             guard let store = self else { return }
@@ -378,7 +414,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 } else {
                     store.notifyStageFailure(stage, project: project, status: process.terminationStatus)
                 }
-                store.appendLog(process.terminationStatus == 0 ? "\(stage.title) finished for \(project.name)" : "\(stage.title) for \(project.name) exited with status \(process.terminationStatus)")
+                store.appendLog(process.terminationStatus == 0 ? "\(stage.title) finished for \(project.name)" : "\(stage.title) for \(project.name) exited with status \(process.terminationStatus)", for: project.id)
                 store.runningProcesses[project.id] = nil
                 store.runningStages[project.id] = nil
                 store.refreshArtifacts()
@@ -391,7 +427,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             runningProcesses[project.id] = nil
             runningStages[project.id] = nil
             refreshArtifacts()
-            appendLog("Could not start \(stage.title): \(error.localizedDescription)")
+            appendLog("Could not start \(stage.title): \(error.localizedDescription)", for: project.id)
         }
     }
 
@@ -464,6 +500,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         if !Defaults.isPackagedApp {
             copyPathToolsIntoEnvironment()
         }
+        let logProjectID = selectedProjectID
         let process = Process()
         let bundledUV = FileManager.default.isExecutableFile(atPath: environment.uvExecutable)
         guard bundledUV || Defaults.which("uv") != nil else {
@@ -483,13 +520,13 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
             guard let store = self else { return }
-            Task { @MainActor in store.appendLog(text.trimmingCharacters(in: .newlines)) }
+            Task { @MainActor in store.appendLog(text.trimmingCharacters(in: .newlines), for: logProjectID) }
         }
         process.terminationHandler = { [weak self] process in
             guard let store = self else { return }
             Task { @MainActor in
                 pipe.fileHandleForReading.readabilityHandler = nil
-                store.appendLog(process.terminationStatus == 0 ? "Environment setup finished" : "Environment setup exited with status \(process.terminationStatus)")
+                store.appendLog(process.terminationStatus == 0 ? "Environment setup finished" : "Environment setup exited with status \(process.terminationStatus)", for: logProjectID)
                 store.environmentProcess = nil
                 store.refreshArtifacts()
             }
@@ -607,10 +644,17 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             "Prediction Parameters Left",
             "Prediction Parameters Right",
             "intermediates",
+            "Target STL Left",
+            "Target STL Right",
+            "ICP STL Left",
+            "ICP STL Right",
+            "Prediction STL Left",
+            "Prediction STL Right",
             "Projects",
             "HRTF",
             "Results Inference.csv",
-            ".pinna2hrtf_native_run.yaml"
+            ".pinna2hrtf_native_run.yaml",
+            "Project Settings.yaml"
         ]
         for name in names {
             let url = output.appendingPathComponent(name)
@@ -630,9 +674,25 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         appendLog("Reset generated outputs in \(output.path)")
     }
 
-    func appendLog(_ text: String) {
+    func loadSelectedProjectLog() {
+        logText = selectedProjectID.flatMap { logTextByProject[$0] } ?? ""
+    }
+
+    func clearSelectedProjectLog() {
+        guard let selectedProjectID else { return }
+        logTextByProject[selectedProjectID] = ""
+        logText = ""
+    }
+
+    func appendLog(_ text: String, for projectID: UUID? = nil) {
         guard !text.isEmpty else { return }
-        logText += logText.isEmpty ? text : "\n\(text)"
+        guard let projectID = projectID ?? selectedProjectID else { return }
+        let current = logTextByProject[projectID] ?? ""
+        let updated = current.isEmpty ? text : "\(current)\n\(text)"
+        logTextByProject[projectID] = updated
+        if projectID == selectedProjectID {
+            logText = updated
+        }
     }
 
     static func migrated(_ registry: ProjectRegistry, rootURL: URL, packageURL: URL) -> ProjectRegistry {
@@ -664,8 +724,24 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             updated.leftEar = migratedPath(updated.leftEar, replacements: replacements)
             updated.rightEar = migratedPath(updated.rightEar, replacements: replacements)
             updated.saveLocation = migratedPath(updated.saveLocation, replacements: replacements)
+            let projectFolder = URL(fileURLWithPath: updated.saveLocation)
+            let entries = try? FileManager.default.contentsOfDirectory(at: projectFolder, includingPropertiesForKeys: nil)
+            let legacyIntermediates = entries?.first(where: { $0.lastPathComponent == "intermediates" })
+            let currentIntermediates = entries?.first(where: { $0.lastPathComponent == "Intermediates" })
+            if let legacyIntermediates, currentIntermediates == nil {
+                let migrationPath = projectFolder.appendingPathComponent(".pinna2hrtf-intermediates-migration")
+                try? FileManager.default.moveItem(at: legacyIntermediates, to: migrationPath)
+                try? FileManager.default.moveItem(at: migrationPath, to: projectFolder.appendingPathComponent("Intermediates"))
+            }
             updated.settings.inference.modelConfig = migratedPath(updated.settings.inference.modelConfig, replacements: replacements)
             updated.settings.inference.modelCheckpoint = migratedPath(updated.settings.inference.modelCheckpoint, replacements: replacements)
+            if updated.settings.inference.targetLeftFolder == "Target STL Left" { updated.settings.inference.targetLeftFolder = "Input/Left" }
+            if updated.settings.inference.targetRightFolder == "Target STL Right" { updated.settings.inference.targetRightFolder = "Input/Right" }
+            if updated.settings.inference.predictionLeftFolder == "Prediction STL Left" { updated.settings.inference.predictionLeftFolder = "Intermediates/Prediction STL Left" }
+            if updated.settings.inference.predictionRightFolder == "Prediction STL Right" { updated.settings.inference.predictionRightFolder = "Intermediates/Prediction STL Right" }
+            if updated.settings.inference.predictionLeftFolder == "Intermediates/Prediction STL Left" { updated.settings.inference.predictionLeftFolder = "Intermediates/Left" }
+            if updated.settings.inference.predictionRightFolder == "Intermediates/Prediction STL Right" { updated.settings.inference.predictionRightFolder = "Intermediates/Right" }
+            updated.settings.preprocessing.frequencyStepCount = "\(max(Int(updated.settings.preprocessing.frequencyStepCount) ?? 129, 2))"
             if Defaults.isPackagedApp {
                 let resources = packageURL.appendingPathComponent("HRTFCalculation/Inference/resources", isDirectory: true)
                 let bundledConfig = resources.appendingPathComponent(URL(fileURLWithPath: updated.settings.inference.modelConfig).lastPathComponent)
