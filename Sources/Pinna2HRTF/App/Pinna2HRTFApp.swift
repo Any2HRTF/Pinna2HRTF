@@ -4,10 +4,12 @@ import AppKit
 @main
 struct Pinna2HRTFApp: App {
     @NSApplicationDelegateAdaptor(Pinna2HRTFAppDelegate.self) private var appDelegate
+    @StateObject private var store = AppStore()
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(store: store)
+                .onAppear { appDelegate.store = store }
                 .frame(minWidth: 1320, minHeight: 840)
         }
         .windowStyle(.titleBar)
@@ -46,6 +48,23 @@ struct Pinna2HRTFApp: App {
 
 final class Pinna2HRTFAppDelegate: NSObject, NSApplicationDelegate {
     var aboutPanel: NSPanel?
+    var store: AppStore?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let store, !store.runningProcesses.isEmpty || store.environmentProcess != nil else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = "A pipeline task is still running"
+        alert.informativeText = "Quitting will stop the task and may leave incomplete outputs. Do you want to quit anyway?"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        store?.runningProcesses.values.forEach { $0.terminate() }
+        store?.environmentProcess?.terminate()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMenuItems()

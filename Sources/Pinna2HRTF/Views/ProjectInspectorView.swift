@@ -42,20 +42,16 @@ struct ProjectInspectorView: View {
             VStack(alignment: .leading, spacing: 10) {
                 requiredPanel
                 SettingsDisclosure("BezierPPM Inference", systemImage: "wand.and.stars") {
-                    ModelPicker(selection: modelNameBinding, options: store.modelOptions)
+                    ModelPicker(selection: modelNameBinding, options: store.modelOptions, helpID: "inference.model")
                 }
                 SettingsDisclosure("Mesh2HRTF", systemImage: "waveform.path.ecg") {
-                    PathField("Evaluation grid", text: optionalPreprocessingBinding(\.evaluationGrid), mode: .directory)
-                    Toggle("Use custom head radius", isOn: useCustomHeadRadiusBinding)
-                    LabeledMillimeterSlider("Head radius", value: headRadiusBinding, range: 0...200)
-                        .disabled(!useCustomHeadRadiusBinding.wrappedValue)
-                        .opacity(useCustomHeadRadiusBinding.wrappedValue ? 1 : 0.55)
-                    LabeledTextField("Min frequency", text: preprocessingBinding(\.minFrequency))
-                    LabeledTextField("Max frequency", text: preprocessingBinding(\.maxFrequency))
+                    PathField("Evaluation grid", helpID: "mesh2hrtf.evaluation_grid", text: optionalPreprocessingBinding(\.evaluationGrid), mode: .directory)
+                    SettingToggle(title: "Use custom head radius", helpID: "mesh2hrtf.use_head_radius", isOn: useCustomHeadRadiusBinding)
+                    LabeledMillimeterSlider("Head radius", helpID: "mesh2hrtf.head_radius", value: headRadiusBinding, range: 0...200, sliderEnabled: useCustomHeadRadiusBinding.wrappedValue)
+                    LabeledTextField("Min frequency", helpID: "mesh2hrtf.min_frequency", text: preprocessingBinding(\.minFrequency))
+                    LabeledTextField("Max frequency", helpID: "mesh2hrtf.max_frequency", text: preprocessingBinding(\.maxFrequency))
                     HStack {
-                        Text("Frequency steps")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
+                        SettingLabel(title: "Frequency steps", helpID: "mesh2hrtf.frequency_steps")
                         Spacer()
                         Stepper(value: frequencyStepCountBinding, in: 2...10000) {
                             Text("\(frequencyStepCountBinding.wrappedValue)")
@@ -64,9 +60,7 @@ struct ProjectInspectorView: View {
                         }
                     }
                     HStack {
-                        Text("Microphone faces")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
+                        SettingLabel(title: "Microphone faces", helpID: "mesh2hrtf.microphone_faces")
                         Spacer()
                         Stepper(value: sourceAssignmentFaceCountBinding, in: 1...100) {
                             Text("\(sourceAssignmentFaceCountBinding.wrappedValue)")
@@ -79,22 +73,20 @@ struct ProjectInspectorView: View {
                     Text("Required safety step")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    LabeledTextField("Min edge length", text: preprocessingBinding(\.meshMinEdgeLength))
-                    LabeledTextField("Max edge length", text: preprocessingBinding(\.meshMaxEdgeLength))
-                    LabeledTextField("Max error", text: preprocessingBinding(\.meshMaxError))
-                    LabeledTextField("Gamma", text: preprocessingBinding(\.meshGamma))
-                    LabeledTextField("Gamma opposite", text: preprocessingBinding(\.meshGammaOpposite))
+                    LabeledTextField("Min edge length", helpID: "mesh_grading.min_edge_length", text: preprocessingBinding(\.meshMinEdgeLength))
+                    LabeledTextField("Max edge length", helpID: "mesh_grading.max_edge_length", text: preprocessingBinding(\.meshMaxEdgeLength))
+                    LabeledTextField("Max error", helpID: "mesh_grading.max_error", text: preprocessingBinding(\.meshMaxError))
+                    LabeledTextField("Gamma", helpID: "mesh_grading.gamma", text: preprocessingBinding(\.meshGamma))
+                    LabeledTextField("Gamma opposite", helpID: "mesh_grading.gamma_opposite", text: preprocessingBinding(\.meshGammaOpposite))
                 }
                 SettingsDisclosure("NumCalc", systemImage: "cpu") {
-                    LabeledTextField("Parallel instances", text: numcalcBinding(\.maxInstances))
-                    LabeledTextField("CPU limit (%)", text: numcalcBinding(\.maxCPULoad))
-                    Toggle("Adaptive FMM expansion length", isOn: numcalcBoolBinding(\.adaptiveFmmLength))
+                    LabeledTextField("Parallel instances", helpID: "numcalc.parallel_instances", text: numcalcBinding(\.maxInstances))
+                    LabeledTextField("CPU limit (%)", helpID: "numcalc.cpu_limit", text: numcalcBinding(\.maxCPULoad))
+                    SettingToggle(title: "Adaptive FMM expansion length", helpID: "numcalc.adaptive_fmm", isOn: numcalcBoolBinding(\.adaptiveFmmLength))
                 }
                 SettingsDisclosure("Postprocessing", systemImage: "slider.horizontal.3") {
-                    Toggle("Normalize HRTFs", isOn: postprocessingNormalizeBinding)
-                    LabeledTextField("Level offset (dB)", text: postprocessingLevelOffsetBinding)
-                        .disabled(!postprocessingNormalizeBinding.wrappedValue)
-                        .opacity(postprocessingNormalizeBinding.wrappedValue ? 1 : 0.55)
+                    SettingToggle(title: "Normalize HRTFs", helpID: "postprocessing.normalize", isOn: postprocessingNormalizeBinding)
+                    LabeledTextField("Level offset (dB)", helpID: "postprocessing.level_offset", text: postprocessingLevelOffsetBinding, fieldEnabled: postprocessingNormalizeBinding.wrappedValue)
                 }
             }
             .padding(.vertical, 4)
@@ -103,14 +95,14 @@ struct ProjectInspectorView: View {
 
     var requiredPanel: some View {
         VStack(alignment: .leading, spacing: 9) {
-            LabeledTextField("Project name", text: projectStringBinding(\.name, refresh: false))
-            PathField("Left ear (optional)", text: projectStringBinding(\.leftEar), mode: .file)
-            PathField("Right ear (optional)", text: projectStringBinding(\.rightEar), mode: .file)
+            LabeledTextField("Project name", helpID: "project.name", text: projectStringBinding(\.name, refresh: false))
+            PathField("Left ear (optional)", helpID: "project.left_ear", text: projectStringBinding(\.leftEar), mode: .file)
+            PathField("Right ear (optional)", helpID: "project.right_ear", text: projectStringBinding(\.rightEar), mode: .file)
             Text("Choose at least one ear mesh.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            PathField("Save location", text: projectStringBinding(\.saveLocation), mode: .directory)
-            Toggle("Use BezierPPM", isOn: inferenceBoolBinding(\.usePredictionsForPreprocessing))
+            PathField("Save location", helpID: "project.save_location", text: projectStringBinding(\.saveLocation), mode: .directory)
+            SettingToggle(title: "Use BezierPPM", helpID: "project.use_bezierppm", isOn: inferenceBoolBinding(\.usePredictionsForPreprocessing))
         }
         .padding(10)
         .background(.background, in: RoundedRectangle(cornerRadius: 10))

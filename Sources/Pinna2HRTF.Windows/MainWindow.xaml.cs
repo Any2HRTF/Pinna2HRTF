@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     readonly Dictionary<Guid, Queue<Stage>> queuedStages = [];
     readonly Dictionary<Guid, HashSet<Stage>> failedStages = [];
     readonly Dictionary<Guid, string> projectLogs = [];
+    readonly Dictionary<string, SettingHelpEntry> settingHelp = [];
     readonly JsonSerializerOptions jsonOptions = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
     ProjectRegistry registry = new();
     EnvironmentConfig environment = new();
@@ -60,6 +61,7 @@ public partial class MainWindow : Window
     void WindowLoaded(object sender, RoutedEventArgs e)
     {
         packageRoot = FindPackageRoot();
+        LoadSettingHelp();
         appData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Pinna2HRTF");
         registryPath = Path.Combine(appData, "projects.json");
         Directory.CreateDirectory(appData);
@@ -152,6 +154,15 @@ public partial class MainWindow : Window
 
     void WindowClosing(object? sender, CancelEventArgs e)
     {
+        if (runningProcesses.Count > 0)
+        {
+            var result = MessageBox.Show(this, "A pipeline task is still running. Quitting will stop it and may leave incomplete outputs. Quit anyway?", "Quit Pinna2HRTF", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            if (result != MessageBoxResult.Yes)
+            {
+                e.Cancel = true;
+                return;
+            }
+        }
         statusTimer.Stop();
         SystemEvents.UserPreferenceChanged -= UserPreferenceChanged;
         foreach (var process in runningProcesses.Values.ToList())
@@ -159,7 +170,52 @@ public partial class MainWindow : Window
         Persist();
     }
 
+    void LoadSettingHelp()
+    {
+        var path = Path.Combine(packageRoot, "ProjectSettingHelp.json");
+        if (!File.Exists(path))
+            return;
+        try
+        {
+            var entries = JsonSerializer.Deserialize<List<SettingHelpEntry>>(File.ReadAllText(path), jsonOptions) ?? [];
+            foreach (var entry in entries)
+                settingHelp[entry.Id] = entry;
+        }
+        catch
+        {
+            settingHelp.Clear();
+        }
+    }
+
+    void SettingInfoClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.Tag is not string id || !settingHelp.TryGetValue(id, out var entry))
+            return;
+        SettingHelpTitle.Text = entry.Title;
+        SettingHelpDescription.Text = entry.Description;
+        SettingHelpPublications.ItemsSource = entry.Publications;
+        SettingHelpPublicationsLabel.Visibility = entry.Publications.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        SettingHelpPopup.PlacementTarget = button;
+        SettingHelpPopup.IsOpen = true;
+        button.Focus();
+    }
+
+    void PublicationClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button button && button.Tag is string url)
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+    }
+
     void UserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e) => Dispatcher.BeginInvoke(() => UpdateViewerAppearance());
+
+    void WindowPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape && SettingHelpPopup.IsOpen)
+        {
+            SettingHelpPopup.IsOpen = false;
+            e.Handled = true;
+        }
+    }
 
     void UpdateViewerAppearance()
     {
@@ -169,6 +225,11 @@ public partial class MainWindow : Window
         ViewerPlaceholder.Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#c8c8c8" : "#69717d"));
         MeshControlsHint.Background = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#cc2b2b2b" : "#ccffffff"));
         MeshControlsHintText.Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#c8c8c8" : "#69717d"));
+        SettingHelpCard.Background = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#2b2b2b" : "#ffffff"));
+        SettingHelpCard.BorderBrush = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#505050" : "#cfd6df"));
+        SettingHelpTitle.Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#f0f0f0" : "#20242a"));
+        SettingHelpDescription.Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#d0d0d0" : "#3f4854"));
+        SettingHelpPublicationsLabel.Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#c8c8c8" : "#69717d"));
     }
 
     void LoadRegistry()
@@ -1462,6 +1523,20 @@ class ProjectRegistry
     public List<ProjectRecord> Projects { get; set; } = [];
     public Guid? SelectedProjectID { get; set; }
     public EnvironmentConfig Environment { get; set; } = new();
+}
+
+class SettingHelpEntry
+{
+    public string Id { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string Description { get; set; } = "";
+    public List<SettingHelpPublication> Publications { get; set; } = [];
+}
+
+class SettingHelpPublication
+{
+    public string Title { get; set; } = "";
+    public string Url { get; set; } = "";
 }
 
 class EnvironmentConfig

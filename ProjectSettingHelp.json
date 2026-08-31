@@ -1,0 +1,172 @@
+[
+  {
+    "id": "project.name",
+    "title": "Project name",
+    "description": "The name shown in the project list and written into the generated Mesh2HRTF project metadata. Changing it does not move or rename the project folder.",
+    "publications": []
+  },
+  {
+    "id": "project.left_ear",
+    "title": "Left ear",
+    "description": "The left pinna mesh used as input. The file is read during preprocessing; it can be omitted when only a right-ear project is needed.",
+    "publications": []
+  },
+  {
+    "id": "project.right_ear",
+    "title": "Right ear",
+    "description": "The right pinna mesh used as input. The file is read during preprocessing; it can be omitted when only a left-ear project is needed.",
+    "publications": []
+  },
+  {
+    "id": "project.save_location",
+    "title": "Save location",
+    "description": "The project root. Pinna2HRTF stores Project Settings.yaml, the input meshes, Intermediates, Mesh2HRTF Projects, and finished HRTF files below this folder.",
+    "publications": []
+  },
+  {
+    "id": "project.use_bezierppm",
+    "title": "Use BezierPPM",
+    "description": "Runs Mesh2PPM inference before preprocessing and uses the predicted BezierPPM meshes as the ear inputs. Disable this to preprocess the selected input meshes directly.",
+    "publications": [
+      { "title": "Perfler et al. (2025)", "url": "https://doi.org/10.1016/j.compbiomed.2025.109817" },
+      { "title": "Pausch et al. (2026)", "url": "https://doi.org/10.1121/10.0043919" }
+    ]
+  },
+  {
+    "id": "inference.model",
+    "title": "Model",
+    "description": "Selects the bundled pretrained Mesh2PPM model and its matching camera-view configuration. Local 3 Views is the default model.",
+    "publications": [
+      { "title": "Pausch et al. (2026)", "url": "https://doi.org/10.1121/10.0043919" }
+    ]
+  },
+  {
+    "id": "mesh2hrtf.evaluation_grid",
+    "title": "Evaluation grid",
+    "description": "The directions at which Mesh2HRTF evaluates the simulated sound field. Default uses the bundled default evaluation grid.",
+    "publications": [
+      { "title": "Mesh2HRTF publication", "url": "https://doi.org/10.17743/jaes.2022.0078" }
+    ]
+  },
+  {
+    "id": "mesh2hrtf.use_head_radius",
+    "title": "Use custom head radius",
+    "description": "Enables manual placement of the input pinnae at a specified lateral head radius before the dummy head is created. Leave disabled to preserve the input placement.",
+    "publications": []
+  },
+  {
+    "id": "mesh2hrtf.head_radius",
+    "title": "Head radius",
+    "description": "The lateral distance in millimetres used to place the left and right pinnae before head construction. This value is used only when Use custom head radius is enabled.",
+    "publications": []
+  },
+  {
+    "id": "mesh2hrtf.min_frequency",
+    "title": "Min frequency",
+    "description": "The lower bound of the simulated frequency range in hertz.",
+    "publications": [
+      { "title": "Mesh2HRTF publication", "url": "https://doi.org/10.17743/jaes.2022.0078" }
+    ]
+  },
+  {
+    "id": "mesh2hrtf.max_frequency",
+    "title": "Max frequency",
+    "description": "The upper bound of the simulated frequency range in hertz.",
+    "publications": [
+      { "title": "Mesh2HRTF publication", "url": "https://doi.org/10.17743/jaes.2022.0078" }
+    ]
+  },
+  {
+    "id": "mesh2hrtf.frequency_steps",
+    "title": "Frequency steps",
+    "description": "The number of frequency samples spanning the selected range. It must be at least 2; the default is 129 samples.",
+    "publications": [
+      { "title": "Mesh2HRTF publication", "url": "https://doi.org/10.17743/jaes.2022.0078" }
+    ]
+  },
+  {
+    "id": "mesh2hrtf.microphone_faces",
+    "title": "Microphone faces",
+    "description": "The number of nearby mesh faces used to define the reciprocal microphone/source region around the estimated ear-canal entrance. The default is 6.",
+    "publications": [
+      { "title": "Ziegelwanger et al. (2015)", "url": "https://doi.org/10.1121/1.4922518" }
+    ]
+  },
+  {
+    "id": "mesh_grading.min_edge_length",
+    "title": "Min edge length",
+    "description": "The smallest allowed mesh edge length in millimetres. Smaller elements preserve more detail near the high-resolution ear side; the default is 0.5 mm.",
+    "publications": [
+      { "title": "Palm et al. (2021)", "url": "https://pub.dega-akustik.de/DAGA_2021/data/articles/000414.pdf" },
+      { "title": "Ziegelwanger et al. (2016)", "url": "https://doi.org/10.1016/j.apacoust.2016.07.005" }
+    ]
+  },
+  {
+    "id": "mesh_grading.max_edge_length",
+    "title": "Max edge length",
+    "description": "The largest allowed mesh edge length in millimetres. Elements can become this large farther from the high-resolution ear side; the default is 10 mm.",
+    "publications": [
+      { "title": "Palm et al. (2021)", "url": "https://pub.dega-akustik.de/DAGA_2021/data/articles/000414.pdf" },
+      { "title": "Ziegelwanger et al. (2016)", "url": "https://doi.org/10.1016/j.apacoust.2016.07.005" }
+    ]
+  },
+  {
+    "id": "mesh_grading.max_error",
+    "title": "Max error",
+    "description": "The maximum permitted geometric remeshing error in millimetres. The default is 0.5 mm. This value is passed to the hybrid mesh-grading algorithm.",
+    "publications": [
+      { "title": "Palm et al. (2021)", "url": "https://pub.dega-akustik.de/DAGA_2021/data/articles/000414.pdf" },
+      { "title": "Ziegelwanger et al. (2016)", "url": "https://doi.org/10.1016/j.apacoust.2016.07.005" }
+    ]
+  },
+  {
+    "id": "mesh_grading.gamma",
+    "title": "Gamma",
+    "description": "The grading factor used to estimate the active ear-canal entrance for mesh grading. The default is 0.2.",
+    "publications": [
+      { "title": "Palm et al. (2021)", "url": "https://pub.dega-akustik.de/DAGA_2021/data/articles/000414.pdf" },
+      { "title": "Ziegelwanger et al. (2016)", "url": "https://doi.org/10.1016/j.apacoust.2016.07.005" }
+    ]
+  },
+  {
+    "id": "mesh_grading.gamma_opposite",
+    "title": "Gamma opposite",
+    "description": "The grading factor used to estimate the contralateral ear-canal entrance while grading the active side. The default is 0.1.",
+    "publications": [
+      { "title": "Palm et al. (2021)", "url": "https://pub.dega-akustik.de/DAGA_2021/data/articles/000414.pdf" },
+      { "title": "Ziegelwanger et al. (2016)", "url": "https://doi.org/10.1016/j.apacoust.2016.07.005" }
+    ]
+  },
+  {
+    "id": "numcalc.parallel_instances",
+    "title": "Parallel instances",
+    "description": "The maximum number of NumCalc frequency jobs that may run concurrently. More instances can shorten a run but use more CPU and memory; the default is 1.",
+    "publications": []
+  },
+  {
+    "id": "numcalc.cpu_limit",
+    "title": "CPU limit (%)",
+    "description": "The CPU-load threshold used by the local scheduler before starting additional NumCalc work. The default is 90%.",
+    "publications": []
+  },
+  {
+    "id": "numcalc.adaptive_fmm",
+    "title": "Adaptive FMM expansion length",
+    "description": "Lets NumCalc adapt the fast-multipole expansion length to the local cluster geometry. It is enabled by default and can improve stability and resource use for non-uniform meshes.",
+    "publications": [
+      { "title": "Kreuzer and Kasess (2026)", "url": "https://arxiv.org/abs/2606.31771" }
+    ]
+  },
+  {
+    "id": "postprocessing.normalize",
+    "title": "Normalize HRTFs",
+    "description": "Enables the fixed broadband level adjustment applied to generated SOFA files during postprocessing. It changes overall gain, not the directional spectral shape.",
+    "publications": []
+  },
+  {
+    "id": "postprocessing.level_offset",
+    "title": "Level offset",
+    "description": "The broadband gain adjustment in decibels applied during postprocessing when Normalize HRTFs is enabled. The default is -30 dB.",
+    "publications": []
+  }
+]

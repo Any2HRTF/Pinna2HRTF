@@ -73,6 +73,9 @@ fi
 if [[ -f "$ROOT/icon.png" ]]; then
   cp "$ROOT/icon.png" "$RESOURCES/icon.png"
 fi
+if [[ -f "$ROOT/ProjectSettingHelp.json" ]]; then
+  cp "$ROOT/ProjectSettingHelp.json" "$RESOURCES/ProjectSettingHelp.json"
+fi
 cd "$RESOURCES"
 GIT_CONFIG_COUNT=1 \
 GIT_CONFIG_KEY_0="url.https://github.com/.insteadOf" \

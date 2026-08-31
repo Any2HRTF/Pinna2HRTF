@@ -36,6 +36,7 @@ New-Item -ItemType Directory -Path $dist | Out-Null
 Copy-Item (Join-Path $publish "*") $dist -Recurse -Force
 Copy-Item (Join-Path $root "HRTFCalculation") (Join-Path $dist "HRTFCalculation") -Recurse -Force
 Copy-Item (Join-Path $root "pyproject.toml") (Join-Path $dist "pyproject.toml") -Force
+Copy-Item (Join-Path $root "ProjectSettingHelp.json") (Join-Path $dist "ProjectSettingHelp.json") -Force
 
 if (-not (Test-Path (Join-Path $root "uv.lock"))) {
     throw "uv.lock is required to build the portable Windows app."

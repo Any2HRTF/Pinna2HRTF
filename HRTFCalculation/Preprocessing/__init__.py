@@ -165,7 +165,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             gamma_r = settings.mesh_gamma_opposite if side == "left" else settings.mesh_gamma
             grading_env = os.environ.copy()
             grading_env["DYLD_LIBRARY_PATH"] = os.pathsep.join(filter(None, [str(Path(mesh_grading_executable).parent), grading_env.get("DYLD_LIBRARY_PATH")]))
-            subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-v', '-g', str(gamma_l), '-h', str(gamma_r), '-s', side, '-i', str(stitched[side]), '-o', str(graded[side])], check=True, env=grading_env)
+            subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-e', str(settings.mesh_max_error), '-v', '-g', str(gamma_l), '-h', str(gamma_r), '-s', side, '-i', str(stitched[side]), '-o', str(graded[side])], check=True, env=grading_env)
         for project in [projects_dir / "Left", projects_dir / "Right"] if output_dir is not None else []:
             if project.exists():
                 shutil.rmtree(project)
