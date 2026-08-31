@@ -11,7 +11,7 @@ struct ProjectSidebarView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(store.projects) { project in
-                        ProjectRow(project: project)
+                        ProjectRow(project: project, runningStage: store.runningStages[project.id])
                             .tag(project.id)
                             .contextMenu {
                                 Button("Duplicate Project") {
@@ -81,6 +81,7 @@ struct ProjectSidebarView: View {
 
 struct ProjectRow: View {
     let project: ProjectRecord
+    let runningStage: Stage?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -94,6 +95,12 @@ struct ProjectRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            if let runningStage {
+                ProgressView()
+                    .controlSize(.small)
+                    .help("\(runningStage.title) running")
             }
         }
     }
