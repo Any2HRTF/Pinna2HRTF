@@ -169,7 +169,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         refreshArtifacts()
         let completed = Stage.allCases.filter { ArtifactScanner.stageIsComplete($0, project: project) }.map(\.title)
         let completedText = completed.isEmpty ? "none detected" : completed.joined(separator: ", ")
-        appendLog("Imported project folder \(folder.path). Completed stages: \(completedText)")
+        appendLog("Imported. Completed: \(completedText).")
     }
 
     func importedMesh(in folder: URL, side: String) -> String {
@@ -285,13 +285,13 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         } else if artifact.isImage {
             openImage(artifact.url)
         } else {
-            appendLog("Cannot open artifact: \(artifact.url.path)")
+            appendLog("Could not open \(artifact.url.lastPathComponent).")
         }
     }
 
     func openMesh(_ url: URL) {
         guard FileManager.default.fileExists(atPath: url.path), ["stl", "ply"].contains(url.pathExtension.lowercased()) else {
-            appendLog("Cannot open mesh: \(url.path)")
+            appendLog("Could not open \(url.lastPathComponent).")
             return
         }
         let asset = MDLAsset(url: url)
@@ -358,7 +358,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let scale = selectedCameraScale
         selectedCameraState = savedCamera ?? ViewerCameraState(x: (Double(cameraPosition.x) - Double(center.x)) / scale, y: (Double(cameraPosition.y) - Double(center.y)) / scale, z: (Double(cameraPosition.z) - Double(center.z)) / scale)
         rememberSelectedArtifact(url)
-        appendLog("Opened \(url.path)")
     }
 
     func microphonePosition(for meshURL: URL) -> SCNVector3? {
@@ -447,7 +446,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             }
         }
         clearMicrophonePlacementSession()
-        appendLog("Saved the \(side.rawValue) microphone position for the next preprocessing run.")
+        appendLog("\(side.title) mic saved.")
     }
 
     func cancelMicrophonePlacement() {
@@ -480,10 +479,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             openMesh(meshURL)
         }
         guard let meshURL else {
-            appendLog("The \(side.rawValue) preprocessing mesh is not available for automatic positioning.")
+            appendLog("\(side.title) mic mesh unavailable.")
             return
         }
-        appendLog(keepingPlacement ? "Calculating the automatic \(side.rawValue) microphone position. Press Done to save it." : "Calculating the automatic \(side.rawValue) microphone position.")
+        appendLog(keepingPlacement ? "Calculating \(side.rawValue) mic. Press Done to save." : "Calculating \(side.rawValue) mic.")
         calculateAutomaticMicrophonePosition(for: meshURL, side: side) { [weak self] position in
             guard let self else { return }
             if let position {
@@ -495,9 +494,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 } else if self.selectedMesh?.standardizedFileURL.path == meshURL.standardizedFileURL.path {
                     self.openMesh(meshURL)
                 }
-                self.appendLog("The \(side.rawValue) microphone will use automatic ear-canal estimation at [\(String(format: "%.3f", position.x)), \(String(format: "%.3f", position.y)), \(String(format: "%.3f", position.z))] mm.")
+                self.appendLog("\(side.title) mic: [\(String(format: "%.3f", position.x)), \(String(format: "%.3f", position.y)), \(String(format: "%.3f", position.z))] mm.")
             } else {
-                self.appendLog("Could not calculate the automatic \(side.rawValue) microphone position.")
+                self.appendLog("\(side.title) mic calculation failed.")
             }
         }
     }
@@ -569,7 +568,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func openImage(_ url: URL) {
         guard FileManager.default.fileExists(atPath: url.path), let image = NSImage(contentsOf: url) else {
-            appendLog("Cannot open image: \(url.path)")
+            appendLog("Could not open \(url.lastPathComponent).")
             return
         }
         selectedMesh = url
@@ -577,7 +576,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         selectedScene = SCNScene()
         selectedCameraState = nil
         rememberSelectedArtifact(url)
-        appendLog("Opened \(url.path)")
     }
 
     func updateCameraPosition(_ position: SCNVector3) {
@@ -657,19 +655,19 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             return
         }
         guard runningProcesses[project.id] == nil else {
-            appendLog("\(project.name) already has a running task.")
+            appendLog("A task is already running.")
             return
         }
         guard !stageBlocked(stage) else {
-            appendLog("Run BezierPPM Inference before preprocessing when Use BezierPPM is enabled.")
+            appendLog("Run BezierPPM Inference first.")
             return
         }
         if stage == .preprocessing, isPlacingMicrophone {
-            appendLog("Finish or cancel microphone placement before preprocessing.")
+            appendLog("Finish microphone placement first.")
             return
         }
         guard (!project.leftEar.isEmpty || !project.rightEar.isEmpty), !project.saveLocation.isEmpty else {
-            appendLog("Select at least one ear mesh and a save location before running.")
+            appendLog("Select an ear mesh and save location first.")
             return
         }
         do {
@@ -702,7 +700,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         runningStages[project.id] = stage
         failedStagesByProject[project.id, default: []].remove(stage)
         refreshArtifacts()
-        appendLog("Started \(stage.title) for \(project.name)")
+        appendLog("\(stage.title) started.")
         pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
@@ -721,7 +719,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 } else {
                     store.notifyStageFailure(stage, project: project, status: process.terminationStatus)
                 }
-                store.appendLog(process.terminationStatus == 0 ? "\(stage.title) finished for \(project.name)" : "\(stage.title) for \(project.name) exited with status \(process.terminationStatus)", for: project.id)
+                store.appendLog(process.terminationStatus == 0 ? "\(stage.title) finished." : "\(stage.title) failed (status \(process.terminationStatus)).", for: project.id)
                 store.runningProcesses[project.id] = nil
                 store.runningStages[project.id] = nil
                 if stage == .inference, process.terminationStatus == 0 {
@@ -755,7 +753,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
         if changed {
             persist()
-            appendLog("Cleared microphone positions tied to the previous inference mesh.", for: projectID)
+            appendLog("Previous mic positions cleared.", for: projectID)
         }
     }
 
@@ -843,7 +841,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         process.standardOutput = pipe
         process.standardError = pipe
         environmentProcess = process
-        appendLog("Setting up Python environment")
+        appendLog("Environment setup started.")
         pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
@@ -854,7 +852,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             guard let store = self else { return }
             Task { @MainActor in
                 pipe.fileHandleForReading.readabilityHandler = nil
-                store.appendLog(process.terminationStatus == 0 ? "Environment setup finished" : "Environment setup exited with status \(process.terminationStatus)", for: logProjectID)
+                store.appendLog(process.terminationStatus == 0 ? "Environment setup finished." : "Environment setup failed (status \(process.terminationStatus)).", for: logProjectID)
                 store.environmentProcess = nil
                 store.refreshArtifacts()
             }
@@ -944,7 +942,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                     default: $0.meshGradingExecutable = target.path
                     }
                 }
-                appendLog("Copied \(tool.0) into \(target.path)")
             } catch {
                 appendLog("Could not copy \(tool.0) into the app dependencies: \(error.localizedDescription)")
             }
@@ -954,7 +951,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     func stopRunningProcess() {
         guard let project = selectedProject else { return }
         runningProcesses[project.id]?.terminate()
-        appendLog("Termination requested.")
+        appendLog("Stopping task.")
     }
 
     func resetSelectedProjectOutputs() {
@@ -987,7 +984,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         for name in names {
             let url = output.appendingPathComponent(name)
             if (!project.leftEar.isEmpty && path(url, contains: URL(fileURLWithPath: project.leftEar))) || (!project.rightEar.isEmpty && path(url, contains: URL(fileURLWithPath: project.rightEar))) {
-                appendLog("Skipped reset of \(url.path) because it contains a configured input mesh.")
+                appendLog("Kept \(url.lastPathComponent): configured input mesh.")
                 continue
             }
             if FileManager.default.fileExists(atPath: url.path) {
@@ -999,7 +996,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         selectedImage = nil
         selectedScene = SCNScene()
         refreshArtifacts()
-        appendLog("Reset generated outputs in \(output.path)")
+        appendLog("Generated outputs reset.")
     }
 
     func loadSelectedProjectLog() {
@@ -1013,10 +1010,18 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func appendLog(_ text: String, for projectID: UUID? = nil) {
-        guard !text.isEmpty else { return }
+        let compactText = text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { line in
+            guard !line.isEmpty else { return false }
+            let lower = line.lowercased()
+            if lower.hasPrefix("info: total files") && lower.contains("failed 0") { return false }
+            if lower.contains("error") || lower.contains("warning") || lower.contains("failed") || lower.contains("exception") || lower.contains("traceback") { return true }
+            let redundantPrefixes = ["using config:", "left input mesh:", "right input mesh:", "running inference in ", "running preprocessing into ", "running local numcalc with ", "local numcalc project root:", "running postprocessing into ", "started left, step ", "started right, step "]
+            return !redundantPrefixes.contains(where: { lower.hasPrefix($0) }) && !line.hasPrefix("/") && !(line.contains("Mem:") && line.contains("Time:")) && !line.hasPrefix("Fra:") && !lower.hasPrefix("blender ") && lower != "blender quit" && !lower.hasPrefix("read blend:") && !lower.hasPrefix("saved: '")
+        }.joined(separator: "\n")
+        guard !compactText.isEmpty else { return }
         guard let projectID = projectID ?? selectedProjectID else { return }
         let current = logTextByProject[projectID] ?? ""
-        let updated = current.isEmpty ? text : "\(current)\n\(text)"
+        let updated = current.isEmpty ? compactText : "\(current)\n\(compactText)"
         logTextByProject[projectID] = updated
         if projectID == selectedProjectID {
             logText = updated

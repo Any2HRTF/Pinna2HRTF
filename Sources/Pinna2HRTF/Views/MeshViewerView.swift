@@ -40,9 +40,9 @@ struct MeshViewerView: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Artifact Viewer")
+                    Text("Preview")
                         .font(.title2.weight(.semibold))
-                    Text(store.selectedMesh?.path ?? "Select an artifact")
+                    Text(store.selectedMesh?.lastPathComponent ?? "Select a file to preview")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -68,7 +68,7 @@ struct MeshViewerView: View {
                         }
                     }
                 } label: {
-                    Label("Artifact", systemImage: "list.bullet.rectangle")
+                    Label("Preview", systemImage: "list.bullet.rectangle")
                 }
                 .controlSize(.small)
                 .disabled(store.isPlacingMicrophone)
@@ -114,7 +114,7 @@ struct MeshViewerView: View {
                         Image(systemName: "cube.transparent")
                             .font(.system(size: 36))
                             .foregroundStyle(.secondary)
-                        Text("Select an artifact")
+                        Text("Select a file to preview")
                             .foregroundStyle(.secondary)
                     }
                 } else {

@@ -76,7 +76,7 @@ struct PipelineCommands: Commands {
 
             Divider()
 
-            Button("Refresh Artifacts") {
+            Button("Refresh Project Files") {
                 commands?.refreshArtifacts()
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])

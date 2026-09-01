@@ -82,8 +82,8 @@
               <ColumnDefinition Width="230"/>
             </Grid.ColumnDefinitions>
             <StackPanel>
-              <TextBlock Text="Artifact Viewer" FontSize="20" FontWeight="SemiBold"/>
-              <TextBlock x:Name="SelectedArtifactText" Text="Select an artifact" Foreground="{DynamicResource SecondaryTextBrush}" TextTrimming="CharacterEllipsis"/>
+              <TextBlock Text="Preview" FontSize="20" FontWeight="SemiBold"/>
+              <TextBlock x:Name="SelectedArtifactText" Text="Select a file to preview" Foreground="{DynamicResource SecondaryTextBrush}" TextTrimming="CharacterEllipsis"/>
             </StackPanel>
             <ComboBox x:Name="ArtifactPicker" Grid.Column="1" VerticalAlignment="Center" SelectionChanged="ArtifactSelectionChanged"><ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Title}"/></DataTemplate></ComboBox.ItemTemplate></ComboBox>
           </Grid>
@@ -124,7 +124,7 @@
                 <TextBlock x:Name="MeshControlsHintText" Text="Drag to rotate  |  Mouse wheel to zoom" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="12"/>
               </Border>
               <Image x:Name="ImagePreview" Stretch="Uniform" Margin="18" Visibility="Collapsed"/>
-              <TextBlock x:Name="ViewerPlaceholder" Text="No artifact selected" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="18"/>
+              <TextBlock x:Name="ViewerPlaceholder" Text="No preview selected" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="18"/>
             </Grid>
           </Border>
         </Grid>
