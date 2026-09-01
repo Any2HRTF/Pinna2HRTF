@@ -325,7 +325,7 @@
               <Button x:Name="RunPostprocessingButton" Grid.Column="2" Content="Run" Click="RunPostprocessingClicked" Padding="12,3"/>
             </Grid>
           </StackPanel>
-          <Button Content="Run All" Click="RunAllClicked" Height="34" Margin="0,8,0,0" Background="#6f9f9c" Foreground="White" FontWeight="SemiBold"/>
+          <Button x:Name="RunAllButton" Content="Run All" Click="RunAllClicked" Height="34" Margin="0,8,0,0" Background="#6f9f9c" Foreground="White" FontWeight="SemiBold"/>
           <Grid Margin="0,6,0,0">
             <TextBlock x:Name="NumCalcStatusText" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,110,0"/>
             <Button HorizontalAlignment="Right" Content="Reset Outputs" Click="ResetOutputsClicked" Padding="10,3" FontSize="11"/>

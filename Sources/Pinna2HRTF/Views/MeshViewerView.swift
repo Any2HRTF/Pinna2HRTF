@@ -26,6 +26,14 @@ struct MeshViewerView: View {
                 logPanel
             }
         }
+        .onExitCommand {
+            store.cancelMicrophonePlacement()
+        }
+        .alert("Cannot Place Microphone", isPresented: Binding(get: { store.microphonePlacementError != nil }, set: { if !$0 { store.microphonePlacementError = nil } })) {
+            Button("OK") { store.microphonePlacementError = nil }
+        } message: {
+            Text(store.microphonePlacementError ?? "")
+        }
     }
 
     var viewer: some View {
@@ -38,13 +46,19 @@ struct MeshViewerView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    if store.selectedMesh?.lastPathComponent.caseInsensitiveCompare("graded_head.ply") == .orderedSame {
-                        Text("Orange marker: microphone position")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    }
+                    Text(store.selectedMeshHasMicrophoneMarker ? "Orange marker: microphone position" : " ")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .frame(height: 14, alignment: .leading)
                 }
                 Spacer()
+                ForEach(EarSide.allCases) { side in
+                    Button("Place \(side.title) Mic") {
+                        store.beginMicrophonePlacement(side)
+                    }
+                    .controlSize(.small)
+                    .disabled(store.isPlacingMicrophone || store.selectedProject.map { side == .left ? $0.leftEar.isEmpty : $0.rightEar.isEmpty } ?? true)
+                }
                 Menu {
                     ForEach(store.artifacts.filter(\.exists)) { artifact in
                         Button {
@@ -57,9 +71,35 @@ struct MeshViewerView: View {
                     Label("Artifact", systemImage: "list.bullet.rectangle")
                 }
                 .controlSize(.small)
+                .disabled(store.isPlacingMicrophone)
             }
             .padding([.horizontal, .top], 18)
             .padding(.bottom, 12)
+            if let side = store.microphonePlacementSide {
+                Divider()
+                HStack(spacing: 10) {
+                    Label("Click the \(side.rawValue) ear mesh", systemImage: "scope")
+                        .font(.callout.weight(.medium))
+                    Text(microphoneCoordinates)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Use Automatic Position") {
+                        store.useAutomaticMicrophonePosition(side)
+                    }
+                    Button("Cancel") {
+                        store.cancelMicrophonePlacement()
+                    }
+                    Button("Done") {
+                        store.completeMicrophonePlacement()
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(store.pendingMicrophonePosition == nil)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 9)
+                .background(.bar)
+            }
             Divider()
             ZStack {
                 Rectangle()
@@ -78,9 +118,7 @@ struct MeshViewerView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    PersistentSceneView(scene: store.selectedScene, cameraState: $store.selectedCameraState, darkMode: colorScheme == .dark) { position in
-                        store.updateCameraPosition(position)
-                    }
+                    PersistentSceneView(scene: store.selectedScene, cameraState: $store.selectedCameraState, darkMode: colorScheme == .dark, placementMode: store.isPlacingMicrophone, cameraPositionChanged: store.updateCameraPosition, surfaceSelected: store.previewMicrophonePosition)
                         .onAppear {
                             store.updateSceneBackground(darkMode: colorScheme == .dark)
                         }
@@ -143,16 +181,23 @@ struct MeshViewerView: View {
         if store.logText.isEmpty { return "No output yet" }
         return store.logText.split(separator: "\n").last.map(String.init) ?? "Ready"
     }
+
+    var microphoneCoordinates: String {
+        guard let position = store.pendingMicrophonePosition else { return "No position selected" }
+        return String(format: "X %.2f · Y %.2f · Z %.2f mm", position.x, position.y, position.z)
+    }
 }
 
 struct PersistentSceneView: NSViewRepresentable {
     let scene: SCNScene
     @Binding var cameraState: ViewerCameraState?
     let darkMode: Bool
+    let placementMode: Bool
     let cameraPositionChanged: (SCNVector3) -> Void
+    let surfaceSelected: (SCNVector3) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(cameraState: $cameraState, cameraPositionChanged: cameraPositionChanged)
+        Coordinator(cameraState: $cameraState, placementMode: placementMode, cameraPositionChanged: cameraPositionChanged, surfaceSelected: surfaceSelected)
     }
 
     func makeNSView(context: Context) -> SCNView {
@@ -162,13 +207,17 @@ struct PersistentSceneView: NSViewRepresentable {
         view.autoenablesDefaultLighting = true
         view.backgroundColor = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
         view.delegate = context.coordinator
+        view.addGestureRecognizer(NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.selectSurface(_:))))
         context.coordinator.scene = scene
         return view
     }
 
     func updateNSView(_ view: SCNView, context: Context) {
         context.coordinator.cameraState = $cameraState
+        context.coordinator.placementMode = placementMode
         context.coordinator.cameraPositionChanged = cameraPositionChanged
+        context.coordinator.surfaceSelected = surfaceSelected
+        view.allowsCameraControl = true
         if view.scene !== scene {
             view.scene = scene
             context.coordinator.scene = scene
@@ -179,13 +228,24 @@ struct PersistentSceneView: NSViewRepresentable {
 
     final class Coordinator: NSObject, SCNSceneRendererDelegate {
         var cameraState: Binding<ViewerCameraState?>
+        var placementMode: Bool
         var cameraPositionChanged: (SCNVector3) -> Void
+        var surfaceSelected: (SCNVector3) -> Void
         weak var scene: SCNScene?
         var lastPosition: SCNVector3?
 
-        init(cameraState: Binding<ViewerCameraState?>, cameraPositionChanged: @escaping (SCNVector3) -> Void) {
+        init(cameraState: Binding<ViewerCameraState?>, placementMode: Bool, cameraPositionChanged: @escaping (SCNVector3) -> Void, surfaceSelected: @escaping (SCNVector3) -> Void) {
             self.cameraState = cameraState
+            self.placementMode = placementMode
             self.cameraPositionChanged = cameraPositionChanged
+            self.surfaceSelected = surfaceSelected
+        }
+
+        @objc func selectSurface(_ recognizer: NSClickGestureRecognizer) {
+            guard placementMode, let view = recognizer.view as? SCNView else { return }
+            let hits = view.hitTest(recognizer.location(in: view), options: [.categoryBitMask: 1, .searchMode: SCNHitTestSearchMode.closest.rawValue, .backFaceCulling: false])
+            guard let hit = hits.first else { return }
+            surfaceSelected(hit.worldCoordinates)
         }
 
         func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {

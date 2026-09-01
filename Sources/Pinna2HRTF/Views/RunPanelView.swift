@@ -23,10 +23,9 @@ struct RunPanelView: View {
             }
             VStack(spacing: 6) {
                 ForEach(Stage.allCases) { stage in
-                    StageRunButton(stage: stage, state: store.stageStates[stage] ?? .ready) {
+                    StageRunButton(stage: stage, state: store.stageStates[stage] ?? .ready, available: store.canRun(stage: stage)) {
                         store.run(stage: stage)
                     }
-                    .disabled(!store.canRun(stage: stage))
                 }
             }
             Button {
@@ -66,16 +65,18 @@ struct RunPanelView: View {
 struct StageRunButton: View {
     let stage: Stage
     let state: StageState
+    let available: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(alignment: .center, spacing: 10) {
                 Image(systemName: stage.systemImage)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(available ? .secondary : .tertiary)
                     .frame(width: 16, alignment: .leading)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(stage.title)
+                        .foregroundStyle(available ? .primary : .secondary)
                         .lineLimit(1)
                     Text(state.rawValue.capitalized)
                         .font(.caption)
@@ -90,6 +91,8 @@ struct StageRunButton: View {
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
+        .disabled(!available)
+        .opacity(available ? 1 : 0.5)
     }
 
     var stateColor: Color {
@@ -98,6 +101,7 @@ struct StageRunButton: View {
         case .running: .orange
         case .failed: .red
         case .done: .green
+        case .skipped: .secondary
         }
     }
 }

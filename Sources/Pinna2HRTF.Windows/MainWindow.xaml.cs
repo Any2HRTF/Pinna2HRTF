@@ -1466,16 +1466,35 @@ ui:
     void UpdateRunButtons(ProjectRecord? project)
     {
         var buttons = new[] { RunInferenceButton, RunPreprocessingButton, RunNumCalcButton, RunPostprocessingButton };
+        var stages = Stage.GetValues();
         var active = project != null && runningStages.TryGetValue(project.Id, out var stage) ? stage : (Stage?)null;
         for (var i = 0; i < buttons.Length; i++)
         {
-            buttons[i].Content = active == Stage.GetValues()[i] ? "Stop" : "Run";
-            buttons[i].IsEnabled = active == Stage.GetValues()[i] || (active == null && !(Stage.GetValues()[i] == Stage.Preprocessing && PreprocessingBlocked(project)));
+            buttons[i].Content = active == stages[i] ? "Stop" : "Run";
+            buttons[i].IsEnabled = active == stages[i] || (active == null && StageCanRun(stages[i], project));
         }
+        var pending = project == null ? new List<Stage>() : AutomaticStages(project).Where(stage => !StageIsComplete(stage, project)).ToList();
+        RunAllButton.IsEnabled = active == null && project != null && pending.Count > 0 && StageCanRun(pending[0], project);
     }
 
     bool InferenceIsAutomatic(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing && !string.IsNullOrWhiteSpace(project.LeftEar) && !string.IsNullOrWhiteSpace(project.RightEar);
     bool PreprocessingBlocked(ProjectRecord project) => InferenceIsAutomatic(project) && !StageIsComplete(Stage.Inference, project);
+    bool StageCanRun(Stage stage, ProjectRecord? project)
+    {
+        if (project == null || runningProcesses.ContainsKey(project.Id) || string.IsNullOrWhiteSpace(project.SaveLocation) || (string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar)))
+            return false;
+        if ((!string.IsNullOrWhiteSpace(project.LeftEar) && !File.Exists(project.LeftEar)) || (!string.IsNullOrWhiteSpace(project.RightEar) && !File.Exists(project.RightEar)))
+            return false;
+        if (stage == Stage.Inference)
+            return InferenceIsAutomatic(project) && File.Exists(project.Settings.Inference.ModelConfig) && File.Exists(project.Settings.Inference.ModelCheckpoint);
+        if (stage == Stage.Preprocessing)
+            return !PreprocessingBlocked(project) && File.Exists(environment.MeshGradingExecutable) && Directory.Exists(Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf"));
+        if (stage == Stage.Numcalc)
+            return StageIsComplete(Stage.Preprocessing, project) && File.Exists(environment.NumCalcExecutable);
+        if (stage == Stage.Postprocessing)
+            return StageIsComplete(Stage.Numcalc, project);
+        return false;
+    }
     Stage[] AutomaticStages(ProjectRecord project) => InferenceIsAutomatic(project) ? Stage.GetValues() : [Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing];
 
     string NumCalcStatus(ProjectRecord project)
