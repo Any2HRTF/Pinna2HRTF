@@ -173,6 +173,8 @@ Build and run the packaged macOS app locally:
 
 This requires `uv`, prepares external tools, builds `build/release/Pinna2HRTF.app`, embeds the offline runtime, and launches the app. The distributable zip is produced by the GitHub release workflow.
 
+A compiled version is available to (download)[https://ecosystem.sonicom.eu/tools/30].
+
 ### Windows
 
 The Windows app supports x64 Windows. Extract the complete `Pinna2HRTF-windows.zip` archive to any writable folder and run `Pinna2HRTF.Windows.exe`. Keep the extracted folder together; no Python or `uv` installation is required.
