@@ -9,8 +9,11 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Interop;
 using System.Windows.Input;
 using System.Runtime.InteropServices;
+using System.Reflection;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Media.Media3D;
@@ -47,7 +50,15 @@ public partial class MainWindow : Window
     string appData = "";
     string registryPath = "";
     string viewerStatePath = "";
+    string uiStatePath = "";
+    double projectsExpandedWidth = 280;
+    double liveLogExpandedHeight = 170;
+    bool uiStateLoaded;
     bool refreshingArtifacts;
+    ModelVisual3D? meshVisual;
+    ModelVisual3D? edgeVisual;
+    ModelVisual3D? microphoneVisual;
+    CancellationTokenSource? edgeBuildCancellation;
     readonly DispatcherTimer statusTimer = new() { Interval = TimeSpan.FromSeconds(2) };
 
     public MainWindow()
@@ -63,6 +74,129 @@ public partial class MainWindow : Window
         };
     }
 
+    void WindowSourceInitialized(object? sender, EventArgs e)
+    {
+        if (PresentationSource.FromVisual(this) is HwndSource source)
+            source.AddHook(WindowProc);
+        UpdateMaximizeButton();
+    }
+
+    void TitleBarMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is DependencyObject source && IsTitleBarInteractiveSource(source))
+            return;
+        if (e.ClickCount == 2)
+        {
+            ToggleMaximizeWindow();
+            e.Handled = true;
+            return;
+        }
+        if (e.ButtonState == MouseButtonState.Pressed)
+        {
+            try { DragMove(); } catch (InvalidOperationException) { }
+            e.Handled = true;
+        }
+    }
+
+    static T? FindVisualParent<T>(DependencyObject? child) where T : DependencyObject
+    {
+        while (child != null)
+        {
+            if (child is T match) return match;
+            // Menu text is often a FrameworkContentElement (for example a
+            // Run/AccessText), not a Visual. VisualTreeHelper.GetParent throws
+            // for those elements, which used to make clicking menu text crash.
+            child = child switch
+            {
+                FrameworkContentElement content => content.Parent ?? content.TemplatedParent,
+                Visual or Visual3D => VisualTreeHelper.GetParent(child),
+                _ => null
+            };
+        }
+        return null;
+    }
+
+    static bool IsTitleBarInteractiveSource(DependencyObject source) =>
+        FindVisualParent<MenuItem>(source) != null ||
+        FindVisualParent<Menu>(source) != null ||
+        FindVisualParent<System.Windows.Controls.Primitives.ButtonBase>(source) != null;
+
+    void TitleBarMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is DependencyObject source && IsTitleBarInteractiveSource(source))
+            return;
+        var screenPoint = PointToScreen(e.GetPosition(this));
+        SystemCommands.ShowSystemMenu(this, screenPoint);
+        e.Handled = true;
+    }
+    void MinimizeWindowClicked(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
+    void ToggleMaximizeWindowClicked(object sender, RoutedEventArgs e) => ToggleMaximizeWindow();
+    void ToggleMaximizeWindow()
+    {
+        // Use the native system commands instead of assigning WindowState directly.
+        // This preserves the normal non-client maximize path, including the
+        // WM_GETMINMAXINFO work-area calculation that keeps the taskbar visible.
+        if (WindowState == WindowState.Maximized)
+            SystemCommands.RestoreWindow(this);
+        else
+            SystemCommands.MaximizeWindow(this);
+    }
+    void CloseWindowClicked(object sender, RoutedEventArgs e) => Close();
+    void WindowStateChanged(object? sender, EventArgs e) => UpdateMaximizeButton();
+    void UpdateMaximizeButton()
+    {
+        if (MaximizeWindowButton != null)
+        {
+            MaximizeWindowButton.Content = WindowState == WindowState.Maximized ? "\uE923" : "\uE922";
+            MaximizeWindowButton.ToolTip = WindowState == WindowState.Maximized ? "Restore" : "Maximize";
+        }
+    }
+
+    const int WmNcHitTest = 0x0084;
+    const int WmGetMinMaxInfo = 0x0024;
+    const int HtClient = 1, HtLeft = 10, HtRight = 11, HtTop = 12, HtTopLeft = 13, HtTopRight = 14, HtBottom = 15, HtBottomLeft = 16, HtBottomRight = 17;
+    const uint MonitorDefaultToNearest = 2;
+
+    IntPtr WindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == WmNcHitTest && WindowState != WindowState.Maximized)
+        {
+            var x = (short)(lParam.ToInt64() & 0xffff);
+            var y = (short)((lParam.ToInt64() >> 16) & 0xffff);
+            var point = PointFromScreen(new System.Windows.Point(x, y));
+            const double grip = 7;
+            var left = point.X <= grip;
+            var right = point.X >= ActualWidth - grip;
+            var top = point.Y <= grip;
+            var bottom = point.Y >= ActualHeight - grip;
+            var result = left && top ? HtTopLeft : right && top ? HtTopRight : left && bottom ? HtBottomLeft : right && bottom ? HtBottomRight : left ? HtLeft : right ? HtRight : top ? HtTop : bottom ? HtBottom : HtClient;
+            handled = result != HtClient;
+            return (IntPtr)result;
+        }
+        if (msg == WmGetMinMaxInfo)
+        {
+            var info = Marshal.PtrToStructure<MinMaxInfo>(lParam);
+            var monitor = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
+            var monitorInfo = new MonitorInfo { cbSize = Marshal.SizeOf<MonitorInfo>() };
+            if (monitor != IntPtr.Zero && GetMonitorInfo(monitor, ref monitorInfo))
+            {
+                info.ptMaxPosition.X = monitorInfo.rcWork.Left - monitorInfo.rcMonitor.Left;
+                info.ptMaxPosition.Y = monitorInfo.rcWork.Top - monitorInfo.rcMonitor.Top;
+                info.ptMaxSize.X = monitorInfo.rcWork.Right - monitorInfo.rcWork.Left;
+                info.ptMaxSize.Y = monitorInfo.rcWork.Bottom - monitorInfo.rcWork.Top;
+                Marshal.StructureToPtr(info, lParam, true);
+                handled = true;
+            }
+        }
+        return IntPtr.Zero;
+    }
+
+    [StructLayout(LayoutKind.Sequential)] struct PointNative { public int X; public int Y; }
+    [StructLayout(LayoutKind.Sequential)] struct MinMaxInfo { public PointNative ptReserved; public PointNative ptMaxSize; public PointNative ptMaxPosition; public PointNative ptMinTrackSize; public PointNative ptMaxTrackSize; }
+    [StructLayout(LayoutKind.Sequential)] struct RectNative { public int Left; public int Top; public int Right; public int Bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct MonitorInfo { public int cbSize; public RectNative rcMonitor; public RectNative rcWork; public int dwFlags; }
+    [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool GetMonitorInfo(IntPtr hMonitor, ref MonitorInfo lpmi);
     void WindowLoaded(object sender, RoutedEventArgs e)
     {
         packageRoot = FindPackageRoot();
@@ -70,6 +204,7 @@ public partial class MainWindow : Window
         appData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Pinna2HRTF");
         registryPath = Path.Combine(appData, "projects.json");
         viewerStatePath = Path.Combine(appData, "viewer-state.json");
+        uiStatePath = Path.Combine(appData, "ui-state.json");
         Directory.CreateDirectory(appData);
         Directory.CreateDirectory(Path.Combine(appData, "Cache", "matplotlib"));
         Directory.CreateDirectory(Path.Combine(appData, "Cache", "python"));
@@ -84,6 +219,7 @@ public partial class MainWindow : Window
         }
         LoadRegistry();
         LoadViewerStates();
+        LoadUiState();
         foreach (var project in projects)
         {
             project.Settings.Preprocessing.FrequencyStepCount = Math.Max(int.TryParse(project.Settings.Preprocessing.FrequencyStepCount, out var steps) ? steps : 129, 2).ToString();
@@ -123,21 +259,28 @@ public partial class MainWindow : Window
         LoadSelectedProject();
         RefreshArtifacts();
         UpdateViewerAppearance();
+        uiStateLoaded = true;
+        SetProjectsExpanded(projectsExpanded);
+        SetLiveLogExpanded(liveLogExpanded);
         statusTimer.Start();
         RefreshNumCalcStatus();
         RefreshPipelineStatus();
     }
 
     bool projectsExpanded = true;
+    bool liveLogExpanded = true;
 
     void ProjectsExpanded(object sender, RoutedEventArgs e) => SetProjectsExpanded(true);
     void ProjectsCollapsed(object sender, RoutedEventArgs e) => SetProjectsExpanded(false);
     void SetProjectsExpanded(bool expanded)
     {
         if (ProjectsColumn == null || ProjectList == null) return;
+        if (!expanded && projectsExpanded && ProjectsColumn.ActualWidth > 60)
+            projectsExpandedWidth = ProjectsColumn.ActualWidth;
         projectsExpanded = expanded;
         ProjectList.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
-        ProjectsColumn.Width = expanded ? new GridLength(280) : new GridLength(40);
+        var width = Math.Clamp(projectsExpandedWidth, 180, 520);
+        ProjectsColumn.Width = expanded ? new GridLength(width) : new GridLength(40);
         ProjectsHeaderGrid.Margin = expanded ? new Thickness(10, 8, 10, 8) : new Thickness(0, 8, 0, 8);
         ProjectsTitle.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
         NewProjectButton.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
@@ -145,20 +288,40 @@ public partial class MainWindow : Window
         DuplicateProjectButton.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
         DeleteProjectButton.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
         ProjectsToggle.ToolTip = expanded ? "Collapse projects" : "Expand projects";
+        if (uiStateLoaded) SaveUiState();
     }
-
-    bool liveLogExpanded = true;
 
     void LiveLogExpanded(object sender, RoutedEventArgs e) => SetLiveLogExpanded(true);
     void LiveLogCollapsed(object sender, RoutedEventArgs e) => SetLiveLogExpanded(false);
     void SetLiveLogExpanded(bool expanded)
     {
         if (LiveLogPanel == null || LiveLogContent == null) return;
+        if (!expanded && liveLogExpanded && LiveLogPanel.Parent is Grid existingGrid && existingGrid.RowDefinitions.Count > 2 && existingGrid.RowDefinitions[2].ActualHeight > 50)
+            liveLogExpandedHeight = existingGrid.RowDefinitions[2].ActualHeight;
         liveLogExpanded = expanded;
         LiveLogContent.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
-        if (LiveLogPanel.Parent is Grid grid && grid.RowDefinitions.Count > 2) grid.RowDefinitions[2].Height = expanded ? new GridLength(170) : GridLength.Auto;
+        if (LiveLogPanel.Parent is Grid grid && grid.RowDefinitions.Count > 2)
+            grid.RowDefinitions[2].Height = expanded ? new GridLength(Math.Clamp(liveLogExpandedHeight, 80, 600)) : GridLength.Auto;
+        if (uiStateLoaded) SaveUiState();
     }
 
+    void ProjectsSplitterDragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (projectsExpanded && ProjectsColumn.ActualWidth > 60)
+        {
+            projectsExpandedWidth = ProjectsColumn.ActualWidth;
+            SaveUiState();
+        }
+    }
+
+    void LiveLogSplitterDragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (liveLogExpanded && LiveLogPanel.Parent is Grid grid && grid.RowDefinitions.Count > 2 && grid.RowDefinitions[2].ActualHeight > 50)
+        {
+            liveLogExpandedHeight = grid.RowDefinitions[2].ActualHeight;
+            SaveUiState();
+        }
+    }
     void WindowClosing(object? sender, CancelEventArgs e)
     {
         if (runningProcesses.Count > 0)
@@ -175,8 +338,35 @@ public partial class MainWindow : Window
         foreach (var process in runningProcesses.Values.ToList())
             TryTerminate(process);
         Persist();
+            SaveUiState();
     }
 
+    void LoadUiState()
+    {
+        if (!File.Exists(uiStatePath)) return;
+        try
+        {
+            var state = JsonSerializer.Deserialize<WindowUiState>(File.ReadAllText(uiStatePath), jsonOptions);
+            if (state == null) return;
+            projectsExpandedWidth = Math.Clamp(state.ProjectsWidth, 180, 520);
+            liveLogExpandedHeight = Math.Clamp(state.LiveLogHeight, 80, 600);
+            projectsExpanded = state.ProjectsExpanded;
+            liveLogExpanded = state.LiveLogExpanded;
+        }
+        catch { }
+    }
+
+    void SaveUiState()
+    {
+        if (string.IsNullOrWhiteSpace(uiStatePath)) return;
+        try
+        {
+            Directory.CreateDirectory(appData);
+            var state = new WindowUiState { ProjectsWidth = projectsExpandedWidth, LiveLogHeight = liveLogExpandedHeight, ProjectsExpanded = projectsExpanded, LiveLogExpanded = liveLogExpanded };
+            File.WriteAllText(uiStatePath, JsonSerializer.Serialize(state, jsonOptions));
+        }
+        catch { }
+    }
     void LoadSettingHelp()
     {
         var path = Path.Combine(packageRoot, "ProjectSettingHelp.json");
@@ -213,6 +403,46 @@ public partial class MainWindow : Window
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     }
 
+    void OpenDocumentationClicked(object sender, RoutedEventArgs e)
+    {
+        Process.Start(new ProcessStartInfo("https://github.com/Any2HRTF/Pinna2HRTF#readme") { UseShellExecute = true });
+    }
+
+    void ShowAboutClicked(object sender, RoutedEventArgs e)
+    {
+        var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "1.0.0b";
+        var foreground = (System.Windows.Media.Brush)FindResource("PrimaryTextBrush");
+        var secondary = (System.Windows.Media.Brush)FindResource("SecondaryTextBrush");
+        var dialog = new Window
+        {
+            Owner = this,
+            Title = "About Pinna2HRTF",
+            Width = 460,
+            Height = 360,
+            ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = (System.Windows.Media.Brush)FindResource("PanelBackgroundBrush"),
+            Foreground = foreground
+        };
+        var content = new StackPanel { Margin = new Thickness(24), HorizontalAlignment = System.Windows.HorizontalAlignment.Center };
+        try
+        {
+            var icon = new BitmapImage(new Uri("pack://application:,,,/Resources/app_icon.ico", UriKind.Absolute));
+            content.Children.Add(new System.Windows.Controls.Image { Source = icon, Width = 120, Height = 80, Stretch = Stretch.Uniform, Margin = new Thickness(0, 0, 0, 8) });
+        }
+        catch (IOException) { }
+        content.Children.Add(new TextBlock { Text = "Pinna2HRTF", FontSize = 24, FontWeight = FontWeights.Bold, Foreground = foreground, HorizontalAlignment = System.Windows.HorizontalAlignment.Center });
+        content.Children.Add(new TextBlock { Text = $"Version {version}", Foreground = secondary, HorizontalAlignment = System.Windows.HorizontalAlignment.Center, Margin = new Thickness(0, 4, 0, 0) });
+        content.Children.Add(new TextBlock { Text = "© 2026 Any2HRTF", Foreground = secondary, HorizontalAlignment = System.Windows.HorizontalAlignment.Center, Margin = new Thickness(0, 2, 0, 12) });
+        content.Children.Add(new TextBlock { Text = "A desktop pipeline for ear-mesh preprocessing, Pinna2HRTF inference, Mesh2HRTF simulation, and SOFA export.", TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, MaxWidth = 380, Foreground = foreground });
+        dialog.Content = content;
+        dialog.ShowDialog();
+    }
+
+    void LogTextSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => LogText.ScrollToEnd()));
+    }
     void UserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e) => Dispatcher.BeginInvoke(() => UpdateViewerAppearance());
 
     void WindowPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -234,9 +464,15 @@ public partial class MainWindow : Window
         SetThemeBrush("InputBackgroundBrush", darkMode ? "#2f2f2f" : "#ffffff");
         SetThemeBrush("PrimaryTextBrush", darkMode ? "#e6e6e6" : "#1a1a1a");
         SetThemeBrush("SecondaryTextBrush", darkMode ? "#9b9b9b" : "#69717d");
+        SetThemeBrush("MenuTextBrush", darkMode ? "#a2a2a2" : "#59666f");
+        SetThemeBrush("MenuSeparatorBrush", darkMode ? "#2c2c2c" : "#b4bcc1");
+        SetThemeBrush("SpinnerOverlayBrush", darkMode ? "#3f000000" : "#26000000");
         SetThemeBrush("BorderBrush", darkMode ? "#3a3a3a" : "#d9dee8");
         SetThemeBrush("ComboSelectedBrush", darkMode ? "#3a3a3a" : "#d9eaf0");
         SetThemeBrush("ComboHoverBrush", darkMode ? "#333333" : "#edf3f5");
+        SetThemeBrush("ScrollTrackBrush", darkMode ? "#00000000" : "#00000000");
+        SetThemeBrush("ScrollThumbBrush", darkMode ? "#5d5d5d" : "#b8c2c8");
+        SetThemeBrush("ScrollThumbHoverBrush", darkMode ? "#7a7a7a" : "#8e9ba3");
         MeshViewerBackground.Background = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#1f1f1f" : "#edf3f2"));
         Background = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#202020" : "#f3f6f5"));
         var panelBrush = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(darkMode ? "#2b2b2b" : "#ffffff"));
@@ -778,12 +1014,14 @@ public partial class MainWindow : Window
         {
             try
             {
-                var model = MeshLoader.Load(artifact.Path, out var originalCenter, out var meshScale);
+                var model = MeshLoader.Load(artifact.Path, out var originalCenter, out var meshScale, out var meshGeometry);
                 var bounds = model.Bounds;
                 meshCenter = new Point3D((bounds.X + bounds.SizeX / 2), (bounds.Y + bounds.SizeY / 2), (bounds.Z + bounds.SizeZ / 2));
                 meshMaximumDimension = Math.Max(bounds.SizeX, Math.Max(bounds.SizeY, bounds.SizeZ));
                 meshFrontDirection = artifact.Path.Contains("left", StringComparison.OrdinalIgnoreCase) ? 1 : -1;
-                MeshViewport.Children.Add(new ModelVisual3D { Content = model });
+                meshVisual = new ModelVisual3D { Content = model };
+                MeshViewport.Children.Add(meshVisual);
+                StartEdgeBuild(artifact.Path, meshGeometry);
                 if (MicrophonePosition(artifact.Path) is Point3D microphone)
                 {
                     var transformedMicrophone = new Point3D(
@@ -793,7 +1031,8 @@ public partial class MainWindow : Window
                     var markerMaterial = new MaterialGroup();
                     markerMaterial.Children.Add(new DiffuseMaterial(new SolidColorBrush(System.Windows.Media.Color.FromRgb(255, 149, 0))));
                     markerMaterial.Children.Add(new EmissiveMaterial(new SolidColorBrush(System.Windows.Media.Color.FromRgb(255, 149, 0))));
-                    MeshViewport.Children.Add(new ModelVisual3D { Content = new GeometryModel3D(MeshLoader.CreateSphere(transformedMicrophone, Math.Max(meshMaximumDimension * 0.006, 0.35)), markerMaterial) { BackMaterial = markerMaterial } });
+                    microphoneVisual = new ModelVisual3D { Content = new GeometryModel3D(MeshLoader.CreateSphere(transformedMicrophone, Math.Max(meshMaximumDimension * 0.006, 0.35)), markerMaterial) { BackMaterial = markerMaterial } };
+                    MeshViewport.Children.Add(microphoneVisual);
                 }
                 ResetMeshCamera();
                 MeshControlsHint.Visibility = Visibility.Visible;
@@ -825,10 +1064,40 @@ public partial class MainWindow : Window
         }
     }
 
+    void StartEdgeBuild(string artifactPath, MeshGeometry3D geometry)
+    {
+        edgeBuildCancellation?.Cancel();
+        edgeVisual = null;
+        if (!string.Equals(Path.GetExtension(artifactPath), ".ply", StringComparison.OrdinalIgnoreCase))
+            return;
+        var cancellation = new CancellationTokenSource();
+        edgeBuildCancellation = cancellation;
+        _ = Task.Run(() => MeshLoader.CreateEdgeGeometry(geometry, cancellation.Token), cancellation.Token).ContinueWith(task =>
+        {
+            if (task.IsCanceled || task.IsFaulted || cancellation.IsCancellationRequested || edgeBuildCancellation != cancellation || selectedArtifactPath != artifactPath)
+                return;
+            Dispatcher.Invoke(() =>
+            {
+                if (cancellation.IsCancellationRequested || edgeBuildCancellation != cancellation || selectedArtifactPath != artifactPath || meshVisual == null)
+                    return;
+                var edgeMaterial = new MaterialGroup();
+                edgeMaterial.Children.Add(new DiffuseMaterial(new SolidColorBrush(System.Windows.Media.Color.FromArgb(150, 35, 65, 65))));
+                edgeMaterial.Children.Add(new EmissiveMaterial(new SolidColorBrush(System.Windows.Media.Color.FromArgb(100, 20, 35, 35))));
+                edgeVisual = new ModelVisual3D { Content = new GeometryModel3D(task.Result, edgeMaterial) { BackMaterial = edgeMaterial } };
+                MeshViewport.Children.Add(edgeVisual);
+            });
+        }, TaskScheduler.Default);
+    }
     void ResetViewer()
     {
-        while (MeshViewport.Children.Count > 4)
-            MeshViewport.Children.RemoveAt(4);
+        edgeBuildCancellation?.Cancel();
+        edgeBuildCancellation = null;
+        if (edgeVisual != null) MeshViewport.Children.Remove(edgeVisual);
+        if (microphoneVisual != null) MeshViewport.Children.Remove(microphoneVisual);
+        if (meshVisual != null) MeshViewport.Children.Remove(meshVisual);
+        edgeVisual = null;
+        microphoneVisual = null;
+        meshVisual = null;
         ImagePreview.Source = null;
         ImagePreview.Visibility = Visibility.Collapsed;
         MeshControlsHint.Visibility = Visibility.Collapsed;
@@ -837,10 +1106,9 @@ public partial class MainWindow : Window
         SelectedArtifactText.Text = "Select an artifact";
         selectedArtifactPath = null;
     }
-
     void MeshViewportMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (MeshViewport.Children.Count <= 4)
+        if (meshVisual == null)
             return;
         rotatingMesh = true;
         lastMeshPointer = e.GetPosition(MeshViewport);
@@ -866,15 +1134,15 @@ public partial class MainWindow : Window
             return;
 
         var pointer = e.GetPosition(MeshViewport);
-        meshYaw += (pointer.X - lastMeshPointer.X) * 0.45;
-        meshPitch = Math.Clamp(meshPitch - (pointer.Y - lastMeshPointer.Y) * 0.45, -89, 89);
+        meshYaw -= (pointer.X - lastMeshPointer.X) * 0.45;
+        meshPitch = Math.Clamp(meshPitch + (pointer.Y - lastMeshPointer.Y) * 0.45, -89, 89);
         lastMeshPointer = pointer;
         UpdateMeshCamera();
     }
 
     void MeshViewportMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (MeshViewport.Children.Count <= 4)
+        if (meshVisual == null)
             return;
         meshDistance = Math.Clamp(meshDistance * Math.Pow(0.88, e.Delta / 120.0), 80, 1200);
         UpdateMeshCamera();
@@ -922,7 +1190,7 @@ public partial class MainWindow : Window
 
     void SaveMeshCamera()
     {
-        if (SelectedProject == null || selectedArtifactPath == null || MeshViewport.Children.Count <= 4)
+        if (SelectedProject == null || selectedArtifactPath == null || meshVisual == null)
             return;
         if (!viewerStates.TryGetValue(SelectedProject.Id, out var state))
         {
@@ -1590,6 +1858,13 @@ class ProjectRegistry
     public EnvironmentConfig Environment { get; set; } = new();
 }
 
+class WindowUiState
+{
+    public double ProjectsWidth { get; set; } = 280;
+    public double LiveLogHeight { get; set; } = 170;
+    public bool ProjectsExpanded { get; set; } = true;
+    public bool LiveLogExpanded { get; set; } = true;
+}
 class ProjectViewerState
 {
     public string? SelectedArtifactPath { get; set; }
@@ -1690,18 +1965,78 @@ class NumCalcSettings
 
 static class MeshLoader
 {
-    public static Model3D Load(string path, out Point3D center, out double scale)
+    public static Model3D Load(string path, out Point3D center, out double scale) => Load(path, out center, out scale, out _);
+
+    public static Model3D Load(string path, out Point3D center, out double scale, out MeshGeometry3D geometry)
     {
         var mesh = string.Equals(Path.GetExtension(path), ".ply", StringComparison.OrdinalIgnoreCase) ? LoadPly(path) : LoadStl(path);
         Center(mesh, out center, out scale);
+        if (mesh.CanFreeze) mesh.Freeze();
+        geometry = mesh;
         var material = new MaterialGroup();
         material.Children.Add(new DiffuseMaterial(new SolidColorBrush(System.Windows.Media.Color.FromRgb(96, 145, 144))));
-        material.Children.Add(new SpecularMaterial(new SolidColorBrush(System.Windows.Media.Color.FromRgb(205, 225, 224)), 28));
+        material.Children.Add(new SpecularMaterial(new SolidColorBrush(System.Windows.Media.Color.FromRgb(160, 180, 178)), 10));
         material.Children.Add(new EmissiveMaterial(new SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 28, 28))));
         return new GeometryModel3D(mesh, material) { BackMaterial = material };
     }
-
     public static Model3D Load(string path) => Load(path, out _, out _);
+    public static MeshGeometry3D CreateEdgeGeometry(MeshGeometry3D mesh, CancellationToken cancellationToken)
+    {
+        var positions = mesh.Positions;
+        var triangles = mesh.TriangleIndices;
+        var edges = new HashSet<(int A, int B)>();
+        for (var i = 0; i + 2 < triangles.Count; i += 3)
+        {
+            AddEdge(edges, triangles[i], triangles[i + 1]);
+            AddEdge(edges, triangles[i + 1], triangles[i + 2]);
+            AddEdge(edges, triangles[i + 2], triangles[i]);
+        }
+        var edgeMesh = new MeshGeometry3D();
+        const double radius = 0.18;
+        foreach (var edge in edges)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AddEdgePrism(edgeMesh, positions[edge.A], positions[edge.B], radius);
+        }
+        if (edgeMesh.CanFreeze) edgeMesh.Freeze();
+        return edgeMesh;
+    }
+
+    static void AddEdge(HashSet<(int A, int B)> edges, int first, int second)
+    {
+        if (first == second) return;
+        edges.Add(first < second ? (first, second) : (second, first));
+    }
+
+    static void AddEdgePrism(MeshGeometry3D mesh, Point3D start, Point3D end, double radius)
+    {
+        var axis = end - start;
+        var length = axis.Length;
+        if (length < 1e-9) return;
+        axis.Normalize();
+        var reference = Math.Abs(axis.Z) < 0.9 ? new Vector3D(0, 0, 1) : new Vector3D(0, 1, 0);
+        var side = Vector3D.CrossProduct(axis, reference);
+        side.Normalize();
+        var other = Vector3D.CrossProduct(axis, side);
+        other.Normalize();
+        var baseIndex = mesh.Positions.Count;
+        const int segments = 4;
+        for (var segment = 0; segment < segments; segment++)
+        {
+            var angle = 2 * Math.PI * segment / segments;
+            var offset = radius * (side * Math.Cos(angle) + other * Math.Sin(angle));
+            mesh.Positions.Add(start + offset);
+            mesh.Positions.Add(end + offset);
+        }
+        for (var segment = 0; segment < segments; segment++)
+        {
+            var next = (segment + 1) % segments;
+            var a = baseIndex + segment * 2;
+            var b = baseIndex + next * 2;
+            mesh.TriangleIndices.Add(a); mesh.TriangleIndices.Add(b); mesh.TriangleIndices.Add(a + 1);
+            mesh.TriangleIndices.Add(a + 1); mesh.TriangleIndices.Add(b); mesh.TriangleIndices.Add(b + 1);
+        }
+    }
 
     public static MeshGeometry3D CreateSphere(Point3D center, double radius)
     {
