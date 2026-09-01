@@ -44,6 +44,40 @@ enum ArtifactScanner {
         return meshes.map { Artifact(title: "\(title) - \($0.deletingPathExtension().lastPathComponent)", url: $0) }
     }
 
+    static func preprocessingMesh(for project: ProjectRecord, side: EarSide) -> URL? {
+        let sourcePath = side == .left ? project.leftEar : project.rightEar
+        guard !sourcePath.isEmpty else { return nil }
+        let source = URL(fileURLWithPath: sourcePath)
+        guard project.settings.inference.usePredictionsForPreprocessing, !project.leftEar.isEmpty, !project.rightEar.isEmpty else {
+            return FileManager.default.fileExists(atPath: source.path) ? source : nil
+        }
+        let folderName = side == .left ? project.settings.inference.predictionLeftFolder : project.settings.inference.predictionRightFolder
+        let folder = URL(fileURLWithPath: project.saveLocation).appendingPathComponent(folderName)
+        let preferred = folder.appendingPathComponent("Prediction_\(source.deletingPathExtension().lastPathComponent).stl")
+        if FileManager.default.fileExists(atPath: preferred.path) { return preferred }
+        let legacyPreferred = folder.appendingPathComponent("\(source.deletingPathExtension().lastPathComponent).stl")
+        if FileManager.default.fileExists(atPath: legacyPreferred.path) { return legacyPreferred }
+        guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return nil }
+        let meshes = files.filter { $0.pathExtension.lowercased() == "stl" }
+        return meshes.count == 1 ? meshes[0] : nil
+    }
+
+    static func meshIdentity(_ url: URL) -> String? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
+        let size = (attributes[.size] as? NSNumber)?.int64Value ?? -1
+        let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return "\(url.standardizedFileURL.path)|\(size)|\(modified)"
+    }
+
+    static func manualMicrophonePosition(for project: ProjectRecord, side: EarSide) -> ManualMicrophonePosition? {
+        side == .left ? project.settings.preprocessing.sourcePositionInputLeft : project.settings.preprocessing.sourcePositionInputRight
+    }
+
+    static func validManualMicrophonePosition(for project: ProjectRecord, side: EarSide) -> ManualMicrophonePosition? {
+        guard let placement = manualMicrophonePosition(for: project, side: side), let mesh = preprocessingMesh(for: project, side: side), placement.meshPath == mesh.standardizedFileURL.path, placement.meshIdentity == meshIdentity(mesh) else { return nil }
+        return placement
+    }
+
     static func stageStates(for project: ProjectRecord, runningStage: Stage?, failedStages: Set<Stage>) -> [Stage: StageState] {
         Dictionary(uniqueKeysWithValues: Stage.allCases.map { stage in
             if runningStage == stage {
@@ -51,6 +85,9 @@ enum ArtifactScanner {
             }
             if failedStages.contains(stage), !stageIsComplete(stage, project: project) {
                 return (stage, .failed)
+            }
+            if stage == .inference, !project.settings.inference.usePredictionsForPreprocessing {
+                return (stage, .skipped)
             }
             return (stage, stageIsComplete(stage, project: project) ? .done : .ready)
         })

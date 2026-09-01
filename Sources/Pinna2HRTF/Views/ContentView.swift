@@ -30,7 +30,8 @@ struct ContentView: View {
         return PipelineCommandContext(
             canRemoveProject: selectedProject != nil,
             canDuplicateProject: selectedProject != nil,
-            canRunProject: selectedProject != nil && !selectedProjectIsRunning,
+            canRunProject: store.canRunNextStage(),
+            canRunStage: { stage in store.canRun(stage: stage) },
             canStopProject: selectedProjectIsRunning,
             canResetProject: selectedProject != nil && !selectedProjectIsRunning,
             createProject: { store.createProject() },

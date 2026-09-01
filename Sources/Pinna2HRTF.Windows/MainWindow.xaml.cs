@@ -801,7 +801,7 @@ public partial class MainWindow : Window
         RefreshProjectList();
         RefreshArtifacts();
         var completed = Stage.GetValues().Where(stage => StageIsComplete(stage, project)).Select(stage => stage.Title).ToList();
-        AppendLog($"Imported project folder {folder}. Completed stages: {(completed.Count == 0 ? "none detected" : string.Join(", ", completed))}");
+        AppendLog($"Imported. Completed: {(completed.Count == 0 ? "none detected" : string.Join(", ", completed))}.");
     }
 
     string ImportedMesh(string folder, string side)
@@ -1003,7 +1003,7 @@ public partial class MainWindow : Window
         ResetViewer();
         selectedArtifactPath = artifact.Path;
         RememberSelectedArtifact(artifact.Path);
-        SelectedArtifactText.Text = artifact.Path;
+        SelectedArtifactText.Text = Path.GetFileName(artifact.Path);
         if (artifact.IsImage)
         {
             ImagePreview.Source = new BitmapImage(new Uri(artifact.Path));
@@ -1054,12 +1054,12 @@ public partial class MainWindow : Window
                 }
                 catch (Exception error)
                 {
-                    AppendLog($"Cannot open artifact: {error.Message}");
+                    AppendLog($"Could not preview file: {error.Message}");
                 }
             }
             else
             {
-                ViewerPlaceholder.Text = $"{Path.GetFileName(artifact.Path)} selected";
+                ViewerPlaceholder.Text = $"Preview unavailable for {Path.GetFileName(artifact.Path)}";
             }
         }
     }
@@ -1101,9 +1101,9 @@ public partial class MainWindow : Window
         ImagePreview.Source = null;
         ImagePreview.Visibility = Visibility.Collapsed;
         MeshControlsHint.Visibility = Visibility.Collapsed;
-        ViewerPlaceholder.Text = "No artifact selected";
+        ViewerPlaceholder.Text = "No preview selected";
         ViewerPlaceholder.Visibility = Visibility.Visible;
-        SelectedArtifactText.Text = "Select an artifact";
+        SelectedArtifactText.Text = "Select a file to preview";
         selectedArtifactPath = null;
     }
     void MeshViewportMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -1261,7 +1261,7 @@ public partial class MainWindow : Window
         var stage = AutomaticStages(project).FirstOrDefault(stage => !StageIsComplete(stage, project));
         if (stage == null)
         {
-            AppendLog($"All pipeline steps are complete for {project.Name}.", project.Id);
+            AppendLog("All stages complete.", project.Id);
             return;
         }
         RunStage(stage, project);
@@ -1277,17 +1277,17 @@ public partial class MainWindow : Window
         }
         if (runningProcesses.ContainsKey(project.Id))
         {
-            AppendLog($"{project.Name} already has a running task.", project.Id);
+            AppendLog("A task is already running.", project.Id);
             return;
         }
         var stages = AutomaticStages(project).Where(stage => !StageIsComplete(stage, project)).ToList();
         if (stages.Count == 0)
         {
-            AppendLog($"All pipeline steps are complete for {project.Name}.", project.Id);
+            AppendLog("All stages complete.", project.Id);
             return;
         }
         queuedStages[project.Id] = new Queue<Stage>(stages.Skip(1));
-        AppendLog($"Run All queued for {project.Name}: {string.Join(" → ", stages.Select(stage => stage.Title))}", project.Id);
+        AppendLog($"Queued: {string.Join(" → ", stages.Select(stage => stage.Title))}.", project.Id);
         RunStage(stages[0], project, true);
     }
 
@@ -1301,7 +1301,7 @@ public partial class MainWindow : Window
         }
         if (runningProcesses.ContainsKey(project.Id))
         {
-            AppendLog($"{project.Name} already has a running task.", project.Id);
+            AppendLog("A task is already running.", project.Id);
             return;
         }
         if (!continueQueued)
@@ -1309,13 +1309,20 @@ public partial class MainWindow : Window
         if ((string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar)) || string.IsNullOrWhiteSpace(project.SaveLocation))
         {
             queuedStages.Remove(project.Id);
-            AppendLog("Select at least one ear mesh and a save location before running.", project.Id);
+            AppendLog("Select an ear mesh and save location first.", project.Id);
             return;
         }
         if ((!string.IsNullOrWhiteSpace(project.LeftEar) && !File.Exists(project.LeftEar)) || (!string.IsNullOrWhiteSpace(project.RightEar) && !File.Exists(project.RightEar)))
         {
             queuedStages.Remove(project.Id);
-            AppendLog("One or more configured ear mesh files are missing.", project.Id);
+            AppendLog("A configured ear mesh is missing.", project.Id);
+            RefreshPipelineStatus();
+            return;
+        }
+        if (stage == Stage.Preprocessing && PreprocessingBlocked(project))
+        {
+            queuedStages.Remove(project.Id);
+            AppendLog("Run BezierPPM Inference first.", project.Id);
             RefreshPipelineStatus();
             return;
         }
@@ -1336,7 +1343,7 @@ public partial class MainWindow : Window
         if (stage == Stage.Inference && (!File.Exists(project.Settings.Inference.ModelConfig) || !File.Exists(project.Settings.Inference.ModelCheckpoint)))
         {
             queuedStages.Remove(project.Id);
-            AppendLog("The selected inference model files are missing.", project.Id);
+            AppendLog("Inference model files are missing.", project.Id);
             RefreshPipelineStatus();
             return;
         }
@@ -1371,7 +1378,7 @@ public partial class MainWindow : Window
             runningProcesses[project.Id] = process;
             runningStages[project.Id] = stage;
             FailedStages(project.Id).Remove(stage);
-            AppendLog($"Started {stage.Title} for {project.Name}", project.Id);
+            AppendLog($"{stage.Title} started.", project.Id);
             RefreshPipelineStatus();
             process.Exited += (_, _) => Dispatcher.BeginInvoke(() =>
             {
@@ -1380,7 +1387,7 @@ public partial class MainWindow : Window
                     FailedStages(project.Id).Add(stage);
                 runningProcesses.Remove(project.Id);
                 runningStages.Remove(project.Id);
-                AppendLog(code == 0 ? $"{stage.Title} finished for {project.Name}" : $"{stage.Title} for {project.Name} exited with status {code}", project.Id);
+                AppendLog(code == 0 ? $"{stage.Title} finished." : $"{stage.Title} failed (status {code}).", project.Id);
                 process.Dispose();
                 RefreshArtifacts();
                 RefreshPipelineStatus();
@@ -1392,7 +1399,7 @@ public partial class MainWindow : Window
                 else
                 {
                     if (code != 0 && queuedStages.TryGetValue(project.Id, out var stoppedQueue) && stoppedQueue.Count > 0)
-                        AppendLog($"Run All stopped after {stage.Title} failed.", project.Id);
+                        AppendLog($"Queue stopped: {stage.Title} failed.", project.Id);
                     queuedStages.Remove(project.Id);
                     RefreshPipelineStatus();
                 }
@@ -1568,7 +1575,7 @@ ui:
         if (runningProcesses.TryGetValue(project.Id, out var process))
         {
             TryTerminate(process);
-            AppendLog("Termination requested.", project.Id);
+            AppendLog("Stopping task.", project.Id);
         }
         RefreshPipelineStatus();
     }
@@ -1621,7 +1628,7 @@ ui:
             var path = Path.Combine(project.SaveLocation, name);
             if (ContainsPath(path, project.LeftEar) || ContainsPath(path, project.RightEar))
             {
-                AppendLog($"Skipped reset of {path} because it contains a configured input mesh.", project.Id);
+                AppendLog($"Kept {Path.GetFileName(path)}: configured input mesh.", project.Id);
                 continue;
             }
             try
@@ -1639,7 +1646,7 @@ ui:
         failedStages[project.Id] = [];
         ResetViewer();
         RefreshArtifacts();
-        AppendLog($"Reset generated outputs in {project.SaveLocation}", project.Id);
+        AppendLog("Generated outputs reset.", project.Id);
         RefreshPipelineStatus();
     }
 
@@ -1664,13 +1671,27 @@ ui:
     {
         if (string.IsNullOrWhiteSpace(text))
             return;
+        var compactText = string.Join(Environment.NewLine, text.Replace("\r\n", "\n").Split('\n').Select(line => line.Trim()).Where(line =>
+        {
+            if (line.Length == 0)
+                return false;
+            var lower = line.ToLowerInvariant();
+            if (lower.StartsWith("info: total files") && lower.Contains("failed 0"))
+                return false;
+            if (lower.Contains("error") || lower.Contains("warning") || lower.Contains("failed") || lower.Contains("exception") || lower.Contains("traceback"))
+                return true;
+            var redundantPrefixes = new[] { "using config:", "left input mesh:", "right input mesh:", "running inference in ", "running preprocessing into ", "running local numcalc with ", "local numcalc project root:", "running postprocessing into ", "started left, step ", "started right, step " };
+            return !redundantPrefixes.Any(prefix => lower.StartsWith(prefix)) && !Path.IsPathRooted(line) && !(line.Contains("Mem:") && line.Contains("Time:")) && !line.StartsWith("Fra:") && !lower.StartsWith("blender ") && lower != "blender quit" && !lower.StartsWith("read blend:") && !lower.StartsWith("saved: '");
+        }));
+        if (compactText.Length == 0)
+            return;
         var targetProjectID = projectId ?? SelectedProject?.Id;
         if (targetProjectID == null)
             return;
         void Append()
         {
             var current = projectLogs.TryGetValue(targetProjectID.Value, out var log) ? log : "";
-            var updated = current.Length == 0 ? text : current + Environment.NewLine + text;
+            var updated = current.Length == 0 ? compactText : current + Environment.NewLine + compactText;
             projectLogs[targetProjectID.Value] = updated;
             if (SelectedProject?.Id == targetProjectID)
             {
@@ -1727,15 +1748,35 @@ ui:
     void UpdateRunButtons(ProjectRecord? project)
     {
         var buttons = new[] { RunInferenceButton, RunPreprocessingButton, RunNumCalcButton, RunPostprocessingButton };
+        var stages = Stage.GetValues();
         var active = project != null && runningStages.TryGetValue(project.Id, out var stage) ? stage : (Stage?)null;
         for (var i = 0; i < buttons.Length; i++)
         {
-            buttons[i].Content = active == Stage.GetValues()[i] ? "Stop" : "Run";
-            buttons[i].IsEnabled = active == null || active == Stage.GetValues()[i];
+            buttons[i].Content = active == stages[i] ? "Stop" : "Run";
+            buttons[i].IsEnabled = active == stages[i] || (active == null && StageCanRun(stages[i], project));
         }
+        var pending = project == null ? new List<Stage>() : AutomaticStages(project).Where(stage => !StageIsComplete(stage, project)).ToList();
+        RunAllButton.IsEnabled = active == null && project != null && pending.Count > 0 && StageCanRun(pending[0], project);
     }
 
     bool InferenceIsAutomatic(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing && !string.IsNullOrWhiteSpace(project.LeftEar) && !string.IsNullOrWhiteSpace(project.RightEar);
+    bool PreprocessingBlocked(ProjectRecord project) => InferenceIsAutomatic(project) && !StageIsComplete(Stage.Inference, project);
+    bool StageCanRun(Stage stage, ProjectRecord? project)
+    {
+        if (project == null || runningProcesses.ContainsKey(project.Id) || string.IsNullOrWhiteSpace(project.SaveLocation) || (string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar)))
+            return false;
+        if ((!string.IsNullOrWhiteSpace(project.LeftEar) && !File.Exists(project.LeftEar)) || (!string.IsNullOrWhiteSpace(project.RightEar) && !File.Exists(project.RightEar)))
+            return false;
+        if (stage == Stage.Inference)
+            return InferenceIsAutomatic(project) && File.Exists(project.Settings.Inference.ModelConfig) && File.Exists(project.Settings.Inference.ModelCheckpoint);
+        if (stage == Stage.Preprocessing)
+            return !PreprocessingBlocked(project) && File.Exists(environment.MeshGradingExecutable) && Directory.Exists(Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf"));
+        if (stage == Stage.Numcalc)
+            return StageIsComplete(Stage.Preprocessing, project) && File.Exists(environment.NumCalcExecutable);
+        if (stage == Stage.Postprocessing)
+            return StageIsComplete(Stage.Numcalc, project);
+        return false;
+    }
     Stage[] AutomaticStages(ProjectRecord project) => InferenceIsAutomatic(project) ? Stage.GetValues() : [Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing];
 
     string NumCalcStatus(ProjectRecord project)

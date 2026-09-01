@@ -4,6 +4,9 @@ enum PipelineConfigWriter {
     static func prepare(project: ProjectRecord, environment: EnvironmentConfig) throws -> URL {
         let output = URL(fileURLWithPath: project.saveLocation)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let manualPositions = Dictionary(uniqueKeysWithValues: EarSide.allCases.compactMap { side in
+            ArtifactScanner.validManualMicrophonePosition(for: project, side: side).map { (side, $0) }
+        })
         var prepared = project
         if project.inputHandling == .copy {
             if !project.leftEar.isEmpty {
@@ -14,7 +17,7 @@ enum PipelineConfigWriter {
             }
         }
         let configURL = output.appendingPathComponent("Project Settings.yaml")
-        try yaml(project: prepared, environment: environment).write(to: configURL, atomically: true, encoding: .utf8)
+        try yaml(project: prepared, environment: environment, manualPositions: manualPositions).write(to: configURL, atomically: true, encoding: .utf8)
         return configURL
     }
 
@@ -32,7 +35,7 @@ enum PipelineConfigWriter {
         return target.path
     }
 
-    static func yaml(project: ProjectRecord, environment: EnvironmentConfig) -> String {
+    static func yaml(project: ProjectRecord, environment: EnvironmentConfig, manualPositions: [EarSide: ManualMicrophonePosition]? = nil) -> String {
         let output = URL(fileURLWithPath: project.saveLocation)
         let inference = project.settings.inference
         let preprocessing = project.settings.preprocessing
@@ -47,6 +50,14 @@ enum PipelineConfigWriter {
         let levelOffsetDB = yamlNumber(postprocessing.levelOffsetDB) ?? "-30"
         let leftEar = project.leftEar.isEmpty ? "null" : project.leftEar
         let rightEar = project.rightEar.isEmpty ? "null" : project.rightEar
+        let positions = manualPositions ?? Dictionary(uniqueKeysWithValues: EarSide.allCases.compactMap { side in
+            ArtifactScanner.validManualMicrophonePosition(for: project, side: side).map { (side, $0) }
+        })
+        let sourcePositions = EarSide.allCases.compactMap { side -> String? in
+            guard let position = positions[side] else { return nil }
+            return "  source_position_input_\(side.rawValue): [\(position.x), \(position.y), \(position.z)]"
+        }.joined(separator: "\n")
+        let sourcePositionBlock = sourcePositions.isEmpty ? "" : "\(sourcePositions)\n"
         return """
         paths:
           left_ear: \(leftEar)
@@ -106,7 +117,7 @@ enum PipelineConfigWriter {
           material_search_paths: None
           source_assignment_tolerance: 2.0
           source_assignment_face_count: \(sourceAssignmentFaceCount)
-        numcalc:
+        \(sourcePositionBlock)numcalc:
           enabled: false
           mode: local
           max_instances: \(numcalc.maxInstances)

@@ -32,6 +32,7 @@ enum StageState: String, Codable {
     case running
     case failed
     case done
+    case skipped
 }
 
 enum InputHandling: String, CaseIterable, Identifiable, Codable {
@@ -46,6 +47,22 @@ enum InputHandling: String, CaseIterable, Identifiable, Codable {
         case .reference: "Reference inputs"
         }
     }
+}
+
+enum EarSide: String, CaseIterable, Identifiable, Codable {
+    case left
+    case right
+
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
+struct ManualMicrophonePosition: Codable, Equatable {
+    var x: Double
+    var y: Double
+    var z: Double
+    var meshPath: String
+    var meshIdentity: String
 }
 
 struct Artifact: Identifiable, Hashable {
@@ -101,6 +118,8 @@ struct PreprocessingSettings: Codable, Equatable {
     var meshGammaOpposite = "0.1"
     var skipMeshGrading: Bool?
     var sourceAssignmentFaceCount: String? = "6"
+    var sourcePositionInputLeft: ManualMicrophonePosition?
+    var sourcePositionInputRight: ManualMicrophonePosition?
 }
 
 struct NumCalcSettings: Codable, Equatable {

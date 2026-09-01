@@ -28,9 +28,10 @@ struct Pinna2HRTFApp: App {
                         Text("Pinna2HRTF")
                             .font(.title.bold())
                         Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0")")
+                        Text("Git HEAD: \(Bundle.main.object(forInfoDictionaryKey: "Pinna2HRTFGitHead") as? String ?? "unknown")")
                         Text("© 2026 Any2HRTF")
                             .foregroundStyle(.secondary)
-                        Text("A desktop pipeline for ear-mesh preprocessing, Pinna2HRTF inference, Mesh2HRTF simulation, and SOFA export.")
+                        Text("A desktop pipeline for ear-mesh preprocessing, Mesh2PPM inference, Mesh2HRTF simulation, and SOFA export.")
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: 380)
                     }
@@ -79,6 +80,9 @@ final class Pinna2HRTFAppDelegate: NSObject, NSApplicationDelegate {
     private func installMenuItems() {
         DispatchQueue.main.async {
             guard let mainMenu = NSApp.mainMenu else { return }
+            if let fileMenu = mainMenu.items.first(where: { $0.title == "File" })?.submenu {
+                fileMenu.items.filter { $0.title == "Close Window" || $0.title == "Close" || ($0.keyEquivalent == "w" && $0.keyEquivalentModifierMask.contains(.command)) }.forEach { fileMenu.removeItem($0) }
+            }
             let helpMenuItem = mainMenu.items.first(where: { $0.title == "Help" }) ?? NSMenuItem(title: "Help", action: nil, keyEquivalent: "")
             if helpMenuItem.submenu == nil {
                 helpMenuItem.submenu = NSMenu(title: "Help")

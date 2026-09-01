@@ -114,6 +114,8 @@ class PreprocessingConfig(BaseModel):
     source_assignment_face_count: int = Field(default=6, ge=1)
     source_position_left: tuple[float, float, float] | None = None
     source_position_right: tuple[float, float, float] | None = None
+    source_position_input_left: tuple[float, float, float] | None = None
+    source_position_input_right: tuple[float, float, float] | None = None
 
 
 class NumCalcConfig(BaseModel):

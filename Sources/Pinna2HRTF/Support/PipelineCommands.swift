@@ -4,6 +4,7 @@ struct PipelineCommandContext {
     var canRemoveProject: Bool
     var canDuplicateProject: Bool
     var canRunProject: Bool
+    var canRunStage: (Stage) -> Bool
     var canStopProject: Bool
     var canResetProject: Bool
     var createProject: () -> Void
@@ -54,9 +55,9 @@ struct PipelineCommands: Commands {
             Menu("Run Stage") {
                 ForEach(Stage.allCases) { stage in
                     Button(stage.title) {
-                        commands?.runStage(stage)
-                    }
-                    .disabled(commands?.canRunProject != true)
+                    commands?.runStage(stage)
+                }
+                    .disabled(commands?.canRunStage(stage) != true)
                 }
             }
 
@@ -75,7 +76,7 @@ struct PipelineCommands: Commands {
 
             Divider()
 
-            Button("Refresh Artifacts") {
+            Button("Refresh Project Files") {
                 commands?.refreshArtifacts()
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])

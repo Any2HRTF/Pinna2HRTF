@@ -190,20 +190,25 @@ def ear_canal_closer(ear, mode="legacy"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--ear_path', type=str, required=True, help='Path to the ear mesh')
-    parser.add_argument('--export_path', type=str, required=True, help='Path to save the closed up ear to')
+    parser.add_argument('--export_path', type=str, required=False, default=None, help='Path to save the closed up ear to')
     parser.add_argument('--landmark_path', type=str, required=False, default=None, help='Path to save the estimated ear canal landmark')
     parser.add_argument('--side', type=str, required=False, default='auto', help='Ear side')
+    parser.add_argument('--estimate-only', action='store_true')
     parser.add_argument('--mode', type=str, required=False, default='legacy',
                         choices=['legacy', 'interpolated'],
                         help='Cap construction mode (see ear_canal_closer docstring). Default: legacy.')
     args = parser.parse_args()
 
     ear_path = args.ear_path
-    export_path = args.export_path
 
     ear = trimesh.load(ear_path)
     if args.landmark_path:
         with open(args.landmark_path, "w") as f:
             json.dump(estimate_ear_canal_position(ear, side=args.side), f, indent=2)
+    if args.estimate_only:
+        raise SystemExit(0)
+    if not args.export_path:
+        parser.error('--export_path is required unless --estimate-only is used')
+    export_path = args.export_path
     ear = ear_canal_closer(ear, mode=args.mode)
     ear.export(export_path)

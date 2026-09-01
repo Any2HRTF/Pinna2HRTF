@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 REPO_ROOT="$(cd "$ROOT/.." && pwd)"
 APP_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$ROOT/pyproject.toml" | head -n 1)"
+GIT_HEAD="$(git -C "$ROOT" rev-parse --short HEAD)"
 SCRATCH="/private/tmp/pinna2hrtf-swift-build"
 APP_DIR="$ROOT/build/release/Pinna2HRTF.app"
 CONTENTS="$APP_DIR/Contents"
@@ -135,6 +136,8 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <string>$APP_VERSION</string>
   <key>CFBundleVersion</key>
   <string>1</string>
+  <key>Pinna2HRTFGitHead</key>
+  <string>$GIT_HEAD</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
   <key>NSHighResolutionCapable</key>

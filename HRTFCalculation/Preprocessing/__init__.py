@@ -22,10 +22,14 @@ def pinna_y_center(ear):
 
 
 def place_pinnae_at_head_radius(left_ear, right_ear, head_radius):
+    translations = {"left": (0.0, 0.0, 0.0), "right": (0.0, 0.0, 0.0)}
     if left_ear is not None:
-        left_ear.apply_translation((0, head_radius - pinna_y_center(left_ear), 0))
+        translations["left"] = (0.0, head_radius - pinna_y_center(left_ear), 0.0)
+        left_ear.apply_translation(translations["left"])
     if right_ear is not None:
-        right_ear.apply_translation((0, -head_radius - pinna_y_center(right_ear), 0))
+        translations["right"] = (0.0, -head_radius - pinna_y_center(right_ear), 0.0)
+        right_ear.apply_translation(translations["right"])
+    return translations
 
 
 def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, mesh2hrtf_path, evaluation_grid, preprocessing=None, output_dir=None, export_path=None, logger=print):
@@ -97,8 +101,9 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
         logger("Loading input ear meshes")
         left_ear = trimesh.load(left_path) if left_path is not None else None
         right_ear = trimesh.load(right_path) if right_path is not None else None
+        translations = {"left": (0.0, 0.0, 0.0), "right": (0.0, 0.0, 0.0)}
         if settings.head_radius is not None:
-            place_pinnae_at_head_radius(left_ear, right_ear, settings.head_radius)
+            translations = place_pinnae_at_head_radius(left_ear, right_ear, settings.head_radius)
             logger(f"Placed pinnae at head radius: {settings.head_radius}")
         ears = {"left": left_ear, "right": right_ear}
         for side, ear in ears.items():
@@ -115,6 +120,9 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             if ear is None:
                 continue
             source_position = settings.source_position_left if side == "left" else settings.source_position_right
+            source_position_input = settings.source_position_input_left if side == "left" else settings.source_position_input_right
+            if source_position is None and source_position_input is not None:
+                source_position = tuple(coordinate + translation for coordinate, translation in zip(source_position_input, translations[side]))
             landmarks[side] = {"position": list(source_position), "method": "configured", "confidence": 1.0} if source_position is not None else estimate_ear_canal_position(ear, side=side)
             with open(landmark_paths[side], "w") as f:
                 json.dump(landmarks[side], f, indent=2)
