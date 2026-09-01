@@ -28,9 +28,10 @@ struct Pinna2HRTFApp: App {
                         Text("Pinna2HRTF")
                             .font(.title.bold())
                         Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0")")
+                        Text("Git HEAD: \(Bundle.main.object(forInfoDictionaryKey: "Pinna2HRTFGitHead") as? String ?? "unknown")")
                         Text("© 2026 Any2HRTF")
                             .foregroundStyle(.secondary)
-                        Text("A desktop pipeline for ear-mesh preprocessing, Pinna2HRTF inference, Mesh2HRTF simulation, and SOFA export.")
+                        Text("A desktop pipeline for ear-mesh preprocessing, Mesh2PPM inference, Mesh2HRTF simulation, and SOFA export.")
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: 380)
                     }
