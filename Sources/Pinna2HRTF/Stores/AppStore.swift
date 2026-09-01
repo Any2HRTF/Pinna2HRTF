@@ -643,10 +643,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             return project.settings.inference.usePredictionsForPreprocessing && !project.leftEar.isEmpty && !project.rightEar.isEmpty && FileManager.default.fileExists(atPath: project.settings.inference.modelConfig) && FileManager.default.fileExists(atPath: project.settings.inference.modelCheckpoint)
         case .preprocessing:
             guard !stageBlocked(stage), FileManager.default.fileExists(atPath: environment.meshGradingExecutable), FileManager.default.fileExists(atPath: environment.externalDir + "/src/Mesh2HRTF/mesh2hrtf"), !isPlacingMicrophone else { return false }
-            return EarSide.allCases.allSatisfy { side in
-                let sourcePath = side == .left ? project.leftEar : project.rightEar
-                return sourcePath.isEmpty || ArtifactScanner.manualMicrophonePosition(for: project, side: side) == nil || ArtifactScanner.validManualMicrophonePosition(for: project, side: side) != nil
-            }
+            return true
         case .numcalc:
             return ArtifactScanner.stageIsComplete(.preprocessing, project: project) && FileManager.default.fileExists(atPath: environment.numcalcExecutable)
         case .postprocessing:
@@ -670,18 +667,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         if stage == .preprocessing, isPlacingMicrophone {
             appendLog("Finish or cancel microphone placement before preprocessing.")
             return
-        }
-        if stage == .preprocessing {
-            let staleSides = EarSide.allCases.filter { side in
-                let sourcePath = side == .left ? project.leftEar : project.rightEar
-                return !sourcePath.isEmpty && ArtifactScanner.manualMicrophonePosition(for: project, side: side) != nil && ArtifactScanner.validManualMicrophonePosition(for: project, side: side) == nil
-            }
-            guard staleSides.isEmpty else {
-                let names = staleSides.map(\.title).joined(separator: " and ")
-                microphonePlacementError = "The saved \(names.lowercased()) microphone position no longer matches the preprocessing mesh. Place it again or choose automatic positioning."
-                appendLog(microphonePlacementError ?? "A saved microphone position is stale.")
-                return
-            }
         }
         guard (!project.leftEar.isEmpty || !project.rightEar.isEmpty), !project.saveLocation.isEmpty else {
             appendLog("Select at least one ear mesh and a save location before running.")
@@ -739,6 +724,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 store.appendLog(process.terminationStatus == 0 ? "\(stage.title) finished for \(project.name)" : "\(stage.title) for \(project.name) exited with status \(process.terminationStatus)", for: project.id)
                 store.runningProcesses[project.id] = nil
                 store.runningStages[project.id] = nil
+                if stage == .inference, process.terminationStatus == 0 {
+                    store.clearStaleMicrophonePositions(for: project.id)
+                }
                 store.refreshArtifacts()
             }
         }
@@ -750,6 +738,24 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             runningStages[project.id] = nil
             refreshArtifacts()
             appendLog("Could not start \(stage.title): \(error.localizedDescription)", for: project.id)
+        }
+    }
+
+    func clearStaleMicrophonePositions(for projectID: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        var changed = false
+        for side in EarSide.allCases {
+            guard ArtifactScanner.manualMicrophonePosition(for: projects[index], side: side) != nil, ArtifactScanner.validManualMicrophonePosition(for: projects[index], side: side) == nil else { continue }
+            if side == .left {
+                projects[index].settings.preprocessing.sourcePositionInputLeft = nil
+            } else {
+                projects[index].settings.preprocessing.sourcePositionInputRight = nil
+            }
+            changed = true
+        }
+        if changed {
+            persist()
+            appendLog("Cleared microphone positions tied to the previous inference mesh.", for: projectID)
         }
     }
 
