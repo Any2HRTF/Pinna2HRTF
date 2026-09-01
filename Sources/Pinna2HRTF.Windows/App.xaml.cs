@@ -1,7 +1,19 @@
-using System.Windows;
+using Microsoft.UI.Xaml;
 
 namespace Pinna2HRTF.Windows;
 
-public partial class App : System.Windows.Application
+public partial class App : Application
 {
+    Window? window;
+
+    public App()
+    {
+        InitializeComponent();
+    }
+
+    protected override void OnLaunched(LaunchActivatedEventArgs args)
+    {
+        window = new MainWindow();
+        window.Activate();
+    }
 }
