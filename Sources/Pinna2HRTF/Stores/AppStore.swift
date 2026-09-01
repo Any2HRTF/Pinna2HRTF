@@ -411,6 +411,16 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         run(stage: stage)
     }
 
+    func stageBlocked(_ stage: Stage) -> Bool {
+        guard let project = selectedProject else { return false }
+        return stage == .preprocessing && project.settings.inference.usePredictionsForPreprocessing && !ArtifactScanner.stageIsComplete(.inference, project: project)
+    }
+
+    func canRun(stage: Stage) -> Bool {
+        guard let project = selectedProject, runningProcesses[project.id] == nil else { return false }
+        return !stageBlocked(stage)
+    }
+
     func run(stage: Stage) {
         guard let project = selectedProject else {
             appendLog("Create or select a project before running.")
@@ -418,6 +428,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
         guard runningProcesses[project.id] == nil else {
             appendLog("\(project.name) already has a running task.")
+            return
+        }
+        guard !stageBlocked(stage) else {
+            appendLog("Run BezierPPM Inference before preprocessing when Use BezierPPM is enabled.")
             return
         }
         guard (!project.leftEar.isEmpty || !project.rightEar.isEmpty), !project.saveLocation.isEmpty else {

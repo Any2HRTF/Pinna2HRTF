@@ -26,7 +26,7 @@ struct RunPanelView: View {
                     StageRunButton(stage: stage, state: store.stageStates[stage] ?? .ready) {
                         store.run(stage: stage)
                     }
-                    .disabled(selectedProjectIsRunning)
+                    .disabled(!store.canRun(stage: stage))
                 }
             }
             Button {

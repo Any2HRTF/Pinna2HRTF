@@ -1051,6 +1051,13 @@ public partial class MainWindow : Window
             RefreshPipelineStatus();
             return;
         }
+        if (stage == Stage.Preprocessing && PreprocessingBlocked(project))
+        {
+            queuedStages.Remove(project.Id);
+            AppendLog("Run BezierPPM Inference before preprocessing when Use BezierPPM is enabled.", project.Id);
+            RefreshPipelineStatus();
+            return;
+        }
         if (stage == Stage.Preprocessing && !File.Exists(environment.MeshGradingExecutable))
         {
             queuedStages.Remove(project.Id);
@@ -1463,11 +1470,12 @@ ui:
         for (var i = 0; i < buttons.Length; i++)
         {
             buttons[i].Content = active == Stage.GetValues()[i] ? "Stop" : "Run";
-            buttons[i].IsEnabled = active == null || active == Stage.GetValues()[i];
+            buttons[i].IsEnabled = active == Stage.GetValues()[i] || (active == null && !(Stage.GetValues()[i] == Stage.Preprocessing && PreprocessingBlocked(project)));
         }
     }
 
     bool InferenceIsAutomatic(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing && !string.IsNullOrWhiteSpace(project.LeftEar) && !string.IsNullOrWhiteSpace(project.RightEar);
+    bool PreprocessingBlocked(ProjectRecord project) => InferenceIsAutomatic(project) && !StageIsComplete(Stage.Inference, project);
     Stage[] AutomaticStages(ProjectRecord project) => InferenceIsAutomatic(project) ? Stage.GetValues() : [Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing];
 
     string NumCalcStatus(ProjectRecord project)
