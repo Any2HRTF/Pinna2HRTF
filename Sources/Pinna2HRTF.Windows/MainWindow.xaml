@@ -1,6 +1,5 @@
 <Window x:Class="Pinna2HRTF.Windows.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Pinna2HRTF">
-  <Grid x:Name="Root" Loaded="WindowLoaded" />
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid x:Name="Root" />
 </Window>

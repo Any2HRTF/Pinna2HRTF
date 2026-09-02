@@ -9,6 +9,7 @@ $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $windowsProject = Join-Path $root "Sources\Pinna2HRTF.Windows"
 $dist = Join-Path $root "dist\windows\Pinna2HRTF"
 $publish = Join-Path $windowsProject "bin\Release\net8.0-windows10.0.19041.0\win-x64\publish"
+$buildOutput = Split-Path $publish -Parent
 $distExternal = Join-Path $dist "External"
 $distBin = Join-Path $distExternal "bin"
 $dotnet = Get-Command "dotnet.exe" -ErrorAction SilentlyContinue
@@ -31,12 +32,33 @@ if (Test-Path $dist) {
 }
 
 & $dotnetPath publish (Join-Path $windowsProject "Pinna2HRTF.Windows.csproj") -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet publish failed with exit code $LASTEXITCODE"
+}
 
 New-Item -ItemType Directory -Path $dist | Out-Null
 Copy-Item (Join-Path $publish "*") $dist -Recurse -Force
+# WinUI's XAML compiler emits the page resources next to the publish folder,
+# so copy them explicitly for unpackaged/self-contained deployments.
+foreach ($xamlResource in @("App.xbf", "MainWindow.xbf")) {
+    $sourceXamlResource = Join-Path $buildOutput $xamlResource
+    if (Test-Path $sourceXamlResource) {
+        Copy-Item $sourceXamlResource (Join-Path $dist $xamlResource) -Force
+    }
+}
+$appPri = Join-Path $buildOutput "Pinna2HRTF.Windows.pri"
+if (Test-Path $appPri) {
+    Copy-Item $appPri (Join-Path $dist "Pinna2HRTF.Windows.pri") -Force
+}
 Copy-Item (Join-Path $root "HRTFCalculation") (Join-Path $dist "HRTFCalculation") -Recurse -Force
 Copy-Item (Join-Path $root "pyproject.toml") (Join-Path $dist "pyproject.toml") -Force
 Copy-Item (Join-Path $root "ProjectSettingHelp.json") (Join-Path $dist "ProjectSettingHelp.json") -Force
+if (Test-Path (Join-Path $windowsProject "Resources\app_icon.ico")) {
+    Copy-Item (Join-Path $windowsProject "Resources\app_icon.ico") (Join-Path $dist "app_icon.ico") -Force
+}
+if (Test-Path (Join-Path $root "icon.png")) {
+    Copy-Item (Join-Path $root "icon.png") (Join-Path $dist "icon.png") -Force
+}
 
 if (-not (Test-Path (Join-Path $root "uv.lock"))) {
     throw "uv.lock is required to build the portable Windows app."
@@ -45,10 +67,12 @@ Copy-Item (Join-Path $root "uv.lock") (Join-Path $dist "uv.lock") -Force
 
 New-Item -ItemType Directory -Path $distBin -Force | Out-Null
 $sourceExternal = Join-Path $root "External"
-foreach ($name in @("NumCalc.exe", "NumCalc.source-commit", "hrtf_mesh_grading.exe")) {
-    $source = Join-Path (Join-Path $sourceExternal "bin") $name
-    if (Test-Path $source) {
-        Copy-Item $source (Join-Path $distBin $name) -Force
+$sourceBin = Join-Path $sourceExternal "bin"
+if (Test-Path $sourceBin) {
+    # Mesh grading and NumCalc are native builds. Copy their complete sibling
+    # runtime (DLLs and helper tools) so the portable app also works offline.
+    Get-ChildItem $sourceBin -File -Force | Where-Object { $_.Name -ne "uv.exe" } | ForEach-Object {
+        Copy-Item $_.FullName (Join-Path $distBin $_.Name) -Force
     }
 }
 $sourceMesh2Hrtf = Join-Path $sourceExternal "src\Mesh2HRTF"
@@ -144,6 +168,13 @@ if ($missingExternalTools.Count -gt 0) {
     } else {
         throw $message
     }
+}
+
+$missingNativeRuntime = @("libpmp.dll", "libpmp_vis.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll") | Where-Object {
+    -not (Test-Path (Join-Path $distBin $_))
+}
+if ($missingNativeRuntime.Count -gt 0) {
+    throw "Missing native external runtime file(s): $($missingNativeRuntime -join ', '). Copy the matching DLLs next to the Windows tools before building."
 }
 
 $mesh2input = Join-Path $distExternal "src\Mesh2HRTF\mesh2hrtf\Mesh2Input\mesh2input.py"

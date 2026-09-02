@@ -1,4 +1,5 @@
 using HelixToolkit.Maths;
+using HelixToolkit;
 using HelixToolkit.SharpDX;
 using HelixToolkit.WinUI.SharpDX;
 using Microsoft.UI;
@@ -19,6 +20,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Windows.Foundation;
 using Windows.Storage.Pickers;
 using Windows.System;
@@ -28,6 +30,18 @@ namespace Pinna2HRTF.Windows;
 
 public partial class MainWindow : Window
 {
+    [DllImport("user32.dll")]
+    static extern IntPtr LoadCursor(IntPtr hInstance, IntPtr lpCursorName);
+    [DllImport("user32.dll")]
+    static extern IntPtr SetCursor(IntPtr hCursor);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern IntPtr LoadLibraryEx(string lpFileName, IntPtr hFile, uint dwFlags);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool FreeLibrary(IntPtr hModule);
+    const uint LoadLibrarySearchDllLoadDir = 0x00000100;
+    const uint LoadLibrarySearchDefaultDirs = 0x00001000;
+    static readonly IntPtr ResizeCursor = LoadCursor(IntPtr.Zero, new IntPtr(32644)); // IDC_SIZEWE
+    static readonly IntPtr ArrowCursor = LoadCursor(IntPtr.Zero, new IntPtr(32512)); // IDC_ARROW
     readonly ObservableCollection<ProjectRecord> projects = [];
     readonly ObservableCollection<Artifact> artifacts = [];
     readonly Dictionary<Guid, Process> runningProcesses = [];
@@ -35,14 +49,16 @@ public partial class MainWindow : Window
     readonly Dictionary<Guid, Queue<Stage>> queuedStages = [];
     readonly Dictionary<Guid, HashSet<Stage>> failedStages = [];
     readonly Dictionary<Guid, string> projectLogs = [];
+    readonly Dictionary<Guid, ProjectRowUi> projectRows = [];
     readonly Dictionary<Guid, ProjectViewerState> viewerStates = [];
     readonly Dictionary<string, SettingHelpEntry> settingHelp = [];
     readonly JsonSerializerOptions jsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true, Converters = { new JsonStringEnumConverter() } };
-    readonly DispatcherQueueTimer statusTimer;
+    readonly Microsoft.UI.Dispatching.DispatcherQueueTimer statusTimer;
     readonly Dictionary<string, Control> settingControls = [];
     readonly List<Button> stageButtons = [];
     readonly List<TextBlock> stageStatusLabels = [];
     readonly List<Expander> settingSections = [];
+    readonly List<Element3D> sceneLights = [];
     ProjectRegistry registry = new();
     EnvironmentConfig environment = new();
     ProjectRecord? selectedProject;
@@ -50,6 +66,7 @@ public partial class MainWindow : Window
     MeshGeometryModel3D? microphoneVisual;
     MeshData? currentMesh;
     string? selectedArtifactPath;
+    string? selectedArtifactSide;
     string packageRoot = "";
     string appData = "";
     string registryPath = "";
@@ -57,6 +74,15 @@ public partial class MainWindow : Window
     string uiStatePath = "";
     double projectsExpandedWidth = 280;
     double liveLogExpandedHeight = 170;
+    double settingsExpandedWidth = 390;
+    readonly SolidColorBrush appBackgroundBrush = new();
+    readonly SolidColorBrush surfaceBrush = new();
+    readonly SolidColorBrush secondarySurfaceBrush = new();
+    readonly SolidColorBrush inputBackgroundBrush = new();
+    readonly SolidColorBrush borderBrush = new();
+    readonly SolidColorBrush primaryTextBrush = new();
+    readonly SolidColorBrush mutedTextBrush = new();
+    readonly SolidColorBrush viewerBackgroundBrush = new();
     bool loading;
     bool refreshingArtifacts;
     bool rotatingMesh;
@@ -67,9 +93,7 @@ public partial class MainWindow : Window
     bool closingConfirmed;
     Grid? contentGrid;
     ColumnDefinition? projectsColumn;
-    ColumnDefinition? mainProjectsColumn;
-    RowDefinition? liveLogRow;
-    RowDefinition? mainLiveLogRow;
+    ColumnDefinition? settingsColumn;
     ListView projectList = new();
     ComboBox artifactPicker = new();
     TextBlock selectedArtifactText = new();
@@ -77,6 +101,22 @@ public partial class MainWindow : Window
     TextBlock viewerPlaceholder = new();
     Viewport3DX meshViewport = new();
     Border meshViewerBackground = new();
+    Border? projectsPaneBorder;
+    Border? previewPanelBorder;
+    Border? logPanelBorder;
+    Border? settingsPaneBorder;
+    Grid? projectsHeader;
+    TextBlock? projectsHeaderText;
+    FrameworkElement? projectsBody;
+    FrameworkElement? projectsActions;
+    Button? projectsCollapseButton;
+    Button? logCollapseButton;
+    RowDefinition? centerLogRow;
+    bool projectsCollapsed;
+    bool logCollapsed;
+    bool viewportReady;
+    enum MeshPointerMode { None, Rotate, Pan }
+    MeshPointerMode meshPointerMode;
     TextBox logText = new();
     TextBlock numCalcStatusText = new();
     TextBlock placementCoordinates = new();
@@ -116,14 +156,24 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        statusTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
+        Root.Loaded += WindowLoaded;
+        Root.ActualThemeChanged += (_, _) => UpdateViewerAppearance();
+        statusTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
         statusTimer.Interval = TimeSpan.FromSeconds(2);
         statusTimer.Tick += (_, _) => { RefreshNumCalcStatus(); RefreshPipelineStatus(); };
-        ExtendsContentIntoTitleBar = false;
+        ExtendsContentIntoTitleBar = true;
         Activated += (_, _) => UpdateViewerAppearance();
         var hwnd = WindowNative.GetWindowHandle(this);
         var id = Win32Interop.GetWindowIdFromWindow(hwnd);
         var appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(id);
+        appWindow.Title = "Pinna2HRTF";
+        try
+        {
+            var icon = Path.Combine(AppContext.BaseDirectory, "app_icon.ico");
+            if (!File.Exists(icon)) icon = Path.Combine(AppContext.BaseDirectory, "Resources", "app_icon.ico");
+            if (File.Exists(icon)) appWindow.SetIcon(icon);
+        }
+        catch { }
         appWindow.Closing += AppWindowClosing;
     }
 
@@ -146,10 +196,12 @@ public partial class MainWindow : Window
         LoadViewerStates();
         LoadUiState();
         if (projectsColumn != null) projectsColumn.Width = new GridLength(Math.Clamp(projectsExpandedWidth, 240, 520));
-        if (liveLogRow != null) liveLogRow.Height = new GridLength(Math.Clamp(liveLogExpandedHeight, 100, 600));
-        if (mainProjectsColumn != null) mainProjectsColumn.Width = new GridLength(Math.Clamp(projectsExpandedWidth, 240, 520));
-        if (mainLiveLogRow != null) mainLiveLogRow.Height = new GridLength(Math.Clamp(liveLogExpandedHeight, 100, 600));
-        environment = registry.Environment.IsEmpty ? DefaultEnvironment() : registry.Environment;
+        if (centerLogRow != null) centerLogRow.Height = new GridLength(Math.Clamp(liveLogExpandedHeight, 100, 600));
+        if (settingsColumn != null) settingsColumn.Width = new GridLength(Math.Clamp(settingsExpandedWidth, 320, 560));
+        // Windows builds always use the bundled native tools. Older registries
+        // may contain absolute paths from a previous build directory; ignoring
+        // those paths prevents preprocessing from loading stale/missing DLLs.
+        environment = DefaultEnvironment();
         foreach (var project in projects)
         {
             if (int.TryParse(project.Settings.Preprocessing.FrequencyStepCount, out var steps))
@@ -161,7 +213,9 @@ public partial class MainWindow : Window
         if (selectedProject != null)
             projectList.SelectedIndex = projects.IndexOf(selectedProject);
         LoadSelectedProject();
-        RefreshArtifacts();
+        // Viewport3DX creates its item collection when its template is applied. Defer
+        // the first artifact load until the newly-created visual tree has completed layout.
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => RefreshArtifacts());
         UpdateViewerAppearance();
         statusTimer.Start();
         RefreshPipelineStatus();
@@ -170,45 +224,137 @@ public partial class MainWindow : Window
     void BuildInterface()
     {
         Root.Children.Clear();
-        Root.Background = new SolidColorBrush(Colors.White);
-        contentGrid = new Grid { Background = new SolidColorBrush(Colors.White) };
-        projectsColumn = new ColumnDefinition { Width = new GridLength(projectsExpandedWidth), MinWidth = 240, MaxWidth = 420 };
+        Root.RowDefinitions.Clear();
+        Root.ColumnDefinitions.Clear();
+        Root.UseLayoutRounding = true;
+        Root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(36) });
+        Root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        var titleBar = BuildTitleBar();
+        Grid.SetRow(titleBar, 0);
+        Root.Children.Add(titleBar);
+
+        contentGrid = new Grid { Background = appBackgroundBrush };
+        projectsColumn = new ColumnDefinition { Width = new GridLength(projectsExpandedWidth), MinWidth = 240, MaxWidth = 520 };
         contentGrid.ColumnDefinitions.Add(projectsColumn);
+        contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4), MinWidth = 4, MaxWidth = 4 });
         contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 420 });
-        contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(390), MinWidth = 320, MaxWidth = 520 });
+        contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4), MinWidth = 4, MaxWidth = 4 });
+        settingsColumn = new ColumnDefinition { Width = new GridLength(settingsExpandedWidth), MinWidth = 320, MaxWidth = 560 };
+        contentGrid.ColumnDefinitions.Add(settingsColumn);
         contentGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        liveLogRow = new RowDefinition { Height = new GridLength(liveLogExpandedHeight) };
-        contentGrid.RowDefinitions.Add(liveLogRow);
+        Grid.SetRow(contentGrid, 1);
         Root.Children.Add(contentGrid);
-        var menu = BuildMenu();
-        Grid.SetColumnSpan(menu, 3);
-        Grid.SetRow(menu, 0);
-        menu.Margin = new Thickness(0, 0, 0, 0);
-        var main = new Grid { Margin = new Thickness(0, 34, 0, 0) };
-        mainProjectsColumn = new ColumnDefinition { Width = new GridLength(projectsExpandedWidth), MinWidth = 240, MaxWidth = 520 };
-        main.ColumnDefinitions.Add(mainProjectsColumn);
-        main.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 420 });
-        main.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(390), MinWidth = 320, MaxWidth = 520 });
-        main.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        mainLiveLogRow = new RowDefinition { Height = new GridLength(liveLogExpandedHeight) };
-        main.RowDefinitions.Add(mainLiveLogRow);
-        Grid.SetColumnSpan(main, 3);
-        Grid.SetRowSpan(main, 2);
-        contentGrid.Children.Add(main);
-        contentGrid.Children.Add(menu);
         var projectsPane = BuildProjectsPane();
         Grid.SetColumn(projectsPane, 0);
-        main.Children.Add(projectsPane);
+        contentGrid.Children.Add(projectsPane);
+        var projectSplitter = BuildSplitter(true, ProjectSplitterDragged);
+        projectSplitter.Margin = new Thickness(-4, 0, -4, 0);
+        Grid.SetColumn(projectSplitter, 1);
+        contentGrid.Children.Add(projectSplitter);
         var center = BuildCenterPane();
-        Grid.SetColumn(center, 1);
-        main.Children.Add(center);
+        Grid.SetColumn(center, 2);
+        contentGrid.Children.Add(center);
+        var settingsSplitter = BuildSplitter(true, SettingsSplitterDragged);
+        settingsSplitter.Margin = new Thickness(-4, 0, -4, 0);
+        Grid.SetColumn(settingsSplitter, 3);
+        contentGrid.Children.Add(settingsSplitter);
         var settings = BuildSettingsPane();
-        Grid.SetColumn(settings, 2);
-        main.Children.Add(settings);
-        Grid.SetRow(center, 0);
-        Grid.SetRowSpan(center, 2);
-        Grid.SetRow(settings, 0);
-        Grid.SetRowSpan(settings, 2);
+        Grid.SetColumn(settings, 4);
+        contentGrid.Children.Add(settings);
+        SetProjectsCollapsed(projectsCollapsed, false);
+    }
+
+    Grid BuildSplitter(bool vertical, DragDeltaEventHandler handler)
+    {
+        var host = new Grid
+        {
+            Width = vertical ? 12 : double.NaN,
+            Height = vertical ? double.NaN : 12,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Background = new SolidColorBrush(Colors.Transparent),
+            IsHitTestVisible = true
+        };
+        var line = new Border
+        {
+            Width = vertical ? 1 : double.NaN,
+            Height = vertical ? double.NaN : 1,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Background = borderBrush,
+            IsHitTestVisible = false
+        };
+        var thumb = new Thumb
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Background = new SolidColorBrush(Colors.Transparent),
+            IsHitTestVisible = true
+        };
+        AttachResizeCursor(thumb);
+        thumb.DragDelta += handler;
+        host.Children.Add(line);
+        host.Children.Add(thumb);
+        return host;
+    }
+
+    Grid BuildTitleBar()
+    {
+        var titleBar = new Grid { Height = 36, Background = new SolidColorBrush(Colors.Transparent), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch };
+        titleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        titleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var logo = new Image { Width = 20, Height = 20, Margin = new Thickness(10, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+        var titleIcon = Path.Combine(AppContext.BaseDirectory, "app_icon.ico");
+        if (!File.Exists(titleIcon)) titleIcon = Path.Combine(AppContext.BaseDirectory, "icon.png");
+        if (File.Exists(titleIcon)) logo.Source = new BitmapImage(new Uri(titleIcon));
+        titleBar.Children.Add(logo);
+        var menu = BuildMenu();
+        menu.Height = 36;
+        menu.VerticalAlignment = VerticalAlignment.Stretch;
+        menu.HorizontalAlignment = HorizontalAlignment.Left;
+        Grid.SetColumn(menu, 1);
+        titleBar.Children.Add(menu);
+        SetTitleBar(titleBar);
+        return titleBar;
+    }
+
+    void ProjectSplitterDragged(object sender, DragDeltaEventArgs e)
+    {
+        if (projectsCollapsed || projectsColumn == null) return;
+        projectsExpandedWidth = Math.Clamp(projectsExpandedWidth + e.HorizontalChange, 240, 520);
+        projectsColumn.Width = new GridLength(projectsExpandedWidth);
+        SaveUiState();
+    }
+
+    void SettingsSplitterDragged(object sender, DragDeltaEventArgs e)
+    {
+        if (settingsColumn == null) return;
+        settingsExpandedWidth = Math.Clamp(settingsExpandedWidth - e.HorizontalChange, 320, 560);
+        settingsColumn.Width = new GridLength(settingsExpandedWidth);
+        SaveUiState();
+    }
+
+    static void AttachResizeCursor(FrameworkElement splitter)
+    {
+        splitter.PointerEntered += (_, _) => SetCursor(ResizeCursor);
+        splitter.PointerExited += (_, _) => SetCursor(ArrowCursor);
+    }
+
+    void SetProjectsCollapsed(bool collapsed, bool persist)
+    {
+        projectsCollapsed = collapsed;
+        if (projectsColumn != null)
+            projectsColumn.Width = new GridLength(collapsed ? 32 : Math.Clamp(projectsExpandedWidth, 240, 520));
+        if (projectsBody != null) projectsBody.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        if (projectsActions != null) projectsActions.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        if (projectsHeaderText != null) projectsHeaderText.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        if (projectsCollapseButton != null)
+        {
+            projectsCollapseButton.Content = collapsed ? "›" : "‹";
+            projectsCollapseButton.Visibility = Visibility.Visible;
+            ToolTipService.SetToolTip(projectsCollapseButton, collapsed ? "Expand Projects" : "Collapse Projects");
+        }
+        if (persist) SaveUiState();
     }
 
     MenuBar BuildMenu()
@@ -221,14 +367,16 @@ public partial class MainWindow : Window
         project.Items.Add(new MenuFlyoutSeparator());
         project.Items.Add(MenuItem("Delete Project", RemoveProjectClicked, "Ctrl+Delete"));
         var pipeline = new MenuBarItem { Title = "Pipeline" };
+        pipeline.Items.Add(MenuItem("Run All", RunAllClicked));
         pipeline.Items.Add(MenuItem("Run Next Step", RunNextClicked, "Ctrl+R"));
-        pipeline.Items.Add(MenuItem("BezierPPM Inference", RunInferenceClicked));
-        pipeline.Items.Add(MenuItem("Preprocessing", RunPreprocessingClicked));
-        pipeline.Items.Add(MenuItem("NumCalc", RunNumCalcClicked));
-        pipeline.Items.Add(MenuItem("Postprocessing", RunPostprocessingClicked));
+        var run = new MenuFlyoutSubItem { Text = "Run" };
+        run.Items.Add(MenuItem("BezierPPM Inference", RunInferenceClicked));
+        run.Items.Add(MenuItem("Preprocessing", RunPreprocessingClicked));
+        run.Items.Add(MenuItem("NumCalc", RunNumCalcClicked));
+        run.Items.Add(MenuItem("Postprocessing", RunPostprocessingClicked));
+        pipeline.Items.Add(run);
         pipeline.Items.Add(new MenuFlyoutSeparator());
         pipeline.Items.Add(MenuItem("Stop", StopClicked, "Ctrl+."));
-        pipeline.Items.Add(MenuItem("Run All", RunAllClicked));
         pipeline.Items.Add(MenuItem("Reset Outputs", ResetOutputsClicked));
         var help = new MenuBarItem { Title = "Help" };
         help.Items.Add(MenuItem("Online Documentation", OpenDocumentationClicked));
@@ -249,45 +397,63 @@ public partial class MainWindow : Window
 
     Border BuildProjectsPane()
     {
-        var pane = new Border { Background = new SolidColorBrush(Colors.White), BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(255, 220, 225, 228)), BorderThickness = new Thickness(0, 0, 1, 0) };
+        projectsPaneBorder = new Border { Background = surfaceBrush, BorderBrush = borderBrush, BorderThickness = new Thickness(0, 0, 1, 0) };
+        var pane = projectsPaneBorder;
         var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        var header = new Grid { Margin = new Thickness(14, 12, 10, 10) };
+        projectsHeader = new Grid { Margin = new Thickness(8, 8, 8, 8), HorizontalAlignment = HorizontalAlignment.Stretch };
+        var header = projectsHeader;
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.Children.Add(new TextBlock { Text = "Projects", FontSize = 20, VerticalAlignment = VerticalAlignment.Center });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        projectsHeaderText = new TextBlock { Text = "Projects", FontSize = 20, VerticalAlignment = VerticalAlignment.Center, Foreground = primaryTextBrush };
+        header.Children.Add(projectsHeaderText);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
-        buttons.Children.Add(ProjectButton("＋", "New project", CreateProjectClicked));
-        buttons.Children.Add(ProjectButton("⇧", "Import project", ImportProjectClicked));
-        buttons.Children.Add(ProjectButton("⧉", "Duplicate selected project", DuplicateProjectClicked));
-        buttons.Children.Add(ProjectButton("−", "Delete selected project", RemoveProjectClicked));
+        projectsActions = buttons;
+        buttons.Children.Add(ProjectButton("&#xE710;", "New project", CreateProjectClicked));
+        buttons.Children.Add(ProjectButton("&#xE896;", "Import project", ImportProjectClicked));
+        buttons.Children.Add(ProjectButton("&#xE8C8;", "Duplicate selected project", DuplicateProjectClicked));
+        buttons.Children.Add(ProjectButton("&#xE74D;", "Delete selected project", RemoveProjectClicked));
         Grid.SetColumn(buttons, 1);
         header.Children.Add(buttons);
         grid.Children.Add(header);
         projectList.SelectionChanged += ProjectSelectionChanged;
         projectList.Background = new SolidColorBrush(Colors.Transparent);
         projectList.BorderThickness = new Thickness(0);
+        projectList.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        projectList.VerticalContentAlignment = VerticalAlignment.Stretch;
         projectList.Margin = new Thickness(10, 0, 10, 10);
         Grid.SetRow(projectList, 1);
         grid.Children.Add(projectList);
+        projectsBody = projectList;
+        projectsCollapseButton = new Button { Content = "‹", Width = 28, Height = 28, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        ToolTipService.SetToolTip(projectsCollapseButton, "Collapse Projects");
+        projectsCollapseButton.Click += (_, _) => SetProjectsCollapsed(!projectsCollapsed, true);
+        Grid.SetColumn(projectsCollapseButton, 2);
+        header.Children.Add(projectsCollapseButton);
         pane.Child = grid;
         return pane;
     }
 
     Button ProjectButton(string glyph, string tip, RoutedEventHandler handler)
     {
-        var button = new Button { Content = glyph, Width = 32, Height = 32, Padding = new Thickness(0), ToolTip = tip };
+        var fontIcon = new FontIcon { FontFamily = new FontFamily("Segoe MDL2 Assets"), Glyph = glyph, Width = 32, Height = 32, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var button = new Button { Content = fontIcon, Width = 32, Height = 32, Padding = new Thickness(0) };
+        ToolTipService.SetToolTip(button, tip);
         button.Click += handler;
         return button;
     }
 
     Grid BuildCenterPane()
     {
-        var grid = new Grid { Margin = new Thickness(14, 48, 14, 14) };
+        var grid = new Grid { Margin = new Thickness(14, 14, 14, 14) };
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var preview = new Border { CornerRadius = new CornerRadius(8), BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(255, 220, 225, 228)), BorderThickness = new Thickness(1), Background = new SolidColorBrush(Colors.White) };
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(4) });
+        centerLogRow = new RowDefinition { Height = new GridLength(Math.Clamp(liveLogExpandedHeight, 100, 600)) };
+        grid.RowDefinitions.Add(centerLogRow);
+        previewPanelBorder = new Border { CornerRadius = new CornerRadius(8), BorderBrush = borderBrush, BorderThickness = new Thickness(1), Background = surfaceBrush };
+        var preview = previewPanelBorder;
         var previewGrid = new Grid();
         previewGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(86) });
         previewGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -314,10 +480,16 @@ public partial class MainWindow : Window
         Grid.SetColumn(pickerPanel, 1);
         header.Children.Add(pickerPanel);
         previewGrid.Children.Add(header);
-        meshViewerBackground = new Border { Background = new SolidColorBrush(ColorHelper.FromArgb(255, 237, 243, 242)) };
+        meshViewerBackground = new Border { Background = viewerBackgroundBrush };
         Grid.SetRow(meshViewerBackground, 1);
         var viewerGrid = new Grid();
-        meshViewport = new Viewport3DX { IsRotationEnabled = true, IsZoomEnabled = true, EnableMouseButtonHitTest = true, ModelUpDirection = new System.Numerics.Vector3(0, 0, 1), BackgroundColor = new Color4(0.93f, 0.95f, 0.95f, 1) };
+        meshViewport = new Viewport3DX { IsRotationEnabled = false, IsPanEnabled = false, IsMoveEnabled = false, IsZoomEnabled = true, EnableMouseButtonHitTest = true, ShowCoordinateSystem = false, ShowViewCube = false, ModelUpDirection = new System.Numerics.Vector3(0, 0, 1), BackgroundColor = ColorHelper.FromArgb(255, 237, 243, 242), EffectsManager = new DefaultEffectsManager() };
+        meshViewport.Loaded += (_, _) =>
+        {
+            viewportReady = true;
+            EnsureSceneLighting();
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RefreshArtifacts);
+        };
         meshViewport.PointerPressed += MeshViewportPointerPressed;
         meshViewport.PointerMoved += MeshViewportPointerMoved;
         meshViewport.PointerReleased += MeshViewportPointerReleased;
@@ -325,7 +497,7 @@ public partial class MainWindow : Window
         viewerGrid.Children.Add(meshViewport);
         imagePreview = new Image { Stretch = Stretch.Uniform, Margin = new Thickness(18), Visibility = Visibility.Collapsed };
         viewerGrid.Children.Add(imagePreview);
-        viewerPlaceholder = new TextBlock { Text = "No preview selected", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, FontSize = 18, Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)) };
+        viewerPlaceholder = new TextBlock { Text = "No preview selected", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, FontSize = 18, Foreground = mutedTextBrush };
         viewerGrid.Children.Add(viewerPlaceholder);
         placementBorder = new Border { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(10), Visibility = Visibility.Collapsed, Background = new SolidColorBrush(ColorHelper.FromArgb(230, 255, 255, 255)), Padding = new Thickness(10, 7, 10, 7) };
         placementPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
@@ -347,40 +519,97 @@ public partial class MainWindow : Window
         previewGrid.Children.Add(viewerGrid);
         preview.Child = previewGrid;
         grid.Children.Add(preview);
+        var logSplitter = BuildSplitter(false, LogSplitterDragged);
+        logSplitter.Margin = new Thickness(0, -4, 0, -4);
+        Grid.SetRow(logSplitter, 1);
+        grid.Children.Add(logSplitter);
         var log = BuildLogPane();
-        Grid.SetRow(log, 1);
+        Grid.SetRow(log, 2);
         grid.Children.Add(log);
+        SetLogCollapsed(logCollapsed, false);
         return grid;
+    }
+
+    void EnsureSceneLighting()
+    {
+        if (!viewportReady || meshViewport.Items == null || sceneLights.Count > 0)
+            return;
+        // Viewport3DX does not guarantee useful lighting when no scene lights are
+        // supplied by the host. Keep the setup neutral and diffuse so mesh shape
+        // remains readable in both light and dark themes.
+        var ambient = new AmbientLight3D { Color = Colors.White };
+        var key = new DirectionalLight3D { Color = Colors.White, Direction = new System.Numerics.Vector3(-0.45f, -0.65f, -0.6f) };
+        var fill = new DirectionalLight3D { Color = ColorHelper.FromArgb(210, 220, 235, 255), Direction = new System.Numerics.Vector3(0.7f, 0.25f, -0.35f) };
+        var rim = new DirectionalLight3D { Color = ColorHelper.FromArgb(170, 255, 235, 210), Direction = new System.Numerics.Vector3(0.15f, 0.55f, 0.8f) };
+        sceneLights.AddRange([ambient, key, fill, rim]);
+        foreach (var light in sceneLights)
+            meshViewport.Items.Add(light);
+    }
+
+    void LogSplitterDragged(object sender, DragDeltaEventArgs e)
+    {
+        if (logCollapsed || centerLogRow == null) return;
+        liveLogExpandedHeight = Math.Clamp(liveLogExpandedHeight - e.VerticalChange, 100, 600);
+        centerLogRow.Height = new GridLength(liveLogExpandedHeight);
+        SaveUiState();
     }
 
     Border BuildLogPane()
     {
-        var panel = new Border { Margin = new Thickness(0, 10, 0, 0), Background = new SolidColorBrush(Colors.White), BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(255, 220, 225, 228)), BorderThickness = new Thickness(1) };
+        logPanelBorder = new Border { Margin = new Thickness(0, 10, 0, 0), Background = surfaceBrush, BorderBrush = borderBrush, BorderThickness = new Thickness(1) };
+        var panel = logPanelBorder;
         var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(34) });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         var header = new Grid { Margin = new Thickness(10, 0, 6, 0) };
-        header.Children.Add(new TextBlock { Text = "Live Log", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var title = new TextBlock { Text = "Live Log", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(title, 1);
+        header.Children.Add(title);
         var clear = new Button { Content = "Clear", HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(10, 2, 10, 2) };
         clear.Click += ClearLogClicked;
+        Grid.SetColumn(clear, 2);
         header.Children.Add(clear);
         grid.Children.Add(header);
         logText = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Consolas"), FontSize = 12, BorderThickness = new Thickness(0), Margin = new Thickness(10) };
         ScrollViewer.SetVerticalScrollBarVisibility(logText, ScrollBarVisibility.Auto);
         Grid.SetRow(logText, 1);
         grid.Children.Add(logText);
+        logCollapseButton = new Button { Content = "⌄", Width = 26, Height = 26, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
+        ToolTipService.SetToolTip(logCollapseButton, "Collapse Live Log");
+        logCollapseButton.Click += (_, _) => SetLogCollapsed(!logCollapsed, true);
+        Grid.SetColumn(logCollapseButton, 0);
+        header.Children.Add(logCollapseButton);
         panel.Child = grid;
         return panel;
     }
 
+    void SetLogCollapsed(bool collapsed, bool persist)
+    {
+        logCollapsed = collapsed;
+        if (centerLogRow != null)
+            centerLogRow.Height = new GridLength(collapsed ? 34 : Math.Clamp(liveLogExpandedHeight, 100, 600));
+        logText.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        if (logCollapseButton != null)
+        {
+            logCollapseButton.Content = collapsed ? "⌃" : "⌄";
+            logCollapseButton.Visibility = Visibility.Visible;
+            ToolTipService.SetToolTip(logCollapseButton, collapsed ? "Expand Live Log" : "Collapse Live Log");
+        }
+        if (persist) SaveUiState();
+    }
+
     Border BuildSettingsPane()
     {
-        var pane = new Border { Background = new SolidColorBrush(ColorHelper.FromArgb(255, 251, 251, 252)), BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(255, 220, 225, 228)), BorderThickness = new Thickness(1, 0, 0, 0) };
+        settingsPaneBorder = new Border { Background = secondarySurfaceBrush, BorderBrush = borderBrush, BorderThickness = new Thickness(1, 0, 0, 0) };
+        var pane = settingsPaneBorder;
         var outer = new Grid();
         outer.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         outer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        var settings = new StackPanel { Margin = new Thickness(14) };
+        var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        var settings = new StackPanel { Margin = new Thickness(12, 10, 12, 10), HorizontalAlignment = HorizontalAlignment.Stretch };
         settings.Children.Add(new TextBlock { Text = "Project", FontSize = 20, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) });
         AddSetting(settings, "Project name", "project.name", projectNameBox);
         AddPathSetting(settings, "Left ear (optional)", "project.left_ear", leftEarBox, BrowseLeftEarClicked);
@@ -389,8 +618,7 @@ public partial class MainWindow : Window
         settings.Children.Add(new TextBlock { Text = "Choose at least one ear mesh.", Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)), Margin = new Thickness(0, 3, 0, 4) });
         AddSetting(settings, "Use BezierPPM", "project.use_bezierppm", usePredictionsBox, "Use BezierPPM");
         AddExpander(settings, "BezierPPM Inference", [AddSettingPanel("Model", "inference.model", modelPicker)]);
-        AddPathSetting(settings, "Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked, true);
-        AddExpander(settings, "Mesh2HRTF", [AddSettingPanel("Use custom head radius", "mesh2hrtf.use_head_radius", useHeadRadiusBox, "Use custom head radius"), AddSettingPanel("Head radius", "mesh2hrtf.head_radius", headRadiusBox), AddSettingPanel("Min frequency", "mesh2hrtf.min_frequency", minFrequencyBox), AddSettingPanel("Max frequency", "mesh2hrtf.max_frequency", maxFrequencyBox), AddSettingPanel("Frequency steps (minimum 2)", "mesh2hrtf.frequency_steps", frequencyStepsBox), AddSettingPanel("Microphone faces", "mesh2hrtf.microphone_faces", microphoneFacesBox)]);
+        AddExpander(settings, "Mesh2HRTF", [PathSettingPanel("Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked), AddSettingPanel("Use custom head radius", "mesh2hrtf.use_head_radius", useHeadRadiusBox, "Use custom head radius"), AddSettingPanel("Head radius", "mesh2hrtf.head_radius", headRadiusBox), AddSettingPanel("Min frequency", "mesh2hrtf.min_frequency", minFrequencyBox), AddSettingPanel("Max frequency", "mesh2hrtf.max_frequency", maxFrequencyBox), AddSettingPanel("Frequency steps (minimum 2)", "mesh2hrtf.frequency_steps", frequencyStepsBox), AddSettingPanel("Microphone faces", "mesh2hrtf.microphone_faces", microphoneFacesBox)]);
         AddExpander(settings, "Mesh Grading", [AddSettingPanel("Min edge length", "mesh_grading.min_edge_length", meshMinEdgeBox), AddSettingPanel("Max edge length", "mesh_grading.max_edge_length", meshMaxEdgeBox), AddSettingPanel("Max error", "mesh_grading.max_error", meshMaxErrorBox), AddSettingPanel("Gamma", "mesh_grading.gamma", meshGammaBox), AddSettingPanel("Gamma opposite", "mesh_grading.gamma_opposite", meshGammaOppositeBox)]);
         AddExpander(settings, "NumCalc", [AddSettingPanel("Parallel instances", "numcalc.parallel_instances", maxInstancesBox), AddSettingPanel("CPU limit (%)", "numcalc.cpu_limit", maxCpuLoadBox), AddSettingPanel("Adaptive FMM expansion length", "numcalc.adaptive_fmm", adaptiveFmmLengthBox, "Adaptive FMM expansion length")]);
         AddExpander(settings, "Postprocessing", [AddSettingPanel("Normalize HRTFs", "postprocessing.normalize", normalizeHrtfsBox, "Normalize HRTFs"), AddSettingPanel("Level offset (dB)", "postprocessing.level_offset", levelOffsetBox)]);
@@ -411,7 +639,7 @@ public partial class MainWindow : Window
 
     Grid AddSettingPanel(string label, string id, Control control, string? checkBoxText = null)
     {
-        var row = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+        var row = new Grid { Margin = new Thickness(0, 2, 0, 0), HorizontalAlignment = HorizontalAlignment.Stretch };
         if (control is CheckBox checkBox)
         {
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -419,8 +647,7 @@ public partial class MainWindow : Window
             checkBox.Content = checkBoxText ?? label;
             checkBox.HorizontalAlignment = HorizontalAlignment.Left;
             row.Children.Add(checkBox);
-            var info = new Button { Content = "ⓘ", Width = 25, Height = 25, Padding = new Thickness(0), Margin = new Thickness(6, 0, 0, 0), Tag = id, ToolTip = "Show information" };
-            info.Click += SettingInfoClicked;
+            var info = InfoButton(id);
             Grid.SetColumn(info, 1);
             row.Children.Add(info);
         }
@@ -430,14 +657,15 @@ public partial class MainWindow : Window
             row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var labelPanel = new StackPanel { Orientation = Orientation.Horizontal };
             labelPanel.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center });
-            var info = new Button { Content = "ⓘ", Width = 25, Height = 25, Padding = new Thickness(0), Margin = new Thickness(6, 0, 0, 0), Tag = id, ToolTip = "Show information" };
-            info.Click += SettingInfoClicked;
+            var info = InfoButton(id);
             labelPanel.Children.Add(info);
             row.Children.Add(labelPanel);
             Grid.SetRow(control, 1);
             row.Children.Add(control);
         }
         control.Tag = id;
+        control.HorizontalAlignment = HorizontalAlignment.Stretch;
+        control.MinHeight = 28;
         settingControls[id] = control;
         if (control is TextBox textBox)
             textBox.TextChanged += ProjectEdited;
@@ -451,12 +679,43 @@ public partial class MainWindow : Window
         return row;
     }
 
-    void AddPathSetting(StackPanel parent, string label, string id, TextBox box, RoutedEventHandler handler, bool nested = false)
+    void AddPathSetting(StackPanel parent, string label, string id, TextBox box, RoutedEventHandler handler, bool nested = false) => parent.Children.Add(PathSettingPanel(label, id, box, handler));
+
+    Grid PathSettingPanel(string label, string id, TextBox box, RoutedEventHandler handler)
     {
-        AddSetting(parent, label, id, box);
-        var browse = new Button { Content = "Browse", HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, -2, 0, 2) };
+        var row = new Grid { Margin = new Thickness(0, 2, 0, 0), HorizontalAlignment = HorizontalAlignment.Stretch };
+        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var labelPanel = new StackPanel { Orientation = Orientation.Horizontal };
+        labelPanel.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center });
+        var info = InfoButton(id);
+        labelPanel.Children.Add(info);
+        row.Children.Add(labelPanel);
+        var browse = new Button { Content = "Browse", HorizontalAlignment = HorizontalAlignment.Right, MinHeight = 28, Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(6, 0, 0, 0) };
         browse.Click += handler;
-        parent.Children.Add(browse);
+        Grid.SetColumn(browse, 1);
+        row.Children.Add(browse);
+        Grid.SetRow(box, 1);
+        Grid.SetColumnSpan(box, 2);
+        box.HorizontalAlignment = HorizontalAlignment.Stretch;
+        box.MinHeight = 28;
+        row.Children.Add(box);
+        box.Tag = id;
+        settingControls[id] = box;
+        box.TextChanged += ProjectEdited;
+        return row;
+    }
+
+    Button InfoButton(string id)
+    {
+        // Keep the hit target for keyboard/mouse help while hiding the visual
+        // chrome; the surrounding label remains clean and uncluttered.
+        var info = new Button { Content = null, Width = 20, Height = 20, Padding = new Thickness(0), Margin = new Thickness(4, 0, 0, 0), Tag = id, Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), Opacity = 0 };
+        ToolTipService.SetToolTip(info, "Show information");
+        info.Click += SettingInfoClicked;
+        return info;
     }
 
     void AddExpander(StackPanel parent, string title, IEnumerable<Grid> children)
@@ -464,25 +723,27 @@ public partial class MainWindow : Window
         var panel = new StackPanel { Spacing = 3 };
         foreach (var child in children)
             panel.Children.Add(child);
-        var expander = new Expander { Header = title, Content = panel, IsExpanded = false, Margin = new Thickness(0, 8, 0, 0) };
+        panel.HorizontalAlignment = HorizontalAlignment.Stretch;
+        var expander = new Expander { Header = title, Content = panel, IsExpanded = false, Margin = new Thickness(0, 5, 0, 0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
         settingSections.Add(expander);
         parent.Children.Add(expander);
     }
 
     Border BuildStagesPane()
     {
-        var border = new Border { BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(255, 220, 225, 228)), BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(14, 8, 14, 12) };
+        var border = new Border { BorderBrush = borderBrush, BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(14, 8, 14, 12) };
         var stack = new StackPanel();
         var stages = Stage.GetValues();
         for (var i = 0; i < stages.Length; i++)
         {
-            var row = new Grid { Margin = new Thickness(0, 3, 0, 3) };
+            var row = new Grid { Margin = new Thickness(0, 1, 0, 1), HorizontalAlignment = HorizontalAlignment.Stretch };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.Children.Add(new TextBlock { Text = stages[i].Title, VerticalAlignment = VerticalAlignment.Center });
             Grid.SetColumn(stageStatus[i], 1);
-            stageStatus[i].Margin = new Thickness(10, 0, 12, 0);
+            stageStatus[i].Margin = new Thickness(8, 0, 10, 0);
+            stageStatus[i].FontSize = 11;
             stageStatus[i].VerticalAlignment = VerticalAlignment.Center;
             row.Children.Add(stageStatus[i]);
             var button = new Button { Content = "Run", Width = 62, Padding = new Thickness(8, 3, 8, 3), Tag = stages[i] };
@@ -492,7 +753,7 @@ public partial class MainWindow : Window
             row.Children.Add(button);
             stack.Children.Add(row);
         }
-        runAllButton = new Button { Content = "Run All", Height = 34, Margin = new Thickness(0, 8, 0, 0), Background = new SolidColorBrush(ColorHelper.FromArgb(255, 111, 159, 156)), Foreground = new SolidColorBrush(Colors.White), HorizontalContentAlignment = HorizontalAlignment.Center };
+        runAllButton = new Button { Content = "Run All", Height = 34, Margin = new Thickness(0, 8, 0, 0), Background = new SolidColorBrush(ColorHelper.FromArgb(255, 111, 159, 156)), Foreground = new SolidColorBrush(Colors.White), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center };
         runAllButton.Click += RunAllClicked;
         stack.Children.Add(runAllButton);
         var statusRow = new Grid { Margin = new Thickness(0, 6, 0, 0) };
@@ -596,22 +857,31 @@ public partial class MainWindow : Window
     void RefreshProjectList()
     {
         var index = selectedProject == null ? -1 : projects.IndexOf(selectedProject);
-        projectList.Items.Clear();
+        var matching = projectList.Items.Count == projects.Count && projects.Select((project, i) => projectList.Items[i] is Grid row && ReferenceEquals(row.Tag, project)).All(x => x);
+        if (!matching)
+        {
+            projectRows.Clear();
+            projectList.Items.Clear();
+            foreach (var project in projects)
+            {
+                var ui = new ProjectRowUi(project);
+                projectRows[project.Id] = ui;
+                projectList.Items.Add(ui.Root);
+            }
+        }
         foreach (var project in projects)
         {
             project.IsRunning = runningProcesses.ContainsKey(project.Id);
             project.StatusText = NextStageSummary(project);
-            var row = new Grid { Margin = new Thickness(8, 7, 8, 7), Tag = project };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var text = new StackPanel();
-            text.Children.Add(new TextBlock { Text = project.Name, FontWeight = FontWeights.SemiBold, FontSize = 14 });
-            text.Children.Add(new TextBlock { Text = project.StatusText, FontSize = 11, Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)) });
-            row.Children.Add(text);
-            var spinner = new ProgressRing { Width = 17, Height = 17, IsActive = project.IsRunning, Visibility = project.IsRunning ? Visibility.Visible : Visibility.Collapsed, VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(spinner, 1);
-            row.Children.Add(spinner);
-            projectList.Items.Add(row);
+            if (projectRows.TryGetValue(project.Id, out var ui))
+            {
+                ui.Name.Text = project.Name;
+                ui.Status.Text = project.StatusText;
+                ui.Name.Foreground = primaryTextBrush;
+                ui.Status.Foreground = mutedTextBrush;
+                ui.Spinner.IsActive = project.IsRunning;
+                ui.Spinner.Visibility = project.IsRunning ? Visibility.Visible : Visibility.Collapsed;
+            }
         }
         if (index >= 0 && index < projectList.Items.Count && projectList.SelectedIndex != index)
             projectList.SelectedIndex = index;
@@ -620,15 +890,18 @@ public partial class MainWindow : Window
     void LoadSelectedProjectLog()
     {
         logText.Text = selectedProject != null && projectLogs.TryGetValue(selectedProject.Id, out var value) ? value : "";
+        RestoreLogScroll(0, true);
     }
 
     void RefreshModelOptions()
     {
         modelPicker.Items.Clear();
         var resources = Path.Combine(packageRoot, "HRTFCalculation", "Inference", "resources");
-        foreach (var path in Directory.Exists(resources) ? Directory.GetFiles(resources, "*.yaml").OrderBy(x => x) : [])
+        foreach (var path in Directory.Exists(resources) ? Directory.GetFiles(resources, "*.yaml").OrderBy(NaturalModelSortKey, StringComparer.OrdinalIgnoreCase) : Enumerable.Empty<string>())
             modelPicker.Items.Add(Path.GetFileNameWithoutExtension(path));
     }
+
+    static string NaturalModelSortKey(string path) => Regex.Replace(Path.GetFileNameWithoutExtension(path), "\\d+", match => match.Value.PadLeft(12, '0'), RegexOptions.CultureInvariant);
 
     void SelectModel(ProjectRecord? project)
     {
@@ -850,26 +1123,26 @@ public partial class MainWindow : Window
                 list.Add(new Artifact(Path.GetFileNameWithoutExtension(file), file));
         if (!string.IsNullOrWhiteSpace(project.LeftEar))
         {
-            list.Add(new Artifact("Input left ear", project.LeftEar));
-            list.Add(new Artifact("Left simulation mesh", Path.Combine(project.SaveLocation, "Intermediates", "Left", "graded_head.ply")));
-            AddMeshFolder(list, "Predicted left ear", Path.Combine(project.SaveLocation, project.Settings.Inference.PredictionLeftFolder));
+            list.Add(new Artifact("Input left ear", project.LeftEar, "left"));
+            list.Add(new Artifact("Left simulation mesh", Path.Combine(project.SaveLocation, "Intermediates", "Left", "graded_head.ply"), "left"));
+            AddMeshFolder(list, "Predicted left ear", "left", Path.Combine(project.SaveLocation, project.Settings.Inference.PredictionLeftFolder));
         }
         if (!string.IsNullOrWhiteSpace(project.RightEar))
         {
-            list.Add(new Artifact("Input right ear", project.RightEar));
-            list.Add(new Artifact("Right simulation mesh", Path.Combine(project.SaveLocation, "Intermediates", "Right", "graded_head.ply")));
-            AddMeshFolder(list, "Predicted right ear", Path.Combine(project.SaveLocation, project.Settings.Inference.PredictionRightFolder));
+            list.Add(new Artifact("Input right ear", project.RightEar, "right"));
+            list.Add(new Artifact("Right simulation mesh", Path.Combine(project.SaveLocation, "Intermediates", "Right", "graded_head.ply"), "right"));
+            AddMeshFolder(list, "Predicted right ear", "right", Path.Combine(project.SaveLocation, project.Settings.Inference.PredictionRightFolder));
         }
         return list;
     }
 
-    void AddMeshFolder(List<Artifact> list, string title, string folder)
+    void AddMeshFolder(List<Artifact> list, string title, string side, string folder)
     {
         if (!Directory.Exists(folder))
             return;
         foreach (var file in Directory.EnumerateFiles(folder).Where(IsMesh).OrderBy(x => x))
             if (Path.GetFileName(file).StartsWith("Prediction_", StringComparison.OrdinalIgnoreCase))
-                list.Add(new Artifact(title + " - " + Path.GetFileNameWithoutExtension(file), file));
+                list.Add(new Artifact(title + " - " + Path.GetFileNameWithoutExtension(file), file, side));
     }
 
     void ArtifactSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -882,8 +1155,10 @@ public partial class MainWindow : Window
     {
         ResetViewer();
         selectedArtifactPath = artifact.Path;
+        selectedArtifactSide = ArtifactSide(artifact);
         RememberSelectedArtifact(artifact.Path);
         selectedArtifactText.Text = Path.GetFileName(artifact.Path);
+        UpdatePlacementButtons();
         if (artifact.IsImage)
         {
             try { imagePreview.Source = new BitmapImage(new Uri(artifact.Path)); imagePreview.Visibility = Visibility.Visible; viewerPlaceholder.Visibility = Visibility.Collapsed; }
@@ -892,25 +1167,42 @@ public partial class MainWindow : Window
         }
         if (artifact.IsMesh)
         {
-            try
-            {
-                currentMesh = MeshLoader.Load(artifact.Path);
-                meshVisual = new MeshGeometryModel3D { Geometry = currentMesh.Geometry, Material = new PhongMaterial { DiffuseColor = new Color4(0.38f, 0.57f, 0.56f, 1), SpecularColor = new Color4(0.7f, 0.78f, 0.76f, 1) }, CullMode = SharpDX.Direct3D11.CullMode.None };
-                meshVisual.RenderWireframe = string.Equals(Path.GetExtension(artifact.Path), ".ply", StringComparison.OrdinalIgnoreCase);
-                meshVisual.WireframeColor = new Color4(0.12f, 0.22f, 0.22f, 0.55f);
-                meshViewport.Items.Add(meshVisual);
-                AddMicrophoneMarker(artifact.Path);
-                ResetMeshCamera();
-                viewerPlaceholder.Visibility = Visibility.Collapsed;
-                meshViewport.Visibility = Visibility.Visible;
-                placeLeftButton.IsEnabled = placementSide == null && currentMesh != null && IsLeftMesh(artifact.Path);
-                placeRightButton.IsEnabled = placementSide == null && currentMesh != null && IsRightMesh(artifact.Path);
-            }
-            catch (Exception error) { AppendLog("Cannot open mesh: " + error.Message); }
+            _ = OpenMeshAsync(artifact);
             return;
         }
         viewerPlaceholder.Text = artifact.IsText ? SafeReadText(artifact.Path) : "Preview unavailable for " + Path.GetFileName(artifact.Path);
         viewerPlaceholder.Visibility = Visibility.Visible;
+    }
+
+    async Task OpenMeshAsync(Artifact artifact)
+    {
+        try
+        {
+            var loaded = await Task.Run(() => MeshLoader.Load(artifact.Path));
+            if (!string.Equals(selectedArtifactPath, artifact.Path, StringComparison.OrdinalIgnoreCase)) return;
+            for (var attempt = 0; attempt < 40 && (!viewportReady || meshViewport.RenderHost == null); attempt++)
+                await Task.Delay(25);
+            if (!viewportReady || meshViewport.RenderHost == null || meshViewport.Items == null)
+                throw new InvalidOperationException("The 3D viewport render host is not ready yet.");
+            currentMesh = loaded;
+            meshVisual = new MeshGeometryModel3D { Geometry = currentMesh.Geometry, Material = new PhongMaterial { DiffuseColor = new Color4(0.38f, 0.57f, 0.56f, 1), SpecularColor = new Color4(0.7f, 0.78f, 0.76f, 1) }, CullMode = SharpDX.Direct3D11.CullMode.None };
+            meshVisual.RenderWireframe = string.Equals(Path.GetExtension(artifact.Path), ".ply", StringComparison.OrdinalIgnoreCase);
+            meshVisual.WireframeColor = ColorHelper.FromArgb(140, 31, 56, 56);
+            meshViewport.Items.Add(meshVisual);
+            AddMicrophoneMarker(artifact.Path);
+            ResetMeshCamera();
+            meshViewport.Camera?.ZoomExtents(meshViewport, 80);
+            viewerPlaceholder.Visibility = Visibility.Collapsed;
+            meshViewport.Visibility = Visibility.Visible;
+            UpdatePlacementButtons();
+        }
+        catch (Exception error)
+        {
+            currentMesh = null;
+            viewerPlaceholder.Text = "Could not open mesh";
+            viewerPlaceholder.Visibility = Visibility.Visible;
+            AppendLog("Cannot open mesh: " + error, selectedProject?.Id);
+        }
     }
 
     string SafeReadText(string path)
@@ -942,37 +1234,68 @@ public partial class MainWindow : Window
         viewerPlaceholder.Visibility = Visibility.Visible;
         selectedArtifactText.Text = "Select a file to preview";
         selectedArtifactPath = null;
+        selectedArtifactSide = null;
         placeLeftButton.IsEnabled = false;
         placeRightButton.IsEnabled = false;
     }
 
     void MeshViewportPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (meshVisual == null)
+        if (meshVisual == null || currentMesh == null)
             return;
+        var properties = e.GetCurrentPoint(meshViewport).Properties;
+        meshPointerMode = properties.IsLeftButtonPressed ? MeshPointerMode.Rotate : properties.IsMiddleButtonPressed ? MeshPointerMode.Pan : MeshPointerMode.None;
+        if (meshPointerMode == MeshPointerMode.None) return;
         lastPointer = e.GetCurrentPoint(meshViewport).Position;
         pointerMoved = false;
-        rotatingMesh = true;
+        rotatingMesh = meshPointerMode == MeshPointerMode.Rotate;
         meshViewport.CapturePointer(e.Pointer);
     }
 
     void MeshViewportPointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (!rotatingMesh)
+        if (meshPointerMode == MeshPointerMode.None || currentMesh == null || meshViewport.Camera is not PerspectiveCamera camera)
             return;
         var point = e.GetCurrentPoint(meshViewport).Position;
-        if (Math.Abs(point.X - lastPointer.X) + Math.Abs(point.Y - lastPointer.Y) > 4)
+        var dx = point.X - lastPointer.X;
+        var dy = point.Y - lastPointer.Y;
+        if (Math.Abs(dx) + Math.Abs(dy) > 2)
             pointerMoved = true;
         lastPointer = point;
+        if (!pointerMoved) return;
+        if (meshPointerMode == MeshPointerMode.Rotate)
+        {
+            var direction = camera.Position - currentMesh.Center;
+            var distance = Math.Max(direction.Length(), 1e-4f);
+            var yaw = Math.Atan2(direction.X, -direction.Y) + dx * 0.008;
+            var pitch = Math.Clamp(Math.Asin(direction.Z / distance) + dy * 0.008, -1.48, 1.48);
+            var horizontal = distance * Math.Cos(pitch);
+            var position = currentMesh.Center + new System.Numerics.Vector3((float)(horizontal * Math.Sin(yaw)), (float)(-horizontal * Math.Cos(yaw)), (float)(distance * Math.Sin(pitch)));
+            camera.Position = position;
+            camera.LookDirection = currentMesh.Center - position;
+            camera.UpDirection = new System.Numerics.Vector3(0, 0, 1);
+        }
+        else
+        {
+            var look = System.Numerics.Vector3.Normalize(camera.LookDirection);
+            var up = System.Numerics.Vector3.Normalize(camera.UpDirection);
+            var right = System.Numerics.Vector3.Normalize(System.Numerics.Vector3.Cross(look, up));
+            var panScale = Math.Max((camera.Position - currentMesh.Center).Length() * 0.0015f, 0.05f);
+            var translation = (-right * (float)dx + up * (float)dy) * panScale;
+            camera.Position += translation;
+            camera.LookDirection += translation;
+        }
     }
 
     void MeshViewportPointerReleased(object sender, PointerRoutedEventArgs e)
     {
         var point = e.GetCurrentPoint(meshViewport).Position;
         meshViewport.ReleasePointerCapture(e.Pointer);
+        var mode = meshPointerMode;
+        meshPointerMode = MeshPointerMode.None;
         rotatingMesh = false;
         SaveMeshCamera();
-        if (placementSide != null && !pointerMoved && currentMesh != null && meshVisual != null)
+        if (placementSide != null && mode == MeshPointerMode.Rotate && !pointerMoved && currentMesh != null && meshVisual != null)
         {
             var hit = meshViewport.FindHits(point).FirstOrDefault(x => ReferenceEquals(x.ModelHit, meshVisual));
             if (hit != null)
@@ -997,13 +1320,27 @@ public partial class MainWindow : Window
         meshViewport.Items.Add(microphoneVisual);
     }
 
-    void BeginPlacement(string side)
+    void UpdatePlacementButtons()
     {
-        if (selectedProject == null || selectedArtifactPath == null || currentMesh == null)
+        var enabled = placementSide == null && currentMesh != null;
+        // A loaded, explicitly sided mesh is enough to enter placement mode. The
+        // preprocessing mesh is preferred when available, but requiring it here
+        // made the buttons appear dead for projects that only have input meshes.
+        var currentSide = selectedArtifactSide ?? SideForPath(currentMesh?.Path ?? "");
+        placeLeftButton.IsEnabled = enabled && selectedProject != null && (PreprocessingMesh(selectedProject, "left") != null || currentSide == "left");
+        placeRightButton.IsEnabled = enabled && selectedProject != null && (PreprocessingMesh(selectedProject, "right") != null || currentSide == "right");
+    }
+
+    async void BeginPlacement(string side)
+    {
+        if (selectedProject == null || currentMesh == null)
+        {
+            AppendLog($"Cannot start {side} microphone placement: no mesh is loaded.", selectedProject?.Id);
             return;
-        if (!string.Equals(side, SideForPath(selectedArtifactPath), StringComparison.OrdinalIgnoreCase))
-            return;
+        }
         var mesh = PreprocessingMesh(selectedProject, side);
+        if (mesh == null && string.Equals(selectedArtifactSide ?? SideForPath(currentMesh.Path), side, StringComparison.OrdinalIgnoreCase))
+            mesh = currentMesh.Path;
         if (mesh == null)
         {
             AppendLog("Select the mesh used for preprocessing before placing the microphone.", selectedProject.Id);
@@ -1012,12 +1349,13 @@ public partial class MainWindow : Window
         if (!Path.GetFullPath(currentMesh.Path).Equals(Path.GetFullPath(mesh), StringComparison.OrdinalIgnoreCase))
         {
             var artifact = artifacts.FirstOrDefault(x => Path.GetFullPath(x.Path).Equals(Path.GetFullPath(mesh), StringComparison.OrdinalIgnoreCase));
-            if (artifact != null) OpenArtifact(artifact);
+            if (artifact != null) await OpenMeshAsync(artifact);
             if (currentMesh == null || !Path.GetFullPath(currentMesh.Path).Equals(Path.GetFullPath(mesh), StringComparison.OrdinalIgnoreCase)) return;
         }
         placementSide = side;
         pendingMicrophonePosition = null;
         placementCoordinates.Text = "Click the mesh to place the microphone";
+        AppendLog($"{side} microphone placement mode started. Click the mesh to choose a position.", selectedProject.Id);
         donePositionButton.IsEnabled = false;
         placementBorder.Visibility = Visibility.Visible;
         artifactPicker.IsEnabled = false;
@@ -1042,7 +1380,7 @@ public partial class MainWindow : Window
         {
             var position = await CalculateAutomaticPosition(mesh, placementSide);
             pendingMicrophonePosition = new ManualMicrophonePosition { X = position.X, Y = position.Y, Z = position.Z, MeshPath = mesh, MeshIdentity = MeshIdentity(mesh) };
-            if (string.Equals(SideForPath(selectedArtifactPath ?? ""), placementSide, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(selectedArtifactSide ?? SideForPath(selectedArtifactPath ?? ""), placementSide, StringComparison.OrdinalIgnoreCase))
             {
                 UpdateMicrophoneMarker(position);
                 placementCoordinates.Text = $"{placementSide} mic: {position.X:0.##}, {position.Y:0.##}, {position.Z:0.##} mm";
@@ -1094,14 +1432,13 @@ public partial class MainWindow : Window
         pendingMicrophonePosition = null;
         placementBorder.Visibility = Visibility.Collapsed;
         artifactPicker.IsEnabled = true;
-        placeLeftButton.IsEnabled = currentMesh != null && IsLeftMesh(selectedArtifactPath ?? "");
-        placeRightButton.IsEnabled = currentMesh != null && IsRightMesh(selectedArtifactPath ?? "");
+        UpdatePlacementButtons();
         RefreshPipelineStatus();
     }
 
     void ResetMeshCamera()
     {
-        var state = selectedProject != null && selectedArtifactPath != null && viewerStates.TryGetValue(selectedProject.Id, out var projectState) && projectState.CameraByArtifact.TryGetValue(selectedArtifactPath, out var saved) ? saved : new MeshCameraState { Yaw = IsLeftMesh(selectedArtifactPath ?? "") ? 180 : 0, Pitch = 8, Distance = Math.Max(currentMesh?.MaximumDimension * 1.7 ?? 300, 120) };
+        var state = selectedProject != null && selectedArtifactPath != null && viewerStates.TryGetValue(selectedProject.Id, out var projectState) && projectState.CameraByArtifact.TryGetValue(selectedArtifactPath, out var saved) ? saved : new MeshCameraState { Yaw = string.Equals(selectedArtifactSide ?? SideForPath(selectedArtifactPath ?? ""), "left", StringComparison.OrdinalIgnoreCase) ? 180 : 0, Pitch = 8, Distance = Math.Max(currentMesh?.MaximumDimension * 1.7 ?? 300, 120) };
         var camera = new PerspectiveCamera { FieldOfView = 38 };
         var yaw = state.Yaw * Math.PI / 180;
         var pitch = state.Pitch * Math.PI / 180;
@@ -1161,6 +1498,7 @@ public partial class MainWindow : Window
         if (!continueQueued) queuedStages.Remove(project.Id);
         try
         {
+            if (stage == Stage.Preprocessing && !ValidateExternalRuntime(project)) return;
             Directory.CreateDirectory(project.SaveLocation);
             if (stage == Stage.Inference)
             {
@@ -1172,20 +1510,22 @@ public partial class MainWindow : Window
             var executable = BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
             var info = new ProcessStartInfo(executable, $"-m HRTFCalculation.CLI {stage.Value} --config {QuoteArgument(config)}") { WorkingDirectory = packageRoot, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
             ApplyProcessEnvironment(info);
-            using var process = new Process { StartInfo = info, EnableRaisingEvents = true };
+            var process = new Process { StartInfo = info, EnableRaisingEvents = true };
             process.OutputDataReceived += (_, args) => AppendLog(args.Data, project.Id);
             process.ErrorDataReceived += (_, args) => AppendLog(args.Data, project.Id);
             process.Exited += (_, _) => DispatcherQueue.TryEnqueue(() => ProcessFinished(process, project, stage));
             runningProcesses[project.Id] = process;
             runningStages[project.Id] = stage;
             FailedStages(project.Id).Remove(stage);
-            process.Start();
+            if (!process.Start())
+                throw new InvalidOperationException("Process.Start returned false.");
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
             AppendLog(stage.Title + " started.", project.Id);
+            AppendLog($"{stage.Title} process: {executable}", project.Id);
             RefreshPipelineStatus();
         }
-        catch (Exception error) { FailedStages(project.Id).Add(stage); AppendLog("Could not start " + stage.Title + ": " + error.Message, project.Id); RefreshPipelineStatus(); }
+        catch (Exception error) { FailedStages(project.Id).Add(stage); AppendLog("Could not start " + stage.Title + ": " + error, project.Id); RefreshPipelineStatus(); }
     }
 
     void ProcessFinished(Process process, ProjectRecord project, Stage stage)
@@ -1212,6 +1552,69 @@ public partial class MainWindow : Window
         info.Environment["BLENDER_USER_DATAFILES"] = Path.Combine(appData, "Blender", "datafiles");
         info.Environment["PYTHONPATH"] = packageRoot + Path.PathSeparator + Path.Combine(packageRoot, ".venv", "Lib", "site-packages");
         info.Environment["PATH"] = Path.Combine(environment.ExternalDir, "bin") + Path.PathSeparator + (info.Environment.TryGetValue("PATH", out var path) ? path : "");
+    }
+
+    bool ValidateExternalRuntime(ProjectRecord project)
+    {
+        var bin = Path.Combine(environment.ExternalDir, "bin");
+        var required = new[] { "hrtf_mesh_grading.exe", "NumCalc.exe", "libpmp.dll", "libpmp_vis.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll" };
+        var missing = required.Where(name => !File.Exists(Path.Combine(bin, name))).ToList();
+        if (missing.Count > 0)
+        {
+            AppendLog($"Preprocessing cannot start: missing native runtime file(s) in {bin}: {string.Join(", ", missing)}", project.Id);
+            return false;
+        }
+        var wrongArchitecture = required.Where(name => !name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? false : !IsWindowsPe64(Path.Combine(bin, name))).ToList();
+        if (wrongArchitecture.Count > 0)
+        {
+            AppendLog($"Preprocessing cannot start: runtime file(s) are not 64-bit Windows binaries: {string.Join(", ", wrongArchitecture)}", project.Id);
+            return false;
+        }
+        var coreLibraries = new[] { "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll", "libpmp.dll" };
+        var loaded = new List<IntPtr>();
+        try
+        {
+            foreach (var name in coreLibraries)
+            {
+                var fullPath = Path.Combine(bin, name);
+                var handle = LoadLibraryEx(fullPath, IntPtr.Zero, LoadLibrarySearchDllLoadDir | LoadLibrarySearchDefaultDirs);
+                if (handle == IntPtr.Zero)
+                {
+                    var error = Marshal.GetLastWin32Error();
+                    AppendLog($"Preprocessing cannot start: Windows could not load {fullPath} (Win32 error {error}). Check dependent DLLs or Windows Security quarantine.", project.Id);
+                    return false;
+                }
+                loaded.Add(handle);
+            }
+            var visualPath = Path.Combine(bin, "libpmp_vis.dll");
+            var visualHandle = LoadLibraryEx(visualPath, IntPtr.Zero, LoadLibrarySearchDllLoadDir | LoadLibrarySearchDefaultDirs);
+            if (visualHandle == IntPtr.Zero)
+                AppendLog($"Native runtime warning: optional visualization library could not be loaded: {visualPath} (Win32 error {Marshal.GetLastWin32Error()}). Mesh grading can continue.", project.Id);
+            else loaded.Add(visualHandle);
+            AppendLog($"Native preprocessing runtime verified in {bin}.", project.Id);
+            return true;
+        }
+        finally
+        {
+            foreach (var handle in loaded) FreeLibrary(handle);
+        }
+    }
+
+    static bool IsWindowsPe64(string path)
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            using var reader = new BinaryReader(stream);
+            if (stream.Length < 0x40 || reader.ReadUInt16() != 0x5A4D) return false;
+            stream.Position = 0x3C;
+            var peOffset = reader.ReadInt32();
+            if (peOffset < 0 || peOffset + 6 > stream.Length) return false;
+            stream.Position = peOffset;
+            if (reader.ReadUInt32() != 0x00004550) return false;
+            return reader.ReadUInt16() == 0x8664;
+        }
+        catch { return false; }
     }
 
     string? BundledPythonExecutable() { var path = Path.Combine(packageRoot, ".venv", "Scripts", "python.exe"); return File.Exists(path) ? path : null; }
@@ -1255,7 +1658,7 @@ public partial class MainWindow : Window
         var steps = Math.Max(int.TryParse(preprocessing.FrequencyStepCount, out var n) ? n : 129, 2);
         var leftPosition = ValidManualPosition(project, "left") ? $"\n  source_position_input_left: [{preprocessing.SourcePositionInputLeft!.X.ToString(CultureInfo.InvariantCulture)}, {preprocessing.SourcePositionInputLeft.Y.ToString(CultureInfo.InvariantCulture)}, {preprocessing.SourcePositionInputLeft.Z.ToString(CultureInfo.InvariantCulture)}]" : "";
         var rightPosition = ValidManualPosition(project, "right") ? $"\n  source_position_input_right: [{preprocessing.SourcePositionInputRight!.X.ToString(CultureInfo.InvariantCulture)}, {preprocessing.SourcePositionInputRight.Y.ToString(CultureInfo.InvariantCulture)}, {preprocessing.SourcePositionInputRight.Z.ToString(CultureInfo.InvariantCulture)}]" : "";
-        return $"""paths:
+        return $@"paths:
   left_ear: {YamlPath(project.LeftEar)}
   right_ear: {YamlPath(project.RightEar)}
   output_dir: {YamlScalar(output)}
@@ -1308,8 +1711,8 @@ preprocessing:
   pictures: false
   reference: true
   unit: mm
-  speed_of_sound: "346.18"
-  air_density: "1.1839"
+  speed_of_sound: ""346.18""
+  air_density: ""1.1839""
   material_search_paths: None
   source_assignment_tolerance: 2.0
   source_assignment_face_count: {preprocessing.SourceAssignmentFaceCount}{leftPosition}{rightPosition}
@@ -1328,7 +1731,7 @@ postprocessing:
 ui:
   mesh_background: white
   show_axes: true
-""";
+";
     }
 
     string YamlScalar(string value) => "'" + value.Replace("'", "''") + "'";
@@ -1337,7 +1740,18 @@ ui:
     string QuoteArgument(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
 
     void StopClicked(object sender, RoutedEventArgs e) { if (selectedProject != null) StopProject(selectedProject); }
-    void StopProject(ProjectRecord project) { queuedStages.Remove(project.Id); if (runningProcesses.TryGetValue(project.Id, out var process)) { TryTerminate(process); AppendLog("Stopping task.", project.Id); } RefreshPipelineStatus(); }
+    void StopProject(ProjectRecord project)
+    {
+        queuedStages.Remove(project.Id);
+        if (runningProcesses.TryGetValue(project.Id, out var process))
+        {
+            TryTerminate(process);
+            runningProcesses.Remove(project.Id);
+            runningStages.Remove(project.Id);
+            AppendLog("Stopping task.", project.Id);
+        }
+        RefreshPipelineStatus();
+    }
     void TryTerminate(Process process) { try { if (!process.HasExited) process.Kill(true); } catch { } }
     void ResetOutputsClicked(object sender, RoutedEventArgs e)
     {
@@ -1366,6 +1780,28 @@ ui:
 
     void ClearLogClicked(object sender, RoutedEventArgs e) { if (selectedProject != null) projectLogs[selectedProject.Id] = ""; logText.Text = ""; }
 
+    static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match) return match;
+            var nested = FindDescendant<T>(child);
+            if (nested != null) return nested;
+        }
+        return null;
+    }
+
+    void RestoreLogScroll(double offset, bool followTail)
+    {
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            var scroll = FindDescendant<ScrollViewer>(logText);
+            if (scroll == null) return;
+            scroll.ChangeView(null, followTail ? scroll.ScrollableHeight : offset, null);
+        });
+    }
+
     void AppendLog(string? text, Guid? projectId = null)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
@@ -1375,9 +1811,16 @@ ui:
         if (id == null) return;
         void Append()
         {
+            var scroll = FindDescendant<ScrollViewer>(logText);
+            var oldOffset = scroll?.VerticalOffset ?? 0;
+            var followTail = scroll == null || scroll.ScrollableHeight - scroll.VerticalOffset < 4;
             var current = projectLogs.TryGetValue(id.Value, out var value) ? value : "";
             projectLogs[id.Value] = current.Length == 0 ? compact : current + Environment.NewLine + compact;
-            if (selectedProject?.Id == id) logText.Text = projectLogs[id.Value];
+            if (selectedProject?.Id == id)
+            {
+                logText.Text = projectLogs[id.Value];
+                RestoreLogScroll(oldOffset, followTail);
+            }
         }
         if (DispatcherQueue.HasThreadAccess) Append(); else DispatcherQueue.TryEnqueue(Append);
     }
@@ -1459,7 +1902,13 @@ ui:
     async void ShowAboutClicked(object sender, RoutedEventArgs e)
     {
         var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "1.0.0";
-        var dialog = new ContentDialog { Title = "About Pinna2HRTF", Content = new StackPanel { Spacing = 8, Children = { new TextBlock { Text = "Pinna2HRTF", FontSize = 24, FontWeight = FontWeights.Bold }, new TextBlock { Text = "Version " + version }, new TextBlock { Text = "A desktop pipeline for ear-mesh preprocessing, Mesh2PPM inference, Mesh2HRTF simulation, and SOFA export.", TextWrapping = TextWrapping.Wrap } } }, CloseButtonText = "Close", XamlRoot = Root.XamlRoot };
+        var content = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
+        var logoPath = Path.Combine(packageRoot, "icon.png");
+        if (File.Exists(logoPath)) content.Children.Add(new Image { Source = new BitmapImage(new Uri(logoPath)), Width = 96, Height = 96, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center });
+        content.Children.Add(new TextBlock { Text = "Pinna2HRTF", FontSize = 24, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center });
+        content.Children.Add(new TextBlock { Text = "Version " + version, HorizontalAlignment = HorizontalAlignment.Center });
+        content.Children.Add(new TextBlock { Text = "A desktop pipeline for ear-mesh preprocessing, Mesh2PPM inference, Mesh2HRTF simulation, and SOFA export.", TextWrapping = TextWrapping.Wrap, MaxWidth = 360, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center });
+        var dialog = new ContentDialog { Title = "About Pinna2HRTF", Content = content, CloseButtonText = "Close", XamlRoot = Root.XamlRoot };
         await dialog.ShowAsync();
     }
 
@@ -1473,10 +1922,38 @@ ui:
     void UpdateViewerAppearance()
     {
         var dark = Root.ActualTheme == ElementTheme.Dark;
-        var background = dark ? ColorHelper.FromArgb(255, 32, 32, 32) : Colors.White;
-        Root.Background = new SolidColorBrush(background);
-        if (contentGrid != null) contentGrid.Background = new SolidColorBrush(background);
-        if (meshViewerBackground != null) { meshViewerBackground.Background = new SolidColorBrush(dark ? ColorHelper.FromArgb(255, 31, 36, 38) : ColorHelper.FromArgb(255, 237, 243, 242)); meshViewport.BackgroundColor = new Color4(dark ? 0.12f : 0.93f, dark ? 0.14f : 0.95f, dark ? 0.15f : 0.95f, 1); }
+        appBackgroundBrush.Color = dark ? ColorHelper.FromArgb(255, 32, 32, 32) : Colors.White;
+        surfaceBrush.Color = dark ? ColorHelper.FromArgb(255, 38, 38, 38) : Colors.White;
+        secondarySurfaceBrush.Color = dark ? ColorHelper.FromArgb(255, 45, 45, 45) : ColorHelper.FromArgb(255, 251, 251, 252);
+        inputBackgroundBrush.Color = dark ? ColorHelper.FromArgb(255, 45, 45, 45) : Colors.White;
+        borderBrush.Color = dark ? ColorHelper.FromArgb(255, 70, 70, 70) : ColorHelper.FromArgb(255, 220, 225, 228);
+        primaryTextBrush.Color = dark ? ColorHelper.FromArgb(255, 235, 235, 235) : ColorHelper.FromArgb(255, 32, 32, 32);
+        mutedTextBrush.Color = dark ? ColorHelper.FromArgb(255, 160, 160, 160) : ColorHelper.FromArgb(255, 105, 113, 125);
+        viewerBackgroundBrush.Color = dark ? ColorHelper.FromArgb(255, 31, 36, 38) : ColorHelper.FromArgb(255, 237, 243, 242);
+        Root.Background = appBackgroundBrush;
+        if (contentGrid != null) contentGrid.Background = appBackgroundBrush;
+        if (meshViewerBackground != null) { meshViewerBackground.Background = viewerBackgroundBrush; meshViewport.BackgroundColor = viewerBackgroundBrush.Color; }
+        foreach (var box in settingControls.Values.OfType<TextBox>().Append(logText))
+        {
+            box.Background = inputBackgroundBrush;
+            box.Foreground = primaryTextBrush;
+            box.BorderBrush = borderBrush;
+        }
+        foreach (var combo in new[] { modelPicker, artifactPicker })
+        {
+            combo.Background = inputBackgroundBrush;
+            combo.Foreground = primaryTextBrush;
+            combo.BorderBrush = borderBrush;
+        }
+        selectedArtifactText.Foreground = mutedTextBrush;
+        viewerPlaceholder.Foreground = mutedTextBrush;
+        numCalcStatusText.Foreground = mutedTextBrush;
+        foreach (var label in stageStatusLabels) label.Foreground = mutedTextBrush;
+        foreach (var row in projectRows.Values)
+        {
+            row.Name.Foreground = primaryTextBrush;
+            row.Status.Foreground = mutedTextBrush;
+        }
     }
 
     void AppWindowClosing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
@@ -1492,7 +1969,7 @@ ui:
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
         closingConfirmed = true;
         foreach (var process in runningProcesses.Values.ToList()) TryTerminate(process);
-        appWindow.Close();
+        appWindow.Destroy();
     }
 
     void LoadRegistry()
@@ -1516,8 +1993,8 @@ ui:
         try { foreach (var pair in JsonSerializer.Deserialize<Dictionary<Guid, ProjectViewerState>>(File.ReadAllText(viewerStatePath), jsonOptions) ?? []) viewerStates[pair.Key] = pair.Value; } catch { viewerStates.Clear(); }
     }
     void SaveViewerStates() { if (!string.IsNullOrWhiteSpace(viewerStatePath)) File.WriteAllText(viewerStatePath, JsonSerializer.Serialize(viewerStates, jsonOptions)); }
-    void LoadUiState() { if (!File.Exists(uiStatePath)) return; try { var state = JsonSerializer.Deserialize<WindowUiState>(File.ReadAllText(uiStatePath), jsonOptions); if (state != null) { projectsExpandedWidth = state.ProjectsWidth; liveLogExpandedHeight = state.LiveLogHeight; } } catch { } }
-    void SaveUiState() { if (!string.IsNullOrWhiteSpace(uiStatePath)) File.WriteAllText(uiStatePath, JsonSerializer.Serialize(new WindowUiState { ProjectsWidth = projectsExpandedWidth, LiveLogHeight = liveLogExpandedHeight }, jsonOptions)); }
+    void LoadUiState() { if (!File.Exists(uiStatePath)) return; try { var state = JsonSerializer.Deserialize<WindowUiState>(File.ReadAllText(uiStatePath), jsonOptions); if (state != null) { projectsExpandedWidth = state.ProjectsWidth; liveLogExpandedHeight = state.LiveLogHeight; settingsExpandedWidth = state.SettingsWidth; } } catch { } }
+    void SaveUiState() { if (!string.IsNullOrWhiteSpace(uiStatePath)) File.WriteAllText(uiStatePath, JsonSerializer.Serialize(new WindowUiState { ProjectsWidth = projectsExpandedWidth, LiveLogHeight = liveLogExpandedHeight, SettingsWidth = settingsExpandedWidth }, jsonOptions)); }
     string FindPackageRoot() { var current = new DirectoryInfo(AppContext.BaseDirectory); while (current != null) { if (File.Exists(Path.Combine(current.FullName, "pyproject.toml")) && Directory.Exists(Path.Combine(current.FullName, "HRTFCalculation"))) return current.FullName; current = current.Parent; } return AppContext.BaseDirectory; }
     EnvironmentConfig DefaultEnvironment() { var external = Path.Combine(packageRoot, "External"); var bin = Path.Combine(external, "bin"); return new EnvironmentConfig { UvExecutable = Path.Combine(bin, "uv.exe"), NumCalcExecutable = Path.Combine(bin, "NumCalc.exe"), MeshGradingExecutable = Path.Combine(bin, "hrtf_mesh_grading.exe"), ExternalDir = external }; }
     ProjectRecord Clone(ProjectRecord project) => JsonSerializer.Deserialize<ProjectRecord>(JsonSerializer.Serialize(project, jsonOptions), jsonOptions) ?? project;
@@ -1535,6 +2012,7 @@ ui:
     }
 
     string SideForPath(string path) => IsLeftMesh(path) ? "left" : IsRightMesh(path) ? "right" : "";
+    string ArtifactSide(Artifact artifact) => artifact.Side ?? SideForPath(artifact.Path);
     bool IsLeftMesh(string path) => path.Contains("left", StringComparison.OrdinalIgnoreCase);
     bool IsRightMesh(string path) => path.Contains("right", StringComparison.OrdinalIgnoreCase);
     ManualMicrophonePosition? ManualPosition(ProjectRecord project, string side) => side == "left" ? project.Settings.Preprocessing.SourcePositionInputLeft : project.Settings.Preprocessing.SourcePositionInputRight;
@@ -1553,9 +2031,33 @@ ui:
         var parameters = Path.Combine(selectedProject.SaveLocation, "Projects", CultureInfo.InvariantCulture.TextInfo.ToTitleCase(side), "parameters.json");
         try { using var document = JsonDocument.Parse(File.ReadAllText(parameters)); var values = document.RootElement.GetProperty("sourceCenter").EnumerateArray().Select(x => (float)x.GetDouble() * 1000).ToArray(); return values.Length == 3 ? new System.Numerics.Vector3(values[0], values[1], values[2]) : null; } catch { return null; }
     }
+
+    sealed class ProjectRowUi
+    {
+        public Grid Root { get; }
+        public TextBlock Name { get; }
+        public TextBlock Status { get; }
+        public ProgressRing Spinner { get; }
+
+        public ProjectRowUi(ProjectRecord project)
+        {
+            Root = new Grid { Margin = new Thickness(8, 7, 8, 7), Tag = project, HorizontalAlignment = HorizontalAlignment.Stretch };
+            Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            Root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var text = new StackPanel { HorizontalAlignment = HorizontalAlignment.Stretch };
+            Name = new TextBlock { Text = project.Name, FontWeight = FontWeights.SemiBold, FontSize = 14 };
+            Status = new TextBlock { Text = project.StatusText, FontSize = 11 };
+            text.Children.Add(Name);
+            text.Children.Add(Status);
+            Root.Children.Add(text);
+            Spinner = new ProgressRing { Width = 17, Height = 17, IsActive = false, Visibility = Visibility.Collapsed, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
+            Grid.SetColumn(Spinner, 1);
+            Root.Children.Add(Spinner);
+        }
+    }
 }
 
-record Artifact(string Title, string Path)
+record Artifact(string Title, string Path, string? Side = null)
 {
     public bool Exists => File.Exists(Path);
     public bool IsMesh => new[] { ".stl", ".ply" }.Contains(System.IO.Path.GetExtension(Path), StringComparer.OrdinalIgnoreCase);
@@ -1574,7 +2076,7 @@ record Stage(string Value, string Title)
 
 enum InputHandling { Copy, Reference }
 class ProjectRegistry { public List<ProjectRecord> Projects { get; set; } = []; public Guid? SelectedProjectID { get; set; } public EnvironmentConfig Environment { get; set; } = new(); }
-class WindowUiState { public double ProjectsWidth { get; set; } = 280; public double LiveLogHeight { get; set; } = 170; }
+class WindowUiState { public double ProjectsWidth { get; set; } = 280; public double LiveLogHeight { get; set; } = 170; public double SettingsWidth { get; set; } = 390; }
 class ProjectViewerState { public string? SelectedArtifactPath { get; set; } public Dictionary<string, MeshCameraState> CameraByArtifact { get; set; } = []; }
 class MeshCameraState { public double Yaw { get; set; } public double Pitch { get; set; } public double Distance { get; set; } }
 class SettingHelpEntry { public string Id { get; set; } = ""; public string Title { get; set; } = ""; public string Description { get; set; } = ""; public List<SettingHelpPublication> Publications { get; set; } = []; }
@@ -1602,11 +2104,18 @@ class MeshData
 
 static class MeshLoader
 {
+    static MeshGeometry3D NewGeometry() => new()
+    {
+        Positions = new Vector3Collection(),
+        Indices = new IntCollection()
+    };
+
     public static MeshData Load(string path)
     {
-        var mesh = new MeshGeometry3D();
+        if (!File.Exists(path)) throw new FileNotFoundException("Mesh file was not found.", path);
+        var mesh = NewGeometry();
         if (Path.GetExtension(path).Equals(".ply", StringComparison.OrdinalIgnoreCase)) LoadPly(path, mesh); else LoadStl(path, mesh);
-        if (mesh.Positions.Count == 0) throw new InvalidDataException("Mesh contains no vertices.");
+        if (mesh.Positions == null || mesh.Indices == null || mesh.Positions.Count == 0 || mesh.Indices.Count < 3) throw new InvalidDataException($"Mesh contains no usable triangles: {path}");
         var min = new System.Numerics.Vector3(mesh.Positions.Min(x => x.X), mesh.Positions.Min(x => x.Y), mesh.Positions.Min(x => x.Z));
         var max = new System.Numerics.Vector3(mesh.Positions.Max(x => x.X), mesh.Positions.Max(x => x.Y), mesh.Positions.Max(x => x.Z));
         var center = (min + max) / 2;
@@ -1620,32 +2129,191 @@ static class MeshLoader
     static void LoadStl(string path, MeshGeometry3D mesh)
     {
         var bytes = File.ReadAllBytes(path);
-        if (bytes.Length >= 84 && 84L + BitConverter.ToUInt32(bytes, 80) * 50L == bytes.Length)
+        if (bytes.Length >= 84)
         {
             var offset = 84;
             var count = BitConverter.ToUInt32(bytes, 80);
-            for (var i = 0; i < count; i++) { offset += 12; var start = mesh.Positions.Count; for (var v = 0; v < 3; v++) { mesh.Positions.Add(new System.Numerics.Vector3(BitConverter.ToSingle(bytes, offset), BitConverter.ToSingle(bytes, offset + 4), BitConverter.ToSingle(bytes, offset + 8))); offset += 12; } mesh.TriangleIndices.Add(start); mesh.TriangleIndices.Add(start + 1); mesh.TriangleIndices.Add(start + 2); offset += 2; }
-            return;
+            var expected = 84L + count * 50L;
+            if (expected == bytes.Length)
+            {
+                for (var i = 0; i < count; i++)
+                {
+                    if (offset + 50 > bytes.Length) throw new InvalidDataException($"Binary STL triangle {i} is truncated: {path}");
+                    offset += 12;
+                    var start = mesh.Positions.Count;
+                    for (var v = 0; v < 3; v++)
+                    {
+                        mesh.Positions.Add(new System.Numerics.Vector3(BitConverter.ToSingle(bytes, offset), BitConverter.ToSingle(bytes, offset + 4), BitConverter.ToSingle(bytes, offset + 8)));
+                        offset += 12;
+                    }
+                    mesh.Indices.Add(start); mesh.Indices.Add(start + 1); mesh.Indices.Add(start + 2);
+                    offset += 2;
+                }
+                return;
+            }
         }
-        var vertices = new List<System.Numerics.Vector3>();
-        foreach (var line in File.ReadLines(path)) { var p = line.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries); if (p.Length == 4 && p[0].Equals("vertex", StringComparison.OrdinalIgnoreCase)) { vertices.Add(new System.Numerics.Vector3(Parse(p[1]), Parse(p[2]), Parse(p[3]))); if (vertices.Count == 3) { var start = mesh.Positions.Count; foreach (var vertex in vertices) mesh.Positions.Add(vertex); mesh.TriangleIndices.Add(start); mesh.TriangleIndices.Add(start + 1); mesh.TriangleIndices.Add(start + 2); vertices.Clear(); } } }
+        var vertices = new List<System.Numerics.Vector3>(3);
+        foreach (var line in File.ReadLines(path))
+        {
+            var p = line.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (p.Length == 0 || !p[0].Equals("vertex", StringComparison.OrdinalIgnoreCase)) continue;
+            if (p.Length < 4 || !float.TryParse(p[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) || !float.TryParse(p[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) || !float.TryParse(p[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var z))
+            {
+                vertices.Clear();
+                continue;
+            }
+            vertices.Add(new System.Numerics.Vector3(x, y, z));
+            if (vertices.Count == 3)
+            {
+                var start = mesh.Positions.Count;
+                foreach (var vertex in vertices) mesh.Positions.Add(vertex);
+                mesh.Indices.Add(start); mesh.Indices.Add(start + 1); mesh.Indices.Add(start + 2);
+                vertices.Clear();
+            }
+        }
+        if (mesh.Indices.Count == 0) throw new InvalidDataException($"STL contains no usable triangles: {path}");
+    }
+
+    sealed class PlyElement
+    {
+        public string Name { get; init; } = "";
+        public int Count { get; init; }
+        public List<PlyProperty> Properties { get; } = [];
+    }
+
+    sealed class PlyProperty
+    {
+        public string Name { get; init; } = "";
+        public bool IsList { get; init; }
+        public string Type { get; init; } = "";
+        public string? CountType { get; init; }
+        public string? ItemType { get; init; }
     }
 
     static void LoadPly(string path, MeshGeometry3D mesh)
     {
-        using var reader = new StreamReader(path);
-        var vertices = 0; var faces = 0; string? line;
-        while ((line = reader.ReadLine()) != null && line != "end_header") { var p = line.Split(' ', StringSplitOptions.RemoveEmptyEntries); if (p.Length == 3 && p[0] == "element" && p[1] == "vertex") vertices = int.Parse(p[2], CultureInfo.InvariantCulture); if (p.Length == 3 && p[0] == "element" && p[1] == "face") faces = int.Parse(p[2], CultureInfo.InvariantCulture); }
-        for (var i = 0; i < vertices; i++) { var p = (reader.ReadLine() ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries); mesh.Positions.Add(new System.Numerics.Vector3(Parse(p[0]), Parse(p[1]), Parse(p[2]))); }
-        for (var i = 0; i < faces; i++) { var p = (reader.ReadLine() ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(x => int.Parse(x, CultureInfo.InvariantCulture)).ToArray(); if (p.Length < 4) continue; for (var j = 2; j < p[0]; j++) { mesh.TriangleIndices.Add(p[1]); mesh.TriangleIndices.Add(p[j]); mesh.TriangleIndices.Add(p[j + 1]); } }
+        var bytes = File.ReadAllBytes(path);
+        var headerEnd = FindPlyHeaderEnd(bytes);
+        if (headerEnd < 0) throw new InvalidDataException($"PLY header is missing end_header: {path}");
+        var header = Encoding.ASCII.GetString(bytes, 0, headerEnd);
+        var elements = new List<PlyElement>();
+        PlyElement? current = null;
+        var format = "";
+        foreach (var raw in header.Split('\n'))
+        {
+            var p = raw.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (p.Length == 0 || p[0].Equals("comment", StringComparison.OrdinalIgnoreCase) || p[0].Equals("obj_info", StringComparison.OrdinalIgnoreCase)) continue;
+            if (p[0].Equals("format", StringComparison.OrdinalIgnoreCase) && p.Length >= 2) format = p[1].ToLowerInvariant();
+            else if (p[0].Equals("element", StringComparison.OrdinalIgnoreCase) && p.Length >= 3 && int.TryParse(p[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var count))
+            {
+                current = new PlyElement { Name = p[1].ToLowerInvariant(), Count = count }; elements.Add(current);
+            }
+            else if (p[0].Equals("property", StringComparison.OrdinalIgnoreCase) && current != null)
+            {
+                if (p.Length >= 5 && p[1].Equals("list", StringComparison.OrdinalIgnoreCase)) current.Properties.Add(new PlyProperty { IsList = true, CountType = p[2].ToLowerInvariant(), ItemType = p[3].ToLowerInvariant(), Name = p[4] });
+                else if (p.Length >= 3) current.Properties.Add(new PlyProperty { Type = p[1].ToLowerInvariant(), Name = p[2] });
+            }
+        }
+        var vertexElement = elements.FirstOrDefault(e => e.Name == "vertex");
+        var faceElement = elements.FirstOrDefault(e => e.Name == "face");
+        if (vertexElement == null || vertexElement.Count <= 0 || faceElement == null || faceElement.Count < 0) throw new InvalidDataException($"PLY does not define usable vertex/face elements: {path}");
+        var xProperty = vertexElement.Properties.FindIndex(p => p.Name.Equals("x", StringComparison.OrdinalIgnoreCase));
+        var yProperty = vertexElement.Properties.FindIndex(p => p.Name.Equals("y", StringComparison.OrdinalIgnoreCase));
+        var zProperty = vertexElement.Properties.FindIndex(p => p.Name.Equals("z", StringComparison.OrdinalIgnoreCase));
+        if (xProperty < 0 || yProperty < 0 || zProperty < 0) throw new InvalidDataException($"PLY vertex element has no x/y/z properties: {path}");
+        var faceList = faceElement.Properties.FirstOrDefault(p => p.IsList && (p.Name.Equals("vertex_indices", StringComparison.OrdinalIgnoreCase) || p.Name.Equals("vertex_index", StringComparison.OrdinalIgnoreCase))) ?? faceElement.Properties.FirstOrDefault(p => p.IsList);
+        if (faceList == null) throw new InvalidDataException($"PLY face element has no vertex index list: {path}");
+
+        if (format == "ascii")
+        {
+            using var reader = new StreamReader(new MemoryStream(bytes, headerEnd, bytes.Length - headerEnd), Encoding.ASCII, false);
+            for (var i = 0; i < vertexElement.Count; i++)
+            {
+                var tokens = (reader.ReadLine() ?? "").Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                if (tokens.Length < vertexElement.Properties.Count || !float.TryParse(tokens[xProperty], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) || !float.TryParse(tokens[yProperty], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) || !float.TryParse(tokens[zProperty], NumberStyles.Float, CultureInfo.InvariantCulture, out var z)) throw new InvalidDataException($"PLY vertex {i} is invalid: {path}");
+                mesh.Positions.Add(new System.Numerics.Vector3(x, y, z));
+            }
+            for (var i = 0; i < faceElement.Count; i++)
+            {
+                var tokens = (reader.ReadLine() ?? "").Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                if (tokens.Length == 0 || !int.TryParse(tokens[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) || count < 3 || tokens.Length < count + 1) continue;
+                var indices = new int[count]; var valid = true;
+                for (var j = 0; j < count; j++) if (!int.TryParse(tokens[j + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out indices[j]) || indices[j] < 0 || indices[j] >= vertexElement.Count) { valid = false; break; }
+                if (!valid) continue;
+                for (var j = 1; j < count - 1; j++) { mesh.Indices.Add(indices[0]); mesh.Indices.Add(indices[j]); mesh.Indices.Add(indices[j + 1]); }
+            }
+        }
+        else if (format == "binary_little_endian")
+        {
+            using var reader = new BinaryReader(new MemoryStream(bytes, headerEnd, bytes.Length - headerEnd), Encoding.ASCII, false);
+            foreach (var element in elements)
+            {
+                for (var i = 0; i < element.Count; i++)
+                {
+                    if (element == vertexElement)
+                    {
+                        var coords = new float[3];
+                        foreach (var property in element.Properties)
+                        {
+                            if (property.IsList) { var n = checked((int)ReadPlyScalar(reader, property.CountType!)); for (var j = 0; j < n; j++) _ = ReadPlyScalar(reader, property.ItemType!); continue; }
+                            var value = ReadPlyScalar(reader, property.Type);
+                            if (property.Name.Equals("x", StringComparison.OrdinalIgnoreCase)) coords[0] = (float)value;
+                            else if (property.Name.Equals("y", StringComparison.OrdinalIgnoreCase)) coords[1] = (float)value;
+                            else if (property.Name.Equals("z", StringComparison.OrdinalIgnoreCase)) coords[2] = (float)value;
+                        }
+                        mesh.Positions.Add(new System.Numerics.Vector3(coords[0], coords[1], coords[2]));
+                    }
+                    else if (element == faceElement)
+                    {
+                        List<int>? indices = null;
+                        foreach (var property in element.Properties)
+                        {
+                            if (!property.IsList) { _ = ReadPlyScalar(reader, property.Type); continue; }
+                            var n = checked((int)ReadPlyScalar(reader, property.CountType!)); var values = new List<int>(Math.Max(0, n));
+                            for (var j = 0; j < n; j++) { var value = ReadPlyScalar(reader, property.ItemType!); values.Add(value is < 0 or > int.MaxValue ? -1 : (int)value); }
+                            if (ReferenceEquals(property, faceList)) indices = values;
+                        }
+                        if (indices == null || indices.Count < 3 || indices.Any(index => index < 0 || index >= vertexElement.Count)) continue;
+                        for (var j = 1; j < indices.Count - 1; j++) { mesh.Indices.Add(indices[0]); mesh.Indices.Add(indices[j]); mesh.Indices.Add(indices[j + 1]); }
+                    }
+                    else
+                    {
+                        foreach (var property in element.Properties)
+                        {
+                            if (property.IsList) { var n = checked((int)ReadPlyScalar(reader, property.CountType!)); for (var j = 0; j < n; j++) _ = ReadPlyScalar(reader, property.ItemType!); }
+                            else _ = ReadPlyScalar(reader, property.Type);
+                        }
+                    }
+                }
+            }
+        }
+        else throw new InvalidDataException($"Unsupported PLY format '{format}'. Supported formats are ASCII and binary_little_endian: {path}");
+        if (mesh.Indices.Count == 0) throw new InvalidDataException($"PLY contains no usable faces: {path}");
     }
+
+    static int FindPlyHeaderEnd(byte[] bytes)
+    {
+        var marker = Encoding.ASCII.GetBytes("end_header");
+        for (var i = 0; i <= bytes.Length - marker.Length; i++)
+        {
+            var match = true; for (var j = 0; j < marker.Length; j++) if (bytes[i + j] != marker[j]) { match = false; break; }
+            if (!match) continue;
+            var end = i + marker.Length; while (end < bytes.Length && (bytes[end] == 13 || bytes[end] == 10)) { end++; if (bytes[end - 1] == 10) break; }
+            return end;
+        }
+        return -1;
+    }
+
+    static double ReadPlyScalar(BinaryReader reader, string type) => type switch
+    {
+        "char" or "int8" => reader.ReadSByte(), "uchar" or "uint8" => reader.ReadByte(), "short" or "int16" => reader.ReadInt16(), "ushort" or "uint16" => reader.ReadUInt16(), "int" or "int32" => reader.ReadInt32(), "uint" or "uint32" => reader.ReadUInt32(), "float" or "float32" => reader.ReadSingle(), "double" or "float64" => reader.ReadDouble(), _ => throw new InvalidDataException($"Unsupported PLY property type '{type}'.")
+    };
 
     public static MeshGeometry3D CreateSphere(System.Numerics.Vector3 center, double radius)
     {
-        var mesh = new MeshGeometry3D(); const int slices = 16; const int stacks = 8;
+        var mesh = NewGeometry(); const int slices = 16; const int stacks = 8;
         for (var stack = 0; stack <= stacks; stack++) { var phi = Math.PI * stack / stacks; for (var slice = 0; slice <= slices; slice++) { var theta = 2 * Math.PI * slice / slices; mesh.Positions.Add(center + new System.Numerics.Vector3((float)(radius * Math.Sin(phi) * Math.Cos(theta)), (float)(radius * Math.Sin(phi) * Math.Sin(theta)), (float)(radius * Math.Cos(phi)))); } }
-        for (var stack = 0; stack < stacks; stack++) for (var slice = 0; slice < slices; slice++) { var first = stack * (slices + 1) + slice; var second = first + slices + 1; mesh.TriangleIndices.Add(first); mesh.TriangleIndices.Add(second); mesh.TriangleIndices.Add(first + 1); mesh.TriangleIndices.Add(first + 1); mesh.TriangleIndices.Add(second); mesh.TriangleIndices.Add(second + 1); }
+        for (var stack = 0; stack < stacks; stack++) for (var slice = 0; slice < slices; slice++) { var first = stack * (slices + 1) + slice; var second = first + slices + 1; mesh.Indices.Add(first); mesh.Indices.Add(second); mesh.Indices.Add(first + 1); mesh.Indices.Add(first + 1); mesh.Indices.Add(second); mesh.Indices.Add(second + 1); }
         mesh.UpdateBounds(); return mesh;
     }
-    static float Parse(string value) => float.Parse(value, CultureInfo.InvariantCulture);
 }
