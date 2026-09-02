@@ -98,7 +98,7 @@ enum ArtifactScanner {
         if states[.postprocessing] == .done { return "Postprocessed" }
         if states[.numcalc] == .done { return "Solved" }
         if states[.preprocessing] == .done { return "Projects ready" }
-        if states[.inference] == .done { return "BezierPPM Inference ready" }
+        if states[.inference] == .done { return "Mesh2PPM Inference ready" }
         return URL(fileURLWithPath: project.saveLocation).lastPathComponent
     }
 

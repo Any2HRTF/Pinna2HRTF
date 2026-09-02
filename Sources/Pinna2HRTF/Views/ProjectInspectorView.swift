@@ -41,7 +41,7 @@ struct ProjectInspectorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 requiredPanel
-                SettingsDisclosure("BezierPPM Inference", systemImage: "wand.and.stars") {
+                SettingsDisclosure("Mesh2PPM Inference", systemImage: "wand.and.stars") {
                     ModelPicker(selection: modelNameBinding, options: store.modelOptions, helpID: "inference.model")
                 }
                 SettingsDisclosure("Mesh2HRTF", systemImage: "waveform.path.ecg") {
@@ -102,7 +102,7 @@ struct ProjectInspectorView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             PathField("Save location", helpID: "project.save_location", text: projectStringBinding(\.saveLocation), mode: .directory)
-            SettingToggle(title: "Use BezierPPM", helpID: "project.use_bezierppm", isOn: inferenceBoolBinding(\.usePredictionsForPreprocessing))
+                SettingToggle(title: "Use Mesh2PPM", helpID: "project.use_bezierppm", isOn: inferenceBoolBinding(\.usePredictionsForPreprocessing))
         }
         .padding(10)
         .background(.background, in: RoundedRectangle(cornerRadius: 10))

@@ -412,7 +412,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
         guard let meshURL = ArtifactScanner.preprocessingMesh(for: project, side: side), let identity = ArtifactScanner.meshIdentity(meshURL) else {
             let inferenceRequired = project.settings.inference.usePredictionsForPreprocessing && !project.leftEar.isEmpty && !project.rightEar.isEmpty
-            microphonePlacementError = inferenceRequired ? "Run BezierPPM Inference before placing the \(side.rawValue) microphone." : "The \(side.rawValue) preprocessing mesh could not be opened."
+            microphonePlacementError = inferenceRequired ? "Run Mesh2PPM Inference before placing the \(side.rawValue) microphone." : "The \(side.rawValue) preprocessing mesh could not be opened."
             return
         }
         microphonePlacementSide = side
@@ -659,7 +659,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             return
         }
         guard !stageBlocked(stage) else {
-            appendLog("Run BezierPPM Inference first.")
+            appendLog("Run Mesh2PPM Inference first.")
             return
         }
         if stage == .preprocessing, isPlacingMicrophone {

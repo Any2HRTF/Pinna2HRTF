@@ -4,6 +4,7 @@ using HelixToolkit.SharpDX;
 using HelixToolkit.WinUI.SharpDX;
 using Microsoft.UI;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -24,24 +25,19 @@ using System.Text.RegularExpressions;
 using Windows.Foundation;
 using Windows.Storage.Pickers;
 using Windows.System;
+using Windows.UI.Core;
 using WinRT.Interop;
 
 namespace Pinna2HRTF.Windows;
 
 public partial class MainWindow : Window
 {
-    [DllImport("user32.dll")]
-    static extern IntPtr LoadCursor(IntPtr hInstance, IntPtr lpCursorName);
-    [DllImport("user32.dll")]
-    static extern IntPtr SetCursor(IntPtr hCursor);
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern IntPtr LoadLibraryEx(string lpFileName, IntPtr hFile, uint dwFlags);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool FreeLibrary(IntPtr hModule);
     const uint LoadLibrarySearchDllLoadDir = 0x00000100;
     const uint LoadLibrarySearchDefaultDirs = 0x00001000;
-    static readonly IntPtr ResizeCursor = LoadCursor(IntPtr.Zero, new IntPtr(32644)); // IDC_SIZEWE
-    static readonly IntPtr ArrowCursor = LoadCursor(IntPtr.Zero, new IntPtr(32512)); // IDC_ARROW
     readonly ObservableCollection<ProjectRecord> projects = [];
     readonly ObservableCollection<Artifact> artifacts = [];
     readonly Dictionary<Guid, Process> runningProcesses = [];
@@ -59,6 +55,7 @@ public partial class MainWindow : Window
     readonly List<TextBlock> stageStatusLabels = [];
     readonly List<Expander> settingSections = [];
     readonly List<Element3D> sceneLights = [];
+    readonly List<MeshGeometryModel3D> meshVisuals = [];
     ProjectRegistry registry = new();
     EnvironmentConfig environment = new();
     ProjectRecord? selectedProject;
@@ -101,6 +98,7 @@ public partial class MainWindow : Window
     TextBlock viewerPlaceholder = new();
     Viewport3DX meshViewport = new();
     Border meshViewerBackground = new();
+    CursorGrid? meshViewportHost;
     Border? projectsPaneBorder;
     Border? previewPanelBorder;
     Border? logPanelBorder;
@@ -115,6 +113,10 @@ public partial class MainWindow : Window
     bool projectsCollapsed;
     bool logCollapsed;
     bool viewportReady;
+    CancellationTokenSource? meshLoadCancellation;
+    int meshLoadGeneration;
+    SplitView? projectsSplitView;
+    FrameworkElement? projectsCompactPane;
     enum MeshPointerMode { None, Rotate, Pan }
     MeshPointerMode meshPointerMode;
     TextBox logText = new();
@@ -236,26 +238,37 @@ public partial class MainWindow : Window
         contentGrid = new Grid { Background = appBackgroundBrush };
         projectsColumn = new ColumnDefinition { Width = new GridLength(projectsExpandedWidth), MinWidth = 240, MaxWidth = 520 };
         contentGrid.ColumnDefinitions.Add(projectsColumn);
-        contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4), MinWidth = 4, MaxWidth = 4 });
+        contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4), MinWidth = 12, MaxWidth = 12 });
         contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 420 });
-        contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4), MinWidth = 4, MaxWidth = 4 });
+        contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4), MinWidth = 12, MaxWidth = 12 });
         settingsColumn = new ColumnDefinition { Width = new GridLength(settingsExpandedWidth), MinWidth = 320, MaxWidth = 560 };
         contentGrid.ColumnDefinitions.Add(settingsColumn);
         contentGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         Grid.SetRow(contentGrid, 1);
         Root.Children.Add(contentGrid);
         var projectsPane = BuildProjectsPane();
-        Grid.SetColumn(projectsPane, 0);
-        contentGrid.Children.Add(projectsPane);
+        projectsSplitView = new SplitView
+        {
+            DisplayMode = SplitViewDisplayMode.Inline,
+            IsPaneOpen = !projectsCollapsed,
+            OpenPaneLength = Math.Clamp(projectsExpandedWidth, 240, 520),
+            CompactPaneLength = 32,
+            Pane = projectsPane,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch
+        };
+        projectsCompactPane = BuildProjectsCompactPane();
+        projectsSplitView.Content = projectsCompactPane;
+        Grid.SetColumn(projectsSplitView, 0);
+        contentGrid.Children.Add(projectsSplitView);
         var projectSplitter = BuildSplitter(true, ProjectSplitterDragged);
-        projectSplitter.Margin = new Thickness(-4, 0, -4, 0);
         Grid.SetColumn(projectSplitter, 1);
         contentGrid.Children.Add(projectSplitter);
         var center = BuildCenterPane();
         Grid.SetColumn(center, 2);
         contentGrid.Children.Add(center);
         var settingsSplitter = BuildSplitter(true, SettingsSplitterDragged);
-        settingsSplitter.Margin = new Thickness(-4, 0, -4, 0);
+        Grid.SetColumn(settingsSplitter, 3);
         Grid.SetColumn(settingsSplitter, 3);
         contentGrid.Children.Add(settingsSplitter);
         var settings = BuildSettingsPane();
@@ -266,24 +279,37 @@ public partial class MainWindow : Window
 
     Grid BuildSplitter(bool vertical, DragDeltaEventHandler handler)
     {
-        var host = new Grid
+        // Let column/row definition size the host. For vertical splitters, stretch height only.
+        // For horizontal splitters, stretch width only.
+        var host = new CursorGrid(vertical ? InputSystemCursorShape.SizeWestEast : InputSystemCursorShape.SizeNorthSouth)
         {
-            Width = vertical ? 12 : double.NaN,
-            Height = vertical ? double.NaN : 12,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Stretch,
             Background = new SolidColorBrush(Colors.Transparent),
             IsHitTestVisible = true
         };
+        
+        if (vertical)
+        {
+            // Vertical splitter: takes 12px width from column, stretches height
+            host.VerticalAlignment = VerticalAlignment.Stretch;
+        }
+        else
+        {
+            // Horizontal splitter: takes 12px height from row, stretches width
+            host.HorizontalAlignment = HorizontalAlignment.Stretch;
+        }
+        
+        // Visual indicator line: 4px, centered
         var line = new Border
         {
-            Width = vertical ? 1 : double.NaN,
-            Height = vertical ? double.NaN : 1,
+            Width = vertical ? 4 : double.NaN,
+            Height = vertical ? double.NaN : 4,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             Background = borderBrush,
             IsHitTestVisible = false
         };
+        
+        // Hit-test area: fills entire host (12px x full height/width)
         var thumb = new Thumb
         {
             HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -291,10 +317,11 @@ public partial class MainWindow : Window
             Background = new SolidColorBrush(Colors.Transparent),
             IsHitTestVisible = true
         };
-        AttachResizeCursor(thumb);
+        
         thumb.DragDelta += handler;
         host.Children.Add(line);
         host.Children.Add(thumb);
+        
         return host;
     }
 
@@ -334,15 +361,27 @@ public partial class MainWindow : Window
         SaveUiState();
     }
 
-    static void AttachResizeCursor(FrameworkElement splitter)
+    FrameworkElement BuildProjectsCompactPane()
     {
-        splitter.PointerEntered += (_, _) => SetCursor(ResizeCursor);
-        splitter.PointerExited += (_, _) => SetCursor(ArrowCursor);
+        var toggle = new Button
+        {
+            Content = new SymbolIcon(Symbol.OpenPane), Width = 32, Height = 40, Padding = new Thickness(0),
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top,
+            Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0)
+        };
+        ToolTipService.SetToolTip(toggle, "Expand Projects");
+        toggle.Click += (_, _) => SetProjectsCollapsed(false, true);
+        return new Border { Background = surfaceBrush, Child = toggle };
     }
 
     void SetProjectsCollapsed(bool collapsed, bool persist)
     {
         projectsCollapsed = collapsed;
+        if (projectsSplitView != null)
+        {
+            projectsSplitView.IsPaneOpen = !collapsed;
+            projectsSplitView.OpenPaneLength = Math.Clamp(projectsExpandedWidth, 240, 520);
+        }
         if (projectsColumn != null)
             projectsColumn.Width = new GridLength(collapsed ? 32 : Math.Clamp(projectsExpandedWidth, 240, 520));
         if (projectsBody != null) projectsBody.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
@@ -360,17 +399,17 @@ public partial class MainWindow : Window
     MenuBar BuildMenu()
     {
         var bar = new MenuBar { Background = new SolidColorBrush(Colors.Transparent) };
-        var project = new MenuBarItem { Title = "Project" };
+        var project = new MenuBarItem { Title = "Project", VerticalAlignment = VerticalAlignment.Center };
         project.Items.Add(MenuItem("New Project", CreateProjectClicked, "Ctrl+N"));
         project.Items.Add(MenuItem("Import Project", ImportProjectClicked, "Ctrl+Shift+O"));
         project.Items.Add(MenuItem("Duplicate Project", DuplicateProjectClicked, "Ctrl+D"));
         project.Items.Add(new MenuFlyoutSeparator());
         project.Items.Add(MenuItem("Delete Project", RemoveProjectClicked, "Ctrl+Delete"));
-        var pipeline = new MenuBarItem { Title = "Pipeline" };
+        var pipeline = new MenuBarItem { Title = "Pipeline", VerticalAlignment = VerticalAlignment.Center };
         pipeline.Items.Add(MenuItem("Run All", RunAllClicked));
         pipeline.Items.Add(MenuItem("Run Next Step", RunNextClicked, "Ctrl+R"));
-        var run = new MenuFlyoutSubItem { Text = "Run" };
-        run.Items.Add(MenuItem("BezierPPM Inference", RunInferenceClicked));
+        var run = new MenuFlyoutSubItem { Text = "Run", VerticalAlignment = VerticalAlignment.Center };
+        run.Items.Add(MenuItem("Mesh2PPM Inference", RunInferenceClicked));
         run.Items.Add(MenuItem("Preprocessing", RunPreprocessingClicked));
         run.Items.Add(MenuItem("NumCalc", RunNumCalcClicked));
         run.Items.Add(MenuItem("Postprocessing", RunPostprocessingClicked));
@@ -378,7 +417,7 @@ public partial class MainWindow : Window
         pipeline.Items.Add(new MenuFlyoutSeparator());
         pipeline.Items.Add(MenuItem("Stop", StopClicked, "Ctrl+."));
         pipeline.Items.Add(MenuItem("Reset Outputs", ResetOutputsClicked));
-        var help = new MenuBarItem { Title = "Help" };
+        var help = new MenuBarItem { Title = "Help", VerticalAlignment = VerticalAlignment.Center };
         help.Items.Add(MenuItem("Online Documentation", OpenDocumentationClicked));
         help.Items.Add(new MenuFlyoutSeparator());
         help.Items.Add(MenuItem("About Pinna2HRTF", ShowAboutClicked));
@@ -411,10 +450,10 @@ public partial class MainWindow : Window
         header.Children.Add(projectsHeaderText);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
         projectsActions = buttons;
-        buttons.Children.Add(ProjectButton("&#xE710;", "New project", CreateProjectClicked));
-        buttons.Children.Add(ProjectButton("&#xE896;", "Import project", ImportProjectClicked));
-        buttons.Children.Add(ProjectButton("&#xE8C8;", "Duplicate selected project", DuplicateProjectClicked));
-        buttons.Children.Add(ProjectButton("&#xE74D;", "Delete selected project", RemoveProjectClicked));
+        buttons.Children.Add(ProjectButton("\uE710", "New project", CreateProjectClicked));
+        buttons.Children.Add(ProjectButton("\uE896", "Import project", ImportProjectClicked));
+        buttons.Children.Add(ProjectButton("\uE8C8", "Duplicate selected project", DuplicateProjectClicked));
+        buttons.Children.Add(ProjectButton("\uE74D", "Delete selected project", RemoveProjectClicked));
         Grid.SetColumn(buttons, 1);
         header.Children.Add(buttons);
         grid.Children.Add(header);
@@ -438,7 +477,7 @@ public partial class MainWindow : Window
 
     Button ProjectButton(string glyph, string tip, RoutedEventHandler handler)
     {
-        var fontIcon = new FontIcon { FontFamily = new FontFamily("Segoe MDL2 Assets"), Glyph = glyph, Width = 32, Height = 32, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var fontIcon = new FontIcon { FontFamily = new FontFamily("Segoe MDL2 Assets"), Glyph = glyph, FontSize = 16, Width = 32, Height = 32, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var button = new Button { Content = fontIcon, Width = 32, Height = 32, Padding = new Thickness(0) };
         ToolTipService.SetToolTip(button, tip);
         button.Click += handler;
@@ -449,7 +488,7 @@ public partial class MainWindow : Window
     {
         var grid = new Grid { Margin = new Thickness(14, 14, 14, 14) };
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(4) });
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(12) });
         centerLogRow = new RowDefinition { Height = new GridLength(Math.Clamp(liveLogExpandedHeight, 100, 600)) };
         grid.RowDefinitions.Add(centerLogRow);
         previewPanelBorder = new Border { CornerRadius = new CornerRadius(8), BorderBrush = borderBrush, BorderThickness = new Thickness(1), Background = surfaceBrush };
@@ -494,7 +533,9 @@ public partial class MainWindow : Window
         meshViewport.PointerMoved += MeshViewportPointerMoved;
         meshViewport.PointerReleased += MeshViewportPointerReleased;
         meshViewport.PointerWheelChanged += MeshViewportPointerWheelChanged;
-        viewerGrid.Children.Add(meshViewport);
+        meshViewportHost = new CursorGrid(InputSystemCursorShape.Arrow);
+        meshViewportHost.Children.Add(meshViewport);
+        viewerGrid.Children.Add(meshViewportHost);
         imagePreview = new Image { Stretch = Stretch.Uniform, Margin = new Thickness(18), Visibility = Visibility.Collapsed };
         viewerGrid.Children.Add(imagePreview);
         viewerPlaceholder = new TextBlock { Text = "No preview selected", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, FontSize = 18, Foreground = mutedTextBrush };
@@ -520,7 +561,7 @@ public partial class MainWindow : Window
         preview.Child = previewGrid;
         grid.Children.Add(preview);
         var logSplitter = BuildSplitter(false, LogSplitterDragged);
-        logSplitter.Margin = new Thickness(0, -4, 0, -4);
+        logSplitter.Margin = new Thickness(0);
         Grid.SetRow(logSplitter, 1);
         grid.Children.Add(logSplitter);
         var log = BuildLogPane();
@@ -616,8 +657,8 @@ public partial class MainWindow : Window
         AddPathSetting(settings, "Right ear (optional)", "project.right_ear", rightEarBox, BrowseRightEarClicked);
         AddPathSetting(settings, "Save location", "project.save_location", saveLocationBox, BrowseSaveLocationClicked);
         settings.Children.Add(new TextBlock { Text = "Choose at least one ear mesh.", Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)), Margin = new Thickness(0, 3, 0, 4) });
-        AddSetting(settings, "Use BezierPPM", "project.use_bezierppm", usePredictionsBox, "Use BezierPPM");
-        AddExpander(settings, "BezierPPM Inference", [AddSettingPanel("Model", "inference.model", modelPicker)]);
+        AddSetting(settings, "Use Mesh2PPM", "project.use_bezierppm", usePredictionsBox, "Use Mesh2PPM");
+        AddExpander(settings, "Mesh2PPM Inference", [AddSettingPanel("Model", "inference.model", modelPicker)]);
         AddExpander(settings, "Mesh2HRTF", [PathSettingPanel("Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked), AddSettingPanel("Use custom head radius", "mesh2hrtf.use_head_radius", useHeadRadiusBox, "Use custom head radius"), AddSettingPanel("Head radius", "mesh2hrtf.head_radius", headRadiusBox), AddSettingPanel("Min frequency", "mesh2hrtf.min_frequency", minFrequencyBox), AddSettingPanel("Max frequency", "mesh2hrtf.max_frequency", maxFrequencyBox), AddSettingPanel("Frequency steps (minimum 2)", "mesh2hrtf.frequency_steps", frequencyStepsBox), AddSettingPanel("Microphone faces", "mesh2hrtf.microphone_faces", microphoneFacesBox)]);
         AddExpander(settings, "Mesh Grading", [AddSettingPanel("Min edge length", "mesh_grading.min_edge_length", meshMinEdgeBox), AddSettingPanel("Max edge length", "mesh_grading.max_edge_length", meshMaxEdgeBox), AddSettingPanel("Max error", "mesh_grading.max_error", meshMaxErrorBox), AddSettingPanel("Gamma", "mesh_grading.gamma", meshGammaBox), AddSettingPanel("Gamma opposite", "mesh_grading.gamma_opposite", meshGammaOppositeBox)]);
         AddExpander(settings, "NumCalc", [AddSettingPanel("Parallel instances", "numcalc.parallel_instances", maxInstancesBox), AddSettingPanel("CPU limit (%)", "numcalc.cpu_limit", maxCpuLoadBox), AddSettingPanel("Adaptive FMM expansion length", "numcalc.adaptive_fmm", adaptiveFmmLengthBox, "Adaptive FMM expansion length")]);
@@ -759,7 +800,7 @@ public partial class MainWindow : Window
         var statusRow = new Grid { Margin = new Thickness(0, 6, 0, 0) };
         statusRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         statusRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        numCalcStatusText = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)) };
+        numCalcStatusText = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)) };
         statusRow.Children.Add(numCalcStatusText);
         var reset = new Button { Content = "Reset Outputs", Padding = new Thickness(10, 3, 10, 3), FontSize = 11 };
         reset.Click += ResetOutputsClicked;
@@ -1069,24 +1110,57 @@ public partial class MainWindow : Window
         }
     }
 
-    async void BrowseLeftEarClicked(object sender, RoutedEventArgs e) { var path = await PickFileAsync(); if (path != null) leftEarBox.Text = path; }
-    async void BrowseRightEarClicked(object sender, RoutedEventArgs e) { var path = await PickFileAsync(); if (path != null) rightEarBox.Text = path; }
-    async void BrowseSaveLocationClicked(object sender, RoutedEventArgs e) { var path = await PickFolderAsync(); if (path != null) saveLocationBox.Text = path; }
-    async void BrowseEvaluationGridClicked(object sender, RoutedEventArgs e) { var path = await PickFolderAsync(); if (path != null) evaluationGridBox.Text = path; }
+    async void BrowseLeftEarClicked(object sender, RoutedEventArgs e) { var path = await PickFileAsync(leftEarBox.Text); if (path != null) leftEarBox.Text = path; }
+    async void BrowseRightEarClicked(object sender, RoutedEventArgs e) { var path = await PickFileAsync(rightEarBox.Text); if (path != null) rightEarBox.Text = path; }
+    async void BrowseSaveLocationClicked(object sender, RoutedEventArgs e) { var path = await PickFolderAsync(saveLocationBox.Text); if (path != null) saveLocationBox.Text = path; }
+    async void BrowseEvaluationGridClicked(object sender, RoutedEventArgs e) { var path = await PickFolderAsync(evaluationGridBox.Text); if (path != null) evaluationGridBox.Text = path; }
 
-    async Task<string?> PickFileAsync()
+    static string? ExistingPickerFolder(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        try
+        {
+            var full = Path.GetFullPath(path.Trim());
+            if (Directory.Exists(full)) return full;
+            var parent = Path.GetDirectoryName(full);
+            return !string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent) ? parent : null;
+        }
+        catch { return null; }
+    }
+
+    static void ConfigurePickerStart(object picker, string? currentPath)
+    {
+        // WinUI pickers expose only a coarse SuggestedStartLocation. A stable
+        // SettingsIdentifier lets Windows remember the last folder separately for
+        // each existing path, while still falling back to the normal picker.
+        var folder = ExistingPickerFolder(currentPath);
+        if (picker is FileOpenPicker filePicker)
+        {
+            filePicker.SuggestedStartLocation = PickerLocationId.ComputerFolder;
+            if (folder != null) filePicker.SettingsIdentifier = "Pinna2HRTF:" + folder;
+        }
+        else if (picker is FolderPicker folderPicker)
+        {
+            folderPicker.SuggestedStartLocation = PickerLocationId.ComputerFolder;
+            if (folder != null) folderPicker.SettingsIdentifier = "Pinna2HRTF:" + folder;
+        }
+    }
+
+    async Task<string?> PickFileAsync(string? currentPath = null)
     {
         var picker = new FileOpenPicker();
         picker.FileTypeFilter.Add("*");
+        ConfigurePickerStart(picker, currentPath);
         InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
         var file = await picker.PickSingleFileAsync();
         return file?.Path;
     }
 
-    async Task<string?> PickFolderAsync()
+    async Task<string?> PickFolderAsync(string? currentPath = null)
     {
         var picker = new FolderPicker();
         picker.FileTypeFilter.Add("*");
+        ConfigurePickerStart(picker, currentPath);
         InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
         var folder = await picker.PickSingleFolderAsync();
         return folder?.Path;
@@ -1176,19 +1250,27 @@ public partial class MainWindow : Window
 
     async Task OpenMeshAsync(Artifact artifact)
     {
+        meshLoadCancellation?.Cancel();
+        meshLoadCancellation?.Dispose();
+        meshLoadCancellation = new CancellationTokenSource();
+        var cancellation = meshLoadCancellation.Token;
+        var generation = ++meshLoadGeneration;
+        RemoveMeshVisuals();
         try
         {
-            var loaded = await Task.Run(() => MeshLoader.Load(artifact.Path));
-            if (!string.Equals(selectedArtifactPath, artifact.Path, StringComparison.OrdinalIgnoreCase)) return;
+            var loaded = await Task.Run(() => MeshLoader.Load(artifact.Path), cancellation);
+            cancellation.ThrowIfCancellationRequested();
+            if (generation != meshLoadGeneration || !string.Equals(selectedArtifactPath, artifact.Path, StringComparison.OrdinalIgnoreCase)) return;
             for (var attempt = 0; attempt < 40 && (!viewportReady || meshViewport.RenderHost == null); attempt++)
                 await Task.Delay(25);
             if (!viewportReady || meshViewport.RenderHost == null || meshViewport.Items == null)
                 throw new InvalidOperationException("The 3D viewport render host is not ready yet.");
             currentMesh = loaded;
-            meshVisual = new MeshGeometryModel3D { Geometry = currentMesh.Geometry, Material = new PhongMaterial { DiffuseColor = new Color4(0.38f, 0.57f, 0.56f, 1), SpecularColor = new Color4(0.7f, 0.78f, 0.76f, 1) }, CullMode = SharpDX.Direct3D11.CullMode.None };
+            meshVisual = new MeshGeometryModel3D { Geometry = currentMesh.Geometry, Material = new PhongMaterial { AmbientColor = new Color4(0.18f, 0.22f, 0.22f, 1), DiffuseColor = new Color4(0.48f, 0.68f, 0.66f, 1), EmissiveColor = new Color4(0.035f, 0.045f, 0.045f, 1), SpecularColor = new Color4(0.12f, 0.14f, 0.14f, 1), SpecularShininess = 12 }, CullMode = SharpDX.Direct3D11.CullMode.None };
             meshVisual.RenderWireframe = string.Equals(Path.GetExtension(artifact.Path), ".ply", StringComparison.OrdinalIgnoreCase);
             meshVisual.WireframeColor = ColorHelper.FromArgb(140, 31, 56, 56);
             meshViewport.Items.Add(meshVisual);
+            meshVisuals.Add(meshVisual);
             AddMicrophoneMarker(artifact.Path);
             ResetMeshCamera();
             meshViewport.Camera?.ZoomExtents(meshViewport, 80);
@@ -1196,6 +1278,7 @@ public partial class MainWindow : Window
             meshViewport.Visibility = Visibility.Visible;
             UpdatePlacementButtons();
         }
+        catch (OperationCanceledException) { }
         catch (Exception error)
         {
             currentMesh = null;
@@ -1222,8 +1305,9 @@ public partial class MainWindow : Window
 
     void ResetViewer()
     {
-        if (meshVisual != null) meshViewport.Items.Remove(meshVisual);
-        if (microphoneVisual != null) meshViewport.Items.Remove(microphoneVisual);
+        meshLoadCancellation?.Cancel();
+        meshLoadGeneration++;
+        RemoveMeshVisuals();
         meshVisual = null;
         microphoneVisual = null;
         currentMesh = null;
@@ -1239,6 +1323,19 @@ public partial class MainWindow : Window
         placeRightButton.IsEnabled = false;
     }
 
+    void RemoveMeshVisuals()
+    {
+        if (meshViewport.Items != null)
+        {
+            foreach (var visual in meshVisuals.ToList()) meshViewport.Items.Remove(visual);
+            if (meshVisual != null) meshViewport.Items.Remove(meshVisual);
+            if (microphoneVisual != null) meshViewport.Items.Remove(microphoneVisual);
+        }
+        meshVisuals.Clear();
+        meshVisual = null;
+        microphoneVisual = null;
+    }
+
     void MeshViewportPointerPressed(object sender, PointerRoutedEventArgs e)
     {
         if (meshVisual == null || currentMesh == null)
@@ -1249,6 +1346,7 @@ public partial class MainWindow : Window
         lastPointer = e.GetCurrentPoint(meshViewport).Position;
         pointerMoved = false;
         rotatingMesh = meshPointerMode == MeshPointerMode.Rotate;
+        meshViewportHost?.SetCursor(meshPointerMode == MeshPointerMode.Rotate ? InputSystemCursorShape.Hand : InputSystemCursorShape.SizeAll);
         meshViewport.CapturePointer(e.Pointer);
     }
 
@@ -1294,6 +1392,7 @@ public partial class MainWindow : Window
         var mode = meshPointerMode;
         meshPointerMode = MeshPointerMode.None;
         rotatingMesh = false;
+        meshViewportHost?.SetCursor(InputSystemCursorShape.Arrow);
         SaveMeshCamera();
         if (placementSide != null && mode == MeshPointerMode.Rotate && !pointerMoved && currentMesh != null && meshVisual != null)
         {
@@ -1306,6 +1405,8 @@ public partial class MainWindow : Window
                 placementCoordinates.Text = $"{placementSide} mic: {raw.X:0.##}, {raw.Y:0.##}, {raw.Z:0.##} mm";
                 donePositionButton.IsEnabled = true;
             }
+            else
+                AppendLog("Could not hit the active mesh at the selected position. Try clicking directly on the mesh surface.", selectedProject?.Id);
         }
     }
 
@@ -1327,8 +1428,16 @@ public partial class MainWindow : Window
         // preprocessing mesh is preferred when available, but requiring it here
         // made the buttons appear dead for projects that only have input meshes.
         var currentSide = selectedArtifactSide ?? SideForPath(currentMesh?.Path ?? "");
-        placeLeftButton.IsEnabled = enabled && selectedProject != null && (PreprocessingMesh(selectedProject, "left") != null || currentSide == "left");
-        placeRightButton.IsEnabled = enabled && selectedProject != null && (PreprocessingMesh(selectedProject, "right") != null || currentSide == "right");
+        placeLeftButton.IsEnabled = enabled && selectedProject != null && PlacementMeshCandidate(selectedProject, "left") != null;
+        placeRightButton.IsEnabled = enabled && selectedProject != null && PlacementMeshCandidate(selectedProject, "right") != null;
+    }
+
+    string? PlacementMeshCandidate(ProjectRecord project, string side)
+    {
+        var preprocessing = PreprocessingMesh(project, side);
+        if (preprocessing != null && File.Exists(preprocessing)) return preprocessing;
+        var input = string.Equals(side, "left", StringComparison.OrdinalIgnoreCase) ? project.LeftEar : project.RightEar;
+        return !string.IsNullOrWhiteSpace(input) && File.Exists(input) ? input : null;
     }
 
     async void BeginPlacement(string side)
@@ -1338,9 +1447,8 @@ public partial class MainWindow : Window
             AppendLog($"Cannot start {side} microphone placement: no mesh is loaded.", selectedProject?.Id);
             return;
         }
-        var mesh = PreprocessingMesh(selectedProject, side);
-        if (mesh == null && string.Equals(selectedArtifactSide ?? SideForPath(currentMesh.Path), side, StringComparison.OrdinalIgnoreCase))
-            mesh = currentMesh.Path;
+        var mesh = PlacementMeshCandidate(selectedProject, side);
+        if (mesh == null && string.Equals(selectedArtifactSide ?? SideForPath(currentMesh.Path), side, StringComparison.OrdinalIgnoreCase)) mesh = currentMesh.Path;
         if (mesh == null)
         {
             AppendLog("Select the mesh used for preprocessing before placing the microphone.", selectedProject.Id);
@@ -1348,8 +1456,12 @@ public partial class MainWindow : Window
         }
         if (!Path.GetFullPath(currentMesh.Path).Equals(Path.GetFullPath(mesh), StringComparison.OrdinalIgnoreCase))
         {
-            var artifact = artifacts.FirstOrDefault(x => Path.GetFullPath(x.Path).Equals(Path.GetFullPath(mesh), StringComparison.OrdinalIgnoreCase));
-            if (artifact != null) await OpenMeshAsync(artifact);
+            var artifact = artifacts.FirstOrDefault(x => Path.GetFullPath(x.Path).Equals(Path.GetFullPath(mesh), StringComparison.OrdinalIgnoreCase)) ?? new Artifact($"{side} placement mesh", mesh, side);
+            ResetViewer();
+            selectedArtifactPath = artifact.Path;
+            selectedArtifactSide = side;
+            selectedArtifactText.Text = Path.GetFileName(artifact.Path);
+            await OpenMeshAsync(artifact);
             if (currentMesh == null || !Path.GetFullPath(currentMesh.Path).Equals(Path.GetFullPath(mesh), StringComparison.OrdinalIgnoreCase)) return;
         }
         placementSide = side;
@@ -2067,7 +2179,7 @@ record Artifact(string Title, string Path, string? Side = null)
 
 record Stage(string Value, string Title)
 {
-    public static readonly Stage Inference = new("inference", "BezierPPM Inference");
+    public static readonly Stage Inference = new("inference", "Mesh2PPM Inference");
     public static readonly Stage Preprocessing = new("preprocessing", "Preprocessing");
     public static readonly Stage Numcalc = new("numcalc", "NumCalc");
     public static readonly Stage Postprocessing = new("postprocessing", "Postprocess");
@@ -2089,6 +2201,22 @@ class PreprocessingSettings { public string MinFrequency { get; set; } = "0"; pu
 class ManualMicrophonePosition { public double X { get; set; } public double Y { get; set; } public double Z { get; set; } public string MeshPath { get; set; } = ""; public string MeshIdentity { get; set; } = ""; }
 class PostprocessingSettings { public bool Normalize { get; set; } = true; public string LevelOffsetDB { get; set; } = "-30"; }
 class NumCalcSettings { public string MaxInstances { get; set; } = "1"; public string MaxCpuLoad { get; set; } = "90"; public bool AdaptiveFmmLength { get; set; } = true; }
+
+sealed class CursorGrid : Grid
+{
+    public CursorGrid(InputSystemCursorShape shape)
+    {
+        // Cursor is assigned after the element is connected to the visual tree.
+        // Creating WinUI input cursors during construction can crash unpackaged
+        // WinUI apps on some Windows App SDK versions.
+        Loaded += (_, _) => ProtectedCursor = InputSystemCursor.Create(shape);
+    }
+
+    public void SetCursor(InputSystemCursorShape value)
+    {
+        DispatcherQueue.TryEnqueue(() => ProtectedCursor = InputSystemCursor.Create(value));
+    }
+}
 
 class MeshData
 {
@@ -2122,6 +2250,7 @@ static class MeshLoader
         var maximum = Math.Max(max.X - min.X, Math.Max(max.Y - min.Y, max.Z - min.Z));
         var scale = 180 / Math.Max(maximum, 1);
         for (var i = 0; i < mesh.Positions.Count; i++) mesh.Positions[i] = (mesh.Positions[i] - center) * (float)scale;
+        CalculateNormals(mesh);
         mesh.UpdateBounds();
         return new MeshData(path, mesh, center, scale, maximum * scale);
     }
@@ -2314,6 +2443,36 @@ static class MeshLoader
         var mesh = NewGeometry(); const int slices = 16; const int stacks = 8;
         for (var stack = 0; stack <= stacks; stack++) { var phi = Math.PI * stack / stacks; for (var slice = 0; slice <= slices; slice++) { var theta = 2 * Math.PI * slice / slices; mesh.Positions.Add(center + new System.Numerics.Vector3((float)(radius * Math.Sin(phi) * Math.Cos(theta)), (float)(radius * Math.Sin(phi) * Math.Sin(theta)), (float)(radius * Math.Cos(phi)))); } }
         for (var stack = 0; stack < stacks; stack++) for (var slice = 0; slice < slices; slice++) { var first = stack * (slices + 1) + slice; var second = first + slices + 1; mesh.Indices.Add(first); mesh.Indices.Add(second); mesh.Indices.Add(first + 1); mesh.Indices.Add(first + 1); mesh.Indices.Add(second); mesh.Indices.Add(second + 1); }
+        CalculateNormals(mesh);
         mesh.UpdateBounds(); return mesh;
+    }
+
+    static void CalculateNormals(MeshGeometry3D mesh)
+    {
+        if (mesh.Positions == null || mesh.Indices == null)
+            return;
+        var normals = new Vector3Collection();
+        for (var i = 0; i < mesh.Positions.Count; i++)
+            normals.Add(System.Numerics.Vector3.Zero);
+        for (var i = 0; i + 2 < mesh.Indices.Count; i += 3)
+        {
+            var ia = mesh.Indices[i];
+            var ib = mesh.Indices[i + 1];
+            var ic = mesh.Indices[i + 2];
+            if (ia < 0 || ib < 0 || ic < 0 || ia >= mesh.Positions.Count || ib >= mesh.Positions.Count || ic >= mesh.Positions.Count)
+                continue;
+            var face = System.Numerics.Vector3.Cross(mesh.Positions[ib] - mesh.Positions[ia], mesh.Positions[ic] - mesh.Positions[ia]);
+            if (face.LengthSquared() < 1e-12f)
+                continue;
+            normals[ia] += face;
+            normals[ib] += face;
+            normals[ic] += face;
+        }
+        for (var i = 0; i < normals.Count; i++)
+        {
+            var normal = normals[i];
+            normals[i] = normal.LengthSquared() < 1e-12f ? new System.Numerics.Vector3(0, 0, 1) : System.Numerics.Vector3.Normalize(normal);
+        }
+        mesh.Normals = normals;
     }
 }

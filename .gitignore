@@ -23,3 +23,4 @@ AppData/
 External/bin/*
 !External/bin/NumCalc.exe
 !External/bin/NumCalc.source-commit
+/.vscode

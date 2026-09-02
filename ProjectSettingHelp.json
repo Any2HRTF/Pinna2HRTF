@@ -25,8 +25,8 @@
   },
   {
     "id": "project.use_bezierppm",
-    "title": "Use BezierPPM",
-    "description": "Runs Mesh2PPM inference before preprocessing and uses the predicted BezierPPM meshes as the ear inputs. Disable this to preprocess the selected input meshes directly.",
+    "title": "Use Mesh2PPM",
+    "description": "Runs Mesh2PPM inference before preprocessing and uses the predicted meshes as the ear inputs. Disable this to preprocess the selected input meshes directly.",
     "publications": [
       { "title": "Perfler et al. (2025)", "url": "https://doi.org/10.1016/j.compbiomed.2025.109817" },
       { "title": "Pausch et al. (2026)", "url": "https://doi.org/10.1121/10.0043919" }

@@ -10,7 +10,7 @@ enum Stage: String, CaseIterable, Identifiable, Codable {
 
     var title: String {
         switch self {
-        case .inference: "BezierPPM Inference"
+        case .inference: "Mesh2PPM Inference"
         case .preprocessing: "Preprocessing"
         case .numcalc: "NumCalc"
         case .postprocessing: "Postprocess"
