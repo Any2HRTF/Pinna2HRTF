@@ -329,25 +329,21 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
         let asset = MDLAsset(url: url)
         let scene = SCNScene()
+        let darkMode = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         for index in 0..<asset.count {
             let object = asset.object(at: index)
             let node = SCNNode(mdlObject: object)
             node.categoryBitMask = 1
-            node.geometry?.firstMaterial?.diffuse.contents = NSColor(calibratedRed: 0.49, green: 0.65, blue: 0.64, alpha: 1)
+            node.geometry?.firstMaterial?.diffuse.contents = darkMode ? NSColor(calibratedRed: 0.749, green: 0.702, blue: 0.651, alpha: 1) : NSColor(calibratedRed: 0.816, green: 0.773, blue: 0.722, alpha: 1)
             node.geometry?.firstMaterial?.roughness.contents = 0.72
             scene.rootNode.addChildNode(node)
         }
         let bounds = scene.rootNode.boundingBox
         let center = SCNVector3((bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2, (bounds.min.z + bounds.max.z) / 2)
         let maximumDimension = max(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z)
-        let darkMode = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         scene.background.contents = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
         if let microphone = microphonePosition(for: url) {
-            let marker = SCNSphere(radius: max(maximumDimension * 0.006, 0.35))
-            marker.firstMaterial?.diffuse.contents = NSColor.systemOrange
-            let markerNode = SCNNode(geometry: marker)
-            markerNode.name = microphoneMarkerName
-            markerNode.categoryBitMask = 2
+            let markerNode = microphoneMarkerNode()
             markerNode.position = microphone
             scene.rootNode.addChildNode(markerNode)
         }
@@ -586,17 +582,33 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     func updateMicrophoneMarker(_ position: SCNVector3?) {
         selectedScene.rootNode.childNode(withName: microphoneMarkerName, recursively: true)?.removeFromParentNode()
         guard let position else { return }
-        let marker = SCNSphere(radius: max(selectedCameraScale * 0.006, 0.35))
-        marker.firstMaterial?.diffuse.contents = NSColor.systemOrange
-        let markerNode = SCNNode(geometry: marker)
-        markerNode.name = microphoneMarkerName
-        markerNode.categoryBitMask = 2
+        let markerNode = microphoneMarkerNode()
         markerNode.position = position
         selectedScene.rootNode.addChildNode(markerNode)
     }
 
+    private func microphoneMarkerNode() -> SCNNode {
+        let marker = SCNSphere(radius: 0.8)
+        marker.segmentCount = 32
+        let material = SCNMaterial()
+        material.lightingModel = .physicallyBased
+        material.diffuse.contents = NSColor(calibratedRed: 0.957, green: 0.478, blue: 0.086, alpha: 1)
+        material.metalness.contents = 0.82
+        material.roughness.contents = 0.14
+        material.specular.contents = NSColor.white
+        marker.firstMaterial = material
+        let markerNode = SCNNode(geometry: marker)
+        markerNode.name = microphoneMarkerName
+        markerNode.categoryBitMask = 2
+        return markerNode
+    }
+
     func updateSceneBackground(darkMode: Bool) {
         selectedScene.background.contents = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
+        selectedScene.rootNode.enumerateChildNodes { node, _ in
+            guard node.categoryBitMask == 1 else { return }
+            node.geometry?.firstMaterial?.diffuse.contents = darkMode ? NSColor(calibratedRed: 0.749, green: 0.702, blue: 0.651, alpha: 1) : NSColor(calibratedRed: 0.816, green: 0.773, blue: 0.722, alpha: 1)
+        }
     }
 
     func openImage(_ url: URL) {
