@@ -455,7 +455,7 @@ public partial class MainWindow : Window
         projectsExpander = new Expander
         {
             Header = projectsHeaderText, Content = grid, IsExpanded = !projectsCollapsed,
-            ExpandDirection = ExpandDirection.Down, MinWidth = 0, Padding = new Thickness(0),
+            ExpandDirection = ExpandDirection.Right, MinWidth = 0, Padding = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch
         };
@@ -657,7 +657,7 @@ public partial class MainWindow : Window
         {
             Header = header,
             Content = logText,
-            ExpandDirection = ExpandDirection.Down,
+            ExpandDirection = ExpandDirection.Up,
             IsExpanded = !logCollapsed,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Stretch,
