@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXTERNAL_ROOT="${1:-$ROOT/External}"
 BIN="$EXTERNAL_ROOT/bin"
 SRC="$EXTERNAL_ROOT/src"
