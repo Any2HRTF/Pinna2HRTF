@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var store: AppStore
-    @SceneStorage("logExpanded") private var logExpanded = true
+    @SceneStorage("logExpanded.v2") private var logExpanded = false
     @SceneStorage("inspectorPresented") private var inspectorPresented = true
 
     var body: some View {

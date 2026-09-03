@@ -75,13 +75,13 @@ def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: f
         while pending or running:
             finished = []
             for item in running:
-                process, log_file, ram, project, step, frequency = item
+                process, log_file, ram, project, item_source_dir, step, frequency = item
                 return_code = process.poll()
                 if return_code is not None:
                     log_file.close()
                     if return_code != 0:
                         raise RuntimeError(f"NumCalc failed for {project.name}, step {step}, frequency {frequency} Hz; see {log_file.name}")
-                    if not frequency_step_complete(source_dir, step):
+                    if not frequency_step_complete(item_source_dir, step):
                         raise RuntimeError(f"NumCalc produced incomplete output for {project.name}, step {step}, frequency {frequency} Hz; see {log_file.name}")
                     finished.append(item)
             for item in finished:

@@ -414,20 +414,18 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func microphonePosition(for meshURL: URL) -> SCNVector3? {
+        guard let project = selectedProject, let side = meshSide(for: meshURL, project: project), let preprocessingMesh = ArtifactScanner.preprocessingMesh(for: project, side: side), preprocessingMesh.standardizedFileURL.path == meshURL.standardizedFileURL.path else { return nil }
         if let microphonePlacementMeshURL, microphonePlacementMeshURL.standardizedFileURL.path == meshURL.standardizedFileURL.path, let pendingMicrophonePosition {
             return SCNVector3(CGFloat(pendingMicrophonePosition.x), CGFloat(pendingMicrophonePosition.y), CGFloat(pendingMicrophonePosition.z))
         }
-        if let project = selectedProject {
-            if let side = meshSide(for: meshURL, project: project), let position = ArtifactScanner.validManualMicrophonePosition(for: project, side: side) ?? ArtifactScanner.manualMicrophonePosition(for: project, side: side) {
-                return SCNVector3(CGFloat(position.x), CGFloat(position.y), CGFloat(position.z))
-            }
+        if let position = ArtifactScanner.validManualMicrophonePosition(for: project, side: side) ?? ArtifactScanner.manualMicrophonePosition(for: project, side: side) {
+            return SCNVector3(CGFloat(position.x), CGFloat(position.y), CGFloat(position.z))
         }
         if let identity = ArtifactScanner.meshIdentity(meshURL) {
             for position in automaticMicrophonePositionsByMesh.values where position.meshPath == meshURL.standardizedFileURL.path && position.meshIdentity == identity {
                 return SCNVector3(Float(position.x), Float(position.y), Float(position.z))
             }
         }
-        guard let project = selectedProject, let side = meshSide(for: meshURL, project: project) else { return nil }
         let parametersURL = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Projects/\(side.title)/parameters.json")
         guard let data = try? Data(contentsOf: parametersURL), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let values = object["sourceCenter"] as? [NSNumber], values.count == 3 else { return nil }
         return SCNVector3(Float(values[0].doubleValue * 1000), Float(values[1].doubleValue * 1000), Float(values[2].doubleValue * 1000))
