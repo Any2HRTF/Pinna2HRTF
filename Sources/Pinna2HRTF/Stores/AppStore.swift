@@ -414,7 +414,11 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func microphonePosition(for meshURL: URL) -> SCNVector3? {
-        guard let project = selectedProject, let side = meshSide(for: meshURL, project: project), let preprocessingMesh = ArtifactScanner.preprocessingMesh(for: project, side: side), preprocessingMesh.standardizedFileURL.path == meshURL.standardizedFileURL.path else { return nil }
+        guard let project = selectedProject, let side = meshSide(for: meshURL, project: project) else { return nil }
+        let meshPath = meshURL.standardizedFileURL.path
+        let preprocessingPath = ArtifactScanner.preprocessingMesh(for: project, side: side)?.standardizedFileURL.path
+        let simulationPath = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Intermediates/\(side.title)/graded_head.ply").standardizedFileURL.path
+        guard meshPath == preprocessingPath || meshPath == simulationPath else { return nil }
         if let microphonePlacementMeshURL, microphonePlacementMeshURL.standardizedFileURL.path == meshURL.standardizedFileURL.path, let pendingMicrophonePosition {
             return SCNVector3(CGFloat(pendingMicrophonePosition.x), CGFloat(pendingMicrophonePosition.y), CGFloat(pendingMicrophonePosition.z))
         }
