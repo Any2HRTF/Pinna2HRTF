@@ -377,8 +377,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         light.intensity = 900
         let lightNode = SCNNode()
         lightNode.light = light
-        lightNode.position = cameraNode.position
-        scene.rootNode.addChildNode(lightNode)
+        lightNode.position = SCNVector3Zero
+        cameraNode.addChildNode(lightNode)
         selectedMesh = url
         selectedImage = nil
         selectedScene = scene
