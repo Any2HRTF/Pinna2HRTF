@@ -705,8 +705,8 @@ public partial class MainWindow : Window
         AddPathSetting(settings, "Right ear (optional)", "project.right_ear", rightEarBox, BrowseRightEarClicked);
         AddPathSetting(settings, "Save location", "project.save_location", saveLocationBox, BrowseSaveLocationClicked);
         settings.Children.Add(new TextBlock { Text = "Choose at least one ear mesh.", Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)), Margin = new Thickness(0, 3, 0, 4) });
-        AddSetting(settings, "Use Mesh2PPM", "project.use_bezierppm", usePredictionsBox, "Use Mesh2PPM");
-        AddExpander(settings, "Mesh2PPM Inference", [AddSettingPanel("Model", "inference.model", modelPicker)]);
+        AddSetting(settings, "Use BezierPPM", "project.use_bezierppm", usePredictionsBox, "Use BezierPPM");
+        AddExpander(settings, "Mesh2PPM", [AddSettingPanel("Model", "inference.model", modelPicker)]);
         AddExpander(settings, "Mesh2HRTF", [PathSettingPanel("Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked), AddSettingPanel("Use custom head radius", "mesh2hrtf.use_head_radius", useHeadRadiusBox, "Use custom head radius"), AddSettingPanel("Head radius", "mesh2hrtf.head_radius", headRadiusBox), AddSettingPanel("Min frequency", "mesh2hrtf.min_frequency", minFrequencyBox), AddSettingPanel("Max frequency", "mesh2hrtf.max_frequency", maxFrequencyBox), AddSettingPanel("Frequency steps (minimum 2)", "mesh2hrtf.frequency_steps", frequencyStepsBox), AddSettingPanel("Microphone faces", "mesh2hrtf.microphone_faces", microphoneFacesBox)]);
         AddExpander(settings, "Mesh Grading", [AddSettingPanel("Min edge length", "mesh_grading.min_edge_length", meshMinEdgeBox), AddSettingPanel("Max edge length", "mesh_grading.max_edge_length", meshMaxEdgeBox), AddSettingPanel("Max error", "mesh_grading.max_error", meshMaxErrorBox), AddSettingPanel("Gamma", "mesh_grading.gamma", meshGammaBox), AddSettingPanel("Gamma opposite", "mesh_grading.gamma_opposite", meshGammaOppositeBox)]);
         AddExpander(settings, "NumCalc", [AddSettingPanel("Parallel instances", "numcalc.parallel_instances", maxInstancesBox), AddSettingPanel("CPU limit (%)", "numcalc.cpu_limit", maxCpuLoadBox), AddSettingPanel("Adaptive FMM expansion length", "numcalc.adaptive_fmm", adaptiveFmmLengthBox, "Adaptive FMM expansion length")]);
@@ -760,8 +760,16 @@ public partial class MainWindow : Window
             textBox.TextChanged += ProjectEdited;
         if (control is CheckBox box)
         {
-            box.Checked += ProjectEdited;
-            box.Unchecked += ProjectEdited;
+            if (ReferenceEquals(box, usePredictionsBox))
+            {
+                box.Checked += BezierPPMSettingChanged;
+                box.Unchecked += BezierPPMSettingChanged;
+            }
+            else
+            {
+                box.Checked += ProjectEdited;
+                box.Unchecked += ProjectEdited;
+            }
         }
         if (control is ComboBox combo)
             combo.SelectionChanged += ModelSelectionChanged;
@@ -956,6 +964,40 @@ public partial class MainWindow : Window
         Persist();
         RefreshProjectList();
         RefreshPipelineStatus();
+    }
+
+    async void BezierPPMSettingChanged(object sender, RoutedEventArgs e)
+    {
+        if (loading || selectedProject == null)
+            return;
+        var project = selectedProject;
+        var desired = usePredictionsBox.IsChecked == true;
+        var current = project.Settings.Inference.UsePredictionsForPreprocessing;
+        if (desired == current)
+            return;
+        if (runningProcesses.ContainsKey(project.Id))
+        {
+            loading = true;
+            usePredictionsBox.IsChecked = current;
+            loading = false;
+            return;
+        }
+        if (!HasGeneratedPipelineOutputs(project))
+        {
+            ProjectEdited(sender, e);
+            return;
+        }
+        loading = true;
+        usePredictionsBox.IsChecked = current;
+        loading = false;
+        var dialog = new ContentDialog { Title = "Reset pipeline outputs?", Content = "Changing Use BezierPPM changes the mesh used for preprocessing and resets the completed pipeline outputs. Your input meshes and project settings will be kept.", PrimaryButtonText = "OK", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary, XamlRoot = Root.XamlRoot };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            return;
+        ResetSelectedProjectOutputs();
+        loading = true;
+        usePredictionsBox.IsChecked = desired;
+        loading = false;
+        ProjectEdited(sender, e);
     }
 
     void RefreshProjectList()
@@ -1965,10 +2007,11 @@ ui:
         RefreshPipelineStatus();
     }
     void TryTerminate(Process process) { try { if (!process.HasExited) process.Kill(true); } catch { } }
-    void ResetOutputsClicked(object sender, RoutedEventArgs e)
+    void ResetOutputsClicked(object sender, RoutedEventArgs e) => ResetSelectedProjectOutputs();
+    void ResetSelectedProjectOutputs()
     {
         if (selectedProject == null || runningProcesses.ContainsKey(selectedProject.Id)) return;
-        foreach (var name in new[] { selectedProject.Settings.Inference.TargetLeftFolder, selectedProject.Settings.Inference.TargetRightFolder, selectedProject.Settings.Inference.PredictionLeftFolder, selectedProject.Settings.Inference.PredictionRightFolder, "Intermediates", "intermediates", "Projects", "HRTF", "Results Inference.csv", "Project Settings.yaml" })
+        foreach (var name in new[] { selectedProject.Settings.Inference.TargetLeftFolder, selectedProject.Settings.Inference.TargetRightFolder, selectedProject.Settings.Inference.PredictionLeftFolder, selectedProject.Settings.Inference.PredictionRightFolder, "Intermediates", "intermediates", "Projects", "HRTF", "Results Inference.csv" })
         {
             var path = Path.Combine(selectedProject.SaveLocation, name);
             if (ContainsPath(path, selectedProject.LeftEar) || ContainsPath(path, selectedProject.RightEar)) continue;
@@ -2060,6 +2103,7 @@ ui:
     }
 
     bool InferenceIsAutomatic(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing && !string.IsNullOrWhiteSpace(project.LeftEar) && !string.IsNullOrWhiteSpace(project.RightEar);
+    bool HasGeneratedPipelineOutputs(ProjectRecord project) => (!string.IsNullOrWhiteSpace(project.LeftEar) || !string.IsNullOrWhiteSpace(project.RightEar)) && !string.IsNullOrWhiteSpace(project.SaveLocation) && ((InferenceIsAutomatic(project) && StageIsComplete(Stage.Inference, project)) || StageIsComplete(Stage.Preprocessing, project) || StageIsComplete(Stage.Numcalc, project) || StageIsComplete(Stage.Postprocessing, project));
     bool PreprocessingBlocked(ProjectRecord project) => InferenceIsAutomatic(project) && !StageIsComplete(Stage.Inference, project);
     bool StageCanRun(Stage stage, ProjectRecord? project)
     {

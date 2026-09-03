@@ -68,6 +68,17 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         projects.firstIndex { $0.id == selectedProjectID }
     }
 
+    var selectedProjectIsRunning: Bool {
+        guard let selectedProject else { return false }
+        return runningProcesses[selectedProject.id] != nil
+    }
+
+    var selectedProjectHasGeneratedOutputs: Bool {
+        guard let selectedProject else { return false }
+        guard (!selectedProject.leftEar.isEmpty || !selectedProject.rightEar.isEmpty) && !selectedProject.saveLocation.isEmpty else { return false }
+        return (selectedProject.settings.inference.usePredictionsForPreprocessing && ArtifactScanner.stageIsComplete(.inference, project: selectedProject)) || ArtifactScanner.stageIsComplete(.preprocessing, project: selectedProject) || ArtifactScanner.stageIsComplete(.numcalc, project: selectedProject) || ArtifactScanner.stageIsComplete(.postprocessing, project: selectedProject)
+    }
+
     var inferenceResourceURL: URL {
         packageURL.appendingPathComponent("HRTFCalculation/Inference/resources")
     }
@@ -219,6 +230,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         if refresh {
             refreshArtifacts()
         }
+    }
+
+    func setBezierPPM(_ enabled: Bool) {
+        updateSelectedProject { $0.settings.inference.usePredictionsForPreprocessing = enabled }
     }
 
     func updateEnvironment(_ update: (inout EnvironmentConfig) -> Void) {
@@ -979,8 +994,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             "Projects",
             "HRTF",
             "Results Inference.csv",
-            ".pinna2hrtf_native_run.yaml",
-            "Project Settings.yaml"
+            ".pinna2hrtf_native_run.yaml"
         ]
         for name in names {
             let url = output.appendingPathComponent(name)

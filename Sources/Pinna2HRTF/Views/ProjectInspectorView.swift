@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ProjectInspectorView: View {
     @ObservedObject var store: AppStore
+    @State private var pendingBezierPPMValue: Bool?
+    @State private var showingBezierPPMResetAlert = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -102,10 +104,42 @@ struct ProjectInspectorView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             PathField("Save location", helpID: "project.save_location", text: projectStringBinding(\.saveLocation), mode: .directory)
-                SettingToggle(title: "Use Mesh2PPM", helpID: "project.use_bezierppm", isOn: inferenceBoolBinding(\.usePredictionsForPreprocessing))
+            SettingToggle(title: "Use BezierPPM", helpID: "project.use_bezierppm", isOn: bezierPPMBinding)
+                .padding(.top, 6)
+                .disabled(store.selectedProjectIsRunning)
         }
         .padding(10)
         .background(.background, in: RoundedRectangle(cornerRadius: 10))
+        .alert("Reset pipeline outputs?", isPresented: $showingBezierPPMResetAlert) {
+            Button("Cancel", role: .cancel) {
+                pendingBezierPPMValue = nil
+            }
+            Button("OK") {
+                guard let pendingBezierPPMValue else { return }
+                store.resetSelectedProjectOutputs()
+                store.setBezierPPM(pendingBezierPPMValue)
+                self.pendingBezierPPMValue = nil
+            }
+        } message: {
+            Text("Changing Use BezierPPM changes the mesh used for preprocessing and resets the completed pipeline outputs. Your input meshes and project settings will be kept.")
+        }
+    }
+
+    var bezierPPMBinding: Binding<Bool> {
+        Binding(
+            get: { store.selectedProject?.settings.inference.usePredictionsForPreprocessing ?? false },
+            set: { value in
+                let current = store.selectedProject?.settings.inference.usePredictionsForPreprocessing ?? false
+                guard value != current else { return }
+                guard !store.selectedProjectIsRunning else { return }
+                if store.selectedProjectHasGeneratedOutputs {
+                    pendingBezierPPMValue = value
+                    showingBezierPPMResetAlert = true
+                } else {
+                    store.setBezierPPM(value)
+                }
+            }
+        )
     }
 
     func projectStringBinding(_ keyPath: WritableKeyPath<ProjectRecord, String>, refresh: Bool = true) -> Binding<String> {
