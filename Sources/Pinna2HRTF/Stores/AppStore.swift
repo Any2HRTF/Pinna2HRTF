@@ -409,16 +409,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 return SCNVector3(Float(position.x), Float(position.y), Float(position.z))
             }
         }
-        guard meshURL.lastPathComponent.caseInsensitiveCompare("graded_head.ply") == .orderedSame, let project = selectedProject else { return nil }
-        let side: String
-        if meshURL.path.lowercased().contains("/left/") {
-            side = "Left"
-        } else if meshURL.path.lowercased().contains("/right/") {
-            side = "Right"
-        } else {
-            return nil
-        }
-        let parametersURL = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Projects/\(side)/parameters.json")
+        guard let project = selectedProject, let side = meshSide(for: meshURL, project: project) else { return nil }
+        let parametersURL = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Projects/\(side.title)/parameters.json")
         guard let data = try? Data(contentsOf: parametersURL), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let values = object["sourceCenter"] as? [NSNumber], values.count == 3 else { return nil }
         return SCNVector3(Float(values[0].doubleValue * 1000), Float(values[1].doubleValue * 1000), Float(values[2].doubleValue * 1000))
     }
