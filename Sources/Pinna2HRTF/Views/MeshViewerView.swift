@@ -46,60 +46,16 @@ struct MeshViewerView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .help(store.selectedMesh?.lastPathComponent ?? "Select a file to preview")
                     Text(store.selectedMeshHasMicrophoneMarker ? "Orange marker: microphone position" : " ")
                         .font(.caption2)
                         .foregroundStyle(.orange)
                         .frame(height: 14, alignment: .leading)
                 }
                 Spacer()
-                ForEach(EarSide.allCases) { side in
-                    Button("Place \(side.title) Mic") {
-                        store.beginMicrophonePlacement(side)
-                    }
-                    .controlSize(.small)
-                    .disabled(store.isPlacingMicrophone || store.selectedProject.map { side == .left ? $0.leftEar.isEmpty : $0.rightEar.isEmpty } ?? true)
-                }
-                Menu {
-                    ForEach(store.artifacts.filter(\.exists)) { artifact in
-                        Button {
-                            store.openArtifact(artifact)
-                        } label: {
-                            Label(artifact.title, systemImage: artifact.url == store.selectedMesh ? "checkmark" : artifact.systemImage)
-                        }
-                    }
-                } label: {
-                    Label("Preview", systemImage: "list.bullet.rectangle")
-                }
-                .controlSize(.small)
-                .disabled(store.isPlacingMicrophone)
             }
             .padding([.horizontal, .top], 18)
             .padding(.bottom, 12)
-            if let side = store.microphonePlacementSide {
-                Divider()
-                HStack(spacing: 10) {
-                    Label("Click the \(side.rawValue) ear mesh", systemImage: "scope")
-                        .font(.callout.weight(.medium))
-                    Text(microphoneCoordinates)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Use Automatic Position") {
-                        store.useAutomaticMicrophonePosition(side)
-                    }
-                    Button("Cancel") {
-                        store.cancelMicrophonePlacement()
-                    }
-                    Button("Done") {
-                        store.completeMicrophonePlacement()
-                    }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(store.pendingMicrophonePosition == nil)
-                }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 9)
-                .background(.bar)
-            }
             Divider()
             ZStack {
                 Rectangle()
@@ -128,6 +84,43 @@ struct MeshViewerView: View {
                 }
             }
             .frame(maxHeight: .infinity)
+            .overlay(alignment: .bottom) {
+                if let side = store.microphonePlacementSide {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Label("Place \(side.title) Microphone", systemImage: "scope")
+                                .font(.callout.weight(.semibold))
+                            Spacer()
+                            Text("Drag to rotate · Click to place")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(microphoneCoordinates)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 10) {
+                            Button("Use Automatic Position") {
+                                store.useAutomaticMicrophonePosition(side)
+                            }
+                            Spacer()
+                            Button("Cancel") {
+                                store.cancelMicrophonePlacement()
+                            }
+                            Button("Done") {
+                                store.completeMicrophonePlacement()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .keyboardShortcut(.defaultAction)
+                            .disabled(store.pendingMicrophonePosition == nil)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                    }
+                    .padding(16)
+                    .modifier(MicrophonePlacementSurface())
+                    .padding(16)
+                }
+            }
         }
     }
 
@@ -173,7 +166,6 @@ struct MeshViewerView: View {
                 .frame(height: 170)
             }
         }
-        .background(.bar)
     }
 
     var logSummary: String {
@@ -185,6 +177,20 @@ struct MeshViewerView: View {
     var microphoneCoordinates: String {
         guard let position = store.pendingMicrophonePosition else { return "No position selected" }
         return String(format: "X %.2f · Y %.2f · Z %.2f mm", position.x, position.y, position.z)
+    }
+}
+
+struct MicrophonePlacementSurface: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 16))
+        } else if #available(macOS 26.0, *) {
+            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16))
+        } else {
+            content.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        }
     }
 }
 

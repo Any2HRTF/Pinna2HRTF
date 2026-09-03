@@ -3,17 +3,69 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var store: AppStore
     @SceneStorage("logExpanded") private var logExpanded = true
+    @SceneStorage("inspectorPresented") private var inspectorPresented = true
 
     var body: some View {
-        NavigationSplitView {
-            ProjectSidebarView(store: store)
-                .navigationSplitViewColumnWidth(min: 280, ideal: 320, max: 380)
-        } content: {
-            MeshViewerView(store: store, logExpanded: $logExpanded)
-                .frame(minWidth: 620)
-        } detail: {
-            ProjectInspectorView(store: store)
-                .navigationSplitViewColumnWidth(min: 360, ideal: 420, max: 480)
+        workspace
+        .navigationTitle(store.selectedProject?.name ?? "Pinna2HRTF")
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Menu {
+                    ForEach(store.artifacts.filter(\.exists)) { artifact in
+                        Button {
+                            store.openArtifact(artifact)
+                        } label: {
+                            Label(artifact.title, systemImage: artifact.url == store.selectedMesh ? "checkmark" : artifact.systemImage)
+                        }
+                    }
+                } label: {
+                    Label("Preview", systemImage: "list.bullet.rectangle")
+                }
+                .labelStyle(.titleAndIcon)
+                .accessibilityLabel("Preview")
+                .help("Choose a File to Preview")
+                .disabled(store.selectedProject == nil || store.isPlacingMicrophone)
+                Button {
+                    store.refreshArtifacts()
+                } label: {
+                    Label("Refresh Previews", systemImage: "arrow.clockwise")
+                }
+                .help("Refresh Previews")
+                .disabled(store.selectedProject == nil || store.isPlacingMicrophone)
+            }
+            if #available(macOS 26.0, *) {
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+            }
+            ToolbarItemGroup(placement: .primaryAction) {
+                ForEach(EarSide.allCases) { side in
+                    Button {
+                        store.beginMicrophonePlacement(side)
+                    } label: {
+                        Label("Place \(side.title) Mic", systemImage: "scope")
+                    }
+                    .labelStyle(.titleAndIcon)
+                    .help("Place \(side.title) Microphone")
+                    .disabled(store.isPlacingMicrophone || store.selectedProject.map { side == .left ? $0.leftEar.isEmpty : $0.rightEar.isEmpty } ?? true)
+                }
+            }
+            if #available(macOS 26.0, *) {
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+            }
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    withAnimation { logExpanded.toggle() }
+                } label: {
+                    Label(logExpanded ? "Hide Live Log" : "Show Live Log", systemImage: "terminal")
+                }
+                .help(logExpanded ? "Hide Live Log" : "Show Live Log")
+                Button {
+                    withAnimation { inspectorPresented.toggle() }
+                } label: {
+                    Label(inspectorPresented ? "Hide Project Settings" : "Show Project Settings", systemImage: "sidebar.right")
+                }
+                .help(inspectorPresented ? "Hide Project Settings" : "Show Project Settings")
+                .keyboardShortcut("i", modifiers: [.command, .option])
+            }
         }
         .focusedSceneValue(\.pipelineCommands, commandContext)
         .onChange(of: store.selectedProjectID) { _ in
@@ -21,6 +73,24 @@ struct ContentView: View {
             store.loadSelectedProjectLog()
             store.refreshArtifacts()
             store.restoreViewer()
+        }
+    }
+
+    var workspace: some View {
+        HSplitView {
+            NavigationSplitView {
+                ProjectSidebarView(store: store)
+                    .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
+            } detail: {
+                MeshViewerView(store: store, logExpanded: $logExpanded)
+                    .frame(minWidth: 480, maxWidth: .infinity)
+            }
+            .navigationSplitViewStyle(.balanced)
+            if inspectorPresented {
+                ProjectInspectorView(store: store)
+                    .frame(minWidth: 360, idealWidth: 400, maxWidth: 480)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
     }
 

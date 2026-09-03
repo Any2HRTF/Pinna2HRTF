@@ -38,26 +38,30 @@ struct ProjectSidebarView: View {
                 Button {
                     store.createProject()
                 } label: {
-                    Image(systemName: "plus")
+                    Label("New Project", systemImage: "plus")
+                        .frame(width: 28, height: 28)
                 }
                 .help("New Project")
                 Button(role: .destructive) {
                     store.forgetSelectedProject()
                 } label: {
-                    Image(systemName: "minus")
+                    Label("Remove Project", systemImage: "minus")
+                        .frame(width: 28, height: 28)
                 }
                 .help("Remove Project")
                 .disabled(store.selectedProject == nil)
                 Button {
                     store.importProject()
                 } label: {
-                    Image(systemName: "folder.badge.plus")
+                    Label("Import Project", systemImage: "folder.badge.plus")
+                        .frame(width: 28, height: 28)
                 }
                 .help("Import Project Folder")
                 Button {
                     store.duplicateSelectedProject()
                 } label: {
-                    Image(systemName: "plus.square.on.square")
+                    Label("Duplicate Project", systemImage: "plus.square.on.square")
+                        .frame(width: 28, height: 28)
                 }
                 .help("Duplicate Project")
                 .disabled(store.selectedProject == nil)
@@ -67,11 +71,12 @@ struct ProjectSidebarView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.borderless)
+            .labelStyle(.iconOnly)
             .controlSize(.small)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(.bar)
         }
+        .modifier(WorkspaceScrollEdges())
     }
 
     var projectCountText: String {

@@ -41,10 +41,12 @@ struct SettingHelpButton: View {
         } label: {
             Image(systemName: "info.circle")
                 .font(.caption)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
-        .accessibilityLabel("Show information")
+        .accessibilityLabel("About \(SettingHelpCatalog.entry(helpID)?.title ?? "this setting")")
         .help("Show information")
         .popover(isPresented: $isPresented, arrowEdge: .trailing) {
             if let entry = SettingHelpCatalog.entry(helpID) {
@@ -56,11 +58,27 @@ struct SettingHelpButton: View {
 
 struct SettingHelpPopover: View {
     let entry: SettingHelpEntry
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var closeFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(entry.title)
-                .font(.headline)
+            HStack {
+                Text(entry.title)
+                    .font(.headline)
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.borderless)
+                .focused($closeFocused)
+                .keyboardShortcut(.cancelAction)
+                .accessibilityLabel("Close Information")
+                .help("Close Information")
+            }
             Text(entry.description)
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
@@ -83,6 +101,7 @@ struct SettingHelpPopover: View {
         }
         .padding(14)
         .frame(width: 340, alignment: .leading)
+        .onAppear { closeFocused = true }
     }
 }
 
@@ -145,6 +164,7 @@ struct SettingsDisclosure<Content: View>: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
             if isExpanded {
                 VStack(alignment: .leading, spacing: 9) {
                     content()
@@ -153,8 +173,16 @@ struct SettingsDisclosure<Content: View>: View {
                 .padding(.leading, 2)
             }
         }
-        .padding(10)
-        .background(.background, in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+struct WorkspaceScrollEdges: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.scrollEdgeEffectStyle(.soft, for: .vertical)
+        } else {
+            content
+        }
     }
 }
 
@@ -176,6 +204,7 @@ struct LabeledTextField: View {
             SettingLabel(title: title, helpID: helpID)
             TextField(title, text: $text)
                 .textFieldStyle(.roundedBorder)
+                .labelsHidden()
                 .disabled(!fieldEnabled)
                 .opacity(fieldEnabled ? 1 : 0.55)
         }
@@ -238,6 +267,7 @@ struct PathField: View {
             HStack(spacing: 6) {
                 TextField(title, text: $text)
                     .textFieldStyle(.roundedBorder)
+                    .labelsHidden()
                 Button("Choose") {
                     let panel = NSOpenPanel()
                     panel.canChooseFiles = mode != .directory
@@ -280,6 +310,7 @@ struct ToolPathField: View {
             HStack(spacing: 6) {
                 TextField(title, text: $text)
                     .textFieldStyle(.roundedBorder)
+                    .labelsHidden()
                 Button("Choose") {
                     let panel = NSOpenPanel()
                     panel.canChooseFiles = true
@@ -317,6 +348,7 @@ struct ModelPicker: View {
                 }
             }
             .pickerStyle(.menu)
+            .labelsHidden()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }

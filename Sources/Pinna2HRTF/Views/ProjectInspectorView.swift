@@ -6,12 +6,13 @@ struct ProjectInspectorView: View {
     @State private var showingBezierPPMResetAlert = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Project")
+                Text("Project Settings")
                     .font(.headline)
                 Spacer()
             }
+            .padding(16)
             Divider()
             if store.selectedProject == nil {
                 VStack(alignment: .leading, spacing: 10) {
@@ -32,24 +33,25 @@ struct ProjectInspectorView: View {
                         }
                     }
                 }
+                .padding(16)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 settingsPanel
                     .frame(maxHeight: .infinity)
                 Divider()
                 RunPanelView(store: store)
+                    .padding(14)
             }
         }
-        .padding(.top, 12)
-        .padding(.horizontal, 14)
-        .padding(.bottom, 12)
-        .background(.regularMaterial)
+        .controlSize(.small)
     }
 
     var settingsPanel: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
+        Form {
+            Section {
                 requiredPanel
+            }
+            Section {
                 SettingsDisclosure("Mesh2PPM", systemImage: "wand.and.stars") {
                     ModelPicker(selection: modelNameBinding, options: store.modelOptions, helpID: "inference.model")
                 }
@@ -98,8 +100,9 @@ struct ProjectInspectorView: View {
                     LabeledTextField("Level offset (dB)", helpID: "postprocessing.level_offset", text: postprocessingLevelOffsetBinding, fieldEnabled: postprocessingNormalizeBinding.wrappedValue)
                 }
             }
-            .padding(.vertical, 4)
         }
+        .formStyle(.grouped)
+        .modifier(WorkspaceScrollEdges())
     }
 
     var requiredPanel: some View {
@@ -115,8 +118,6 @@ struct ProjectInspectorView: View {
                 .padding(.top, 6)
                 .disabled(store.selectedProjectIsRunning)
         }
-        .padding(10)
-        .background(.background, in: RoundedRectangle(cornerRadius: 10))
         .alert("Reset pipeline outputs?", isPresented: $showingBezierPPMResetAlert) {
             Button("Cancel", role: .cancel) {
                 pendingBezierPPMValue = nil

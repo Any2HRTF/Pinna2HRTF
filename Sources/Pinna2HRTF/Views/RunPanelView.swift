@@ -85,14 +85,12 @@ struct StageRunButton: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 5)
             .frame(maxWidth: .infinity)
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bordered)
         .disabled(!available)
-        .opacity(available ? 1 : 0.5)
     }
 
     var stateColor: Color {
