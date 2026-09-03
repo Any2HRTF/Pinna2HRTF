@@ -378,7 +378,17 @@ public partial class MainWindow : Window
             // Apply the template first; Loaded can fire before its header exists.
             projectsExpander.ApplyTemplate();
             if (FindDescendant<ToggleButton>(projectsExpander) is { } header)
+            {
                 header.Padding = new Thickness(0);
+                header.ApplyTemplate();
+                if (FindDescendant<AnimatedIcon>(header) is { } chevron)
+                {
+                    // Keep WinUI's native up/down animation, rotated so its two
+                    // states point right when closed and left when open.
+                    chevron.RenderTransformOrigin = new Point(0.5, 0.5);
+                    chevron.RenderTransform = new RotateTransform { Angle = -90 };
+                }
+            }
             ToolTipService.SetToolTip(projectsExpander, collapsed ? "Expand Projects" : "Collapse Projects");
         }
         // Hide the body immediately: the vertical Expander animation must not
@@ -468,6 +478,7 @@ public partial class MainWindow : Window
         // Remove only the space reserved around it, so an empty header measures
         // to the native 32-pixel toggle plus its border when collapsed.
         projectsExpander.Resources["ExpanderChevronMargin"] = new Thickness(0);
+        projectsExpander.Loaded += (_, _) => SetProjectsCollapsed(!projectsExpander.IsExpanded, false);
         projectsExpander.RegisterPropertyChangedCallback(Expander.IsExpandedProperty, (_, _) =>
             SetProjectsCollapsed(!projectsExpander.IsExpanded, true));
         AutomationProperties.SetName(projectsExpander, "Projects");

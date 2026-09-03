@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Windowing;
 using System;
 using System.Runtime.InteropServices;
 
@@ -24,6 +25,8 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         window = new MainWindow();
+        if (window.AppWindow.Presenter is OverlappedPresenter presenter)
+            presenter.Maximize();
         window.Activate();
     }
 }
