@@ -158,11 +158,13 @@ codesign --verify --deep --strict "$CLEAN_ROOT/Pinna2HRTF.app"
 rm -rf "$FINAL_APP_DIR"
 mkdir -p "$(dirname "$FINAL_APP_DIR")"
 if ditto --norsrc --noextattr --noqtn "$CLEAN_ROOT/Pinna2HRTF.app" "$FINAL_APP_DIR"; then
-  xattr -cr "$FINAL_APP_DIR" 2>/dev/null || true
-  codesign --force --deep --sign - "$FINAL_APP_DIR"
-  xattr -cr "$FINAL_APP_DIR" 2>/dev/null || true
-  codesign --verify --deep --strict "$FINAL_APP_DIR"
-  echo "$FINAL_APP_DIR"
+  if xattr -cr "$FINAL_APP_DIR" 2>/dev/null && codesign --force --deep --sign - "$FINAL_APP_DIR" >/dev/null 2>&1 && xattr -cr "$FINAL_APP_DIR" 2>/dev/null && codesign --verify --deep --strict "$FINAL_APP_DIR" >/dev/null 2>&1; then
+    echo "$FINAL_APP_DIR"
+  else
+    echo "Could not verify the copied release bundle at $FINAL_APP_DIR; using the signed temporary bundle at $CLEAN_ROOT/Pinna2HRTF.app" >&2
+    trap - EXIT
+    echo "$CLEAN_ROOT/Pinna2HRTF.app"
+  fi
 else
   echo "Could not write the release bundle to $FINAL_APP_DIR; using the signed temporary bundle at $CLEAN_ROOT/Pinna2HRTF.app" >&2
   trap - EXIT
