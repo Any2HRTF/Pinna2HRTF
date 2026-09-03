@@ -73,7 +73,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     var modelOptions: [String] {
-        resourceOptions(extensions: ["yaml", "yml"]).map(Self.modelName).sorted()
+        let available = Set(resourceOptions(extensions: ["yaml", "yml"]).map(Self.modelName))
+        return ["1 Views", "3 Views", "9 Views", "25 Views"].filter { available.contains($0) }
     }
 
     var registry: ProjectRegistry {
