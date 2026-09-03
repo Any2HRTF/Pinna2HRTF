@@ -440,6 +440,11 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         ].map { URL(fileURLWithPath: $0).standardizedFileURL.path }
         if leftPrefixes.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) { return .left }
         if rightPrefixes.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) { return .right }
+        let projectPath = output.path
+        guard path == projectPath || path.hasPrefix(projectPath + "/") else { return nil }
+        let components = URL(fileURLWithPath: path).pathComponents.map { $0.lowercased() }
+        if components.contains(where: { $0 == "left" || $0.contains("left") }) { return .left }
+        if components.contains(where: { $0 == "right" || $0.contains("right") }) { return .right }
         return nil
     }
 
