@@ -41,7 +41,7 @@ struct ProjectInspectorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 requiredPanel
-                SettingsDisclosure("Mesh2PPM Inference", systemImage: "wand.and.stars") {
+                SettingsDisclosure("Mesh2PPM", systemImage: "wand.and.stars") {
                     ModelPicker(selection: modelNameBinding, options: store.modelOptions, helpID: "inference.model")
                 }
                 SettingsDisclosure("Mesh2HRTF", systemImage: "waveform.path.ecg") {
