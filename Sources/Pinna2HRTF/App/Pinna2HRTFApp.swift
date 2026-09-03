@@ -10,7 +10,7 @@ struct Pinna2HRTFApp: App {
         WindowGroup {
             ContentView(store: store)
                 .onAppear { appDelegate.store = store }
-                .frame(minWidth: 920, maxWidth: .infinity, minHeight: 840, maxHeight: .infinity)
+                .frame(minWidth: 1120, maxWidth: .infinity, minHeight: 840, maxHeight: .infinity)
         }
         .defaultSize(width: 1320, height: 900)
         .windowStyle(.titleBar)
