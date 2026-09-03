@@ -400,10 +400,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             return SCNVector3(CGFloat(pendingMicrophonePosition.x), CGFloat(pendingMicrophonePosition.y), CGFloat(pendingMicrophonePosition.z))
         }
         if let project = selectedProject {
-            for side in EarSide.allCases {
-                if let position = ArtifactScanner.validManualMicrophonePosition(for: project, side: side), position.meshPath == meshURL.standardizedFileURL.path {
-                    return SCNVector3(CGFloat(position.x), CGFloat(position.y), CGFloat(position.z))
-                }
+            if let side = meshSide(for: meshURL, project: project), let position = ArtifactScanner.validManualMicrophonePosition(for: project, side: side) {
+                return SCNVector3(CGFloat(position.x), CGFloat(position.y), CGFloat(position.z))
             }
         }
         if let identity = ArtifactScanner.meshIdentity(meshURL) {
@@ -423,6 +421,26 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let parametersURL = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Projects/\(side)/parameters.json")
         guard let data = try? Data(contentsOf: parametersURL), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let values = object["sourceCenter"] as? [NSNumber], values.count == 3 else { return nil }
         return SCNVector3(Float(values[0].doubleValue * 1000), Float(values[1].doubleValue * 1000), Float(values[2].doubleValue * 1000))
+    }
+
+    func meshSide(for meshURL: URL, project: ProjectRecord) -> EarSide? {
+        let path = meshURL.standardizedFileURL.path
+        if !project.leftEar.isEmpty && path == URL(fileURLWithPath: project.leftEar).standardizedFileURL.path { return .left }
+        if !project.rightEar.isEmpty && path == URL(fileURLWithPath: project.rightEar).standardizedFileURL.path { return .right }
+        let output = URL(fileURLWithPath: project.saveLocation).standardizedFileURL
+        let leftPrefixes = [
+            output.appendingPathComponent("Intermediates/Left").path,
+            output.appendingPathComponent(project.settings.inference.predictionLeftFolder).path,
+            output.appendingPathComponent("Projects/Left").path
+        ].map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        let rightPrefixes = [
+            output.appendingPathComponent("Intermediates/Right").path,
+            output.appendingPathComponent(project.settings.inference.predictionRightFolder).path,
+            output.appendingPathComponent("Projects/Right").path
+        ].map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        if leftPrefixes.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) { return .left }
+        if rightPrefixes.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) { return .right }
+        return nil
     }
 
     var selectedMeshHasMicrophoneMarker: Bool {
