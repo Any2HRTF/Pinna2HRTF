@@ -120,13 +120,30 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 suffix += 1
             }
             duplicate.saveLocation = duplicateURL.path
+            if FileManager.default.fileExists(atPath: originalURL.path) {
+                do {
+                    try FileManager.default.copyItem(at: originalURL, to: duplicateURL)
+                    let originalPath = originalURL.standardizedFileURL.path
+                    let duplicatePath = duplicateURL.standardizedFileURL.path
+                    let relocated: (String) -> String = { path in
+                        let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
+                        guard normalized == originalPath || normalized.hasPrefix(originalPath + "/") else { return path }
+                        return duplicatePath + String(normalized.dropFirst(originalPath.count))
+                    }
+                    duplicate.leftEar = relocated(duplicate.leftEar)
+                    duplicate.rightEar = relocated(duplicate.rightEar)
+                    let settingsURL = duplicateURL.appendingPathComponent("Project Settings.yaml")
+                    if let settings = try? String(contentsOf: settingsURL, encoding: .utf8) {
+                        try? settings.replacingOccurrences(of: originalPath, with: duplicatePath).write(to: settingsURL, atomically: true, encoding: .utf8)
+                    }
+                } catch {
+                    appendLog("Could not duplicate project folder: \(error.localizedDescription)")
+                    return
+                }
+            }
         }
-        if ArtifactScanner.validManualMicrophonePosition(for: duplicate, side: .left) == nil {
-            duplicate.settings.preprocessing.sourcePositionInputLeft = nil
-        }
-        if ArtifactScanner.validManualMicrophonePosition(for: duplicate, side: .right) == nil {
-            duplicate.settings.preprocessing.sourcePositionInputRight = nil
-        }
+        duplicate.settings.preprocessing.sourcePositionInputLeft = nil
+        duplicate.settings.preprocessing.sourcePositionInputRight = nil
         projects.append(duplicate)
         selectedProjectID = duplicate.id
         failedStagesByProject[duplicate.id] = []

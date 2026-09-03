@@ -19,10 +19,17 @@ struct ProjectInspectorView: View {
                         .font(.title3.weight(.semibold))
                     Text("Create or select a project in the sidebar to edit settings and run the pipeline.")
                         .foregroundStyle(.secondary)
-                    Button {
-                        store.createProject()
-                    } label: {
-                        Label("New Project", systemImage: "plus")
+                    HStack {
+                        Button {
+                            store.createProject()
+                        } label: {
+                            Label("New Project", systemImage: "plus")
+                        }
+                        Button {
+                            store.importProject()
+                        } label: {
+                            Label("Import Project…", systemImage: "folder.badge.plus")
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

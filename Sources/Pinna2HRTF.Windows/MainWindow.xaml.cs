@@ -1179,7 +1179,34 @@ public partial class MainWindow : Window
             while (Directory.Exists(location))
                 location = Path.Combine(parent, original.Name + " Copy " + number++);
             duplicate.SaveLocation = location;
+            if (original.Exists)
+            {
+                try
+                {
+                    CopyDirectory(original.FullName, location);
+                    var originalPath = Path.GetFullPath(original.FullName).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    var duplicatePath = Path.GetFullPath(location).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    string Relocate(string path)
+                    {
+                        if (string.IsNullOrWhiteSpace(path)) return path;
+                        var normalized = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                        return normalized.Equals(originalPath, StringComparison.OrdinalIgnoreCase) || normalized.StartsWith(originalPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ? duplicatePath + normalized[originalPath.Length..] : path;
+                    }
+                    duplicate.LeftEar = Relocate(duplicate.LeftEar);
+                    duplicate.RightEar = Relocate(duplicate.RightEar);
+                    var settingsPath = Path.Combine(location, "Project Settings.yaml");
+                    if (File.Exists(settingsPath))
+                        File.WriteAllText(settingsPath, File.ReadAllText(settingsPath).Replace(originalPath, duplicatePath, StringComparison.OrdinalIgnoreCase));
+                }
+                catch (Exception error)
+                {
+                    AppendLog("Could not duplicate project folder: " + error.Message, selectedProject.Id);
+                    return;
+                }
+            }
         }
+        duplicate.Settings.Preprocessing.SourcePositionInputLeft = null;
+        duplicate.Settings.Preprocessing.SourcePositionInputRight = null;
         InvalidateManualPositions(duplicate);
         projects.Add(duplicate);
         failedStages[duplicate.Id] = [];
@@ -1188,6 +1215,15 @@ public partial class MainWindow : Window
         RefreshProjectList();
         LoadSelectedProject();
         RefreshArtifacts();
+    }
+
+    void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var file in Directory.EnumerateFiles(source))
+            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)));
+        foreach (var directory in Directory.EnumerateDirectories(source))
+            CopyDirectory(directory, Path.Combine(destination, Path.GetFileName(directory)));
     }
 
     ProjectRecord NewProject(int index)
