@@ -28,10 +28,10 @@ jobs:
           swift --version
 
       - name: Prepare external tools
-        run: ./Sources/Pinna2HRTF/Scripts/prepare_external_tools.sh
+        run: bash Scripts/prepare_external_tools.sh
 
       - name: Build release app bundle
-        run: ./Sources/Pinna2HRTF/Scripts/build_release_app.sh
+        run: bash Scripts/build_release_app.sh
 
       - name: Verify arm64 binaries
         run: |

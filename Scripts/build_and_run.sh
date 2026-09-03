@@ -5,13 +5,13 @@ MODE="${1:-run}"
 APP_NAME="Pinna2HRTF"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PREPARE_SCRIPT="$ROOT_DIR/Sources/Pinna2HRTF/Scripts/prepare_external_tools.sh"
-RELEASE_SCRIPT="$ROOT_DIR/Sources/Pinna2HRTF/Scripts/build_release_app.sh"
+PREPARE_SCRIPT="$ROOT_DIR/Scripts/prepare_external_tools.sh"
+RELEASE_SCRIPT="$ROOT_DIR/Scripts/build_release_app.sh"
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
-"$PREPARE_SCRIPT"
-BUILD_OUTPUT="$("$RELEASE_SCRIPT")"
+bash "$PREPARE_SCRIPT"
+BUILD_OUTPUT="$(bash "$RELEASE_SCRIPT")"
 printf "%s\n" "$BUILD_OUTPUT"
 APP_BUNDLE="$(printf "%s\n" "$BUILD_OUTPUT" | tail -n 1)"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"

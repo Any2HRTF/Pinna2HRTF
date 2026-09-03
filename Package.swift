@@ -12,9 +12,6 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "Pinna2HRTF",
-            exclude: [
-                "Scripts"
-            ],
             resources: [
                 .copy("Resources")
             ]
