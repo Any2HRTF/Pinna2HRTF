@@ -68,6 +68,17 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         projects.firstIndex { $0.id == selectedProjectID }
     }
 
+    var selectedProjectIsRunning: Bool {
+        guard let selectedProject else { return false }
+        return runningProcesses[selectedProject.id] != nil
+    }
+
+    var selectedProjectHasGeneratedOutputs: Bool {
+        guard let selectedProject else { return false }
+        guard (!selectedProject.leftEar.isEmpty || !selectedProject.rightEar.isEmpty) && !selectedProject.saveLocation.isEmpty else { return false }
+        return (selectedProject.settings.inference.usePredictionsForPreprocessing && ArtifactScanner.stageIsComplete(.inference, project: selectedProject)) || ArtifactScanner.stageIsComplete(.preprocessing, project: selectedProject) || ArtifactScanner.stageIsComplete(.numcalc, project: selectedProject) || ArtifactScanner.stageIsComplete(.postprocessing, project: selectedProject)
+    }
+
     var inferenceResourceURL: URL {
         packageURL.appendingPathComponent("HRTFCalculation/Inference/resources")
     }
@@ -109,13 +120,30 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 suffix += 1
             }
             duplicate.saveLocation = duplicateURL.path
+            if FileManager.default.fileExists(atPath: originalURL.path) {
+                do {
+                    try FileManager.default.copyItem(at: originalURL, to: duplicateURL)
+                    let originalPath = originalURL.standardizedFileURL.path
+                    let duplicatePath = duplicateURL.standardizedFileURL.path
+                    let relocated: (String) -> String = { path in
+                        let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
+                        guard normalized == originalPath || normalized.hasPrefix(originalPath + "/") else { return path }
+                        return duplicatePath + String(normalized.dropFirst(originalPath.count))
+                    }
+                    duplicate.leftEar = relocated(duplicate.leftEar)
+                    duplicate.rightEar = relocated(duplicate.rightEar)
+                    let settingsURL = duplicateURL.appendingPathComponent("Project Settings.yaml")
+                    if let settings = try? String(contentsOf: settingsURL, encoding: .utf8) {
+                        try? settings.replacingOccurrences(of: originalPath, with: duplicatePath).write(to: settingsURL, atomically: true, encoding: .utf8)
+                    }
+                } catch {
+                    appendLog("Could not duplicate project folder: \(error.localizedDescription)")
+                    return
+                }
+            }
         }
-        if ArtifactScanner.validManualMicrophonePosition(for: duplicate, side: .left) == nil {
-            duplicate.settings.preprocessing.sourcePositionInputLeft = nil
-        }
-        if ArtifactScanner.validManualMicrophonePosition(for: duplicate, side: .right) == nil {
-            duplicate.settings.preprocessing.sourcePositionInputRight = nil
-        }
+        duplicate.settings.preprocessing.sourcePositionInputLeft = nil
+        duplicate.settings.preprocessing.sourcePositionInputRight = nil
         projects.append(duplicate)
         selectedProjectID = duplicate.id
         failedStagesByProject[duplicate.id] = []
@@ -219,6 +247,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         if refresh {
             refreshArtifacts()
         }
+    }
+
+    func setBezierPPM(_ enabled: Bool) {
+        updateSelectedProject { $0.settings.inference.usePredictionsForPreprocessing = enabled }
     }
 
     func updateEnvironment(_ update: (inout EnvironmentConfig) -> Void) {
@@ -979,8 +1011,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             "Projects",
             "HRTF",
             "Results Inference.csv",
-            ".pinna2hrtf_native_run.yaml",
-            "Project Settings.yaml"
+            ".pinna2hrtf_native_run.yaml"
         ]
         for name in names {
             let url = output.appendingPathComponent(name)
