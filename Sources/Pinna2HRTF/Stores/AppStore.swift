@@ -1053,15 +1053,29 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func confirmResetSelectedProjectOutputs() {
         guard let project = selectedProject, runningProcesses[project.id] == nil else { return }
+        if confirmResetOutputs(for: project) {
+            resetSelectedProjectOutputs()
+        }
+    }
+
+    func confirmSetBezierPPM(_ enabled: Bool) {
+        guard let project = selectedProject, runningProcesses[project.id] == nil else { return }
+        guard project.settings.inference.usePredictionsForPreprocessing != enabled else { return }
+        if selectedProjectHasGeneratedOutputs {
+            guard confirmResetOutputs(for: project) else { return }
+            resetSelectedProjectOutputs()
+        }
+        setBezierPPM(enabled)
+    }
+
+    func confirmResetOutputs(for project: ProjectRecord) -> Bool {
         let alert = NSAlert()
         alert.messageText = "Reset pipeline outputs?"
         alert.informativeText = "Generated files in \(project.saveLocation.isEmpty ? "the project output folder" : project.saveLocation) will be removed. Input meshes and settings will be kept."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Reset Outputs")
         alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn {
-            resetSelectedProjectOutputs()
-        }
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     func resetSelectedProjectOutputs() {

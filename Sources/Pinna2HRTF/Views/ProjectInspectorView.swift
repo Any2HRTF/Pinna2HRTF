@@ -2,8 +2,6 @@ import SwiftUI
 
 struct ProjectInspectorView: View {
     @ObservedObject var store: AppStore
-    @State private var pendingBezierPPMValue: Bool?
-    @State private var showingBezierPPMResetAlert = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -126,19 +124,6 @@ struct ProjectInspectorView: View {
                 .padding(.top, 6)
                 .disabled(store.selectedProjectIsRunning)
         }
-        .alert("Reset pipeline outputs?", isPresented: $showingBezierPPMResetAlert) {
-            Button("Cancel", role: .cancel) {
-                pendingBezierPPMValue = nil
-            }
-            Button("OK") {
-                guard let pendingBezierPPMValue else { return }
-                store.resetSelectedProjectOutputs()
-                store.setBezierPPM(pendingBezierPPMValue)
-                self.pendingBezierPPMValue = nil
-            }
-        } message: {
-            Text("Changing Use Mesh2PPM changes the mesh used for preprocessing and resets the completed pipeline outputs. Your input meshes and project settings will be kept.")
-        }
     }
 
     var bezierPPMBinding: Binding<Bool> {
@@ -148,12 +133,7 @@ struct ProjectInspectorView: View {
                 let current = store.selectedProject?.settings.inference.usePredictionsForPreprocessing ?? false
                 guard value != current else { return }
                 guard !store.selectedProjectIsRunning else { return }
-                if store.selectedProjectHasGeneratedOutputs {
-                    pendingBezierPPMValue = value
-                    showingBezierPPMResetAlert = true
-                } else {
-                    store.setBezierPPM(value)
-                }
+                store.confirmSetBezierPPM(value)
             }
         )
     }
