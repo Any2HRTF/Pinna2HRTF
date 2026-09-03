@@ -20,7 +20,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="Resources\app_icon.ico" />
-    <None Include="Resources\app_icon.ico" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Resources\app_icon.ico" Link="app_icon.ico" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\Pinna2HRTF\Resources\app_icon.png" Link="app_icon.png" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\icon.png" Link="icon.png" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\ProjectSettingHelp.json" Link="ProjectSettingHelp.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

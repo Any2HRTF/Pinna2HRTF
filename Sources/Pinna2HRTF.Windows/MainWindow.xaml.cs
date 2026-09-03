@@ -94,6 +94,11 @@ public partial class MainWindow : Window
     Point lastPointer;
     uint activeMeshPointerId = uint.MaxValue;
     string? placementSide;
+    Guid? placementProjectId;
+    string? placementMeshPath;
+    string? placementMeshIdentity;
+    CancellationTokenSource? placementCancellation;
+    bool calculatingAutomaticPosition;
     ManualMicrophonePosition? pendingMicrophonePosition;
     bool closingConfirmed;
     Grid? contentGrid;
@@ -130,6 +135,7 @@ public partial class MainWindow : Window
     MeshPointerMode meshPointerMode;
     TextBox logText = new();
     TextBlock numCalcStatusText = new();
+    TextBlock pipelineHintText = new();
     TextBlock placementCoordinates = new();
     StackPanel placementPanel = new();
     Border placementBorder = new();
@@ -331,8 +337,7 @@ public partial class MainWindow : Window
         titleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         titleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         var logo = new Image { Width = 20, Height = 20, Margin = new Thickness(10, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
-        var titleIcon = Path.Combine(AppContext.BaseDirectory, "app_icon.ico");
-        if (!File.Exists(titleIcon)) titleIcon = Path.Combine(AppContext.BaseDirectory, "icon.png");
+        var titleIcon = Path.Combine(AppContext.BaseDirectory, "app_icon.png");
         if (File.Exists(titleIcon)) logo.Source = new BitmapImage(new Uri(titleIcon));
         titleBar.Children.Add(logo);
         var menu = BuildMenu();
@@ -373,7 +378,17 @@ public partial class MainWindow : Window
             // Apply the template first; Loaded can fire before its header exists.
             projectsExpander.ApplyTemplate();
             if (FindDescendant<ToggleButton>(projectsExpander) is { } header)
+            {
                 header.Padding = new Thickness(0);
+                header.ApplyTemplate();
+                if (FindDescendant<AnimatedIcon>(header) is { } chevron)
+                {
+                    // Keep WinUI's native up/down animation, rotated so its two
+                    // states point right when closed and left when open.
+                    chevron.RenderTransformOrigin = new Point(0.5, 0.5);
+                    chevron.RenderTransform = new RotateTransform { Angle = -90 };
+                }
+            }
             ToolTipService.SetToolTip(projectsExpander, collapsed ? "Expand Projects" : "Collapse Projects");
         }
         // Hide the body immediately: the vertical Expander animation must not
@@ -455,7 +470,7 @@ public partial class MainWindow : Window
         projectsExpander = new Expander
         {
             Header = projectsHeaderText, Content = grid, IsExpanded = !projectsCollapsed,
-            ExpandDirection = ExpandDirection.Right, MinWidth = 0, Padding = new Thickness(0),
+            ExpandDirection = ExpandDirection.Down, MinWidth = 0, Padding = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch
         };
@@ -463,6 +478,7 @@ public partial class MainWindow : Window
         // Remove only the space reserved around it, so an empty header measures
         // to the native 32-pixel toggle plus its border when collapsed.
         projectsExpander.Resources["ExpanderChevronMargin"] = new Thickness(0);
+        projectsExpander.Loaded += (_, _) => SetProjectsCollapsed(!projectsExpander.IsExpanded, false);
         projectsExpander.RegisterPropertyChangedCallback(Expander.IsExpandedProperty, (_, _) =>
             SetProjectsCollapsed(!projectsExpander.IsExpanded, true));
         AutomationProperties.SetName(projectsExpander, "Projects");
@@ -868,6 +884,8 @@ public partial class MainWindow : Window
         runAllButton = new Button { Content = "Run All", Height = 34, Margin = new Thickness(0, 8, 0, 0), Background = new SolidColorBrush(ColorHelper.FromArgb(255, 111, 159, 156)), Foreground = new SolidColorBrush(Colors.White), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center };
         runAllButton.Click += RunAllClicked;
         stack.Children.Add(runAllButton);
+        pipelineHintText = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 6, 0, 0), Visibility = Visibility.Collapsed };
+        stack.Children.Add(pipelineHintText);
         var statusRow = new Grid { Margin = new Thickness(0, 6, 0, 0) };
         statusRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         statusRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -903,6 +921,7 @@ public partial class MainWindow : Window
 
     void LoadSelectedProject()
     {
+        if (placementSide != null) EndPlacement();
         loading = true;
         var project = selectedProject;
         projectNameBox.Text = project?.Name ?? "";
@@ -942,6 +961,7 @@ public partial class MainWindow : Window
         project.RightEar = rightEarBox.Text.Trim();
         project.SaveLocation = saveLocationBox.Text.Trim();
         project.Settings.Inference.UsePredictionsForPreprocessing = usePredictionsBox.IsChecked == true;
+        if (placementSide != null && !PlacementIsCurrent()) EndPlacement();
         project.Settings.Preprocessing.EvaluationGrid = evaluationGridBox.Text.Trim();
         project.Settings.Preprocessing.UseCustomHeadRadius = useHeadRadiusBox.IsChecked == true;
         project.Settings.Preprocessing.HeadRadius = headRadiusBox.Text.Trim();
@@ -1309,6 +1329,8 @@ public partial class MainWindow : Window
 
     void RefreshArtifacts()
     {
+        // A background stage finishing must not replace an active placement mesh.
+        if (placementSide != null) return;
         if (selectedProject == null)
         {
             artifacts.Clear();
@@ -1343,10 +1365,9 @@ public partial class MainWindow : Window
             list.Add(new Artifact("Input right ear", project.RightEar, "right"));
             list.Add(new Artifact("Right simulation mesh", Path.Combine(project.SaveLocation, "Intermediates", "Right", "graded_head.ply"), "right"));
         }
-        if (!string.IsNullOrWhiteSpace(project.LeftEar))
-            AddMeshFolder(list, "Predicted left ear", "left", Path.Combine(project.SaveLocation, project.Settings.Inference.PredictionLeftFolder));
-        if (!string.IsNullOrWhiteSpace(project.RightEar))
-            AddMeshFolder(list, "Predicted right ear", "right", Path.Combine(project.SaveLocation, project.Settings.Inference.PredictionRightFolder));
+        foreach (var side in new[] { "left", "right" })
+            if (PredictionMesh(project, side) is string prediction)
+                list.Add(new Artifact($"Predicted {side} ear", prediction, side));
         if (Directory.Exists(hrtf))
             foreach (var file in Directory.EnumerateFiles(hrtf)
                 .Where(x => new[] { ".jpg", ".jpeg", ".png" }.Contains(Path.GetExtension(x).ToLowerInvariant()))
@@ -1370,15 +1391,6 @@ public partial class MainWindow : Window
         if (name.Contains("horizontal", StringComparison.OrdinalIgnoreCase)) return "Horizontal HRTF plot";
         if (name.Contains("median", StringComparison.OrdinalIgnoreCase)) return "Median HRTF plot";
         return name;
-    }
-
-    void AddMeshFolder(List<Artifact> list, string title, string side, string folder)
-    {
-        if (!Directory.Exists(folder))
-            return;
-        foreach (var file in Directory.EnumerateFiles(folder).Where(IsMesh).OrderBy(NaturalModelSortKey, StringComparer.OrdinalIgnoreCase))
-            if (Path.GetFileName(file).StartsWith("Prediction_", StringComparison.OrdinalIgnoreCase))
-                list.Add(new Artifact(title + " - " + Path.GetFileNameWithoutExtension(file), file, side));
     }
 
     void ArtifactSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1425,6 +1437,8 @@ public partial class MainWindow : Window
             if (generation != meshLoadGeneration || !string.Equals(selectedArtifactPath, artifact.Path, StringComparison.OrdinalIgnoreCase)) return;
             for (var attempt = 0; attempt < 40 && (!viewportReady || meshViewport.RenderHost == null); attempt++)
                 await Task.Delay(25);
+            cancellation.ThrowIfCancellationRequested();
+            if (generation != meshLoadGeneration || !SamePath(selectedArtifactPath, artifact.Path)) return;
             if (!viewportReady || meshViewport.RenderHost == null || meshViewport.Items == null)
                 throw new InvalidOperationException("The 3D viewport render host is not ready yet.");
             currentMesh = loaded;
@@ -1541,7 +1555,7 @@ public partial class MainWindow : Window
         var wasClick = !pointerMoved;
         ResetMeshPointerState();
         SaveMeshCamera();
-        if (placementSide != null && mode == MeshPointerMode.Rotate && wasClick && currentMesh != null && meshVisual != null)
+        if (PlacementIsCurrent() && !calculatingAutomaticPosition && mode == MeshPointerMode.Rotate && wasClick && currentMesh != null && meshVisual != null)
         {
             var hit = meshViewport.FindHits(point.Position).FirstOrDefault(x => ReferenceEquals(x.ModelHit, meshVisual));
             if (hit != null)
@@ -1583,113 +1597,140 @@ public partial class MainWindow : Window
 
     void UpdatePlacementButtons()
     {
-        var enabled = placementSide == null && currentMesh != null;
-        // A loaded, explicitly sided mesh is enough to enter placement mode. The
-        // preprocessing mesh is preferred when available, but requiring it here
-        // made the buttons appear dead for projects that only have input meshes.
-        var currentSide = selectedArtifactSide ?? SideForPath(currentMesh?.Path ?? "");
-        placeLeftButton.IsEnabled = enabled && selectedProject != null && PlacementMeshCandidate(selectedProject, "left") != null;
-        placeRightButton.IsEnabled = enabled && selectedProject != null && PlacementMeshCandidate(selectedProject, "right") != null;
-    }
-
-    string? PlacementMeshCandidate(ProjectRecord project, string side)
-    {
-        var preprocessing = PreprocessingMesh(project, side);
-        if (preprocessing != null && File.Exists(preprocessing)) return preprocessing;
-        var input = string.Equals(side, "left", StringComparison.OrdinalIgnoreCase) ? project.LeftEar : project.RightEar;
-        return !string.IsNullOrWhiteSpace(input) && File.Exists(input) ? input : null;
-    }
-
-    async void BeginPlacement(string side)
-    {
-        if (selectedProject == null || currentMesh == null)
+        foreach (var (side, button) in new[] { ("left", placeLeftButton), ("right", placeRightButton) })
         {
-            AppendLog($"Cannot start {side} microphone placement: no mesh is loaded.", selectedProject?.Id);
-            return;
+            var available = selectedProject != null && PreprocessingMesh(selectedProject, side) != null;
+            button.IsEnabled = placementSide == null && available && !runningProcesses.ContainsKey(selectedProject!.Id);
+            ToolTipService.SetToolTip(button, available ? $"Place the {side} microphone on the mesh used for preprocessing." :
+                selectedProject != null && InferenceIsAutomatic(selectedProject) ? $"Run Mesh2PPM Inference to create the predicted {side} ear first." : $"Select an input {side} ear first.");
         }
-        var mesh = PlacementMeshCandidate(selectedProject, side);
-        if (mesh == null && string.Equals(selectedArtifactSide ?? SideForPath(currentMesh.Path), side, StringComparison.OrdinalIgnoreCase)) mesh = currentMesh.Path;
+    }
+
+    bool PlacementIsCurrent() => selectedProject != null && placementProjectId == selectedProject.Id &&
+        placementSide != null && SamePath(placementMeshPath, currentMesh?.Path) &&
+        SamePath(placementMeshPath, PreprocessingMesh(selectedProject, placementSide)) &&
+        placementMeshIdentity == MeshIdentity(placementMeshPath!);
+
+    async void BeginPlacement(string side) => await BeginPlacementAsync(side);
+
+    async Task BeginPlacementAsync(string side)
+    {
+        var project = selectedProject;
+        if (project == null || placementSide != null || runningProcesses.ContainsKey(project.Id)) return;
+        var mesh = PreprocessingMesh(project, side);
         if (mesh == null)
         {
-            AppendLog("Select the mesh used for preprocessing before placing the microphone.", selectedProject.Id);
+            AppendLog(InferenceIsAutomatic(project) ? $"Run Mesh2PPM Inference before placing the {side} microphone." : $"The input {side} ear is not available.", project.Id);
             return;
         }
-        if (!Path.GetFullPath(currentMesh.Path).Equals(Path.GetFullPath(mesh), StringComparison.OrdinalIgnoreCase))
+        placementSide = side;
+        placementProjectId = project.Id;
+        placementMeshPath = mesh;
+        placementMeshIdentity = MeshIdentity(mesh);
+        var session = placementCancellation = new CancellationTokenSource();
+        pendingMicrophonePosition = ValidManualPosition(project, side) ? ManualPosition(project, side) : null;
+        donePositionButton.IsEnabled = false;
+        automaticPositionButton.IsEnabled = false;
+        placementCoordinates.Text = "Opening microphone placement mesh…";
+        placementBorder.Visibility = Visibility.Visible;
+        artifactPicker.IsEnabled = false;
+        RefreshPipelineStatus();
+        var artifact = artifacts.FirstOrDefault(x => SamePath(x.Path, mesh)) ??
+            new Artifact(InferenceIsAutomatic(project) ? $"Predicted {side} ear" : $"Input {side} ear", mesh, side);
+        artifactPicker.SelectedItem = artifact;
+        RememberSelectedArtifact(mesh);
+        if (!SamePath(currentMesh?.Path, mesh))
         {
-            var artifact = artifacts.FirstOrDefault(x => Path.GetFullPath(x.Path).Equals(Path.GetFullPath(mesh), StringComparison.OrdinalIgnoreCase)) ?? new Artifact($"{side} placement mesh", mesh, side);
             ResetViewer();
             selectedArtifactPath = artifact.Path;
             selectedArtifactSide = side;
             selectedArtifactText.Text = Path.GetFileName(artifact.Path);
             await OpenMeshAsync(artifact);
-            if (currentMesh == null || !Path.GetFullPath(currentMesh.Path).Equals(Path.GetFullPath(mesh), StringComparison.OrdinalIgnoreCase)) return;
         }
-        placementSide = side;
-        pendingMicrophonePosition = null;
-        placementCoordinates.Text = "Click the mesh to place the microphone";
-        AppendLog($"{side} microphone placement mode started. Click the mesh to choose a position.", selectedProject.Id);
-        donePositionButton.IsEnabled = false;
-        placementBorder.Visibility = Visibility.Visible;
-        artifactPicker.IsEnabled = false;
-        foreach (var button in stageButtons) button.IsEnabled = false;
-        runAllButton.IsEnabled = false;
-        placeLeftButton.IsEnabled = false;
-        placeRightButton.IsEnabled = false;
+        if (!ReferenceEquals(session, placementCancellation)) return;
+        if (!PlacementIsCurrent()) { EndPlacement(); return; }
+        automaticPositionButton.IsEnabled = true;
+        donePositionButton.IsEnabled = pendingMicrophonePosition != null;
+        placementCoordinates.Text = pendingMicrophonePosition == null ? "Click the mesh or calculate the automatic microphone position." : "Saved microphone position loaded. Click Done to keep it.";
+        AppendLog($"{side} microphone placement uses {artifact.Title}. Click the mesh or calculate automatically, then press Done.", project.Id);
     }
 
-    async void AutomaticPositionClicked(object sender, RoutedEventArgs e)
+    async void AutomaticPositionClicked(object sender, RoutedEventArgs e) => await UseAutomaticPositionAsync();
+
+    async Task UseAutomaticPositionAsync()
     {
-        if (selectedProject == null || placementSide == null)
-            return;
-        var mesh = PreprocessingMesh(selectedProject, placementSide);
-        if (mesh == null)
-        {
-            AppendLog("The preprocessing mesh is not available.", selectedProject.Id);
-            return;
-        }
+        if (!PlacementIsCurrent() || calculatingAutomaticPosition || placementCancellation == null) return;
+        var project = selectedProject!;
+        var side = placementSide!;
+        var mesh = placementMeshPath!;
+        var session = placementCancellation;
+        calculatingAutomaticPosition = true;
         automaticPositionButton.IsEnabled = false;
+        donePositionButton.IsEnabled = false;
+        placementCoordinates.Text = "Calculating automatic microphone position…";
         try
         {
-            var position = await CalculateAutomaticPosition(mesh, placementSide);
+            var position = await CalculateAutomaticPosition(mesh, side, session.Token);
+            if (!ReferenceEquals(session, placementCancellation) || !PlacementIsCurrent()) return;
             pendingMicrophonePosition = new ManualMicrophonePosition { X = position.X, Y = position.Y, Z = position.Z, MeshPath = mesh, MeshIdentity = MeshIdentity(mesh) };
-            if (string.Equals(selectedArtifactSide ?? SideForPath(selectedArtifactPath ?? ""), placementSide, StringComparison.OrdinalIgnoreCase))
-            {
-                UpdateMicrophoneMarker(position);
-                placementCoordinates.Text = $"{placementSide} mic: {position.X:0.##}, {position.Y:0.##}, {position.Z:0.##} mm";
-            }
+            UpdateMicrophoneMarker(position);
+            placementCoordinates.Text = $"{side} mic: {position.X:0.##}, {position.Y:0.##}, {position.Z:0.##} mm — press Done to save.";
             donePositionButton.IsEnabled = true;
         }
-        catch (Exception error) { AppendLog("Automatic microphone position failed: " + error.Message, selectedProject.Id); }
-        finally { automaticPositionButton.IsEnabled = true; }
+        catch (OperationCanceledException) { }
+        catch (Exception error)
+        {
+            AppendLog("Automatic microphone position failed: " + error.Message, project.Id);
+            if (ReferenceEquals(session, placementCancellation)) placementCoordinates.Text = "Calculation failed. Retry or click the mesh to choose a position.";
+        }
+        finally
+        {
+            if (ReferenceEquals(session, placementCancellation))
+            {
+                calculatingAutomaticPosition = false;
+                automaticPositionButton.IsEnabled = PlacementIsCurrent();
+                donePositionButton.IsEnabled = PlacementIsCurrent() && pendingMicrophonePosition != null;
+            }
+        }
     }
 
-    async Task<System.Numerics.Vector3> CalculateAutomaticPosition(string mesh, string side)
+    async Task<System.Numerics.Vector3> CalculateAutomaticPosition(string mesh, string side, CancellationToken cancellation = default)
     {
         var landmark = Path.Combine(appData, "Cache", "automatic-landmark-" + Guid.NewGuid().ToString("N") + ".json");
         var executable = BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
         var info = new ProcessStartInfo(executable, $"-m HRTFCalculation.Preprocessing.src.ear_canal_closer --ear_path {QuoteArgument(mesh)} --landmark_path {QuoteArgument(landmark)} --side {side} --estimate-only") { WorkingDirectory = packageRoot, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         ApplyProcessEnvironment(info);
+        Directory.CreateDirectory(Path.GetDirectoryName(landmark)!);
         using var process = Process.Start(info) ?? throw new InvalidOperationException("Could not start the bundled Python environment.");
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
+        using var registration = cancellation.Register(() => TryTerminate(process));
         try
         {
+            // Drain both pipes together: filling stderr must not block stdout or Done.
+            var outputTask = process.StandardOutput.ReadToEndAsync(cancellation);
+            var errorTask = process.StandardError.ReadToEndAsync(cancellation);
+            await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(cancellation));
+            var output = await outputTask;
+            var error = await errorTask;
             if (process.ExitCode != 0)
-                throw new InvalidOperationException(error.Trim());
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? $"Estimator exited with status {process.ExitCode}. {output.Trim()}" : error.Trim());
             using var document = JsonDocument.Parse(File.Exists(landmark) ? File.ReadAllText(landmark) : output);
             var values = document.RootElement.GetProperty("position").EnumerateArray().Select(x => (float)x.GetDouble()).ToArray();
-            if (values.Length != 3) throw new InvalidDataException("The estimator returned an invalid position.");
+            if (values.Length != 3 || values.Any(x => !float.IsFinite(x))) throw new InvalidDataException("The estimator returned an invalid position.");
             return new System.Numerics.Vector3(values[0], values[1], values[2]);
         }
-        finally { if (File.Exists(landmark)) File.Delete(landmark); }
+        finally
+        {
+            if (!process.HasExited) { TryTerminate(process); await process.WaitForExitAsync(); }
+            if (File.Exists(landmark)) File.Delete(landmark);
+        }
     }
 
     void DonePositionClicked(object sender, RoutedEventArgs e)
     {
-        if (selectedProject == null || placementSide == null || pendingMicrophonePosition == null)
+        if (!PlacementIsCurrent() || calculatingAutomaticPosition || pendingMicrophonePosition == null ||
+            !PositionMatchesMesh(pendingMicrophonePosition, placementMeshPath))
             return;
-        if (placementSide == "left") selectedProject.Settings.Preprocessing.SourcePositionInputLeft = pendingMicrophonePosition; else selectedProject.Settings.Preprocessing.SourcePositionInputRight = pendingMicrophonePosition;
+        if (placementSide == "left") selectedProject!.Settings.Preprocessing.SourcePositionInputLeft = pendingMicrophonePosition; else selectedProject!.Settings.Preprocessing.SourcePositionInputRight = pendingMicrophonePosition;
         Persist();
         AppendLog($"Saved {placementSide} microphone position.", selectedProject.Id);
         EndPlacement();
@@ -1700,10 +1741,21 @@ public partial class MainWindow : Window
 
     void EndPlacement()
     {
+        placementCancellation?.Cancel();
+        placementCancellation?.Dispose();
+        placementCancellation = null;
+        placementProjectId = null;
+        placementMeshPath = null;
+        placementMeshIdentity = null;
+        calculatingAutomaticPosition = false;
         placementSide = null;
         pendingMicrophonePosition = null;
+        donePositionButton.IsEnabled = false;
         placementBorder.Visibility = Visibility.Collapsed;
         artifactPicker.IsEnabled = true;
+        if (microphoneVisual != null) meshViewport.Items.Remove(microphoneVisual);
+        microphoneVisual = null;
+        if (currentMesh != null) AddMicrophoneMarker(currentMesh.Path);
         UpdatePlacementButtons();
         RefreshPipelineStatus();
     }
@@ -1766,7 +1818,12 @@ public partial class MainWindow : Window
     void RunStage(Stage stage, ProjectRecord? targetProject = null, bool continueQueued = false)
     {
         var project = targetProject ?? selectedProject;
-        if (project == null || runningProcesses.ContainsKey(project.Id) || !StageCanRun(stage, project)) return;
+        if (project == null) return;
+        if (StageUnavailableReason(stage, project) is string reason)
+        {
+            AppendLog($"{stage.Title} cannot start: {reason}", project.Id);
+            return;
+        }
         if (!continueQueued) queuedStages.Remove(project.Id);
         try
         {
@@ -1829,7 +1886,7 @@ public partial class MainWindow : Window
     bool ValidateExternalRuntime(ProjectRecord project)
     {
         var bin = Path.Combine(environment.ExternalDir, "bin");
-        var required = new[] { "hrtf_mesh_grading.exe", "NumCalc.exe", "libpmp.dll", "libpmp_vis.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll" };
+        var required = new[] { "hrtf_mesh_grading.exe", "libpmp.dll", "libpmp_vis.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll" };
         var missing = required.Where(name => !File.Exists(Path.Combine(bin, name))).ToList();
         if (missing.Count > 0)
         {
@@ -1916,17 +1973,18 @@ public partial class MainWindow : Window
         {
             if (!string.IsNullOrWhiteSpace(project.LeftEar)) prepared.LeftEar = CopyInput(project.LeftEar, Path.Combine(project.SaveLocation, "Input", "Left"));
             if (!string.IsNullOrWhiteSpace(project.RightEar)) prepared.RightEar = CopyInput(project.RightEar, Path.Combine(project.SaveLocation, "Input", "Right"));
-            RebaseManualPosition(prepared.Settings.Preprocessing.SourcePositionInputLeft, prepared.LeftEar);
-            RebaseManualPosition(prepared.Settings.Preprocessing.SourcePositionInputRight, prepared.RightEar);
+            RebaseManualPosition(prepared.Settings.Preprocessing.SourcePositionInputLeft, project.LeftEar, prepared.LeftEar);
+            RebaseManualPosition(prepared.Settings.Preprocessing.SourcePositionInputRight, project.RightEar, prepared.RightEar);
         }
         var config = Path.Combine(project.SaveLocation, "Project Settings.yaml");
         File.WriteAllText(config, Yaml(prepared), Encoding.UTF8);
         return config;
     }
 
-    void RebaseManualPosition(ManualMicrophonePosition? position, string path)
+    void RebaseManualPosition(ManualMicrophonePosition? position, string source, string path)
     {
-        if (position != null && !string.IsNullOrWhiteSpace(path)) { position.MeshPath = path; position.MeshIdentity = MeshIdentity(path); }
+        // Copying an input does not change a placement made on its predicted ear.
+        if (PositionMatchesMesh(position, source) && !string.IsNullOrWhiteSpace(path)) { position!.MeshPath = path; position.MeshIdentity = MeshIdentity(path); }
     }
 
     string CopyInput(string path, string folder)
@@ -2047,6 +2105,7 @@ ui:
     void ResetSelectedProjectOutputs()
     {
         if (selectedProject == null || runningProcesses.ContainsKey(selectedProject.Id)) return;
+        if (placementSide != null) EndPlacement();
         foreach (var name in new[] { selectedProject.Settings.Inference.TargetLeftFolder, selectedProject.Settings.Inference.TargetRightFolder, selectedProject.Settings.Inference.PredictionLeftFolder, selectedProject.Settings.Inference.PredictionRightFolder, "Intermediates", "intermediates", "Projects", "HRTF", "Results Inference.csv" })
         {
             var path = Path.Combine(selectedProject.SaveLocation, name);
@@ -2127,13 +2186,24 @@ ui:
             var skipped = stage == Stage.Inference && !InferenceIsAutomatic(selectedProject);
             var running = runningStages.TryGetValue(selectedProject.Id, out var active) && active == stage;
             var failed = FailedStages(selectedProject.Id).Contains(stage);
-            stageStatus[i].Text = skipped ? "Skipped" : running ? "Running…" : failed ? "Failed" : StageIsComplete(stage, selectedProject) ? "Done" : "Ready";
+            var reason = StageUnavailableReason(stage, selectedProject);
+            stageStatus[i].Text = skipped ? "Skipped" : running ? "Running…" : failed ? "Failed" : StageIsComplete(stage, selectedProject) ? "Done" : reason != null ? "Blocked" : "Ready";
             stageStatus[i].Foreground = new SolidColorBrush(skipped ? ColorHelper.FromArgb(255, 130, 130, 130) : running ? Colors.DarkOrange : failed ? Colors.Firebrick : StageIsComplete(stage, selectedProject) ? Colors.ForestGreen : Colors.Gray);
             stageButtons[i].Content = running ? "Stop" : "Run";
             stageButtons[i].IsEnabled = placementSide == null && (running || StageCanRun(stage, selectedProject));
+            ToolTipService.SetToolTip(stageStatus[i], reason ?? $"{stage.Title} is ready.");
+            ToolTipService.SetToolTip(stageButtons[i], running ? "Stop this stage" : reason ?? $"Run {stage.Title}");
         }
         var pending = AutomaticStages(selectedProject).Where(x => !StageIsComplete(x, selectedProject)).ToList();
         runAllButton.IsEnabled = placementSide == null && pending.Count > 0 && StageCanRun(pending[0], selectedProject);
+        var preprocessingReason = StageUnavailableReason(Stage.Preprocessing, selectedProject);
+        var hint = placementSide != null ? "Finish microphone placement with Done or Cancel." :
+            runningProcesses.ContainsKey(selectedProject.Id) ? null :
+            preprocessingReason != null ? "Preprocessing: " + preprocessingReason :
+            pending.Count > 0 ? StageUnavailableReason(pending[0], selectedProject) : null;
+        pipelineHintText.Text = hint ?? "";
+        pipelineHintText.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
+        UpdatePlacementButtons();
         RefreshProjectList();
         RefreshNumCalcStatus();
     }
@@ -2141,27 +2211,45 @@ ui:
     bool InferenceIsAutomatic(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing && !string.IsNullOrWhiteSpace(project.LeftEar) && !string.IsNullOrWhiteSpace(project.RightEar);
     bool HasGeneratedPipelineOutputs(ProjectRecord project) => (!string.IsNullOrWhiteSpace(project.LeftEar) || !string.IsNullOrWhiteSpace(project.RightEar)) && !string.IsNullOrWhiteSpace(project.SaveLocation) && ((InferenceIsAutomatic(project) && StageIsComplete(Stage.Inference, project)) || StageIsComplete(Stage.Preprocessing, project) || StageIsComplete(Stage.Numcalc, project) || StageIsComplete(Stage.Postprocessing, project));
     bool PreprocessingBlocked(ProjectRecord project) => InferenceIsAutomatic(project) && !StageIsComplete(Stage.Inference, project);
-    bool StageCanRun(Stage stage, ProjectRecord? project)
+    bool StageCanRun(Stage stage, ProjectRecord? project) => StageUnavailableReason(stage, project) == null;
+
+    string? StageUnavailableReason(Stage stage, ProjectRecord? project)
     {
-        if (project == null || runningProcesses.ContainsKey(project.Id) || string.IsNullOrWhiteSpace(project.SaveLocation) || (string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar))) return false;
-        if ((!string.IsNullOrWhiteSpace(project.LeftEar) && !File.Exists(project.LeftEar)) || (!string.IsNullOrWhiteSpace(project.RightEar) && !File.Exists(project.RightEar))) return false;
-        if (stage == Stage.Inference) return InferenceIsAutomatic(project) && File.Exists(project.Settings.Inference.ModelConfig) && File.Exists(project.Settings.Inference.ModelCheckpoint);
-        if (stage == Stage.Preprocessing) return !PreprocessingBlocked(project) && File.Exists(environment.MeshGradingExecutable) && Directory.Exists(Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf"));
-        if (stage == Stage.Numcalc) return StageIsComplete(Stage.Preprocessing, project) && File.Exists(environment.NumCalcExecutable);
-        return stage == Stage.Postprocessing && StageIsComplete(Stage.Numcalc, project);
+        if (project == null) return "Select a project first.";
+        if (runningProcesses.ContainsKey(project.Id)) return "Wait for the running stage to finish.";
+        if (placementProjectId == project.Id) return "Finish microphone placement with Done or Cancel.";
+        if (string.IsNullOrWhiteSpace(project.SaveLocation)) return "Choose a project folder first.";
+        if (string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar)) return "Select at least one input ear.";
+        if ((!string.IsNullOrWhiteSpace(project.LeftEar) && !File.Exists(project.LeftEar)) || (!string.IsNullOrWhiteSpace(project.RightEar) && !File.Exists(project.RightEar))) return "An input ear file is missing. Select it again.";
+        if (stage == Stage.Inference)
+        {
+            if (!InferenceIsAutomatic(project)) return "Enable Use BezierPPM and select both input ears.";
+            return File.Exists(project.Settings.Inference.ModelConfig) && File.Exists(project.Settings.Inference.ModelCheckpoint) ? null : "The selected inference model is missing.";
+        }
+        if (stage == Stage.Preprocessing)
+        {
+            if (PreprocessingBlocked(project)) return "Run Mesh2PPM Inference to create both predicted ears first.";
+            if (!File.Exists(environment.MeshGradingExecutable)) return "The Windows mesh-grading tool is missing. Rebuild the app with its external tools.";
+            var bin = Path.Combine(environment.ExternalDir, "bin");
+            if (new[] { "libpmp.dll", "libpmp_vis.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll" }.Any(name => !File.Exists(Path.Combine(bin, name))))
+                return "The Windows mesh-grading runtime is incomplete. Rebuild the app with its external tools.";
+            return File.Exists(Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf", "Mesh2Input", "mesh2input.py")) ? null : "The Mesh2HRTF export tools are missing.";
+        }
+        if (stage == Stage.Numcalc) return !StageIsComplete(Stage.Preprocessing, project) ? "Run Preprocessing first." : File.Exists(environment.NumCalcExecutable) ? null : "The NumCalc executable is missing.";
+        return stage == Stage.Postprocessing && StageIsComplete(Stage.Numcalc, project) ? null : "Run NumCalc first.";
     }
 
     Stage[] AutomaticStages(ProjectRecord project) => InferenceIsAutomatic(project) ? Stage.GetValues() : [Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing];
     bool StageIsComplete(Stage stage, ProjectRecord project)
     {
         var output = project.SaveLocation;
-        if (stage == Stage.Inference) return !project.Settings.Inference.UsePredictionsForPreprocessing || (InferenceIsAutomatic(project) && ContainsMesh(Path.Combine(output, project.Settings.Inference.PredictionLeftFolder)) && ContainsMesh(Path.Combine(output, project.Settings.Inference.PredictionRightFolder)));
+        if (stage == Stage.Inference) return !InferenceIsAutomatic(project) || (PredictionMesh(project, "left") != null && PredictionMesh(project, "right") != null);
         if (stage == Stage.Preprocessing) return (string.IsNullOrWhiteSpace(project.LeftEar) || (File.Exists(Path.Combine(output, "Projects", "Left", "parameters.json")) && File.Exists(Path.Combine(output, "Intermediates", "Left", "graded_head.ply")))) && (string.IsNullOrWhiteSpace(project.RightEar) || (File.Exists(Path.Combine(output, "Projects", "Right", "parameters.json")) && File.Exists(Path.Combine(output, "Intermediates", "Right", "graded_head.ply"))));
         if (stage == Stage.Numcalc) return (string.IsNullOrWhiteSpace(project.LeftEar) || ContainsOutput2HRTF(Path.Combine(output, "Projects", "Left", "Output2HRTF"))) && (string.IsNullOrWhiteSpace(project.RightEar) || ContainsOutput2HRTF(Path.Combine(output, "Projects", "Right", "Output2HRTF")));
         return stage == Stage.Postprocessing && Directory.Exists(Path.Combine(output, "HRTF")) && Directory.GetFiles(Path.Combine(output, "HRTF"), "*.sofa").Any();
     }
 
-    string NextStageSummary(ProjectRecord project) { if (runningStages.TryGetValue(project.Id, out var active)) return active.Title + ": Running"; var next = AutomaticStages(project).FirstOrDefault(x => !StageIsComplete(x, project)); return next == null ? "Complete" : next.Title + ": Ready"; }
+    string NextStageSummary(ProjectRecord project) { if (runningStages.TryGetValue(project.Id, out var active)) return active.Title + ": Running"; var next = AutomaticStages(project).FirstOrDefault(x => !StageIsComplete(x, project)); return next == null ? "Complete" : next.Title + (StageCanRun(next, project) ? ": Ready" : ": Blocked"); }
     string NumCalcStatus(ProjectRecord project) => "NumCalc: " + string.Join(" · ", new[] { project.LeftEar, project.RightEar }.Select((x, i) => string.IsNullOrWhiteSpace(x) ? "" : (i == 0 ? "Left" : "Right") + " " + NumCalcCompleted(project, i == 0 ? "Left" : "Right") + "/" + NumCalcTotal(project, i == 0 ? "Left" : "Right")).Where(x => x.Length > 0));
     int NumCalcCompleted(ProjectRecord project, string side) { var folder = Path.Combine(project.SaveLocation, "Projects", side, "NumCalc", "source_1", "be.out"); return Directory.Exists(folder) ? Directory.GetDirectories(folder, "be.*").Length : 0; }
     int NumCalcTotal(ProjectRecord project, string side) { try { using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(project.SaveLocation, "Projects", side, "parameters.json"))); return document.RootElement.TryGetProperty("numFrequencies", out var value) ? value.GetInt32() : 0; } catch { return 0; } }
@@ -2195,7 +2283,7 @@ ui:
     {
         var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "1.0.0";
         var content = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
-        var logoPath = Path.Combine(packageRoot, "icon.png");
+        var logoPath = Path.Combine(AppContext.BaseDirectory, "app_icon.png");
         if (File.Exists(logoPath)) content.Children.Add(new Image { Source = new BitmapImage(new Uri(logoPath)), Width = 96, Height = 96, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center });
         content.Children.Add(new TextBlock { Text = "Pinna2HRTF", FontSize = 24, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center });
         content.Children.Add(new TextBlock { Text = "Version " + version, HorizontalAlignment = HorizontalAlignment.Center });
@@ -2244,6 +2332,7 @@ ui:
         selectedArtifactText.Foreground = mutedTextBrush;
         viewerPlaceholder.Foreground = mutedTextBrush;
         numCalcStatusText.Foreground = mutedTextBrush;
+        pipelineHintText.Foreground = mutedTextBrush;
         foreach (var label in stageStatusLabels) label.Foreground = mutedTextBrush;
         foreach (var row in projectRows.Values)
         {
@@ -2254,7 +2343,7 @@ ui:
 
     void AppWindowClosing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
     {
-        if (closingConfirmed || runningProcesses.Count == 0) { statusTimer.Stop(); Persist(); SaveUiState(); return; }
+        if (closingConfirmed || runningProcesses.Count == 0) { if (placementSide != null) EndPlacement(); statusTimer.Stop(); Persist(); SaveUiState(); return; }
         args.Cancel = true;
         _ = ConfirmQuitAsync(sender);
     }
@@ -2297,22 +2386,40 @@ ui:
 
     string? PreprocessingMesh(ProjectRecord project, string side)
     {
-        if (project.Settings.Inference.UsePredictionsForPreprocessing)
-        {
-            var predicted = Path.Combine(project.SaveLocation, side == "left" ? project.Settings.Inference.PredictionLeftFolder : project.Settings.Inference.PredictionRightFolder);
-            var file = Directory.Exists(predicted) ? Directory.EnumerateFiles(predicted).Where(IsMesh).OrderBy(x => x).FirstOrDefault() : null;
-            if (file != null) return file;
-        }
+        if (InferenceIsAutomatic(project)) return PredictionMesh(project, side);
         var raw = side == "left" ? project.LeftEar : project.RightEar;
         return !string.IsNullOrWhiteSpace(raw) && File.Exists(raw) ? raw : null;
     }
+
+    string? PredictionMesh(ProjectRecord project, string side)
+    {
+        var raw = side == "left" ? project.LeftEar : project.RightEar;
+        if (string.IsNullOrWhiteSpace(raw) || string.IsNullOrWhiteSpace(project.SaveLocation)) return null;
+        var folder = Path.Combine(project.SaveLocation, side == "left" ? project.Settings.Inference.PredictionLeftFolder : project.Settings.Inference.PredictionRightFolder);
+        if (!Directory.Exists(folder)) return null;
+        var stem = Path.GetFileNameWithoutExtension(raw);
+        // Match RunConfig.predicted_stl's preferred filenames, never an ICP or head mesh.
+        foreach (var name in new[] { $"Prediction_{stem}.stl", $"{stem}.stl" })
+        {
+            var path = Path.Combine(folder, name);
+            if (File.Exists(path)) return path;
+        }
+        var candidates = Directory.EnumerateFiles(folder).Where(x => Path.GetExtension(x).Equals(".stl", StringComparison.OrdinalIgnoreCase)).ToArray();
+        return candidates.Length == 1 && Path.GetFileName(candidates[0]).StartsWith("Prediction_", StringComparison.OrdinalIgnoreCase) ? candidates[0] : null;
+    }
+
+    static bool SamePath(string? left, string? right) => !string.IsNullOrWhiteSpace(left) && !string.IsNullOrWhiteSpace(right) &&
+        string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
+
+    bool PositionMatchesMesh(ManualMicrophonePosition? position, string? mesh) => position != null && SamePath(position.MeshPath, mesh) &&
+        position.MeshIdentity == MeshIdentity(mesh!) && double.IsFinite(position.X) && double.IsFinite(position.Y) && double.IsFinite(position.Z);
 
     string SideForPath(string path) => IsLeftMesh(path) ? "left" : IsRightMesh(path) ? "right" : "";
     string ArtifactSide(Artifact artifact) => artifact.Side ?? SideForPath(artifact.Path);
     bool IsLeftMesh(string path) => path.Contains("left", StringComparison.OrdinalIgnoreCase);
     bool IsRightMesh(string path) => path.Contains("right", StringComparison.OrdinalIgnoreCase);
     ManualMicrophonePosition? ManualPosition(ProjectRecord project, string side) => side == "left" ? project.Settings.Preprocessing.SourcePositionInputLeft : project.Settings.Preprocessing.SourcePositionInputRight;
-    bool ValidManualPosition(ProjectRecord project, string side) { var position = ManualPosition(project, side); var mesh = PreprocessingMesh(project, side); return position != null && !string.IsNullOrWhiteSpace(position.MeshPath) && mesh != null && string.Equals(Path.GetFullPath(position.MeshPath), Path.GetFullPath(mesh), StringComparison.OrdinalIgnoreCase) && position.MeshIdentity == MeshIdentity(mesh); }
+    bool ValidManualPosition(ProjectRecord project, string side) => PositionMatchesMesh(ManualPosition(project, side), PreprocessingMesh(project, side));
     void InvalidateManualPositions(ProjectRecord project) { if (!ValidManualPosition(project, "left")) project.Settings.Preprocessing.SourcePositionInputLeft = null; if (!ValidManualPosition(project, "right")) project.Settings.Preprocessing.SourcePositionInputRight = null; }
     void RebaseManualPositionIfNeeded(ProjectRecord project) { InvalidateManualPositions(project); }
     string MeshIdentity(string path) { try { var file = new FileInfo(path); return Path.GetFullPath(path).ToLowerInvariant() + ":" + file.Length + ":" + file.LastWriteTimeUtc.Ticks; } catch { return ""; } }
@@ -2320,12 +2427,29 @@ ui:
     System.Numerics.Vector3? MicrophonePosition(string meshPath)
     {
         if (selectedProject == null) return null;
-        var side = SideForPath(meshPath);
-        if (side.Length == 0) return null;
-        if (placementSide == side && pendingMicrophonePosition != null) return new System.Numerics.Vector3((float)pendingMicrophonePosition.X, (float)pendingMicrophonePosition.Y, (float)pendingMicrophonePosition.Z);
-        if (ValidManualPosition(selectedProject, side)) { var p = ManualPosition(selectedProject, side)!; return new System.Numerics.Vector3((float)p.X, (float)p.Y, (float)p.Z); }
-        var parameters = Path.Combine(selectedProject.SaveLocation, "Projects", CultureInfo.InvariantCulture.TextInfo.ToTitleCase(side), "parameters.json");
-        try { using var document = JsonDocument.Parse(File.ReadAllText(parameters)); var values = document.RootElement.GetProperty("sourceCenter").EnumerateArray().Select(x => (float)x.GetDouble() * 1000).ToArray(); return values.Length == 3 ? new System.Numerics.Vector3(values[0], values[1], values[2]) : null; } catch { return null; }
+        foreach (var side in new[] { "left", "right" })
+        {
+            var sideTitle = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(side);
+            var simulationMesh = Path.Combine(selectedProject.SaveLocation, "Intermediates", sideTitle, "graded_head.ply");
+            if (SamePath(meshPath, simulationMesh))
+            {
+                // Simulation coordinates are transformed during preprocessing. Always
+                // use the exported source center, not a position on the original ear.
+                var parameters = Path.Combine(selectedProject.SaveLocation, "Projects", sideTitle, "parameters.json");
+                try
+                {
+                    using var document = JsonDocument.Parse(File.ReadAllText(parameters));
+                    var values = document.RootElement.GetProperty("sourceCenter").EnumerateArray().Select(x => (float)x.GetDouble() * 1000).ToArray();
+                    return values.Length == 3 && values.All(float.IsFinite) ? new System.Numerics.Vector3(values[0], values[1], values[2]) : null;
+                }
+                catch { return null; }
+            }
+            if (!SamePath(meshPath, PreprocessingMesh(selectedProject, side))) continue;
+            var position = placementProjectId == selectedProject.Id && placementSide == side && PositionMatchesMesh(pendingMicrophonePosition, meshPath)
+                ? pendingMicrophonePosition : ValidManualPosition(selectedProject, side) ? ManualPosition(selectedProject, side) : null;
+            if (position != null) return new System.Numerics.Vector3((float)position.X, (float)position.Y, (float)position.Z);
+        }
+        return null;
     }
 
     sealed class ProjectRowUi

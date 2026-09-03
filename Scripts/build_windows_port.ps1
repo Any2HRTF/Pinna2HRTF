@@ -27,8 +27,19 @@ if (-not $dotnetPath) {
     throw "dotnet is not on PATH and .dotnet\dotnet.exe was not found."
 }
 
+# Check the native payload before replacing a previously working package.
+$requiredNative = @("libpmp.dll", "libpmp_vis.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll")
+if (-not $AllowMissingExternalTools) { $requiredNative += @("NumCalc.exe", "hrtf_mesh_grading.exe") }
+$missingNative = $requiredNative | Where-Object { -not (Test-Path (Join-Path $root "External\bin\$_")) }
+if ($missingNative.Count -gt 0 -or -not (Test-Path (Join-Path $root "External\src\Mesh2HRTF\mesh2hrtf\Mesh2Input\mesh2input.py"))) {
+    throw "The Windows preprocessing runtime is incomplete. Run Scripts\prepare_windows_external_tools.ps1, then rebuild. Missing native files: $($missingNative -join ', ')"
+}
+
 if (Test-Path $dist) {
-    Remove-Item $dist -Recurse -Force
+    $resolvedDist = (Resolve-Path -LiteralPath $dist).Path
+    $expectedDist = [IO.Path]::GetFullPath((Join-Path $root "dist\windows\Pinna2HRTF"))
+    if ($resolvedDist -ne $expectedDist) { throw "Unexpected package path: $resolvedDist" }
+    Remove-Item -LiteralPath $resolvedDist -Recurse -Force
 }
 
 & $dotnetPath publish (Join-Path $windowsProject "Pinna2HRTF.Windows.csproj") -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false
