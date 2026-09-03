@@ -82,6 +82,17 @@ struct MeshViewerView: View {
                         Button("Use Automatic Position") {
                             store.useAutomaticMicrophonePosition(side)
                         }
+                        if store.isCalculatingAutomaticMicrophone {
+                            HStack(spacing: 6) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Searching…")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("Searching for automatic microphone position")
+                        }
                         Spacer()
                         Button("Cancel") {
                             store.cancelMicrophonePlacement()
@@ -189,7 +200,7 @@ struct PersistentSceneView: NSViewRepresentable {
         let view = SCNView()
         view.scene = scene
         view.allowsCameraControl = true
-        view.autoenablesDefaultLighting = true
+        view.autoenablesDefaultLighting = false
         view.backgroundColor = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
         view.delegate = context.coordinator
         view.addGestureRecognizer(NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.selectSurface(_:))))

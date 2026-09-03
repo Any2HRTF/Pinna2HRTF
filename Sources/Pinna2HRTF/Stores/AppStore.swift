@@ -29,7 +29,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     private var selectedCameraScale: Double = 1
     private var microphonePlacementMeshURL: URL?
     private var automaticMicrophonePositionsByMesh: [String: ManualMicrophonePosition] = [:]
-    private var automaticMicrophoneProcesses: [String: Process] = [:]
+    @Published private var automaticMicrophoneProcesses: [String: Process] = [:]
     private let microphoneMarkerName = "pinna2hrtf-microphone-marker"
 
     let rootURL: URL
@@ -373,12 +373,18 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         cameraNode.constraints = [cameraConstraint]
         scene.rootNode.addChildNode(cameraNode)
         let light = SCNLight()
-        light.type = .omni
+        light.type = .directional
         light.intensity = 900
         let lightNode = SCNNode()
         lightNode.light = light
         lightNode.position = SCNVector3Zero
         cameraNode.addChildNode(lightNode)
+        let ambientLight = SCNLight()
+        ambientLight.type = .ambient
+        ambientLight.intensity = 180
+        let ambientLightNode = SCNNode()
+        ambientLightNode.light = ambientLight
+        scene.rootNode.addChildNode(ambientLightNode)
         selectedMesh = url
         selectedImage = nil
         selectedScene = scene
@@ -425,6 +431,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     var isPlacingMicrophone: Bool {
         microphonePlacementSide != nil
+    }
+
+    var isCalculatingAutomaticMicrophone: Bool {
+        !automaticMicrophoneProcesses.isEmpty
     }
 
     func hasManualMicrophonePosition(_ side: EarSide) -> Bool {
