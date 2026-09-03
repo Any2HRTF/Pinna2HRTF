@@ -400,7 +400,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             return SCNVector3(CGFloat(pendingMicrophonePosition.x), CGFloat(pendingMicrophonePosition.y), CGFloat(pendingMicrophonePosition.z))
         }
         if let project = selectedProject {
-            if let side = meshSide(for: meshURL, project: project), let position = ArtifactScanner.validManualMicrophonePosition(for: project, side: side) {
+            if let side = meshSide(for: meshURL, project: project), let position = ArtifactScanner.validManualMicrophonePosition(for: project, side: side) ?? ArtifactScanner.manualMicrophonePosition(for: project, side: side) {
                 return SCNVector3(CGFloat(position.x), CGFloat(position.y), CGFloat(position.z))
             }
         }
