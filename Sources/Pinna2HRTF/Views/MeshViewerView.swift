@@ -37,89 +37,68 @@ struct MeshViewerView: View {
     }
 
     var viewer: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Preview")
-                        .font(.title2.weight(.semibold))
-                    Text(store.selectedMesh?.lastPathComponent ?? "Select a file to preview")
-                        .font(.caption)
+        ZStack {
+            Rectangle()
+                .fill(colorScheme == .dark ? Color(nsColor: NSColor(calibratedWhite: 0.12, alpha: 1)) : Color(nsColor: NSColor(calibratedWhite: 0.93, alpha: 1)))
+            if let image = store.selectedImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(18)
+            } else if store.selectedMesh == nil {
+                VStack(spacing: 10) {
+                    Image(systemName: "cube.transparent")
+                        .font(.system(size: 36))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .help(store.selectedMesh?.lastPathComponent ?? "Select a file to preview")
-                    Text(store.selectedMeshHasMicrophoneMarker ? "Orange marker: microphone position" : " ")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                        .frame(height: 14, alignment: .leading)
+                    Text("Select a file to preview")
+                        .foregroundStyle(.secondary)
                 }
-                Spacer()
+            } else {
+                PersistentSceneView(scene: store.selectedScene, cameraState: $store.selectedCameraState, darkMode: colorScheme == .dark, placementMode: store.isPlacingMicrophone, cameraPositionChanged: store.updateCameraPosition, surfaceSelected: store.previewMicrophonePosition)
+                    .onAppear {
+                        store.updateSceneBackground(darkMode: colorScheme == .dark)
+                    }
+                    .onChange(of: colorScheme) { newColorScheme in
+                        store.updateSceneBackground(darkMode: newColorScheme == .dark)
+                    }
             }
-            .padding([.horizontal, .top], 18)
-            .padding(.bottom, 12)
-            Divider()
-            ZStack {
-                Rectangle()
-                    .fill(colorScheme == .dark ? Color(nsColor: NSColor(calibratedWhite: 0.12, alpha: 1)) : Color(nsColor: NSColor(calibratedWhite: 0.93, alpha: 1)))
-                if let image = store.selectedImage {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .padding(18)
-                } else if store.selectedMesh == nil {
-                    VStack(spacing: 10) {
-                        Image(systemName: "cube.transparent")
-                            .font(.system(size: 36))
-                            .foregroundStyle(.secondary)
-                        Text("Select a file to preview")
+        }
+        .frame(maxHeight: .infinity)
+        .overlay(alignment: .bottom) {
+            if let side = store.microphonePlacementSide {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Label("Place \(side.title) Microphone", systemImage: "scope")
+                            .font(.callout.weight(.semibold))
+                        Spacer()
+                        Text("Drag to rotate · Click to place")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                } else {
-                    PersistentSceneView(scene: store.selectedScene, cameraState: $store.selectedCameraState, darkMode: colorScheme == .dark, placementMode: store.isPlacingMicrophone, cameraPositionChanged: store.updateCameraPosition, surfaceSelected: store.previewMicrophonePosition)
-                        .onAppear {
-                            store.updateSceneBackground(darkMode: colorScheme == .dark)
+                    Text(microphoneCoordinates)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 10) {
+                        Button("Use Automatic Position") {
+                            store.useAutomaticMicrophonePosition(side)
                         }
-                        .onChange(of: colorScheme) { newColorScheme in
-                            store.updateSceneBackground(darkMode: newColorScheme == .dark)
+                        Spacer()
+                        Button("Cancel") {
+                            store.cancelMicrophonePlacement()
                         }
-                }
-            }
-            .frame(maxHeight: .infinity)
-            .overlay(alignment: .bottom) {
-                if let side = store.microphonePlacementSide {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Label("Place \(side.title) Microphone", systemImage: "scope")
-                                .font(.callout.weight(.semibold))
-                            Spacer()
-                            Text("Drag to rotate · Click to place")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        Button("Done") {
+                            store.completeMicrophonePlacement()
                         }
-                        Text(microphoneCoordinates)
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                        HStack(spacing: 10) {
-                            Button("Use Automatic Position") {
-                                store.useAutomaticMicrophonePosition(side)
-                            }
-                            Spacer()
-                            Button("Cancel") {
-                                store.cancelMicrophonePlacement()
-                            }
-                            Button("Done") {
-                                store.completeMicrophonePlacement()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .keyboardShortcut(.defaultAction)
-                            .disabled(store.pendingMicrophonePosition == nil)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.regular)
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(store.pendingMicrophonePosition == nil)
                     }
-                    .padding(16)
-                    .modifier(MicrophonePlacementSurface())
-                    .padding(16)
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
                 }
+                .padding(16)
+                .modifier(MicrophonePlacementSurface())
+                .padding(16)
             }
         }
     }

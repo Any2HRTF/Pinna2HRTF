@@ -41,14 +41,14 @@ struct ProjectSidebarView: View {
                     Label("New Project", systemImage: "plus")
                         .frame(width: 28, height: 28)
                 }
-                .help("New Project")
+                .help("Create a new empty project")
                 Button(role: .destructive) {
                     store.forgetSelectedProject()
                 } label: {
                     Label("Remove Project", systemImage: "minus")
                         .frame(width: 28, height: 28)
                 }
-                .help("Remove Project")
+                .help("Remove the selected project from Pinna2HRTF")
                 .disabled(store.selectedProject == nil)
                 Button {
                     store.importProject()
@@ -56,14 +56,14 @@ struct ProjectSidebarView: View {
                     Label("Import Project", systemImage: "folder.badge.plus")
                         .frame(width: 28, height: 28)
                 }
-                .help("Import Project Folder")
+                .help("Import an existing project folder")
                 Button {
                     store.duplicateSelectedProject()
                 } label: {
                     Label("Duplicate Project", systemImage: "plus.square.on.square")
                         .frame(width: 28, height: 28)
                 }
-                .help("Duplicate Project")
+                .help("Duplicate the selected project, including its results")
                 .disabled(store.selectedProject == nil)
                 Spacer()
                 Text(projectCountText)
