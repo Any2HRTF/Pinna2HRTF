@@ -229,9 +229,10 @@ struct LabeledMillimeterSlider: View {
     var body: some View {
         HStack(spacing: 8) {
             SettingLabel(title: title, helpID: helpID)
-            Slider(value: $value, in: range, step: 1)
-                .disabled(!sliderEnabled)
-                .frame(maxWidth: .infinity)
+            if sliderEnabled {
+                Slider(value: $value, in: range, step: 1)
+                    .frame(maxWidth: .infinity)
+            }
             Text("\(Int(value.rounded())) mm")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
