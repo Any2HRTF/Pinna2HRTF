@@ -159,6 +159,8 @@ rm -rf "$FINAL_APP_DIR"
 mkdir -p "$(dirname "$FINAL_APP_DIR")"
 if ditto --norsrc --noextattr --noqtn "$CLEAN_ROOT/Pinna2HRTF.app" "$FINAL_APP_DIR"; then
   xattr -cr "$FINAL_APP_DIR" 2>/dev/null || true
+  codesign --force --deep --sign - "$FINAL_APP_DIR"
+  xattr -cr "$FINAL_APP_DIR" 2>/dev/null || true
   codesign --verify --deep --strict "$FINAL_APP_DIR"
   echo "$FINAL_APP_DIR"
 else
