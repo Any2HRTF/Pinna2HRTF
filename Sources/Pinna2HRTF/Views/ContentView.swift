@@ -25,13 +25,6 @@ struct ContentView: View {
                 .accessibilityLabel("Preview")
                 .help("Choose a File to Preview")
                 .disabled(store.selectedProject == nil || store.isPlacingMicrophone)
-                Button {
-                    store.refreshArtifacts()
-                } label: {
-                    Label("Refresh Previews", systemImage: "arrow.clockwise")
-                }
-                .help("Refresh Previews")
-                .disabled(store.selectedProject == nil || store.isPlacingMicrophone)
             }
             if #available(macOS 26.0, *) {
                 ToolbarSpacer(.fixed, placement: .primaryAction)
