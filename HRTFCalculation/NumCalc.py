@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import signal
 import shutil
 import stat
 import subprocess
@@ -14,7 +15,19 @@ import mesh2hrtf as m2h
 import psutil
 
 
+def frequency_step_complete(source_dir: Path, step: int) -> bool:
+    output_dir = source_dir / "be.out" / f"be.{step}"
+    required_outputs = {"pBoundary", "pEvalGrid", "vBoundary", "vEvalGrid"}
+    if not output_dir.is_dir() or not required_outputs.issubset({path.name for path in output_dir.iterdir()}):
+        return False
+    log_path = source_dir / f"NC{step}-{step}_log.txt"
+    if not log_path.is_file():
+        return False
+    return "---------- NumCalc ended:" in log_path.read_text(encoding="utf-8", errors="replace")
+
+
 def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: float | None, ram_safety_factor: float, max_cpu_load: int, max_instances: int, starting_order: str, wait_time: int, adaptive_fmm_length: bool) -> None:
+    numcalc_path = numcalc_path.expanduser().resolve()
     wrapper_dir: Path | None = None
     executable = numcalc_path
     if executable.is_dir():
@@ -38,12 +51,12 @@ def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: f
             source_dirs = sorted(project.glob("NumCalc/source_*"))
             for source_dir in source_dirs:
                 memory_file = source_dir / "Memory.txt"
-                if adaptive_fmm_length or not memory_file.exists():
+                estimates = list(m2h.read_ram_estimates(str(source_dir))) if memory_file.exists() else []
+                if not estimates or (adaptive_fmm_length and not all(frequency_step_complete(source_dir, int(step)) for step, _, _ in estimates)):
                     subprocess.run([str(executable), *adaptive_arguments, "-estimate_ram"], cwd=source_dir, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, check=True)
-                estimates = m2h.read_ram_estimates(str(source_dir))
+                    estimates = list(m2h.read_ram_estimates(str(source_dir)))
                 for step, frequency, ram in estimates:
-                    output_dir = source_dir / "be.out" / f"be.{int(step)}"
-                    if not output_dir.exists():
+                    if not frequency_step_complete(source_dir, int(step)):
                         pending.append((float(ram), project, source_dir, int(step), frequency))
         if starting_order == "high":
             pending.sort(key=lambda item: item[0], reverse=True)
@@ -68,6 +81,8 @@ def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: f
                     log_file.close()
                     if return_code != 0:
                         raise RuntimeError(f"NumCalc failed for {project.name}, step {step}, frequency {frequency} Hz; see {log_file.name}")
+                    if not frequency_step_complete(source_dir, step):
+                        raise RuntimeError(f"NumCalc produced incomplete output for {project.name}, step {step}, frequency {frequency} Hz; see {log_file.name}")
                     finished.append(item)
             for item in finished:
                 running.remove(item)
@@ -82,7 +97,7 @@ def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: f
                 pending.popleft()
                 log_path = source_dir / f"NC{step}-{step}_log.txt"
                 log_file = log_path.open("w", encoding="utf-8")
-                process = subprocess.Popen([str(executable), *adaptive_arguments, "-istart", str(step), "-iend", str(step)], cwd=source_dir, stdout=log_file, stderr=subprocess.STDOUT)
+                process = subprocess.Popen([str(executable), *adaptive_arguments, "-istart", str(step), "-iend", str(step)], cwd=source_dir, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=os.name != "nt")
                 running.append((process, log_file, ram, project, step, frequency))
                 print(f"Started {project.name}, step {step}, {frequency:g} Hz, estimated {ram:.2f} GB", flush=True)
             if pending and not running and pending[0][0] * ram_safety_factor > ram_budget:
@@ -92,7 +107,13 @@ def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: f
     finally:
         for process, log_file, _, _, _, _ in locals().get("running", []):
             if process.poll() is None:
-                process.terminate()
+                if os.name == "nt":
+                    process.terminate()
+                else:
+                    try:
+                        os.killpg(process.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
             log_file.close()
         if wrapper_dir is not None:
             shutil.rmtree(wrapper_dir, ignore_errors=True)

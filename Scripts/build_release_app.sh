@@ -6,7 +6,11 @@ REPO_ROOT="$(cd "$ROOT/.." && pwd)"
 APP_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$ROOT/pyproject.toml" | head -n 1)"
 GIT_HEAD="$(git -C "$ROOT" rev-parse --short HEAD)"
 SCRATCH="/private/tmp/pinna2hrtf-swift-build"
-APP_DIR="$ROOT/build/release/Pinna2HRTF.app"
+STAGE_ROOT="$(mktemp -d /private/tmp/pinna2hrtf-release-stage.XXXXXX)"
+CLEAN_ROOT="$(mktemp -d /private/tmp/pinna2hrtf-release-clean.XXXXXX)"
+trap 'rm -rf "$STAGE_ROOT" "$CLEAN_ROOT"' EXIT
+APP_DIR="$STAGE_ROOT/Pinna2HRTF.app"
+FINAL_APP_DIR="$ROOT/build/release/Pinna2HRTF.app"
 CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
@@ -148,5 +152,16 @@ cat > "$CONTENTS/Info.plist" <<PLIST
 </plist>
 PLIST
 chmod +x "$MACOS/Pinna2HRTF"
-codesign --force --deep --sign - "$APP_DIR"
-echo "$APP_DIR"
+ditto --norsrc --noextattr --noqtn "$APP_DIR" "$CLEAN_ROOT/Pinna2HRTF.app"
+codesign --force --deep --sign - "$CLEAN_ROOT/Pinna2HRTF.app"
+codesign --verify --deep --strict "$CLEAN_ROOT/Pinna2HRTF.app"
+rm -rf "$FINAL_APP_DIR"
+mkdir -p "$(dirname "$FINAL_APP_DIR")"
+if ditto --norsrc --noextattr --noqtn "$CLEAN_ROOT/Pinna2HRTF.app" "$FINAL_APP_DIR"; then
+  codesign --verify --deep --strict "$FINAL_APP_DIR"
+  echo "$FINAL_APP_DIR"
+else
+  echo "Could not write the release bundle to $FINAL_APP_DIR; using the signed temporary bundle at $CLEAN_ROOT/Pinna2HRTF.app" >&2
+  trap - EXIT
+  echo "$CLEAN_ROOT/Pinna2HRTF.app"
+fi

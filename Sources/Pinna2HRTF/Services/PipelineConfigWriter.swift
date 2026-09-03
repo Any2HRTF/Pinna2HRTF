@@ -48,8 +48,8 @@ enum PipelineConfigWriter {
         let sourceAssignmentFaceCount = max(Int(preprocessing.sourceAssignmentFaceCount ?? "") ?? 6, 1)
         let frequencyStepCount = max(Int(preprocessing.frequencyStepCount) ?? 129, 2)
         let levelOffsetDB = yamlNumber(postprocessing.levelOffsetDB) ?? "-30"
-        let leftEar = project.leftEar.isEmpty ? "null" : project.leftEar
-        let rightEar = project.rightEar.isEmpty ? "null" : project.rightEar
+        let leftEar = project.leftEar.isEmpty ? "null" : yamlString(project.leftEar)
+        let rightEar = project.rightEar.isEmpty ? "null" : yamlString(project.rightEar)
         let positions = manualPositions ?? Dictionary(uniqueKeysWithValues: EarSide.allCases.compactMap { side in
             ArtifactScanner.validManualMicrophonePosition(for: project, side: side).map { (side, $0) }
         })
@@ -62,19 +62,19 @@ enum PipelineConfigWriter {
         paths:
           left_ear: \(leftEar)
           right_ear: \(rightEar)
-          output_dir: \(project.saveLocation)
-          external_deps_dir: \(environment.externalDir)
-          numcalc_executable: \(environment.numcalcExecutable)
-          mesh_grading_executable: \(environment.meshGradingExecutable)
-          evaluation_grid: \(evaluationGrid)
+          output_dir: \(yamlString(project.saveLocation))
+          external_deps_dir: \(yamlString(environment.externalDir))
+          numcalc_executable: \(yamlString(environment.numcalcExecutable))
+          mesh_grading_executable: \(yamlString(environment.meshGradingExecutable))
+          evaluation_grid: \(yamlString(evaluationGrid))
         inference:
           enabled: true
-          model_config_file: \(inference.modelConfig)
-          model_checkpoint: \(inference.modelCheckpoint)
-          target_left_folder: \(inference.targetLeftFolder)
-          target_right_folder: \(inference.targetRightFolder)
-          prediction_left_folder: \(inference.predictionLeftFolder)
-          prediction_right_folder: \(inference.predictionRightFolder)
+          model_config_file: \(yamlString(inference.modelConfig))
+          model_checkpoint: \(yamlString(inference.modelCheckpoint))
+          target_left_folder: \(yamlString(inference.targetLeftFolder))
+          target_right_folder: \(yamlString(inference.targetRightFolder))
+          prediction_left_folder: \(yamlString(inference.predictionLeftFolder))
+          prediction_right_folder: \(yamlString(inference.predictionRightFolder))
           prediction_parameters_left_folder: Intermediates/Left
           prediction_parameters_right_folder: Intermediates/Right
           use_predictions_for_preprocessing: \(inference.usePredictionsForPreprocessing ? "true" : "false")
@@ -100,9 +100,9 @@ enum PipelineConfigWriter {
           mesh_gamma: \(preprocessing.meshGamma)
           mesh_gamma_opposite: \(preprocessing.meshGammaOpposite)
           skip_mesh_grading: false
-          source_type_left: Left ear
-          source_type_right: Right ear
-          title: \(project.name)
+          source_type_left: "Left ear"
+          source_type_right: "Right ear"
+          title: \(yamlString(project.name))
           method: ML-FMM BEM
           min_frequency: \(preprocessing.minFrequency)
           max_frequency: \(preprocessing.maxFrequency)
@@ -125,7 +125,7 @@ enum PipelineConfigWriter {
           adaptive_fmm_length: \(numcalc.adaptiveFmmLength ? "true" : "false")
         postprocessing:
           enabled: false
-          output_sofa_dir: \(output.appendingPathComponent("HRTF").path)
+          output_sofa_dir: \(yamlString(output.appendingPathComponent("HRTF").path))
           overwrite: true
           normalize: \(postprocessing.normalize ? "true" : "false")
           level_offset_db: \(levelOffsetDB)
@@ -144,5 +144,10 @@ enum PipelineConfigWriter {
             return nil
         }
         return trimmed
+    }
+
+    static func yamlString(_ value: String) -> String {
+        let escaped = value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"").replacingOccurrences(of: "\n", with: "\\n")
+        return "\"\(escaped)\""
     }
 }

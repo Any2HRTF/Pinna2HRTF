@@ -69,22 +69,27 @@ struct ContentView: View {
         }
     }
 
-    var workspace: some View {
+    @ViewBuilder var workspace: some View {
         HSplitView {
-            NavigationSplitView {
-                ProjectSidebarView(store: store)
-                    .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
-            } detail: {
-                MeshViewerView(store: store, logExpanded: $logExpanded)
-                    .frame(minWidth: 480, maxWidth: .infinity)
-            }
-            .navigationSplitViewStyle(.balanced)
+            navigationWorkspace
+                .frame(minWidth: 640, maxWidth: .infinity)
+                .layoutPriority(1)
             if inspectorPresented {
                 ProjectInspectorView(store: store)
-                    .frame(minWidth: 360, idealWidth: 400, maxWidth: 480)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .frame(minWidth: 320, idealWidth: 400, maxWidth: 720)
             }
         }
+    }
+
+    var navigationWorkspace: some View {
+        NavigationSplitView {
+            ProjectSidebarView(store: store)
+                .navigationSplitViewColumnWidth(240)
+        } detail: {
+            MeshViewerView(store: store, logExpanded: $logExpanded)
+                .frame(minWidth: 360, maxWidth: .infinity)
+        }
+        .navigationSplitViewStyle(.balanced)
     }
 
     var commandContext: PipelineCommandContext {
@@ -104,7 +109,7 @@ struct ContentView: View {
             runNextStage: { store.runNextStage() },
             runStage: { store.run(stage: $0) },
             stopProject: { store.stopRunningProcess() },
-            resetProject: { store.resetSelectedProjectOutputs() },
+            resetProject: { store.confirmResetSelectedProjectOutputs() },
             refreshArtifacts: { store.refreshArtifacts() }
         )
     }

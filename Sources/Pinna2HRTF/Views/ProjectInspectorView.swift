@@ -122,7 +122,7 @@ struct ProjectInspectorView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             PathField("Save location", helpID: "project.save_location", text: projectStringBinding(\.saveLocation), mode: .directory)
-            SettingToggle(title: "Use BezierPPM", helpID: "project.use_bezierppm", isOn: bezierPPMBinding)
+            SettingToggle(title: "Use Mesh2PPM", helpID: "project.use_bezierppm", isOn: bezierPPMBinding)
                 .padding(.top, 6)
                 .disabled(store.selectedProjectIsRunning)
         }
@@ -137,7 +137,7 @@ struct ProjectInspectorView: View {
                 self.pendingBezierPPMValue = nil
             }
         } message: {
-            Text("Changing Use BezierPPM changes the mesh used for preprocessing and resets the completed pipeline outputs. Your input meshes and project settings will be kept.")
+            Text("Changing Use Mesh2PPM changes the mesh used for preprocessing and resets the completed pipeline outputs. Your input meshes and project settings will be kept.")
         }
     }
 

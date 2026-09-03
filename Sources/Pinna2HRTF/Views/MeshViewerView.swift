@@ -177,7 +177,7 @@ struct MicrophonePlacementSurface: ViewModifier {
         if reduceTransparency {
             content.background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 16))
         } else if #available(macOS 26.0, *) {
-            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16))
+            content.glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 16))
         } else {
             content.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
         }

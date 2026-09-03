@@ -27,6 +27,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     private var viewerStateByProject: [UUID: ProjectViewerState] = [:]
     private var selectedCameraCenter = SCNVector3Zero
     private var selectedCameraScale: Double = 1
+    private var meshLoadID = UUID()
     private var microphonePlacementMeshURL: URL?
     private var automaticMicrophonePositionsByMesh: [String: ManualMicrophonePosition] = [:]
     @Published private var automaticMicrophoneProcesses: [String: Process] = [:]
@@ -327,72 +328,89 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             appendLog("Could not open \(url.lastPathComponent).")
             return
         }
-        let asset = MDLAsset(url: url)
-        let scene = SCNScene()
         let darkMode = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        for index in 0..<asset.count {
-            let object = asset.object(at: index)
-            let node = SCNNode(mdlObject: object)
-            node.categoryBitMask = 1
-            node.geometry?.firstMaterial?.diffuse.contents = darkMode ? NSColor(calibratedRed: 0.749, green: 0.702, blue: 0.651, alpha: 1) : NSColor(calibratedRed: 0.816, green: 0.773, blue: 0.722, alpha: 1)
-            node.geometry?.firstMaterial?.roughness.contents = 0.72
-            scene.rootNode.addChildNode(node)
-        }
-        let bounds = scene.rootNode.boundingBox
-        let center = SCNVector3((bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2, (bounds.min.z + bounds.max.z) / 2)
-        let maximumDimension = max(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z)
-        scene.background.contents = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
-        if let microphone = microphonePosition(for: url) {
-            let markerNode = microphoneMarkerNode()
-            markerNode.position = microphone
-            scene.rootNode.addChildNode(markerNode)
-        }
-        let distance = max(maximumDimension * 1.7, 1)
-        let targetNode = SCNNode()
-        targetNode.position = center
-        scene.rootNode.addChildNode(targetNode)
-        let camera = SCNCamera()
-        camera.zFar = 10_000
-        camera.fieldOfView = 38
-        let cameraNode = SCNNode()
-        cameraNode.camera = camera
-        let frontDirection: CGFloat = url.path.lowercased().contains("left") ? 1 : -1
-        let defaultPosition = SCNVector3(center.x, center.y + frontDirection * distance, center.z + maximumDimension * 0.12)
         let savedCamera = selectedProjectID.flatMap { viewerStateByProject[$0]?.cameraByArtifact[url.path] }
-        let cameraPosition: SCNVector3
-        if let savedCamera {
-            let scale = Double(maximumDimension)
-            cameraPosition = SCNVector3(CGFloat(Double(center.x) + savedCamera.x * scale), CGFloat(Double(center.y) + savedCamera.y * scale), CGFloat(Double(center.z) + savedCamera.z * scale))
-        } else {
-            cameraPosition = defaultPosition
+        let microphone = microphonePosition(for: url)
+        let loadID = UUID()
+        meshLoadID = loadID
+        appendLog("Loading \(url.lastPathComponent)…")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let asset = MDLAsset(url: url)
+            guard asset.count > 0 else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.appendLog("Could not load \(url.lastPathComponent): no mesh objects found.")
+                }
+                return
+            }
+            let scene = SCNScene()
+            for index in 0..<asset.count {
+                let object = asset.object(at: index)
+                let node = SCNNode(mdlObject: object)
+                node.categoryBitMask = 1
+                node.geometry?.firstMaterial?.diffuse.contents = darkMode ? NSColor(calibratedRed: 0.749, green: 0.702, blue: 0.651, alpha: 1) : NSColor(calibratedRed: 0.816, green: 0.773, blue: 0.722, alpha: 1)
+                node.geometry?.firstMaterial?.roughness.contents = 0.72
+                scene.rootNode.addChildNode(node)
+            }
+            let bounds = scene.rootNode.boundingBox
+            let center = SCNVector3((bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2, (bounds.min.z + bounds.max.z) / 2)
+            let maximumDimension = max(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z)
+            scene.background.contents = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
+            if let microphone {
+                let markerNode = self.microphoneMarkerNode()
+                markerNode.position = microphone
+                scene.rootNode.addChildNode(markerNode)
+            }
+            let distance = max(maximumDimension * 1.7, 1)
+            let targetNode = SCNNode()
+            targetNode.position = center
+            scene.rootNode.addChildNode(targetNode)
+            let camera = SCNCamera()
+            camera.zFar = 10_000
+            camera.fieldOfView = 38
+            let cameraNode = SCNNode()
+            cameraNode.camera = camera
+            let frontDirection: CGFloat = url.path.lowercased().contains("left") ? 1 : -1
+            let defaultPosition = SCNVector3(center.x, center.y + frontDirection * distance, center.z + maximumDimension * 0.12)
+            let cameraPosition: SCNVector3
+            if let savedCamera {
+                let scale = Double(maximumDimension)
+                cameraPosition = SCNVector3(CGFloat(Double(center.x) + savedCamera.x * scale), CGFloat(Double(center.y) + savedCamera.y * scale), CGFloat(Double(center.z) + savedCamera.z * scale))
+            } else {
+                cameraPosition = defaultPosition
+            }
+            cameraNode.position = cameraPosition
+            let cameraConstraint = SCNLookAtConstraint(target: targetNode)
+            cameraConstraint.isGimbalLockEnabled = true
+            cameraConstraint.worldUp = SCNVector3(0, 0, 1)
+            cameraNode.constraints = [cameraConstraint]
+            scene.rootNode.addChildNode(cameraNode)
+            let light = SCNLight()
+            light.type = .directional
+            light.intensity = 900
+            let lightNode = SCNNode()
+            lightNode.light = light
+            lightNode.position = SCNVector3(-Float(maximumDimension) * 0.65, Float(maximumDimension) * 0.75, -Float(maximumDimension) * 0.9)
+            cameraNode.addChildNode(lightNode)
+            let ambientLight = SCNLight()
+            ambientLight.type = .ambient
+            ambientLight.intensity = 140
+            let ambientLightNode = SCNNode()
+            ambientLightNode.light = ambientLight
+            scene.rootNode.addChildNode(ambientLightNode)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.meshLoadID == loadID else { return }
+                self.selectedMesh = url
+                self.selectedImage = nil
+                self.selectedScene = scene
+                self.selectedCameraCenter = center
+                self.selectedCameraScale = max(Double(maximumDimension), 1)
+                let scale = self.selectedCameraScale
+                self.selectedCameraState = savedCamera ?? ViewerCameraState(x: (Double(cameraPosition.x) - Double(center.x)) / scale, y: (Double(cameraPosition.y) - Double(center.y)) / scale, z: (Double(cameraPosition.z) - Double(center.z)) / scale)
+                self.rememberSelectedArtifact(url)
+                self.appendLog("Loaded \(url.lastPathComponent).")
+            }
         }
-        cameraNode.position = cameraPosition
-        let cameraConstraint = SCNLookAtConstraint(target: targetNode)
-        cameraConstraint.isGimbalLockEnabled = true
-        cameraConstraint.worldUp = SCNVector3(0, 0, 1)
-        cameraNode.constraints = [cameraConstraint]
-        scene.rootNode.addChildNode(cameraNode)
-        let light = SCNLight()
-        light.type = .directional
-        light.intensity = 900
-        let lightNode = SCNNode()
-        lightNode.light = light
-        lightNode.position = SCNVector3(-Float(maximumDimension) * 0.65, Float(maximumDimension) * 0.75, -Float(maximumDimension) * 0.9)
-        cameraNode.addChildNode(lightNode)
-        let ambientLight = SCNLight()
-        ambientLight.type = .ambient
-        ambientLight.intensity = 140
-        let ambientLightNode = SCNNode()
-        ambientLightNode.light = ambientLight
-        scene.rootNode.addChildNode(ambientLightNode)
-        selectedMesh = url
-        selectedImage = nil
-        selectedScene = scene
-        selectedCameraCenter = center
-        selectedCameraScale = Double(maximumDimension)
-        let scale = selectedCameraScale
-        selectedCameraState = savedCamera ?? ViewerCameraState(x: (Double(cameraPosition.x) - Double(center.x)) / scale, y: (Double(cameraPosition.y) - Double(center.y)) / scale, z: (Double(cameraPosition.z) - Double(center.z)) / scale)
-        rememberSelectedArtifact(url)
     }
 
     func microphonePosition(for meshURL: URL) -> SCNVector3? {
@@ -690,8 +708,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func canRun(stage: Stage) -> Bool {
         guard let project = selectedProject else { return false }
-        if let active = runningStages[project.id], runningProcesses[project.id] != nil {
-            return active == stage
+        if runningStages[project.id] != nil, runningProcesses[project.id] != nil {
+            return false
         }
         guard environmentProcess == nil else { return false }
         return stageCanRun(stage, project: project)
@@ -904,7 +922,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             return
         }
         process.executableURL = bundledUV ? URL(fileURLWithPath: environment.uvExecutable) : URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = bundledUV ? ["sync"] : ["uv", "sync"]
+        process.arguments = bundledUV ? ["sync", "--no-editable"] : ["uv", "sync", "--no-editable"]
         process.currentDirectoryURL = executionPackageURL
         process.environment = processEnvironment()
         let pipe = Pipe()
@@ -1020,8 +1038,28 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func stopRunningProcess() {
         guard let project = selectedProject else { return }
-        runningProcesses[project.id]?.terminate()
+        if let process = runningProcesses[project.id] {
+            let killer = Process()
+            killer.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+            killer.arguments = ["-TERM", "-P", String(process.processIdentifier)]
+            try? killer.run()
+            killer.waitUntilExit()
+            process.terminate()
+        }
         appendLog("Stopping task.")
+    }
+
+    func confirmResetSelectedProjectOutputs() {
+        guard let project = selectedProject, runningProcesses[project.id] == nil else { return }
+        let alert = NSAlert()
+        alert.messageText = "Reset pipeline outputs?"
+        alert.informativeText = "Generated files in \(project.saveLocation.isEmpty ? "the project output folder" : project.saveLocation) will be removed. Input meshes and settings will be kept."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Reset Outputs")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn {
+            resetSelectedProjectOutputs()
+        }
     }
 
     func resetSelectedProjectOutputs() {

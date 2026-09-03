@@ -37,7 +37,7 @@ struct RunPanelView: View {
             .tint(.red)
             .disabled(!selectedProjectIsRunning)
             Button(role: .destructive) {
-                store.resetSelectedProjectOutputs()
+                store.confirmResetSelectedProjectOutputs()
             } label: {
                 Label("Reset", systemImage: "trash")
                     .frame(maxWidth: .infinity)

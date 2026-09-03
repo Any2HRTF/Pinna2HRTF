@@ -721,7 +721,7 @@ public partial class MainWindow : Window
         AddPathSetting(settings, "Right ear (optional)", "project.right_ear", rightEarBox, BrowseRightEarClicked);
         AddPathSetting(settings, "Save location", "project.save_location", saveLocationBox, BrowseSaveLocationClicked);
         settings.Children.Add(new TextBlock { Text = "Choose at least one ear mesh.", Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)), Margin = new Thickness(0, 3, 0, 4) });
-        AddSetting(settings, "Use BezierPPM", "project.use_bezierppm", usePredictionsBox, "Use BezierPPM");
+        AddSetting(settings, "Use Mesh2PPM", "project.use_bezierppm", usePredictionsBox, "Use Mesh2PPM");
         AddExpander(settings, "Mesh2PPM", [AddSettingPanel("Model", "inference.model", modelPicker)]);
         AddExpander(settings, "Mesh2HRTF", [PathSettingPanel("Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked), AddSettingPanel("Use custom head radius", "mesh2hrtf.use_head_radius", useHeadRadiusBox, "Use custom head radius"), AddSettingPanel("Head radius", "mesh2hrtf.head_radius", headRadiusBox), AddSettingPanel("Min frequency", "mesh2hrtf.min_frequency", minFrequencyBox), AddSettingPanel("Max frequency", "mesh2hrtf.max_frequency", maxFrequencyBox), AddSettingPanel("Frequency steps (minimum 2)", "mesh2hrtf.frequency_steps", frequencyStepsBox), AddSettingPanel("Microphone faces", "mesh2hrtf.microphone_faces", microphoneFacesBox)]);
         AddExpander(settings, "Mesh Grading", [AddSettingPanel("Min edge length", "mesh_grading.min_edge_length", meshMinEdgeBox), AddSettingPanel("Max edge length", "mesh_grading.max_edge_length", meshMaxEdgeBox), AddSettingPanel("Max error", "mesh_grading.max_error", meshMaxErrorBox), AddSettingPanel("Gamma", "mesh_grading.gamma", meshGammaBox), AddSettingPanel("Gamma opposite", "mesh_grading.gamma_opposite", meshGammaOppositeBox)]);
@@ -1010,7 +1010,7 @@ public partial class MainWindow : Window
         loading = true;
         usePredictionsBox.IsChecked = current;
         loading = false;
-        var dialog = new ContentDialog { Title = "Reset pipeline outputs?", Content = "Changing Use BezierPPM changes the mesh used for preprocessing and resets the completed pipeline outputs. Your input meshes and project settings will be kept.", PrimaryButtonText = "OK", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary, XamlRoot = Root.XamlRoot };
+        var dialog = new ContentDialog { Title = "Reset pipeline outputs?", Content = "Changing Use Mesh2PPM changes the mesh used for preprocessing and resets the completed pipeline outputs. Your input meshes and project settings will be kept.", PrimaryButtonText = "OK", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary, XamlRoot = Root.XamlRoot };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
             return;
         ResetSelectedProjectOutputs();
@@ -2223,7 +2223,7 @@ ui:
         if ((!string.IsNullOrWhiteSpace(project.LeftEar) && !File.Exists(project.LeftEar)) || (!string.IsNullOrWhiteSpace(project.RightEar) && !File.Exists(project.RightEar))) return "An input ear file is missing. Select it again.";
         if (stage == Stage.Inference)
         {
-            if (!InferenceIsAutomatic(project)) return "Enable Use BezierPPM and select both input ears.";
+            if (!InferenceIsAutomatic(project)) return "Enable Use Mesh2PPM and select both input ears.";
             return File.Exists(project.Settings.Inference.ModelConfig) && File.Exists(project.Settings.Inference.ModelCheckpoint) ? null : "The selected inference model is missing.";
         }
         if (stage == Stage.Preprocessing)

@@ -94,6 +94,7 @@ enum ArtifactScanner {
     }
 
     static func summary(for project: ProjectRecord) -> String {
+        if project.leftEar.isEmpty && project.rightEar.isEmpty { return "Not configured" }
         let states = stageStates(for: project, runningStage: nil, failedStages: [])
         if states[.postprocessing] == .done { return "Postprocessed" }
         if states[.numcalc] == .done { return "Solved" }
@@ -116,17 +117,20 @@ enum ArtifactScanner {
         switch stage {
         case .inference:
             if !settings.usePredictionsForPreprocessing { return true }
+            if project.leftEar.isEmpty && project.rightEar.isEmpty { return false }
             if project.leftEar.isEmpty || project.rightEar.isEmpty { return true }
             let leftDone = project.leftEar.isEmpty || containsMesh(output.appendingPathComponent(settings.predictionLeftFolder))
             let rightDone = project.rightEar.isEmpty || containsMesh(output.appendingPathComponent(settings.predictionRightFolder))
             return leftDone && rightDone
         case .preprocessing:
+            if project.leftEar.isEmpty && project.rightEar.isEmpty { return false }
             let leftDone = project.leftEar.isEmpty || (fileExists(output.appendingPathComponent("Projects/Left/parameters.json")) && fileExists(output.appendingPathComponent("Intermediates/Left/graded_head.ply")))
             let rightDone = project.rightEar.isEmpty || (fileExists(output.appendingPathComponent("Projects/Right/parameters.json")) && fileExists(output.appendingPathComponent("Intermediates/Right/graded_head.ply")))
             return leftDone && rightDone
         case .numcalc:
-            let leftDone = project.leftEar.isEmpty || containsNumCalcOutput(output.appendingPathComponent("Projects/Left/NumCalc/source_1/be.out")) || containsOutput2HRTF(output.appendingPathComponent("Projects/Left/Output2HRTF"))
-            let rightDone = project.rightEar.isEmpty || containsNumCalcOutput(output.appendingPathComponent("Projects/Right/NumCalc/source_1/be.out")) || containsOutput2HRTF(output.appendingPathComponent("Projects/Right/Output2HRTF"))
+            if project.leftEar.isEmpty && project.rightEar.isEmpty { return false }
+            let leftDone = project.leftEar.isEmpty || numcalcIsComplete(output.appendingPathComponent("Projects/Left")) || containsOutput2HRTF(output.appendingPathComponent("Projects/Left/Output2HRTF"))
+            let rightDone = project.rightEar.isEmpty || numcalcIsComplete(output.appendingPathComponent("Projects/Right")) || containsOutput2HRTF(output.appendingPathComponent("Projects/Right/Output2HRTF"))
             return leftDone && rightDone
         case .postprocessing:
             return containsSOFA(output.appendingPathComponent("HRTF"))
@@ -147,20 +151,35 @@ enum ArtifactScanner {
         return files.contains { $0.pathExtension.lowercased() == "sofa" }
     }
 
-    static func containsNumCalcOutput(_ url: URL) -> Bool {
-        guard let files = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else { return false }
-        return files.contains { $0.lastPathComponent.hasPrefix("be.") }
-    }
-
     static func containsOutput2HRTF(_ url: URL) -> Bool {
         guard let files = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else { return false }
         return files.contains { $0.pathExtension.lowercased() == "sofa" }
     }
 
     static func numcalcCompleted(_ project: URL) -> Int {
-        let files = (try? FileManager.default.contentsOfDirectory(at: project.appendingPathComponent("NumCalc/source_1/be.out"), includingPropertiesForKeys: nil)) ?? []
-        let completed = files.filter { $0.lastPathComponent.hasPrefix("be.") && Int($0.lastPathComponent.dropFirst(3)) != nil }.count
+        let source = project.appendingPathComponent("NumCalc/source_1")
+        let files = (try? FileManager.default.contentsOfDirectory(at: source.appendingPathComponent("be.out"), includingPropertiesForKeys: nil)) ?? []
+        let completed = files.filter { path in
+            guard path.lastPathComponent.hasPrefix("be."), let step = Int(path.lastPathComponent.dropFirst(3)) else { return false }
+            return frequencyStepComplete(source: source, step: step)
+        }.count
         return completed > 0 ? completed : containsOutput2HRTF(project.appendingPathComponent("Output2HRTF")) ? numcalcTotal(project) : 0
+    }
+
+    static func numcalcIsComplete(_ project: URL) -> Bool {
+        let total = numcalcTotal(project)
+        guard total > 0 else { return false }
+        let source = project.appendingPathComponent("NumCalc/source_1")
+        return (1...total).allSatisfy { frequencyStepComplete(source: source, step: $0) }
+    }
+
+    static func frequencyStepComplete(source: URL, step: Int) -> Bool {
+        let output = source.appendingPathComponent("be.out/be.\(step)")
+        let required = ["pBoundary", "pEvalGrid", "vBoundary", "vEvalGrid"]
+        guard required.allSatisfy({ fileExists(output.appendingPathComponent($0)) }) else { return false }
+        let log = source.appendingPathComponent("NC\(step)-\(step)_log.txt")
+        guard let text = try? String(contentsOf: log, encoding: .utf8) else { return false }
+        return text.contains("---------- NumCalc ended:")
     }
 
     static func numcalcTotal(_ project: URL) -> Int {

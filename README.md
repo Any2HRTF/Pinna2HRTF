@@ -4,31 +4,29 @@
 
 # Pinna2HRTF
 
-Pinna2HRTF calculates individualized head-related transfer functions (HRTFs) from left and right pinna meshes, or from a single ear mesh. Use the command line to run individual stages, or use the macOS and Windows desktop apps to manage projects and inspect meshes.
+Pinna2HRTF calculates individualized head-related transfer functions (HRTFs) from one or two pinna meshes. It provides a command-line interface and desktop apps for macOS and Windows.
 
-The pipeline has four stages:
+The pipeline consists of:
 
-1. **Inference (optional):** predict pinna geometry and PPM parameters from STL scans using the bundled models.
-2. **Preprocessing:** close the ear canals, construct and stitch the head geometry, grade the mesh, and export Mesh2HRTF simulation projects.
-3. **NumCalc:** calculate the acoustic response with the boundary element method.
-4. **SOFA export:** convert simulation results to HRTF/HRIR SOFA files, merge left and right ears when available, and create inspection plots.
+1. optional geometry inference from STL scans;
+2. mesh preprocessing and Mesh2HRTF project generation;
+3. acoustic simulation with NumCalc;
+4. HRTF and HRIR export to SOFA.
 
-## Installation
+## Desktop apps
 
-### Desktop apps
+Packaged releases include Python, the inference models, NumCalc, mesh grading, and Mesh2HRTF. They run offline and do not require Blender or `uv`.
 
-The release workflow packages an Apple Silicon macOS app and an x64 Windows app. Packaged apps include Python 3.11, the Python dependencies, all four inference models, NumCalc, mesh grading, and Mesh2HRTF sources. A complete package runs offline without a separate Python, Blender, or `uv` installation.
+- **macOS:** extract `Pinna2HRTF-macos.zip`, move the app to Applications, and open it. The current build requires Apple Silicon and macOS 13 or later. It is ad-hoc signed and not notarized.
+- **Windows:** extract the complete `Pinna2HRTF-windows.zip` archive and run `Pinna2HRTF.Windows.exe` from the extracted folder. The current build requires x64 Windows 10 version 2004 or later.
 
-- **macOS:** extract `Pinna2HRTF-macos.zip`, move `Pinna2HRTF.app` to Applications, and open it. The package targets macOS 13 or later and is ad-hoc signed, without notarization.
-- **Windows:** extract the complete `Pinna2HRTF-windows.zip` archive and open `Pinna2HRTF.Windows.exe` inside the extracted folder. Keep that folder together. The project targets Windows 10 version 2004 (build 19041) or later, x64.
+Downloads are available from the [SONICOM tool page](https://ecosystem.sonicom.eu/tools/30).
 
-See the [SONICOM tool page](https://ecosystem.sonicom.eu/tools/30) for the project download entry.
+Project files stay in the folder you choose. App settings and caches are stored in `~/Library/Application Support/Pinna2HRTF` on macOS and `%APPDATA%\Pinna2HRTF` on Windows.
 
-Projects live in the folders you choose. The apps keep their project registry, viewer state, and caches separately in `~/Library/Application Support/Pinna2HRTF` on macOS and `%APPDATA%\Pinna2HRTF` on Windows.
+## Install from source
 
-### Command line from source
-
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and Git, then clone the repository:
+Python 3.11, [uv](https://docs.astral.sh/uv/getting-started/installation/), and Git are required.
 
 ```sh
 git clone https://github.com/Any2HRTF/Pinna2HRTF.git
@@ -36,78 +34,35 @@ cd Pinna2HRTF
 uv sync --locked --python 3.11
 ```
 
-Run all commands below from this repository root: the folder containing `pyproject.toml`, `README.md`, and `Scripts/`. Python 3.11 is required; dependencies are recorded in `uv.lock`.
-
-**macOS / Linux native tools:** install a C/C++ compiler and Make first. On macOS, these are supplied by the Xcode Command Line Tools. Then run:
+Prepare NumCalc, mesh grading, and Mesh2HRTF on macOS or Linux:
 
 ```sh
 bash Scripts/prepare_external_tools.sh
 ```
 
-The script prepares:
-
-```text
-External/bin/NumCalc
-External/bin/hrtf_mesh_grading
-External/src/Mesh2HRTF/mesh2hrtf/
-```
-
-It uses CMake from `PATH`, or runs CMake through `uv` if it is missing. Initial setup needs internet access to fetch dependencies and native sources. Linux also needs the system libraries required by Blender's `bpy` module and the mesh-grading build; the release workflow builds desktop packages only for macOS and Windows.
-
-**Windows native tools:** the PowerShell preparation script installs MSYS2 if needed, builds NumCalc and mesh grading from the pinned sources, and copies their runtime DLLs into `External\bin`. Run it before building or launching the Windows app from source:
+On Windows, run:
 
 ```powershell
 .\Scripts\prepare_windows_external_tools.ps1
 ```
 
-NumCalc must be built from Mesh2HRTF commit `e45d0436a6fbeca3db13828cbae23ca109225be3`, support `-adapt_fmmlength`, and have a matching `External/bin/NumCalc.source-commit` file. The Unix preparation script pins the same revision. Windows packaging additionally requires `libpmp.dll`, `libpmp_vis.dll`, `libgcc_s_seh-1.dll`, `libstdc++-6.dll`, and `libwinpthread-1.dll` alongside the executables.
+These scripts download and build the pinned native dependencies. macOS also needs the Xcode Command Line Tools. Linux needs a C/C++ toolchain, Make, and the system libraries required by Blender's `bpy` module.
 
-Check the command line:
+Check the installation with:
 
 ```sh
 uv run Pinna2HRTF --help
-uv run Pinna2HRTF preprocessing --help
 ```
 
-### Setup and build scripts
-
-All installation and packaging scripts are in the top-level [`Scripts/`](Scripts/) folder:
-
-| Script | Purpose |
-| --- | --- |
-| `prepare_external_tools.sh` | Prepare NumCalc, mesh grading, and Mesh2HRTF sources on macOS/Linux. |
-| `build_release_app.sh` | Build and ad-hoc sign the macOS app with its embedded runtime. Run native-tool preparation first. |
-| `build_and_run.sh` | Prepare native tools, build the macOS app, and launch it. |
-| `prepare_windows_external_tools.ps1` | Prepare MSYS2, build pinned Windows executables, and validate their runtime DLLs. |
-| `build_windows_port.ps1` | Publish the Windows app and bundle Python and native dependencies. |
-
-Build the macOS app on an Apple Silicon Mac with the Swift/macOS SDK toolchain and `uv` installed:
-
-```sh
-bash Scripts/prepare_external_tools.sh
-bash Scripts/build_release_app.sh
-```
-
-The result is `build/release/Pinna2HRTF.app`. To build and launch in one step, use `bash Scripts/build_and_run.sh`. It also accepts `--debug`, `--logs`, `--telemetry`, and `--verify`; each mode rebuilds the app first and closes an existing Pinna2HRTF process.
-
-Build the Windows app on Windows with the .NET 8 SDK, `uv`, Git, and the native files listed above:
-
-```powershell
-.\Scripts\prepare_windows_external_tools.ps1
-.\Scripts\build_windows_port.ps1
-```
-
-The result is `dist\windows\Pinna2HRTF`. The [release workflow](.github/workflows/build-macos-app.yml) packages both apps into ZIP archives and checks their embedded runtimes after relocation.
-
-The Windows microphone regression check runs an isolated app with temporary projects under `build\windows-regression`, leaving the normal project registry untouched. After preparing the Python environment and native tools, run `Tests\Windows\Run-MicrophoneValidation.ps1`. It checks input/prediction selection, automatic placement and Done, cancellation, simulation markers, and preprocessing availability.
+Run commands from the repository root.
 
 ## Command-line workflow
 
-The following examples use a POSIX shell on macOS/Linux. On Windows, use PowerShell syntax and the corresponding `.exe` paths. Every stage provides `--help`.
+The examples below use a POSIX shell. Paths and frequency settings are examples; adjust them for your data and experiment.
 
-### 1. Select input meshes
+### 1. Choose the input meshes
 
-Use STL meshes in millimeters for the direct workflow below. Choose a separate output folder for each subject or condition:
+Input STL meshes must use millimetres. Keep each run in its own output folder.
 
 ```sh
 OUT="runs/example"
@@ -116,9 +71,9 @@ RIGHT_MESH="/path/to/right.stl"
 mkdir -p "$OUT"
 ```
 
-### 2. Predict pinna geometry (optional)
+### 2. Run inference if needed
 
-For a bilateral run, copy the meshes into separate side folders, using the same subject filename on both sides:
+Inference is optional. For a bilateral run, place both scans under the same subject filename:
 
 ```sh
 mkdir -p "$OUT/Input/Left" "$OUT/Input/Right"
@@ -134,11 +89,9 @@ LEFT_MESH="$OUT/Intermediates/Left/Prediction_subject.stl"
 RIGHT_MESH="$OUT/Intermediates/Right/Prediction_subject.stl"
 ```
 
-`Local 3 Views` is the default. Matching configuration/checkpoint pairs for 1, 9, and 25 views are also included. Inference writes predicted meshes, aligned input meshes (`ICP_*.stl`), parameter CSVs, and `Intermediates/Results Inference.csv`. The right ear is mirrored internally.
+`Local 3 Views` is the default model. Matching 1-, 9-, and 25-view models are also included. The right ear is mirrored internally. Skip this step to use the original meshes.
 
-Skip this section to preprocess your original meshes. The direct inference command expects both input folders to exist; one may be empty for a single-ear run. The app/YAML runner skips inference when only one ear is configured.
-
-### 3. Create simulation projects
+### 3. Create the simulation projects
 
 ```sh
 uv run Pinna2HRTF preprocessing \
@@ -153,22 +106,9 @@ uv run Pinna2HRTF preprocessing \
   --frequency-step-count 129
 ```
 
-The frequency settings above match the YAML defaults and request a uniformly spaced grid up to 24 kHz. Mesh2HRTF omits the zero-frequency simulation step. Select frequency settings and an evaluation grid appropriate for your experiment; the grid name is passed to Mesh2HRTF.
-
-This creates:
-
-```text
-runs/example/project-Left/
-runs/example/project-Right/
-runs/example/project-Intermediates/Left/
-runs/example/project-Intermediates/Right/
-```
-
-For a single ear, omit the unused `--left-path` or `--right-path`. Only the selected side becomes a simulation project. Inspect the generated geometry and source placement before starting NumCalc. Rerunning preprocessing regenerates the simulation projects; resume an existing calculation at the NumCalc stage.
+Omit the unused ear argument for a single-ear run. Inspect the generated geometry and source placement before starting NumCalc. Rerunning preprocessing replaces the simulation projects.
 
 ### 4. Run NumCalc
-
-Pass the output folder containing the generated projects directly:
 
 ```sh
 uv run Pinna2HRTF numcalc \
@@ -178,9 +118,9 @@ uv run Pinna2HRTF numcalc \
   --max-cpu-load 90
 ```
 
-`--project-path` accepts a single Mesh2HRTF project or a folder containing projects. The runner schedules frequency steps using RAM estimates; `--max-ram-load-gb` can set a memory budget. Adaptive FMM expansion lengths are enabled by default and can be disabled with `--no-adaptive-fmm-length`.
+`--project-path` may point to one Mesh2HRTF project or a folder containing several projects. Use `--max-ram-load-gb` to set a memory limit. Adaptive FMM expansion lengths are enabled by default.
 
-The runner skips steps whose `be.out/be.<step>` directory already exists. After an interrupted or failed calculation, inspect the corresponding NumCalc logs and outputs before resuming: directory existence alone does not verify a completed result.
+Interrupted runs can be resumed. A frequency step is skipped only when its four result files are present and the NumCalc log contains the completion marker.
 
 ### 5. Export SOFA files
 
@@ -191,68 +131,58 @@ uv run Pinna2HRTF sofa \
   --output-dir "$OUT/HRTF"
 ```
 
-For a single ear, omit the unused project argument. For bilateral results with the `Default` grid, outputs include:
+Omit the unused project argument for a single-ear run. Bilateral runs produce merged HRTF and HRIR SOFA files when the projects are compatible. Add `--overwrite` only when the existing output directory may be deleted and recreated.
 
-```text
-runs/example/HRTF/HRTF_Default_merged.sofa
-runs/example/HRTF/HRIR_Default_merged.sofa
-runs/example/HRTF/HRIR_Default_merged_3D_horizontal_plane.jpeg
-runs/example/HRTF/HRIR_Default_merged_3D_median_plane.jpeg
-```
-
-Single-ear exports retain the original SOFA filenames without `_merged`. HRIR export requires compatible frequency spacing and the project's HRIR setting to be enabled. Add `--overwrite` only when you want to delete and recreate the entire output directory.
+Run any command with `--help` for all available options.
 
 ## YAML workflow
 
-Keep project settings in one file when running repeated stages or using settings not exposed by the direct commands:
+For repeatable runs, create a configuration file:
 
 ```sh
 uv run Pinna2HRTF run-config --write-template pinna2hrtf.yaml
 ```
 
-Edit the generated template before running it:
+Set the input meshes, output directory, external dependency directory, evaluation grid, and stage settings in the generated file. Use `null` for an unused ear. Relative paths are resolved from the YAML file.
 
-- Set `paths.left_ear`, `paths.right_ear`, and `paths.output_dir` to your own paths. Set an unused ear to `null`.
-- Check `paths.external_deps_dir` and `paths.evaluation_grid`. Relative paths resolve from the YAML file's folder.
-- Set `inference.use_predictions_for_preprocessing: false` to force use of the original meshes; otherwise existing matching predictions may be selected even when inference is disabled.
-- Review the stage settings, particularly frequencies, geometry, NumCalc resources, and postprocessing level offset.
-
-Run stages individually:
+Run one stage:
 
 ```sh
-uv run Pinna2HRTF inference --config pinna2hrtf.yaml
 uv run Pinna2HRTF preprocessing --config pinna2hrtf.yaml
 uv run Pinna2HRTF numcalc --config pinna2hrtf.yaml
 uv run Pinna2HRTF sofa --config pinna2hrtf.yaml
 ```
 
-An explicit stage runs regardless of its `enabled` flag. To run only enabled stages in pipeline order, use:
+Or run all enabled stages in order:
 
 ```sh
 uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage all
 ```
 
-Only preprocessing is enabled in a fresh template. For a preview, append `--dry-run`; this reports the selected actions, but does not fully validate inputs or dependencies. Set `numcalc.mode: slurm` and configure the cluster settings to submit frequency arrays with `sbatch` instead of running locally.
+Only preprocessing is enabled in a new template. Add `--dry-run` to preview the selected stages. For cluster execution, set `numcalc.mode: slurm` and configure the Slurm options in the YAML file.
 
-The app/YAML workflow uses this project layout:
+The YAML postprocessing defaults to a -30 dB level offset and replaces its output directory. Set `postprocessing.normalize: false` or `postprocessing.overwrite: false` to change this behaviour. Direct `sofa` commands do not apply the level offset.
 
-```text
-project/
-├── Input/Left/
-├── Input/Right/
-├── Intermediates/Left/
-├── Intermediates/Right/
-├── Projects/Left/
-├── Projects/Right/
-└── HRTF/
+## Build the desktop apps
+
+Build the macOS app on Apple Silicon with the Swift toolchain and `uv` installed:
+
+```sh
+bash Scripts/prepare_external_tools.sh
+bash Scripts/build_release_app.sh
 ```
 
-The YAML runner can also read input meshes from external folders. Only configured sides become simulation projects.
+The app is written to `build/release/Pinna2HRTF.app`. Use `Scripts/build_and_run.sh` to build and launch it.
 
-**Postprocessing levels:** `Pinna2HRTF sofa` with explicit project paths applies no additional level offset. The YAML route (including `sofa --config`) defaults to `postprocessing.normalize: true` and `level_offset_db: -30`, applying a fixed −30 dB gain. Set `normalize: false` to disable it. YAML postprocessing also defaults to deleting and recreating its output directory (`overwrite: true`).
+Build the Windows app on Windows with the .NET 8 SDK, `uv`, and Git:
 
-`Pinna2HRTF postprocessing --data_dir ...` is a separate batch interface for the legacy `Target Left/<subject>`, `Target Right/<subject>`, `Prediction Left/<subject>`, and `Prediction Right/<subject>` layout; use `sofa` for the projects shown above.
+```powershell
+.\Scripts\prepare_windows_external_tools.ps1
+.\Scripts\build_windows_port.ps1
+```
+
+The packaged folder is written to `dist\windows\Pinna2HRTF`.
 
 ## License
 
-See [LICENSE](LICENSE) for the European Union Public Licence v1.2. Bundled dependencies retain their respective licenses.
+Pinna2HRTF is licensed under the [European Union Public Licence 1.2](LICENSE). Bundled dependencies retain their own licences.
