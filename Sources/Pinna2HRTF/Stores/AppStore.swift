@@ -334,7 +334,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             let object = asset.object(at: index)
             let node = SCNNode(mdlObject: object)
             node.categoryBitMask = 1
-            node.geometry?.firstMaterial?.diffuse.contents = darkMode ? NSColor(calibratedRed: 0.659, green: 0.631, blue: 0.592, alpha: 1) : NSColor(calibratedRed: 0.902, green: 0.878, blue: 0.835, alpha: 1)
+            node.geometry?.firstMaterial?.diffuse.contents = darkMode ? NSColor(calibratedRed: 0.749, green: 0.702, blue: 0.651, alpha: 1) : NSColor(calibratedRed: 0.816, green: 0.773, blue: 0.722, alpha: 1)
             node.geometry?.firstMaterial?.roughness.contents = 0.72
             scene.rootNode.addChildNode(node)
         }
@@ -607,7 +607,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         selectedScene.background.contents = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
         selectedScene.rootNode.enumerateChildNodes { node, _ in
             guard node.categoryBitMask == 1 else { return }
-            node.geometry?.firstMaterial?.diffuse.contents = darkMode ? NSColor(calibratedRed: 0.659, green: 0.631, blue: 0.592, alpha: 1) : NSColor(calibratedRed: 0.902, green: 0.878, blue: 0.835, alpha: 1)
+            node.geometry?.firstMaterial?.diffuse.contents = darkMode ? NSColor(calibratedRed: 0.749, green: 0.702, blue: 0.651, alpha: 1) : NSColor(calibratedRed: 0.816, green: 0.773, blue: 0.722, alpha: 1)
         }
     }
 

@@ -45,7 +45,7 @@
     "title": "Evaluation grid",
     "description": "The directions at which Mesh2HRTF evaluates the simulated sound field. Default uses the bundled default evaluation grid.",
     "publications": [
-      { "title": "Mesh2HRTF publication", "url": "https://doi.org/10.17743/jaes.2022.0078" }
+      { "title": "Brinkmann et al. (2023)", "url": "https://doi.org/10.17743/jaes.2022.0078" }
     ]
   },
   {
@@ -65,7 +65,7 @@
     "title": "Min frequency",
     "description": "The lower bound of the simulated frequency range in hertz.",
     "publications": [
-      { "title": "Mesh2HRTF publication", "url": "https://doi.org/10.17743/jaes.2022.0078" }
+      { "title": "Brinkmann et al. (2023)", "url": "https://doi.org/10.17743/jaes.2022.0078" }
     ]
   },
   {
@@ -73,7 +73,7 @@
     "title": "Max frequency",
     "description": "The upper bound of the simulated frequency range in hertz.",
     "publications": [
-      { "title": "Mesh2HRTF publication", "url": "https://doi.org/10.17743/jaes.2022.0078" }
+      { "title": "Brinkmann et al. (2023)", "url": "https://doi.org/10.17743/jaes.2022.0078" }
     ]
   },
   {
@@ -81,7 +81,7 @@
     "title": "Frequency steps",
     "description": "The number of frequency samples spanning the selected range. It must be at least 2; the default is 129 samples.",
     "publications": [
-      { "title": "Mesh2HRTF publication", "url": "https://doi.org/10.17743/jaes.2022.0078" }
+      { "title": "Brinkmann et al. (2023)", "url": "https://doi.org/10.17743/jaes.2022.0078" }
     ]
   },
   {
