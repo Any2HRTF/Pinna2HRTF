@@ -64,20 +64,28 @@ struct ProjectInspectorView: View {
                     HStack {
                         SettingLabel(title: "Frequency steps", helpID: "mesh2hrtf.frequency_steps")
                         Spacer()
-                        Stepper(value: frequencyStepCountBinding, in: 2...10000) {
-                            Text("\(frequencyStepCountBinding.wrappedValue)")
-                                .font(.caption.monospacedDigit())
-                                .frame(width: 44, alignment: .trailing)
-                        }
+                        TextField("Frequency steps", value: frequencyStepCountBinding, format: .number)
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 52)
+                        Stepper("", value: frequencyStepCountBinding, in: 2...10000)
+                            .labelsHidden()
+                            .fixedSize()
+                            .accessibilityLabel("Adjust Frequency steps")
                     }
                     HStack {
                         SettingLabel(title: "Microphone faces", helpID: "mesh2hrtf.microphone_faces")
                         Spacer()
-                        Stepper(value: sourceAssignmentFaceCountBinding, in: 1...100) {
-                            Text("\(sourceAssignmentFaceCountBinding.wrappedValue)")
-                                .font(.caption.monospacedDigit())
-                                .frame(width: 44, alignment: .trailing)
-                        }
+                        TextField("Microphone faces", value: sourceAssignmentFaceCountBinding, format: .number)
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 52)
+                        Stepper("", value: sourceAssignmentFaceCountBinding, in: 1...100)
+                            .labelsHidden()
+                            .fixedSize()
+                            .accessibilityLabel("Adjust Microphone faces")
                     }
                 }
                 SettingsDisclosure("Mesh Grading", systemImage: "ruler") {

@@ -230,8 +230,42 @@ struct LabeledMillimeterSlider: View {
         HStack(spacing: 8) {
             SettingLabel(title: title, helpID: helpID)
             if sliderEnabled {
-                Slider(value: $value, in: range, step: 1)
-                    .frame(maxWidth: .infinity)
+                GeometryReader { geometry in
+                    let width = max(geometry.size.width, 1)
+                    let fraction = min(max((value - range.lowerBound) / (range.upperBound - range.lowerBound), 0), 1)
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.secondary.opacity(0.28))
+                            .frame(height: 4)
+                        Capsule()
+                            .fill(Color.accentColor)
+                            .frame(width: max(6, width * fraction), height: 4)
+                        Circle()
+                            .fill(Color(nsColor: .controlBackgroundColor))
+                            .overlay(Circle().stroke(Color.secondary.opacity(0.45), lineWidth: 0.5))
+                            .frame(width: 16, height: 16)
+                            .offset(x: min(max(width * fraction - 8, 0), width - 16))
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 0).onChanged { gesture in
+                        value = min(max(range.lowerBound + (range.upperBound - range.lowerBound) * gesture.location.x / width, range.lowerBound), range.upperBound)
+                    })
+                    .accessibilityElement()
+                    .accessibilityLabel(title)
+                    .accessibilityValue("\(Int(value.rounded())) mm")
+                    .accessibilityAdjustableAction { direction in
+                        switch direction {
+                        case .increment:
+                            value = min(value + 1, range.upperBound)
+                        case .decrement:
+                            value = max(value - 1, range.lowerBound)
+                        @unknown default:
+                            break
+                        }
+                    }
+                }
+                .frame(height: 20)
             }
             Text("\(Int(value.rounded())) mm")
                 .font(.caption.monospacedDigit())
