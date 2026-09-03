@@ -112,20 +112,20 @@ public partial class MainWindow : Window
     Border? previewPanelBorder;
     Border? logPanelBorder;
     Border? settingsPaneBorder;
-    Grid? projectsHeader;
     TextBlock? projectsHeaderText;
     FrameworkElement? projectsBody;
-    FrameworkElement? projectsActions;
-    Button? projectsCollapseButton;
+    Expander? projectsExpander;
+    ColumnDefinition? projectsSplitterColumn;
+    FrameworkElement? projectsSplitter;
     Expander? logExpander;
     RowDefinition? centerLogRow;
+    RowDefinition? logSplitterRow;
+    FrameworkElement? logSplitter;
     bool projectsCollapsed;
     bool logCollapsed;
     bool viewportReady;
     CancellationTokenSource? meshLoadCancellation;
     int meshLoadGeneration;
-    SplitView? projectsSplitView;
-    FrameworkElement? projectsCompactPane;
     enum MeshPointerMode { None, Rotate, Pan }
     MeshPointerMode meshPointerMode;
     TextBox logText = new();
@@ -206,8 +206,8 @@ public partial class MainWindow : Window
         LoadRegistry();
         LoadViewerStates();
         LoadUiState();
-        if (projectsColumn != null) projectsColumn.Width = new GridLength(Math.Clamp(projectsExpandedWidth, 240, 520));
-        if (centerLogRow != null) centerLogRow.Height = new GridLength(Math.Clamp(liveLogExpandedHeight, 100, 600));
+        SetProjectsCollapsed(projectsCollapsed, false);
+        SetLogCollapsed(logCollapsed, false);
         if (settingsColumn != null) settingsColumn.Width = new GridLength(Math.Clamp(settingsExpandedWidth, 320, 560));
         // Windows builds always use the bundled native tools. Older registries
         // may contain absolute paths from a previous build directory; ignoring
@@ -247,12 +247,11 @@ public partial class MainWindow : Window
         contentGrid = new Grid { Background = appBackgroundBrush };
         projectsColumn = new ColumnDefinition
         {
-            Width = new GridLength(projectsCollapsed ? 32 : projectsExpandedWidth),
-            MinWidth = projectsCollapsed ? 32 : 240,
-            MaxWidth = projectsCollapsed ? 32 : 520
+            Width = new GridLength(projectsExpandedWidth), MinWidth = 240, MaxWidth = 520
         };
         contentGrid.ColumnDefinitions.Add(projectsColumn);
-        contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12), MinWidth = 12, MaxWidth = 12 });
+        projectsSplitterColumn = new ColumnDefinition { Width = new GridLength(12) };
+        contentGrid.ColumnDefinitions.Add(projectsSplitterColumn);
         contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 420 });
         contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12), MinWidth = 12, MaxWidth = 12 });
         settingsColumn = new ColumnDefinition { Width = new GridLength(settingsExpandedWidth), MinWidth = 320, MaxWidth = 560 };
@@ -261,28 +260,15 @@ public partial class MainWindow : Window
         Grid.SetRow(contentGrid, 1);
         Root.Children.Add(contentGrid);
         var projectsPane = BuildProjectsPane();
-        projectsSplitView = new SplitView
-        {
-            DisplayMode = SplitViewDisplayMode.Inline,
-            IsPaneOpen = !projectsCollapsed,
-            OpenPaneLength = Math.Clamp(projectsExpandedWidth, 240, 520),
-            CompactPaneLength = 32,
-            Pane = projectsPane,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Stretch
-        };
-        projectsCompactPane = BuildProjectsCompactPane();
-        projectsSplitView.Content = projectsCompactPane;
-        Grid.SetColumn(projectsSplitView, 0);
-        contentGrid.Children.Add(projectsSplitView);
-        var projectSplitter = BuildSplitter(true, ProjectSplitterDragged);
-        Grid.SetColumn(projectSplitter, 1);
-        contentGrid.Children.Add(projectSplitter);
+        Grid.SetColumn(projectsPane, 0);
+        contentGrid.Children.Add(projectsPane);
+        projectsSplitter = BuildSplitter(true, ProjectSplitterDragged);
+        Grid.SetColumn(projectsSplitter, 1);
+        contentGrid.Children.Add(projectsSplitter);
         var center = BuildCenterPane();
         Grid.SetColumn(center, 2);
         contentGrid.Children.Add(center);
         var settingsSplitter = BuildSplitter(true, SettingsSplitterDragged);
-        Grid.SetColumn(settingsSplitter, 3);
         Grid.SetColumn(settingsSplitter, 3);
         contentGrid.Children.Add(settingsSplitter);
         var settings = BuildSettingsPane();
@@ -375,45 +361,31 @@ public partial class MainWindow : Window
         SaveUiState();
     }
 
-    FrameworkElement BuildProjectsCompactPane()
-    {
-        var toggle = new Button
-        {
-            Content = new SymbolIcon(Symbol.OpenPane), Width = 32, Height = 40, Padding = new Thickness(0),
-            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top,
-            Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0)
-        };
-        ToolTipService.SetToolTip(toggle, "Expand Projects");
-        toggle.Click += (_, _) => SetProjectsCollapsed(false, true);
-        return new Border { Background = surfaceBrush, Child = toggle, Visibility = projectsCollapsed ? Visibility.Visible : Visibility.Collapsed };
-    }
-
     void SetProjectsCollapsed(bool collapsed, bool persist)
     {
         projectsCollapsed = collapsed;
-        if (projectsSplitView != null)
+        if (projectsExpander != null)
         {
-            projectsSplitView.IsPaneOpen = !collapsed;
-            projectsSplitView.OpenPaneLength = Math.Clamp(projectsExpandedWidth, 240, 520);
+            if (projectsExpander.IsExpanded == collapsed) projectsExpander.IsExpanded = !collapsed;
+            projectsExpander.Header = collapsed ? null : projectsHeaderText;
+            projectsExpander.VerticalAlignment = collapsed ? VerticalAlignment.Top : VerticalAlignment.Stretch;
+            // WinUI's static header padding reserves room even with no title.
+            // Apply the template first; Loaded can fire before its header exists.
+            projectsExpander.ApplyTemplate();
+            if (FindDescendant<ToggleButton>(projectsExpander) is { } header)
+                header.Padding = new Thickness(0);
+            ToolTipService.SetToolTip(projectsExpander, collapsed ? "Expand Projects" : "Collapse Projects");
         }
+        // Hide the body immediately: the vertical Expander animation must not
+        // keep the project's list width in the measurement of the compact rail.
+        if (projectsBody != null) projectsBody.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         if (projectsColumn != null)
         {
-            projectsColumn.MinWidth = collapsed ? 32 : 240;
-            projectsColumn.MaxWidth = collapsed ? 32 : 520;
-            projectsColumn.Width = new GridLength(collapsed ? 32 : Math.Clamp(projectsExpandedWidth, 240, 520));
+            projectsColumn.MinWidth = collapsed ? 0 : 240;
+            projectsColumn.Width = collapsed ? GridLength.Auto : new GridLength(Math.Clamp(projectsExpandedWidth, 240, 520));
         }
-        if (projectsCompactPane != null)
-            projectsCompactPane.Visibility = collapsed ? Visibility.Visible : Visibility.Collapsed;
-        if (projectsBody != null) projectsBody.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
-        if (projectsActions != null) projectsActions.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
-        if (projectsHeaderText != null) projectsHeaderText.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
-        if (projectsCollapseButton != null)
-        {
-            projectsCollapseButton.Content = new SymbolIcon(collapsed ? Symbol.OpenPane : Symbol.ClosePane);
-            projectsCollapseButton.Visibility = Visibility.Visible;
-            ToolTipService.SetToolTip(projectsCollapseButton, collapsed ? "Expand Projects" : "Collapse Projects");
-            AutomationProperties.SetName(projectsCollapseButton, collapsed ? "Expand Projects" : "Collapse Projects");
-        }
+        if (projectsSplitterColumn != null) projectsSplitterColumn.Width = new GridLength(collapsed ? 0 : 12);
+        if (projectsSplitter != null) projectsSplitter.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         if (persist) SaveUiState();
     }
 
@@ -462,22 +434,15 @@ public partial class MainWindow : Window
         var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        projectsHeader = new Grid { Margin = new Thickness(8, 8, 8, 8), HorizontalAlignment = HorizontalAlignment.Stretch };
-        var header = projectsHeader;
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        projectsHeaderText = new TextBlock { Text = "Projects", FontSize = 20, VerticalAlignment = VerticalAlignment.Center, Foreground = primaryTextBrush };
-        header.Children.Add(projectsHeaderText);
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
-        projectsActions = buttons;
+        projectsHeaderText = new TextBlock { Text = "Projects", FontSize = 20, Margin = new Thickness(12, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = primaryTextBrush };
+        // Actions belong to the body, outside the native expander's toggle.
+        // A separate toolbar also fits at the sidebar's minimum width.
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(10, 8, 10, 8) };
         buttons.Children.Add(ProjectButton("\uE710", "New project", CreateProjectClicked));
         buttons.Children.Add(ProjectButton("\uE896", "Import project", ImportProjectClicked));
         buttons.Children.Add(ProjectButton("\uE8C8", "Duplicate selected project", DuplicateProjectClicked));
         buttons.Children.Add(ProjectButton("\uE74D", "Delete selected project", RemoveProjectClicked));
-        Grid.SetColumn(buttons, 1);
-        header.Children.Add(buttons);
-        grid.Children.Add(header);
+        grid.Children.Add(buttons);
         projectList.SelectionChanged += ProjectSelectionChanged;
         projectList.Background = new SolidColorBrush(Colors.Transparent);
         projectList.BorderThickness = new Thickness(0);
@@ -486,31 +451,44 @@ public partial class MainWindow : Window
         projectList.Margin = new Thickness(10, 0, 10, 10);
         Grid.SetRow(projectList, 1);
         grid.Children.Add(projectList);
-        projectsBody = projectList;
-        projectsCollapseButton = new Button { Content = new SymbolIcon(Symbol.ClosePane), Width = 28, Height = 28, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
-        ToolTipService.SetToolTip(projectsCollapseButton, "Collapse Projects");
-        AutomationProperties.SetName(projectsCollapseButton, "Collapse Projects");
-        projectsCollapseButton.Click += (_, _) => SetProjectsCollapsed(!projectsCollapsed, true);
-        Grid.SetColumn(projectsCollapseButton, 2);
-        header.Children.Add(projectsCollapseButton);
-        pane.Child = grid;
+        projectsBody = grid;
+        projectsExpander = new Expander
+        {
+            Header = projectsHeaderText, Content = grid, IsExpanded = !projectsCollapsed,
+            ExpandDirection = ExpandDirection.Down, MinWidth = 0, Padding = new Thickness(0),
+            HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch
+        };
+        // Keep WinUI's animated chevron and keyboard/accessibility behavior.
+        // Remove only the space reserved around it, so an empty header measures
+        // to the native 32-pixel toggle plus its border when collapsed.
+        projectsExpander.Resources["ExpanderChevronMargin"] = new Thickness(0);
+        projectsExpander.RegisterPropertyChangedCallback(Expander.IsExpandedProperty, (_, _) =>
+            SetProjectsCollapsed(!projectsExpander.IsExpanded, true));
+        AutomationProperties.SetName(projectsExpander, "Projects");
+        pane.Child = projectsExpander;
         return pane;
     }
 
     Button ProjectButton(string glyph, string tip, RoutedEventHandler handler)
     {
-        var fontIcon = new FontIcon { FontFamily = new FontFamily("Segoe MDL2 Assets"), Glyph = glyph, FontSize = 16, Width = 32, Height = 32, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var fontIcon = new FontIcon { FontFamily = new FontFamily("Segoe MDL2 Assets"), Glyph = glyph, FontSize = 16, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var button = new Button { Content = fontIcon, Width = 32, Height = 32, Padding = new Thickness(0) };
         ToolTipService.SetToolTip(button, tip);
+        AutomationProperties.SetName(button, tip);
         button.Click += handler;
         return button;
     }
 
     Grid BuildCenterPane()
     {
-        var grid = new Grid { Margin = new Thickness(14, 14, 14, 14) };
+        // Keep the vertical breathing room while bringing the viewer closer to
+        // both sidebars. The 12-pixel splitter columns still provide the drag
+        // target between panes.
+        var grid = new Grid { Margin = new Thickness(6, 14, 6, 14) };
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(12) });
+        logSplitterRow = new RowDefinition { Height = new GridLength(12) };
+        grid.RowDefinitions.Add(logSplitterRow);
         centerLogRow = new RowDefinition { Height = new GridLength(Math.Clamp(liveLogExpandedHeight, 100, 600)) };
         grid.RowDefinitions.Add(centerLogRow);
         previewPanelBorder = new Border { CornerRadius = new CornerRadius(8), BorderBrush = borderBrush, BorderThickness = new Thickness(1), Background = surfaceBrush };
@@ -624,7 +602,7 @@ public partial class MainWindow : Window
         previewGrid.Children.Add(viewerGrid);
         preview.Child = previewGrid;
         grid.Children.Add(preview);
-        var logSplitter = BuildSplitter(false, LogSplitterDragged);
+        logSplitter = BuildSplitter(false, LogSplitterDragged);
         logSplitter.Margin = new Thickness(0);
         Grid.SetRow(logSplitter, 1);
         grid.Children.Add(logSplitter);
@@ -682,50 +660,31 @@ public partial class MainWindow : Window
             ExpandDirection = ExpandDirection.Down,
             IsExpanded = !logCollapsed,
             HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalContentAlignment = VerticalAlignment.Stretch,
             Padding = new Thickness(0),
             Margin = new Thickness(0)
         };
-        logExpander.Expanding += LogExpanderExpanding;
-        logExpander.Collapsed += LogExpanderCollapsed;
+        logExpander.RegisterPropertyChangedCallback(Expander.IsExpandedProperty, (_, _) =>
+            SetLogCollapsed(!logExpander.IsExpanded, true));
         ToolTipService.SetToolTip(logExpander, "Expand or collapse Live Log");
         AutomationProperties.SetName(logExpander, "Live Log");
         panel.Child = logExpander;
         return panel;
     }
 
-    void LogExpanderExpanding(Expander sender, ExpanderExpandingEventArgs args)
-    {
-        if (!logCollapsed) return;
-        logCollapsed = false;
-        if (centerLogRow != null)
-            centerLogRow.Height = new GridLength(Math.Clamp(liveLogExpandedHeight, 100, 600));
-        logText.Visibility = Visibility.Visible;
-        ToolTipService.SetToolTip(logExpander, "Collapse Live Log");
-        SaveUiState();
-    }
-
-    void LogExpanderCollapsed(Expander sender, ExpanderCollapsedEventArgs args)
-    {
-        if (logCollapsed) return;
-        logCollapsed = true;
-        if (centerLogRow != null)
-            centerLogRow.Height = new GridLength(34);
-        logText.Visibility = Visibility.Collapsed;
-        ToolTipService.SetToolTip(logExpander, "Expand Live Log");
-        SaveUiState();
-    }
-
     void SetLogCollapsed(bool collapsed, bool persist)
     {
         logCollapsed = collapsed;
         if (centerLogRow != null)
-            centerLogRow.Height = new GridLength(collapsed ? 34 : Math.Clamp(liveLogExpandedHeight, 100, 600));
-        logText.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+            centerLogRow.Height = collapsed ? GridLength.Auto : new GridLength(Math.Clamp(liveLogExpandedHeight, 100, 600));
+        if (logSplitterRow != null) logSplitterRow.Height = new GridLength(collapsed ? 0 : 12);
+        if (logSplitter != null) logSplitter.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         if (logExpander != null)
         {
-            logExpander.IsExpanded = !collapsed;
+            if (logExpander.IsExpanded == collapsed) logExpander.IsExpanded = !collapsed;
+            logExpander.VerticalAlignment = collapsed ? VerticalAlignment.Top : VerticalAlignment.Stretch;
             ToolTipService.SetToolTip(logExpander, collapsed ? "Expand Live Log" : "Collapse Live Log");
         }
         if (persist) SaveUiState();
@@ -840,10 +799,25 @@ public partial class MainWindow : Window
 
     Button InfoButton(string id)
     {
-        // Keep the hit target for keyboard/mouse help while hiding the visual
-        // chrome; the surrounding label remains clean and uncluttered.
-        var info = new Button { Content = null, Width = 20, Height = 20, Padding = new Thickness(0), Margin = new Thickness(4, 0, 0, 0), Tag = id, Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), Opacity = 0 };
+        // Match the macOS info.circle affordance while keeping the existing
+        // flyout content and publication links used by the Windows app.
+        var info = new Button
+        {
+            Content = new FontIcon
+            {
+                FontFamily = new FontFamily("Segoe MDL2 Assets"), Glyph = "\uE946",
+                FontSize = 14, HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            },
+            Width = 20, Height = 20,
+            Padding = new Thickness(0), Margin = new Thickness(4, 0, 0, 0),
+            Tag = id, Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0), Foreground = mutedTextBrush,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
         ToolTipService.SetToolTip(info, "Show information");
+        AutomationProperties.SetName(info, "Show information");
         info.Click += SettingInfoClicked;
         return info;
     }
