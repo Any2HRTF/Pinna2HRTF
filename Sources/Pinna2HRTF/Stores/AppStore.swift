@@ -377,11 +377,11 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         light.intensity = 900
         let lightNode = SCNNode()
         lightNode.light = light
-        lightNode.position = SCNVector3Zero
+        lightNode.position = SCNVector3(-Float(maximumDimension) * 0.65, Float(maximumDimension) * 0.75, -Float(maximumDimension) * 0.9)
         cameraNode.addChildNode(lightNode)
         let ambientLight = SCNLight()
         ambientLight.type = .ambient
-        ambientLight.intensity = 180
+        ambientLight.intensity = 140
         let ambientLightNode = SCNNode()
         ambientLightNode.light = ambientLight
         scene.rootNode.addChildNode(ambientLightNode)
