@@ -227,17 +227,16 @@ struct LabeledMillimeterSlider: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                SettingLabel(title: title, helpID: helpID)
-                Spacer()
-                Text("\(Int(value.rounded())) mm")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .opacity(sliderEnabled ? 1 : 0.55)
-            }
+        HStack(spacing: 8) {
+            SettingLabel(title: title, helpID: helpID)
             Slider(value: $value, in: range, step: 1)
                 .disabled(!sliderEnabled)
+                .frame(maxWidth: .infinity)
+            Text("\(Int(value.rounded())) mm")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .opacity(sliderEnabled ? 1 : 0.55)
+                .frame(width: 48, alignment: .trailing)
         }
     }
 }

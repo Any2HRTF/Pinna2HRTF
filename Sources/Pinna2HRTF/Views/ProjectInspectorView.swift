@@ -76,7 +76,7 @@ struct ProjectInspectorView: View {
                         Stepper(value: sourceAssignmentFaceCountBinding, in: 1...100) {
                             Text("\(sourceAssignmentFaceCountBinding.wrappedValue)")
                                 .font(.caption.monospacedDigit())
-                                .frame(width: 28, alignment: .trailing)
+                                .frame(width: 44, alignment: .trailing)
                         }
                     }
                 }
