@@ -98,14 +98,14 @@ def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: f
                 log_path = source_dir / f"NC{step}-{step}_log.txt"
                 log_file = log_path.open("w", encoding="utf-8")
                 process = subprocess.Popen([str(executable), *adaptive_arguments, "-istart", str(step), "-iend", str(step)], cwd=source_dir, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=os.name != "nt")
-                running.append((process, log_file, ram, project, step, frequency))
+                running.append((process, log_file, ram, project, source_dir, step, frequency))
                 print(f"Started {project.name}, step {step}, {frequency:g} Hz, estimated {ram:.2f} GB", flush=True)
             if pending and not running and pending[0][0] * ram_safety_factor > ram_budget:
                 raise MemoryError(f"The smallest pending NumCalc step requires {pending[0][0] * ram_safety_factor:.2f} GB, above the configured {ram_budget:.2f} GB budget")
             if pending or running:
                 time.sleep(max(1, wait_time if running and len(running) == 1 and len(finished) == 0 else 1))
     finally:
-        for process, log_file, _, _, _, _ in locals().get("running", []):
+        for process, log_file, _, _, _, _, _ in locals().get("running", []):
             if process.poll() is None:
                 if os.name == "nt":
                     process.terminate()
