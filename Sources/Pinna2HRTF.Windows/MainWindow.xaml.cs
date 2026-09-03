@@ -6,6 +6,7 @@ using Microsoft.UI;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
@@ -38,6 +39,10 @@ public partial class MainWindow : Window
     static extern bool FreeLibrary(IntPtr hModule);
     const uint LoadLibrarySearchDllLoadDir = 0x00000100;
     const uint LoadLibrarySearchDefaultDirs = 0x00001000;
+    // Mesh coordinates are expressed in millimetres by the pipeline.  The
+    // marker radius is deliberately independent of the mesh bounds; only the
+    // loader's display transform is applied when creating the viewer sphere.
+    const double MicrophoneMarkerRadiusMeshUnits = 0.5;
     readonly ObservableCollection<ProjectRecord> projects = [];
     readonly ObservableCollection<Artifact> artifacts = [];
     readonly Dictionary<Guid, Process> runningProcesses = [];
@@ -80,11 +85,14 @@ public partial class MainWindow : Window
     readonly SolidColorBrush primaryTextBrush = new();
     readonly SolidColorBrush mutedTextBrush = new();
     readonly SolidColorBrush viewerBackgroundBrush = new();
+    readonly SolidColorBrush viewerHintBackgroundBrush = new();
+    readonly SolidColorBrush viewerHintTextBrush = new();
     bool loading;
     bool refreshingArtifacts;
     bool rotatingMesh;
     bool pointerMoved;
     Point lastPointer;
+    uint activeMeshPointerId = uint.MaxValue;
     string? placementSide;
     ManualMicrophonePosition? pendingMicrophonePosition;
     bool closingConfirmed;
@@ -96,6 +104,7 @@ public partial class MainWindow : Window
     TextBlock selectedArtifactText = new();
     Image imagePreview = new();
     TextBlock viewerPlaceholder = new();
+    Border viewerInteractionHint = new();
     Viewport3DX meshViewport = new();
     Border meshViewerBackground = new();
     CursorGrid? meshViewportHost;
@@ -108,7 +117,7 @@ public partial class MainWindow : Window
     FrameworkElement? projectsBody;
     FrameworkElement? projectsActions;
     Button? projectsCollapseButton;
-    Button? logCollapseButton;
+    Expander? logExpander;
     RowDefinition? centerLogRow;
     bool projectsCollapsed;
     bool logCollapsed;
@@ -236,11 +245,16 @@ public partial class MainWindow : Window
         Root.Children.Add(titleBar);
 
         contentGrid = new Grid { Background = appBackgroundBrush };
-        projectsColumn = new ColumnDefinition { Width = new GridLength(projectsExpandedWidth), MinWidth = 240, MaxWidth = 520 };
+        projectsColumn = new ColumnDefinition
+        {
+            Width = new GridLength(projectsCollapsed ? 32 : projectsExpandedWidth),
+            MinWidth = projectsCollapsed ? 32 : 240,
+            MaxWidth = projectsCollapsed ? 32 : 520
+        };
         contentGrid.ColumnDefinitions.Add(projectsColumn);
-        contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4), MinWidth = 12, MaxWidth = 12 });
+        contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12), MinWidth = 12, MaxWidth = 12 });
         contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 420 });
-        contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4), MinWidth = 12, MaxWidth = 12 });
+        contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12), MinWidth = 12, MaxWidth = 12 });
         settingsColumn = new ColumnDefinition { Width = new GridLength(settingsExpandedWidth), MinWidth = 320, MaxWidth = 560 };
         contentGrid.ColumnDefinitions.Add(settingsColumn);
         contentGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -279,8 +293,8 @@ public partial class MainWindow : Window
 
     Grid BuildSplitter(bool vertical, DragDeltaEventHandler handler)
     {
-        // Let column/row definition size the host. For vertical splitters, stretch height only.
-        // For horizontal splitters, stretch width only.
+        // Reserve the proven 12-pixel interaction slot. The interaction host and
+        // Thumb remain transparent; only the centered one-pixel guide is visible.
         var host = new CursorGrid(vertical ? InputSystemCursorShape.SizeWestEast : InputSystemCursorShape.SizeNorthSouth)
         {
             Background = new SolidColorBrush(Colors.Transparent),
@@ -289,27 +303,27 @@ public partial class MainWindow : Window
         
         if (vertical)
         {
-            // Vertical splitter: takes 12px width from column, stretches height
+            // Vertical splitter: fills the 12-pixel column and stretches height.
             host.VerticalAlignment = VerticalAlignment.Stretch;
         }
         else
         {
-            // Horizontal splitter: takes 12px height from row, stretches width
+            // Horizontal splitter: fills the 12-pixel row and stretches width.
             host.HorizontalAlignment = HorizontalAlignment.Stretch;
         }
         
-        // Visual indicator line: 4px, centered
+        // Visual indicator line: one pixel, centered in the interaction slot.
         var line = new Border
         {
-            Width = vertical ? 4 : double.NaN,
-            Height = vertical ? double.NaN : 4,
+            Width = vertical ? 1 : double.NaN,
+            Height = vertical ? double.NaN : 1,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             Background = borderBrush,
             IsHitTestVisible = false
         };
         
-        // Hit-test area: fills entire host (12px x full height/width)
+        // The Thumb fills the complete slot and remains the drag target.
         var thumb = new Thumb
         {
             HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -371,7 +385,7 @@ public partial class MainWindow : Window
         };
         ToolTipService.SetToolTip(toggle, "Expand Projects");
         toggle.Click += (_, _) => SetProjectsCollapsed(false, true);
-        return new Border { Background = surfaceBrush, Child = toggle };
+        return new Border { Background = surfaceBrush, Child = toggle, Visibility = projectsCollapsed ? Visibility.Visible : Visibility.Collapsed };
     }
 
     void SetProjectsCollapsed(bool collapsed, bool persist)
@@ -383,15 +397,22 @@ public partial class MainWindow : Window
             projectsSplitView.OpenPaneLength = Math.Clamp(projectsExpandedWidth, 240, 520);
         }
         if (projectsColumn != null)
+        {
+            projectsColumn.MinWidth = collapsed ? 32 : 240;
+            projectsColumn.MaxWidth = collapsed ? 32 : 520;
             projectsColumn.Width = new GridLength(collapsed ? 32 : Math.Clamp(projectsExpandedWidth, 240, 520));
+        }
+        if (projectsCompactPane != null)
+            projectsCompactPane.Visibility = collapsed ? Visibility.Visible : Visibility.Collapsed;
         if (projectsBody != null) projectsBody.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         if (projectsActions != null) projectsActions.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         if (projectsHeaderText != null) projectsHeaderText.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         if (projectsCollapseButton != null)
         {
-            projectsCollapseButton.Content = collapsed ? "›" : "‹";
+            projectsCollapseButton.Content = new SymbolIcon(collapsed ? Symbol.OpenPane : Symbol.ClosePane);
             projectsCollapseButton.Visibility = Visibility.Visible;
             ToolTipService.SetToolTip(projectsCollapseButton, collapsed ? "Expand Projects" : "Collapse Projects");
+            AutomationProperties.SetName(projectsCollapseButton, collapsed ? "Expand Projects" : "Collapse Projects");
         }
         if (persist) SaveUiState();
     }
@@ -466,8 +487,9 @@ public partial class MainWindow : Window
         Grid.SetRow(projectList, 1);
         grid.Children.Add(projectList);
         projectsBody = projectList;
-        projectsCollapseButton = new Button { Content = "‹", Width = 28, Height = 28, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        projectsCollapseButton = new Button { Content = new SymbolIcon(Symbol.ClosePane), Width = 28, Height = 28, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         ToolTipService.SetToolTip(projectsCollapseButton, "Collapse Projects");
+        AutomationProperties.SetName(projectsCollapseButton, "Collapse Projects");
         projectsCollapseButton.Click += (_, _) => SetProjectsCollapsed(!projectsCollapsed, true);
         Grid.SetColumn(projectsCollapseButton, 2);
         header.Children.Add(projectsCollapseButton);
@@ -494,24 +516,25 @@ public partial class MainWindow : Window
         previewPanelBorder = new Border { CornerRadius = new CornerRadius(8), BorderBrush = borderBrush, BorderThickness = new Thickness(1), Background = surfaceBrush };
         var preview = previewPanelBorder;
         var previewGrid = new Grid();
-        previewGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(86) });
+        previewGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(57) });
         previewGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        var header = new Grid { Margin = new Thickness(16, 10, 16, 8) };
+        var header = new Grid { Margin = new Thickness(12, 7, 12, 7) };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var titlePanel = new StackPanel();
-        titlePanel.Children.Add(new TextBlock { Text = "Preview", FontSize = 20, FontWeight = FontWeights.SemiBold });
-        selectedArtifactText = new TextBlock { Text = "Select a file to preview", Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)), TextTrimming = TextTrimming.CharacterEllipsis };
+        titlePanel.Children.Add(new TextBlock { Text = "Preview", FontSize = 18, FontWeight = FontWeights.SemiBold });
+        selectedArtifactText = new TextBlock { Text = "Select a file to preview", FontSize = 12, Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)), TextTrimming = TextTrimming.CharacterEllipsis };
         titlePanel.Children.Add(selectedArtifactText);
         header.Children.Add(titlePanel);
-        var pickerPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
-        placeLeftButton = new Button { Content = "Place Left Mic", MinWidth = 108 };
-        placeRightButton = new Button { Content = "Place Right Mic", MinWidth = 112 };
+        var pickerPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        placeLeftButton = new Button { Content = "Place Left Mic", MinWidth = 108, MinHeight = 30 };
+        placeRightButton = new Button { Content = "Place Right Mic", MinWidth = 112, MinHeight = 30 };
         placeLeftButton.Click += (_, _) => BeginPlacement("left");
         placeRightButton.Click += (_, _) => BeginPlacement("right");
         pickerPanel.Children.Add(placeLeftButton);
         pickerPanel.Children.Add(placeRightButton);
         artifactPicker.Width = 230;
+        artifactPicker.MinHeight = 30;
         artifactPicker.ItemsSource = artifacts;
         artifactPicker.DisplayMemberPath = "Title";
         artifactPicker.SelectionChanged += ArtifactSelectionChanged;
@@ -522,17 +545,39 @@ public partial class MainWindow : Window
         meshViewerBackground = new Border { Background = viewerBackgroundBrush };
         Grid.SetRow(meshViewerBackground, 1);
         var viewerGrid = new Grid();
-        meshViewport = new Viewport3DX { IsRotationEnabled = false, IsPanEnabled = false, IsMoveEnabled = false, IsZoomEnabled = true, EnableMouseButtonHitTest = true, ShowCoordinateSystem = false, ShowViewCube = false, ModelUpDirection = new System.Numerics.Vector3(0, 0, 1), BackgroundColor = ColorHelper.FromArgb(255, 237, 243, 242), EffectsManager = new DefaultEffectsManager() };
+        meshViewport = new Viewport3DX
+        {
+            // Let Helix handle camera manipulation. The previous implementation
+            // disabled rotation/pan and tried to mutate the camera from routed
+            // pointer events, which competed with Helix and left zoom as the only
+            // reliable gesture.
+            IsRotationEnabled = true,
+            IsPanEnabled = true,
+            IsMoveEnabled = false,
+            IsZoomEnabled = true,
+            UseDefaultGestures = true,
+            InputController = new MeshInputController(),
+            EnableMouseButtonHitTest = true,
+            ShowCoordinateSystem = false,
+            ShowViewCube = false,
+            ModelUpDirection = new System.Numerics.Vector3(0, 0, 1),
+            BackgroundColor = ColorHelper.FromArgb(255, 237, 243, 242),
+            EffectsManager = new DefaultEffectsManager()
+        };
         meshViewport.Loaded += (_, _) =>
         {
             viewportReady = true;
             EnsureSceneLighting();
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RefreshArtifacts);
         };
-        meshViewport.PointerPressed += MeshViewportPointerPressed;
-        meshViewport.PointerMoved += MeshViewportPointerMoved;
-        meshViewport.PointerReleased += MeshViewportPointerReleased;
-        meshViewport.PointerWheelChanged += MeshViewportPointerWheelChanged;
+        // Helix consumes camera gestures, so observe these events with
+        // handledEventsToo for placement-click detection and camera persistence.
+        meshViewport.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(MeshViewportPointerPressed), true);
+        meshViewport.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(MeshViewportPointerMoved), true);
+        meshViewport.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(MeshViewportPointerReleased), true);
+        meshViewport.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler(MeshViewportPointerCanceled), true);
+        meshViewport.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(MeshViewportPointerCaptureLost), true);
+        meshViewport.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(MeshViewportPointerWheelChanged), true);
         meshViewportHost = new CursorGrid(InputSystemCursorShape.Arrow);
         meshViewportHost.Children.Add(meshViewport);
         viewerGrid.Children.Add(meshViewportHost);
@@ -540,7 +585,26 @@ public partial class MainWindow : Window
         viewerGrid.Children.Add(imagePreview);
         viewerPlaceholder = new TextBlock { Text = "No preview selected", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, FontSize = 18, Foreground = mutedTextBrush };
         viewerGrid.Children.Add(viewerPlaceholder);
-        placementBorder = new Border { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(10), Visibility = Visibility.Collapsed, Background = new SolidColorBrush(ColorHelper.FromArgb(230, 255, 255, 255)), Padding = new Thickness(10, 7, 10, 7) };
+        viewerInteractionHint = new Border
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(16),
+            Padding = new Thickness(10, 6, 10, 6),
+            CornerRadius = new CornerRadius(5),
+            Background = viewerHintBackgroundBrush,
+            Visibility = Visibility.Collapsed,
+            IsHitTestVisible = false,
+            Child = new TextBlock
+            {
+                Text = "Drag to rotate  |  Mouse wheel to zoom",
+                FontSize = 12,
+                Foreground = viewerHintTextBrush,
+                VerticalAlignment = VerticalAlignment.Center
+            }
+        };
+        viewerGrid.Children.Add(viewerInteractionHint);
+        placementBorder = new Border { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(10, 12, 10, 0), Visibility = Visibility.Collapsed, Background = viewerHintBackgroundBrush, CornerRadius = new CornerRadius(5), Padding = new Thickness(10, 7, 10, 7) };
         placementPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         placementCoordinates = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Text = "Click the mesh to place the microphone" };
         automaticPositionButton = new Button { Content = "Use Automatic Position" };
@@ -597,34 +661,60 @@ public partial class MainWindow : Window
 
     Border BuildLogPane()
     {
-        logPanelBorder = new Border { Margin = new Thickness(0, 10, 0, 0), Background = surfaceBrush, BorderBrush = borderBrush, BorderThickness = new Thickness(1) };
+        logPanelBorder = new Border { Margin = new Thickness(0), Background = surfaceBrush, BorderBrush = borderBrush, BorderThickness = new Thickness(1) };
         var panel = logPanelBorder;
-        var grid = new Grid();
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(34) });
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        var header = new Grid { Margin = new Thickness(10, 0, 6, 0) };
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var header = new Grid { Margin = new Thickness(10, 0, 6, 0), HorizontalAlignment = HorizontalAlignment.Stretch };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var title = new TextBlock { Text = "Live Log", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(title, 1);
+        Grid.SetColumn(title, 0);
         header.Children.Add(title);
         var clear = new Button { Content = "Clear", HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(10, 2, 10, 2) };
         clear.Click += ClearLogClicked;
-        Grid.SetColumn(clear, 2);
+        Grid.SetColumn(clear, 1);
         header.Children.Add(clear);
-        grid.Children.Add(header);
         logText = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Consolas"), FontSize = 12, BorderThickness = new Thickness(0), Margin = new Thickness(10) };
         ScrollViewer.SetVerticalScrollBarVisibility(logText, ScrollBarVisibility.Auto);
-        Grid.SetRow(logText, 1);
-        grid.Children.Add(logText);
-        logCollapseButton = new Button { Content = "⌄", Width = 26, Height = 26, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
-        ToolTipService.SetToolTip(logCollapseButton, "Collapse Live Log");
-        logCollapseButton.Click += (_, _) => SetLogCollapsed(!logCollapsed, true);
-        Grid.SetColumn(logCollapseButton, 0);
-        header.Children.Add(logCollapseButton);
-        panel.Child = grid;
+        logExpander = new Expander
+        {
+            Header = header,
+            Content = logText,
+            ExpandDirection = ExpandDirection.Down,
+            IsExpanded = !logCollapsed,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch,
+            Padding = new Thickness(0),
+            Margin = new Thickness(0)
+        };
+        logExpander.Expanding += LogExpanderExpanding;
+        logExpander.Collapsed += LogExpanderCollapsed;
+        ToolTipService.SetToolTip(logExpander, "Expand or collapse Live Log");
+        AutomationProperties.SetName(logExpander, "Live Log");
+        panel.Child = logExpander;
         return panel;
+    }
+
+    void LogExpanderExpanding(Expander sender, ExpanderExpandingEventArgs args)
+    {
+        if (!logCollapsed) return;
+        logCollapsed = false;
+        if (centerLogRow != null)
+            centerLogRow.Height = new GridLength(Math.Clamp(liveLogExpandedHeight, 100, 600));
+        logText.Visibility = Visibility.Visible;
+        ToolTipService.SetToolTip(logExpander, "Collapse Live Log");
+        SaveUiState();
+    }
+
+    void LogExpanderCollapsed(Expander sender, ExpanderCollapsedEventArgs args)
+    {
+        if (logCollapsed) return;
+        logCollapsed = true;
+        if (centerLogRow != null)
+            centerLogRow.Height = new GridLength(34);
+        logText.Visibility = Visibility.Collapsed;
+        ToolTipService.SetToolTip(logExpander, "Expand Live Log");
+        SaveUiState();
     }
 
     void SetLogCollapsed(bool collapsed, bool persist)
@@ -633,11 +723,10 @@ public partial class MainWindow : Window
         if (centerLogRow != null)
             centerLogRow.Height = new GridLength(collapsed ? 34 : Math.Clamp(liveLogExpandedHeight, 100, 600));
         logText.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
-        if (logCollapseButton != null)
+        if (logExpander != null)
         {
-            logCollapseButton.Content = collapsed ? "⌃" : "⌄";
-            logCollapseButton.Visibility = Visibility.Visible;
-            ToolTipService.SetToolTip(logCollapseButton, collapsed ? "Expand Live Log" : "Collapse Live Log");
+            logExpander.IsExpanded = !collapsed;
+            ToolTipService.SetToolTip(logExpander, collapsed ? "Expand Live Log" : "Collapse Live Log");
         }
         if (persist) SaveUiState();
     }
@@ -1192,29 +1281,50 @@ public partial class MainWindow : Window
     {
         var list = new List<Artifact>();
         var hrtf = Path.Combine(project.SaveLocation, "HRTF");
-        if (Directory.Exists(hrtf))
-            foreach (var file in Directory.EnumerateFiles(hrtf).Where(x => new[] { ".jpg", ".jpeg", ".png" }.Contains(Path.GetExtension(x).ToLowerInvariant())).OrderBy(x => x))
-                list.Add(new Artifact(Path.GetFileNameWithoutExtension(file), file));
         if (!string.IsNullOrWhiteSpace(project.LeftEar))
         {
             list.Add(new Artifact("Input left ear", project.LeftEar, "left"));
             list.Add(new Artifact("Left simulation mesh", Path.Combine(project.SaveLocation, "Intermediates", "Left", "graded_head.ply"), "left"));
-            AddMeshFolder(list, "Predicted left ear", "left", Path.Combine(project.SaveLocation, project.Settings.Inference.PredictionLeftFolder));
         }
         if (!string.IsNullOrWhiteSpace(project.RightEar))
         {
             list.Add(new Artifact("Input right ear", project.RightEar, "right"));
             list.Add(new Artifact("Right simulation mesh", Path.Combine(project.SaveLocation, "Intermediates", "Right", "graded_head.ply"), "right"));
-            AddMeshFolder(list, "Predicted right ear", "right", Path.Combine(project.SaveLocation, project.Settings.Inference.PredictionRightFolder));
         }
+        if (!string.IsNullOrWhiteSpace(project.LeftEar))
+            AddMeshFolder(list, "Predicted left ear", "left", Path.Combine(project.SaveLocation, project.Settings.Inference.PredictionLeftFolder));
+        if (!string.IsNullOrWhiteSpace(project.RightEar))
+            AddMeshFolder(list, "Predicted right ear", "right", Path.Combine(project.SaveLocation, project.Settings.Inference.PredictionRightFolder));
+        if (Directory.Exists(hrtf))
+            foreach (var file in Directory.EnumerateFiles(hrtf)
+                .Where(x => new[] { ".jpg", ".jpeg", ".png" }.Contains(Path.GetExtension(x).ToLowerInvariant()))
+                .OrderBy(x => PlotOrder(x))
+                .ThenBy(x => x, StringComparer.OrdinalIgnoreCase))
+                list.Add(new Artifact(PlotTitle(file), file));
         return list;
+    }
+
+    static int PlotOrder(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path);
+        if (name.Contains("horizontal", StringComparison.OrdinalIgnoreCase)) return 0;
+        if (name.Contains("median", StringComparison.OrdinalIgnoreCase)) return 1;
+        return 2;
+    }
+
+    static string PlotTitle(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path);
+        if (name.Contains("horizontal", StringComparison.OrdinalIgnoreCase)) return "Horizontal HRTF plot";
+        if (name.Contains("median", StringComparison.OrdinalIgnoreCase)) return "Median HRTF plot";
+        return name;
     }
 
     void AddMeshFolder(List<Artifact> list, string title, string side, string folder)
     {
         if (!Directory.Exists(folder))
             return;
-        foreach (var file in Directory.EnumerateFiles(folder).Where(IsMesh).OrderBy(x => x))
+        foreach (var file in Directory.EnumerateFiles(folder).Where(IsMesh).OrderBy(NaturalModelSortKey, StringComparer.OrdinalIgnoreCase))
             if (Path.GetFileName(file).StartsWith("Prediction_", StringComparison.OrdinalIgnoreCase))
                 list.Add(new Artifact(title + " - " + Path.GetFileNameWithoutExtension(file), file, side));
     }
@@ -1268,13 +1378,14 @@ public partial class MainWindow : Window
             currentMesh = loaded;
             meshVisual = new MeshGeometryModel3D { Geometry = currentMesh.Geometry, Material = new PhongMaterial { AmbientColor = new Color4(0.18f, 0.22f, 0.22f, 1), DiffuseColor = new Color4(0.48f, 0.68f, 0.66f, 1), EmissiveColor = new Color4(0.035f, 0.045f, 0.045f, 1), SpecularColor = new Color4(0.12f, 0.14f, 0.14f, 1), SpecularShininess = 12 }, CullMode = SharpDX.Direct3D11.CullMode.None };
             meshVisual.RenderWireframe = string.Equals(Path.GetExtension(artifact.Path), ".ply", StringComparison.OrdinalIgnoreCase);
-            meshVisual.WireframeColor = ColorHelper.FromArgb(140, 31, 56, 56);
+            meshVisual.WireframeColor = ColorHelper.FromArgb(65, 31, 56, 56);
             meshViewport.Items.Add(meshVisual);
             meshVisuals.Add(meshVisual);
             AddMicrophoneMarker(artifact.Path);
             ResetMeshCamera();
             meshViewport.Camera?.ZoomExtents(meshViewport, 80);
             viewerPlaceholder.Visibility = Visibility.Collapsed;
+            viewerInteractionHint.Visibility = Visibility.Visible;
             meshViewport.Visibility = Visibility.Visible;
             UpdatePlacementButtons();
         }
@@ -1282,6 +1393,7 @@ public partial class MainWindow : Window
         catch (Exception error)
         {
             currentMesh = null;
+            viewerInteractionHint.Visibility = Visibility.Collapsed;
             viewerPlaceholder.Text = "Could not open mesh";
             viewerPlaceholder.Visibility = Visibility.Visible;
             AppendLog("Cannot open mesh: " + error, selectedProject?.Id);
@@ -1299,8 +1411,13 @@ public partial class MainWindow : Window
         if (position == null || currentMesh == null)
             return;
         var p = currentMesh.ToDisplay(position.Value);
-        microphoneVisual = new MeshGeometryModel3D { Geometry = MeshLoader.CreateSphere(p, Math.Max(currentMesh.MaximumDimension * 0.003, 0.18)), Material = new PhongMaterial { DiffuseColor = new Color4(1f, 0.58f, 0f, 1), EmissiveColor = new Color4(0.35f, 0.12f, 0f, 1) }, IsHitTestVisible = false };
+        microphoneVisual = new MeshGeometryModel3D { Geometry = MeshLoader.CreateSphere(p, MicrophoneMarkerDisplayRadius()), Material = new PhongMaterial { DiffuseColor = new Color4(1f, 0.58f, 0f, 1), EmissiveColor = new Color4(0.35f, 0.12f, 0f, 1) }, IsHitTestVisible = false };
         meshViewport.Items.Add(microphoneVisual);
+    }
+
+    double MicrophoneMarkerDisplayRadius()
+    {
+        return MicrophoneMarkerRadiusMeshUnits * (currentMesh?.Scale ?? 1.0);
     }
 
     void ResetViewer()
@@ -1313,6 +1430,7 @@ public partial class MainWindow : Window
         currentMesh = null;
         imagePreview.Source = null;
         imagePreview.Visibility = Visibility.Collapsed;
+        viewerInteractionHint.Visibility = Visibility.Collapsed;
         meshViewport.Visibility = Visibility.Visible;
         viewerPlaceholder.Text = "No preview selected";
         viewerPlaceholder.Visibility = Visibility.Visible;
@@ -1338,65 +1456,42 @@ public partial class MainWindow : Window
 
     void MeshViewportPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (meshVisual == null || currentMesh == null)
+        if (meshVisual == null || currentMesh == null || activeMeshPointerId != uint.MaxValue)
             return;
-        var properties = e.GetCurrentPoint(meshViewport).Properties;
+        var point = e.GetCurrentPoint(meshViewport);
+        var properties = point.Properties;
         meshPointerMode = properties.IsLeftButtonPressed ? MeshPointerMode.Rotate : properties.IsMiddleButtonPressed ? MeshPointerMode.Pan : MeshPointerMode.None;
-        if (meshPointerMode == MeshPointerMode.None) return;
-        lastPointer = e.GetCurrentPoint(meshViewport).Position;
+        if (meshPointerMode == MeshPointerMode.None)
+            return;
+        activeMeshPointerId = point.PointerId;
+        lastPointer = point.Position;
         pointerMoved = false;
         rotatingMesh = meshPointerMode == MeshPointerMode.Rotate;
         meshViewportHost?.SetCursor(meshPointerMode == MeshPointerMode.Rotate ? InputSystemCursorShape.Hand : InputSystemCursorShape.SizeAll);
-        meshViewport.CapturePointer(e.Pointer);
     }
 
     void MeshViewportPointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (meshPointerMode == MeshPointerMode.None || currentMesh == null || meshViewport.Camera is not PerspectiveCamera camera)
+        if (meshPointerMode == MeshPointerMode.None || e.GetCurrentPoint(meshViewport).PointerId != activeMeshPointerId)
             return;
         var point = e.GetCurrentPoint(meshViewport).Position;
-        var dx = point.X - lastPointer.X;
-        var dy = point.Y - lastPointer.Y;
-        if (Math.Abs(dx) + Math.Abs(dy) > 2)
+        if (Math.Abs(point.X - lastPointer.X) + Math.Abs(point.Y - lastPointer.Y) > 2)
             pointerMoved = true;
         lastPointer = point;
-        if (!pointerMoved) return;
-        if (meshPointerMode == MeshPointerMode.Rotate)
-        {
-            var direction = camera.Position - currentMesh.Center;
-            var distance = Math.Max(direction.Length(), 1e-4f);
-            var yaw = Math.Atan2(direction.X, -direction.Y) + dx * 0.008;
-            var pitch = Math.Clamp(Math.Asin(direction.Z / distance) + dy * 0.008, -1.48, 1.48);
-            var horizontal = distance * Math.Cos(pitch);
-            var position = currentMesh.Center + new System.Numerics.Vector3((float)(horizontal * Math.Sin(yaw)), (float)(-horizontal * Math.Cos(yaw)), (float)(distance * Math.Sin(pitch)));
-            camera.Position = position;
-            camera.LookDirection = currentMesh.Center - position;
-            camera.UpDirection = new System.Numerics.Vector3(0, 0, 1);
-        }
-        else
-        {
-            var look = System.Numerics.Vector3.Normalize(camera.LookDirection);
-            var up = System.Numerics.Vector3.Normalize(camera.UpDirection);
-            var right = System.Numerics.Vector3.Normalize(System.Numerics.Vector3.Cross(look, up));
-            var panScale = Math.Max((camera.Position - currentMesh.Center).Length() * 0.0015f, 0.05f);
-            var translation = (-right * (float)dx + up * (float)dy) * panScale;
-            camera.Position += translation;
-            camera.LookDirection += translation;
-        }
     }
 
     void MeshViewportPointerReleased(object sender, PointerRoutedEventArgs e)
     {
-        var point = e.GetCurrentPoint(meshViewport).Position;
-        meshViewport.ReleasePointerCapture(e.Pointer);
+        var point = e.GetCurrentPoint(meshViewport);
+        if (point.PointerId != activeMeshPointerId)
+            return;
         var mode = meshPointerMode;
-        meshPointerMode = MeshPointerMode.None;
-        rotatingMesh = false;
-        meshViewportHost?.SetCursor(InputSystemCursorShape.Arrow);
+        var wasClick = !pointerMoved;
+        ResetMeshPointerState();
         SaveMeshCamera();
-        if (placementSide != null && mode == MeshPointerMode.Rotate && !pointerMoved && currentMesh != null && meshVisual != null)
+        if (placementSide != null && mode == MeshPointerMode.Rotate && wasClick && currentMesh != null && meshVisual != null)
         {
-            var hit = meshViewport.FindHits(point).FirstOrDefault(x => ReferenceEquals(x.ModelHit, meshVisual));
+            var hit = meshViewport.FindHits(point.Position).FirstOrDefault(x => ReferenceEquals(x.ModelHit, meshVisual));
             if (hit != null)
             {
                 var raw = currentMesh.ToRaw(hit.PointHit);
@@ -1410,14 +1505,27 @@ public partial class MainWindow : Window
         }
     }
 
+    void MeshViewportPointerCanceled(object sender, PointerRoutedEventArgs e) => ResetMeshPointerState();
+
+    void MeshViewportPointerCaptureLost(object sender, PointerRoutedEventArgs e) => ResetMeshPointerState();
+
     void MeshViewportPointerWheelChanged(object sender, PointerRoutedEventArgs e) => SaveMeshCamera();
+
+    void ResetMeshPointerState()
+    {
+        meshPointerMode = MeshPointerMode.None;
+        activeMeshPointerId = uint.MaxValue;
+        rotatingMesh = false;
+        pointerMoved = false;
+        meshViewportHost?.SetCursor(InputSystemCursorShape.Arrow);
+    }
 
     void UpdateMicrophoneMarker(System.Numerics.Vector3 raw)
     {
         if (currentMesh == null)
             return;
         if (microphoneVisual != null) meshViewport.Items.Remove(microphoneVisual);
-        microphoneVisual = new MeshGeometryModel3D { Geometry = MeshLoader.CreateSphere(currentMesh.ToDisplay(raw), Math.Max(currentMesh.MaximumDimension * 0.003, 0.18)), Material = new PhongMaterial { DiffuseColor = new Color4(1f, 0.58f, 0f, 1), EmissiveColor = new Color4(0.35f, 0.12f, 0f, 1) }, IsHitTestVisible = false };
+        microphoneVisual = new MeshGeometryModel3D { Geometry = MeshLoader.CreateSphere(currentMesh.ToDisplay(raw), MicrophoneMarkerDisplayRadius()), Material = new PhongMaterial { DiffuseColor = new Color4(1f, 0.58f, 0f, 1), EmissiveColor = new Color4(0.35f, 0.12f, 0f, 1) }, IsHitTestVisible = false };
         meshViewport.Items.Add(microphoneVisual);
     }
 
@@ -1729,7 +1837,25 @@ public partial class MainWindow : Window
         catch { return false; }
     }
 
-    string? BundledPythonExecutable() { var path = Path.Combine(packageRoot, ".venv", "Scripts", "python.exe"); return File.Exists(path) ? path : null; }
+    string? BundledPythonExecutable()
+    {
+        // uv's Windows trampoline can retain an absolute interpreter reference
+        // when a portable .venv is moved. Prefer the bundled managed CPython
+        // directly; ApplyProcessEnvironment adds the venv site-packages path.
+        var pythonRoot = Path.Combine(packageRoot, "Python");
+        if (Directory.Exists(pythonRoot))
+        {
+            var versioned = Directory.EnumerateDirectories(pythonRoot, "cpython-*")
+                .Where(path => Regex.IsMatch(Path.GetFileName(path), @"^cpython-\d+\.\d+\.\d+-"))
+                .OrderByDescending(path => path, StringComparer.OrdinalIgnoreCase)
+                .Select(path => Path.Combine(path, "python.exe"))
+                .FirstOrDefault(File.Exists);
+            if (versioned != null)
+                return versioned;
+        }
+        var venvPath = Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
+        return File.Exists(venvPath) ? venvPath : null;
+    }
 
     string PrepareConfig(ProjectRecord project)
     {
@@ -2042,6 +2168,10 @@ ui:
         primaryTextBrush.Color = dark ? ColorHelper.FromArgb(255, 235, 235, 235) : ColorHelper.FromArgb(255, 32, 32, 32);
         mutedTextBrush.Color = dark ? ColorHelper.FromArgb(255, 160, 160, 160) : ColorHelper.FromArgb(255, 105, 113, 125);
         viewerBackgroundBrush.Color = dark ? ColorHelper.FromArgb(255, 31, 36, 38) : ColorHelper.FromArgb(255, 237, 243, 242);
+        viewerHintBackgroundBrush.Color = dark ? ColorHelper.FromArgb(215, 43, 46, 48) : ColorHelper.FromArgb(220, 255, 255, 255);
+        viewerHintTextBrush.Color = dark ? Colors.White : ColorHelper.FromArgb(255, 48, 55, 58);
+        placementBorder.Background = viewerHintBackgroundBrush;
+        placementCoordinates.Foreground = viewerHintTextBrush;
         Root.Background = appBackgroundBrush;
         if (contentGrid != null) contentGrid.Background = appBackgroundBrush;
         if (meshViewerBackground != null) { meshViewerBackground.Background = viewerBackgroundBrush; meshViewport.BackgroundColor = viewerBackgroundBrush.Color; }
@@ -2216,6 +2346,17 @@ sealed class CursorGrid : Grid
     {
         DispatcherQueue.TryEnqueue(() => ProtectedCursor = InputSystemCursor.Create(value));
     }
+}
+
+sealed class MeshInputController : InputController
+{
+    // Helix's WinUI defaults use a different button mapping for pan/rotate.
+    // Keep the viewer's model-inspection convention explicit and deterministic.
+    protected override bool IsStartRotate(Microsoft.UI.Input.PointerPointProperties properties) =>
+        properties.IsLeftButtonPressed && !properties.IsMiddleButtonPressed && !properties.IsRightButtonPressed;
+
+    protected override bool IsStartPan(Microsoft.UI.Input.PointerPointProperties properties) =>
+        properties.IsMiddleButtonPressed;
 }
 
 class MeshData
