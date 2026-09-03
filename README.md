@@ -54,7 +54,7 @@ External/src/Mesh2HRTF/mesh2hrtf/
 
 It uses CMake from `PATH`, or runs CMake through `uv` if it is missing. Initial setup needs internet access to fetch dependencies and native sources. Linux also needs the system libraries required by Blender's `bpy` module and the mesh-grading build; the release workflow builds desktop packages only for macOS and Windows.
 
-**Windows native tools:** the PowerShell preparation script downloads Mesh2HRTF sources and validates native tools already present in `External\bin`; it does not build or download the complete Windows toolchain. Supply `NumCalc.exe`, `hrtf_mesh_grading.exe`, and their matching runtime DLLs before running:
+**Windows native tools:** the PowerShell preparation script installs MSYS2 if needed, builds NumCalc and mesh grading from the pinned sources, and copies their runtime DLLs into `External\bin`. Run it before building or launching the Windows app from source:
 
 ```powershell
 .\Scripts\prepare_windows_external_tools.ps1
@@ -78,7 +78,7 @@ All installation and packaging scripts are in the top-level [`Scripts/`](Scripts
 | `prepare_external_tools.sh` | Prepare NumCalc, mesh grading, and Mesh2HRTF sources on macOS/Linux. |
 | `build_release_app.sh` | Build and ad-hoc sign the macOS app with its embedded runtime. Run native-tool preparation first. |
 | `build_and_run.sh` | Prepare native tools, build the macOS app, and launch it. |
-| `prepare_windows_external_tools.ps1` | Fetch pinned Mesh2HRTF sources and validate supplied Windows executables. |
+| `prepare_windows_external_tools.ps1` | Prepare MSYS2, build pinned Windows executables, and validate their runtime DLLs. |
 | `build_windows_port.ps1` | Publish the Windows app and bundle Python and native dependencies. |
 
 Build the macOS app on an Apple Silicon Mac with the Swift/macOS SDK toolchain and `uv` installed:
@@ -98,6 +98,8 @@ Build the Windows app on Windows with the .NET 8 SDK, `uv`, Git, and the native 
 ```
 
 The result is `dist\windows\Pinna2HRTF`. The [release workflow](.github/workflows/build-macos-app.yml) packages both apps into ZIP archives and checks their embedded runtimes after relocation.
+
+The Windows microphone regression check runs an isolated app with temporary projects under `build\windows-regression`, leaving the normal project registry untouched. After preparing the Python environment and native tools, run `Tests\Windows\Run-MicrophoneValidation.ps1`. It checks input/prediction selection, automatic placement and Done, cancellation, simulation markers, and preprocessing availability.
 
 ## Command-line workflow
 
