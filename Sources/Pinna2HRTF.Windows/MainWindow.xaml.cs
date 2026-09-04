@@ -2797,8 +2797,8 @@ ui:
         var logoPath = Path.Combine(AppContext.BaseDirectory, "icon.png");
         if (File.Exists(logoPath)) content.Children.Add(new Image { Source = new BitmapImage(new Uri(logoPath)), Width = 336, Height = 240, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center });
         content.Children.Add(new TextBlock { Text = "Pinna2HRTF", FontSize = 24, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center });
-        content.Children.Add(new TextBlock { Text = "Version " + version, HorizontalAlignment = HorizontalAlignment.Center });
-        content.Children.Add(new TextBlock { Text = "A desktop pipeline for ear-mesh preprocessing, Mesh2PPM inference, Mesh2HRTF simulation, and SOFA export.", TextWrapping = TextWrapping.Wrap, MaxWidth = 360, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center });
+        content.Children.Add(new TextBlock { Text = "Version " + version, FontSize = 13, HorizontalAlignment = HorizontalAlignment.Center });
+        content.Children.Add(new TextBlock { Text = "A desktop pipeline for ear-mesh preprocessing, Mesh2PPM inference, Mesh2HRTF simulation, and SOFA export.", FontSize = 13, TextWrapping = TextWrapping.Wrap, MaxWidth = 540, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center });
         var dialog = new ContentDialog { Title = "About Pinna2HRTF", Content = content, CloseButtonText = "Close", XamlRoot = Root.XamlRoot };
         await dialog.ShowAsync();
     }
