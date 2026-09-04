@@ -67,7 +67,7 @@ function Invoke-Msys2([string]$Command, [hashtable]$Environment = @{}) {
         [Environment]::SetEnvironmentVariable($key, [string]$allEnvironment[$key], "Process")
     }
     try {
-        & $bash -lc ('export PATH="/ucrt64/bin:/usr/bin:$PATH"; ' + $Command)
+        $Command | & $bash -lc 'export PATH="/ucrt64/bin:/usr/bin:$PATH"; bash -s'
         if ($LASTEXITCODE -ne 0) { Fail "MSYS2 command failed with exit code ${LASTEXITCODE}: $Command" }
     } finally {
         foreach ($key in $allEnvironment.Keys) { [Environment]::SetEnvironmentVariable($key, $saved[$key], "Process") }
@@ -156,14 +156,28 @@ function Copy-RuntimeDlls {
         Copy-Item -LiteralPath $source -Destination $destination -Force
     }
 }
+function Get-NativeCommandOutput([string]$Path, [string[]]$Arguments = @()) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = (& $Path @Arguments 2>&1 | Out-String)
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    return [PSCustomObject]@{ Output = $output; ExitCode = $exitCode }
+}
 function Validate-Outputs {
     $required = @("NumCalc.exe", "hrtf_mesh_grading.exe") + $requiredDlls
     foreach ($name in $required) { if (-not (Test-Path (Join-Path $bin $name))) { Fail "Missing output: $(Join-Path $bin $name)" } }
     if (-not (Test-Path $mesh2input)) { Fail "Missing Mesh2HRTF source: $mesh2input" }
     $help = (& $numCalcPath -h 2>&1 | Out-String)
     if ($help -notmatch "-adapt_fmmlength") { Fail "NumCalc -h does not advertise -adapt_fmmlength." }
-    $gradingHelp = (& $gradingPath 2>&1 | Out-String)
+    $gradingRun = Get-NativeCommandOutput $gradingPath
+    $gradingHelp = $gradingRun.Output
     if ($gradingHelp -match "(missing|not found).*\.dll|DLL not found") { Fail "hrtf_mesh_grading.exe reported a missing DLL: $gradingHelp" }
+    if ([string]::IsNullOrWhiteSpace($gradingHelp)) { Fail "hrtf_mesh_grading.exe produced no output (exit code $($gradingRun.ExitCode))." }
+    if ($gradingHelp -notmatch "Example usage|Parameters") { Fail "hrtf_mesh_grading.exe did not print its usage information (exit code $($gradingRun.ExitCode)): $gradingHelp" }
     Invoke-Msys2 'for f in "$P2H_NUMCALC" "$P2H_GRADING"; do info="$(file "$(cygpath -u "$f")")"; echo "$info"; echo "$info" | grep -E "PE32\\+.*x86-64" >/dev/null || { echo "not a 64-bit Windows binary: $f"; exit 1; }; ldd "$(cygpath -u "$f")" | grep "not found" && exit 1 || true; done' @{ P2H_NUMCALC = $numCalcPath; P2H_GRADING = $gradingPath }
     Set-Content -LiteralPath (Join-Path $bin "hrtf_mesh_grading.source-commit") -Value $script:gradingCommit -NoNewline
     $manifest = [ordered]@{ mesh2hrtf = $mesh2hrtfCommit; pmp = $pmpCommit; hrtf_mesh_grading = $script:gradingCommit; toolchain = "MSYS2 UCRT64"; generated_utc = [DateTime]::UtcNow.ToString("o") }
