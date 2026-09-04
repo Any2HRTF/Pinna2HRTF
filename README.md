@@ -20,7 +20,7 @@ Packaged releases include Python, the inference models, NumCalc, mesh grading, a
 - **macOS:** open `Pinna2HRTF-<version>-macOS-arm64.dmg`, drag Pinna2HRTF to Applications, and open it. Distribution builds require Apple Silicon and macOS 13 or later and are Developer ID signed and notarized. Local development builds remain ad-hoc signed.
 - **Windows:** extract the complete `Pinna2HRTF-windows.zip` archive and run `Pinna2HRTF.exe` from the extracted folder. The current build requires x64 Windows 10 version 2004 or later.
 
-Downloads are available from the [SONICOM tool page](https://ecosystem.sonicom.eu/tools/30).
+Download the compiled macOS version [here](https://ecosystem.sonicom.eu/tools/30).
 
 Project files stay in the folder you choose. App settings and caches are stored in `~/Library/Application Support/Pinna2HRTF` on macOS and `%APPDATA%\Pinna2HRTF` on Windows.
 
