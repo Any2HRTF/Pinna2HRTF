@@ -6,13 +6,11 @@
 
 Calculate individualized head-related transfer functions (HRTFs) from one or two pinna meshes. Available as a CLI and macOS/Windows apps.
 
-The pipeline runs optional Mesh2PPM inference, prepares the meshes, solves the acoustics with Mesh2HRTF/NumCalc, and exports HRTFs and HRIRs as SOFA files. **Input STL meshes must use millimetres.**
+The pipeline runs optional Mesh2PPM inference, prepares the meshes, solves the acoustics with Mesh2HRTF/NumCalc, and exports HRTFs and HRIRs as SOFA files.
 
 ## Desktop apps
 
-[Download the macOS app](https://ecosystem.sonicom.eu/tools/30).
-
-- **macOS:** Apple Silicon, macOS 13 or later. Open the DMG and drag Pinna2HRTF to Applications.
+- **macOS:** Apple Silicon, macOS 13 or later. Open the DMG and drag Pinna2HRTF to Applications. [Download the macOS app](https://ecosystem.sonicom.eu/tools/30).
 - **Windows:** x64, Windows 10 version 2004 or later. Extract the entire ZIP and open `Pinna2HRTF.exe` inside it.
 
 Packaged apps include Python, the models, and the simulation tools. They work offline without a separate Blender or `uv` installation.
