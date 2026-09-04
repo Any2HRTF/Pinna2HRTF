@@ -15,7 +15,7 @@ from HRTFCalculation.Config import PreprocessingConfig
 
 def pinna_y_center(ear):
     entities = ear.outline().entities
-    if entities:
+    if entities is not None and len(entities) > 0:
         outline = max((entity.discrete(ear.vertices) for entity in entities), key=len)
         return float(sum(point[1] for point in outline) / len(outline))
     return float((ear.bounds[0][1] + ear.bounds[1][1]) / 2)

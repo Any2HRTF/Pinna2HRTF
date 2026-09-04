@@ -5,6 +5,7 @@ import AppKit
 struct Pinna2HRTFApp: App {
     @NSApplicationDelegateAdaptor(Pinna2HRTFAppDelegate.self) private var appDelegate
     @StateObject private var store = AppStore()
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         Window("Pinna2HRTF", id: "main") {
@@ -17,15 +18,7 @@ struct Pinna2HRTFApp: App {
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About Pinna2HRTF") {
-                    let gitHead = Bundle.main.object(forInfoDictionaryKey: "Pinna2HRTFGitHead") as? String ?? "unknown"
-                    var options: [NSApplication.AboutPanelOptionKey: Any] = [
-                        .credits: NSAttributedString(string: "A desktop pipeline for ear-mesh preprocessing, Mesh2PPM inference, Mesh2HRTF simulation, and SOFA export.\n\nGit HEAD: \(gitHead)\n© 2026 Any2HRTF")
-                    ]
-                    if let iconURL = Bundle.main.url(forResource: "icon", withExtension: "png"), let icon = NSImage(contentsOf: iconURL) {
-                        icon.size = NSSize(width: 128, height: 85)
-                        options[.applicationIcon] = icon
-                    }
-                    NSApp.orderFrontStandardAboutPanel(options: options)
+                    openWindow(id: "about")
                 }
             }
             SidebarCommands()
@@ -39,6 +32,41 @@ struct Pinna2HRTFApp: App {
                 }
             }
         }
+        Window("About Pinna2HRTF", id: "about") {
+            AboutView()
+        }
+        .defaultSize(width: 440, height: 390)
+        .windowResizability(.contentSize)
+    }
+}
+
+struct AboutView: View {
+    var body: some View {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        let gitHead = Bundle.main.object(forInfoDictionaryKey: "Pinna2HRTFGitHead") as? String ?? "unknown"
+        VStack(spacing: 16) {
+            if let iconURL = Bundle.main.url(forResource: "icon", withExtension: "png"), let icon = NSImage(contentsOf: iconURL) {
+                Image(nsImage: icon)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 300, height: 200)
+                    .accessibilityLabel("Pinna2HRTF icon")
+            }
+            Text("Pinna2HRTF")
+                .font(.title2.weight(.semibold))
+            Text("Version \(version) (\(build))")
+                .foregroundStyle(.secondary)
+            Text("A desktop pipeline for ear-mesh preprocessing, Mesh2PPM inference, Mesh2HRTF simulation, and SOFA export.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+            Text("Git HEAD: \(gitHead)\n© 2026 Any2HRTF")
+                .font(.caption)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+        }
+        .padding(24)
+        .frame(width: 440, height: 390)
     }
 }
 
