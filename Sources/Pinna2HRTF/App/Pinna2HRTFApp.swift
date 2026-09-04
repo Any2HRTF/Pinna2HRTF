@@ -35,7 +35,7 @@ struct Pinna2HRTFApp: App {
         Window("About Pinna2HRTF", id: "about") {
             AboutView()
         }
-        .defaultSize(width: 440, height: 390)
+        .defaultSize(width: 440, height: 340)
         .windowResizability(.contentSize)
     }
 }
@@ -45,12 +45,12 @@ struct AboutView: View {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
         let gitHead = Bundle.main.object(forInfoDictionaryKey: "Pinna2HRTFGitHead") as? String ?? "unknown"
-        VStack(spacing: 16) {
+        VStack(spacing: 10) {
             if let iconURL = Bundle.main.url(forResource: "icon", withExtension: "png"), let icon = NSImage(contentsOf: iconURL) {
                 Image(nsImage: icon)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 300, height: 200)
+                    .frame(width: 300, height: 170)
                     .accessibilityLabel("Pinna2HRTF icon")
             }
             Text("Pinna2HRTF")
@@ -58,15 +58,18 @@ struct AboutView: View {
             Text("Version \(version) (\(build))")
                 .foregroundStyle(.secondary)
             Text("A desktop pipeline for ear-mesh preprocessing, Mesh2PPM inference, Mesh2HRTF simulation, and SOFA export.")
+                .frame(maxWidth: 380)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(.secondary)
             Text("Git HEAD: \(gitHead)\n© 2026 Any2HRTF")
                 .font(.caption)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
         }
-        .padding(24)
-        .frame(width: 440, height: 390)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .frame(width: 440)
     }
 }
 

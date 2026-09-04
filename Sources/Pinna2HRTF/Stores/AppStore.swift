@@ -425,19 +425,39 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let simulationPath = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Intermediates/\(side.title)/graded_head.ply").standardizedFileURL.path
         guard meshPath == preprocessingPath || meshPath == simulationPath else { return nil }
         if let microphonePlacementMeshURL, microphonePlacementMeshURL.standardizedFileURL.path == meshURL.standardizedFileURL.path, let pendingMicrophonePosition {
-            return SCNVector3(CGFloat(pendingMicrophonePosition.x), CGFloat(pendingMicrophonePosition.y), CGFloat(pendingMicrophonePosition.z))
+            return microphoneDisplayPosition(SCNVector3(Float(pendingMicrophonePosition.x), Float(pendingMicrophonePosition.y), Float(pendingMicrophonePosition.z)), meshURL: meshURL, project: project, side: side, positionIsInput: true)
         }
         if let position = ArtifactScanner.validManualMicrophonePosition(for: project, side: side) ?? ArtifactScanner.manualMicrophonePosition(for: project, side: side) {
-            return SCNVector3(CGFloat(position.x), CGFloat(position.y), CGFloat(position.z))
+            return microphoneDisplayPosition(SCNVector3(Float(position.x), Float(position.y), Float(position.z)), meshURL: meshURL, project: project, side: side, positionIsInput: true)
         }
         if let identity = ArtifactScanner.meshIdentity(meshURL) {
             for position in automaticMicrophonePositionsByMesh.values where position.meshPath == meshURL.standardizedFileURL.path && position.meshIdentity == identity {
-                return SCNVector3(Float(position.x), Float(position.y), Float(position.z))
+                return microphoneDisplayPosition(SCNVector3(Float(position.x), Float(position.y), Float(position.z)), meshURL: meshURL, project: project, side: side, positionIsInput: true)
             }
         }
         let parametersURL = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Projects/\(side.title)/parameters.json")
         guard let data = try? Data(contentsOf: parametersURL), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let values = object["sourceCenter"] as? [NSNumber], values.count == 3 else { return nil }
-        return SCNVector3(Float(values[0].doubleValue * 1000), Float(values[1].doubleValue * 1000), Float(values[2].doubleValue * 1000))
+        return microphoneDisplayPosition(SCNVector3(Float(values[0].doubleValue * 1000), Float(values[1].doubleValue * 1000), Float(values[2].doubleValue * 1000)), meshURL: meshURL, project: project, side: side, positionIsInput: false)
+    }
+
+    func microphoneDisplayPosition(_ position: SCNVector3, meshURL: URL, project: ProjectRecord, side: EarSide, positionIsInput: Bool) -> SCNVector3 {
+        guard let preprocessing = project.settings.preprocessing.headRadius, project.settings.preprocessing.useCustomHeadRadius ?? true, let radius = Double(preprocessing), radius >= 0 else { return position }
+        let sourceMesh = ArtifactScanner.preprocessingMesh(for: project, side: side)
+        let translatedMesh = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Intermediates/\(side.title)/input_ear.stl")
+        guard let sourceMesh, FileManager.default.fileExists(atPath: translatedMesh.path), let sourceCenterY = meshCenterY(sourceMesh), let translatedCenterY = meshCenterY(translatedMesh) else { return position }
+        let translation = translatedCenterY - sourceCenterY
+        let simulationPath = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Intermediates/\(side.title)/graded_head.ply").standardizedFileURL.path
+        if meshURL.standardizedFileURL.path == simulationPath {
+            return positionIsInput ? SCNVector3(CGFloat(position.x), CGFloat(position.y) + CGFloat(translation), CGFloat(position.z)) : position
+        }
+        return positionIsInput ? position : SCNVector3(CGFloat(position.x), CGFloat(position.y) - CGFloat(translation), CGFloat(position.z))
+    }
+
+    func meshCenterY(_ url: URL) -> Float? {
+        let asset = MDLAsset(url: url)
+        guard asset.count > 0 else { return nil }
+        let bounds = asset.boundingBox
+        return (bounds.minBounds.y + bounds.maxBounds.y) / 2
     }
 
     func meshSide(for meshURL: URL, project: ProjectRecord) -> EarSide? {
