@@ -71,6 +71,7 @@ def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: f
         print(f"Running {len(pending)} unfinished frequency steps with adaptive FMM expansion length={adaptive_fmm_length}", flush=True)
         total_ram = psutil.virtual_memory().total / 1073741824
         ram_budget = max_ram_load_gb or total_ram
+        warned_memory_steps: set[tuple[str, int, str]] = set()
         running = []
         while pending or running:
             finished = []
@@ -95,6 +96,16 @@ def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: f
                 if running and psutil.cpu_percent(interval=0.1) >= max_cpu_load:
                     break
                 pending.popleft()
+                available_ram = psutil.virtual_memory().available / 1073741824
+                safe_available_ram = available_ram * 0.9
+                warning_key = (project.name, step, str(source_dir))
+                if required_ram > safe_available_ram and warning_key not in warned_memory_steps:
+                    warned_memory_steps.add(warning_key)
+                    print(
+                        f"Warning: estimated RAM for {project.name}, {frequency:g} Hz is {required_ram:.2f} GB; "
+                        f"only {available_ram:.2f} GB is currently available with a 10% safety margin.",
+                        flush=True,
+                    )
                 log_path = source_dir / f"NC{step}-{step}_log.txt"
                 log_file = log_path.open("w", encoding="utf-8")
                 process = subprocess.Popen([str(executable), *adaptive_arguments, "-istart", str(step), "-iend", str(step)], cwd=source_dir, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=os.name != "nt")
