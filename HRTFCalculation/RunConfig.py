@@ -11,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable, Iterable
 
-from .Config import PipelineConfig, default_config, load_config, save_config
+from .Config import PipelineConfig, load_config, save_config, template_config
 
 
 Logger = Callable[[str], None]
@@ -333,7 +333,7 @@ def sofa_cli() -> None:
 def cli() -> None:
     args = parse_args()
     if args.write_template:
-        save_config(default_config(), args.write_template)
+        save_config(template_config(), args.write_template)
         print(f"Wrote {args.write_template}")
         return
     if not args.config:

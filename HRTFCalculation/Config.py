@@ -214,12 +214,27 @@ def load_config(path: str | Path) -> PipelineConfig:
     return PipelineConfig.model_validate(data).resolved(config_path.parent)
 
 
-def save_config(config: PipelineConfig, path: str | Path) -> None:
+def save_config(config: PipelineConfig | dict[str, Any], path: str | Path) -> None:
     config_path = Path(path).expanduser().resolve()
     config_path.parent.mkdir(parents=True, exist_ok=True)
+    data = config.yaml_dict() if isinstance(config, PipelineConfig) else config
     with config_path.open("w", encoding="utf-8") as file:
-        yaml.safe_dump(config.yaml_dict(), file, sort_keys=False)
+        yaml.safe_dump(data, file, sort_keys=False)
 
 
 def default_config() -> PipelineConfig:
     return PipelineConfig().resolved(worktree_root())
+
+
+def template_config() -> dict[str, Any]:
+    template = PipelineConfig().yaml_dict()
+    template["paths"] = {
+        "left_ear": "/path/to/left.stl",
+        "right_ear": "/path/to/right.stl",
+        "output_dir": "runs/example",
+        "external_deps_dir": "External",
+        "evaluation_grid": "Default",
+    }
+    template["inference"]["model_config_file"] = "HRTFCalculation/Inference/resources/Local 3 Views.yaml"
+    template["inference"]["model_checkpoint"] = "HRTFCalculation/Inference/resources/Local 3 Views.pth"
+    return template
