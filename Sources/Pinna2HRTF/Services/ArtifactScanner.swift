@@ -26,15 +26,6 @@ enum ArtifactScanner {
         return next
     }
 
-    static func meshArtifacts(title: String, folder: URL) -> [Artifact] {
-        guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return [] }
-        let meshes = files.filter { ["stl", "ply"].contains($0.pathExtension.lowercased()) }.sorted { $0.path < $1.path }
-        if meshes.count == 1, let file = meshes.first {
-            return [Artifact(title: title, url: file)]
-        }
-        return meshes.map { Artifact(title: "\(title) - \($0.deletingPathExtension().lastPathComponent)", url: $0) }
-    }
-
     static func predictionArtifacts(title: String, folder: URL) -> [Artifact] {
         guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return [] }
         let meshes = files.filter { $0.lastPathComponent.hasPrefix("Prediction_") && ["stl", "ply"].contains($0.pathExtension.lowercased()) }.sorted { $0.path < $1.path }
@@ -83,23 +74,23 @@ enum ArtifactScanner {
             if runningStage == stage {
                 return (stage, .running)
             }
-            if failedStages.contains(stage), !stageIsComplete(stage, project: project) {
+            let complete = stageIsComplete(stage, project: project)
+            if failedStages.contains(stage), !complete {
                 return (stage, .failed)
             }
             if stage == .inference, !project.settings.inference.usePredictionsForPreprocessing || (project.leftEar.isEmpty && project.rightEar.isEmpty) {
                 return (stage, .skipped)
             }
-            return (stage, stageIsComplete(stage, project: project) ? .done : .ready)
+            return (stage, complete ? .done : .ready)
         })
     }
 
     static func summary(for project: ProjectRecord) -> String {
         if project.leftEar.isEmpty && project.rightEar.isEmpty { return "Not configured" }
-        let states = stageStates(for: project, runningStage: nil, failedStages: [])
-        if states[.postprocessing] == .done { return "Postprocessed" }
-        if states[.numcalc] == .done { return "Solved" }
-        if states[.preprocessing] == .done { return "Projects ready" }
-        if states[.inference] == .done { return "Mesh2PPM Inference ready" }
+        if stageIsComplete(.postprocessing, project: project) { return "Postprocessed" }
+        if stageIsComplete(.numcalc, project: project) { return "Solved" }
+        if stageIsComplete(.preprocessing, project: project) { return "Projects ready" }
+        if project.settings.inference.usePredictionsForPreprocessing && stageIsComplete(.inference, project: project) { return "Mesh2PPM Inference ready" }
         return URL(fileURLWithPath: project.saveLocation).lastPathComponent
     }
 
@@ -128,8 +119,8 @@ enum ArtifactScanner {
             return leftDone && rightDone
         case .numcalc:
             if project.leftEar.isEmpty && project.rightEar.isEmpty { return false }
-            let leftDone = project.leftEar.isEmpty || numcalcIsComplete(output.appendingPathComponent("Projects/Left")) || containsOutput2HRTF(output.appendingPathComponent("Projects/Left/Output2HRTF"))
-            let rightDone = project.rightEar.isEmpty || numcalcIsComplete(output.appendingPathComponent("Projects/Right")) || containsOutput2HRTF(output.appendingPathComponent("Projects/Right/Output2HRTF"))
+            let leftDone = project.leftEar.isEmpty || numcalcIsComplete(output.appendingPathComponent("Projects/Left")) || containsSOFA(output.appendingPathComponent("Projects/Left/Output2HRTF"))
+            let rightDone = project.rightEar.isEmpty || numcalcIsComplete(output.appendingPathComponent("Projects/Right")) || containsSOFA(output.appendingPathComponent("Projects/Right/Output2HRTF"))
             return leftDone && rightDone
         case .postprocessing:
             return containsSOFA(output.appendingPathComponent("HRTF"))
@@ -151,11 +142,6 @@ enum ArtifactScanner {
         return files.contains { $0.pathExtension.lowercased() == "sofa" }
     }
 
-    static func containsOutput2HRTF(_ url: URL) -> Bool {
-        guard let files = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else { return false }
-        return files.contains { $0.pathExtension.lowercased() == "sofa" }
-    }
-
     static func numcalcCompleted(_ project: URL) -> Int {
         let source = project.appendingPathComponent("NumCalc/source_1")
         let files = (try? FileManager.default.contentsOfDirectory(at: source.appendingPathComponent("be.out"), includingPropertiesForKeys: nil)) ?? []
@@ -163,7 +149,7 @@ enum ArtifactScanner {
             guard path.lastPathComponent.hasPrefix("be."), let step = Int(path.lastPathComponent.dropFirst(3)) else { return false }
             return frequencyStepComplete(source: source, step: step)
         }.count
-        return completed > 0 ? completed : containsOutput2HRTF(project.appendingPathComponent("Output2HRTF")) ? numcalcTotal(project) : 0
+        return completed > 0 ? completed : containsSOFA(project.appendingPathComponent("Output2HRTF")) ? numcalcTotal(project) : 0
     }
 
     static func numcalcIsComplete(_ project: URL) -> Bool {

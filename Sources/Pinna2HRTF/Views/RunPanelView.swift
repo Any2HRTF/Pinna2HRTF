@@ -41,14 +41,14 @@ struct RunPanelView: View {
                     .frame(maxWidth: .infinity)
             }
             .tint(.red)
-            .disabled(!selectedProjectIsRunning)
+            .disabled(!store.selectedProjectIsRunning)
             Button(role: .destructive) {
                 store.confirmResetSelectedProjectOutputs()
             } label: {
-                Label("Reset", systemImage: "trash")
+                Label("Reset Outputs…", systemImage: "trash")
                     .frame(maxWidth: .infinity)
             }
-            .disabled(selectedProjectIsRunning)
+            .disabled(store.selectedProjectIsRunning)
         }
         }
         .buttonStyle(.bordered)
@@ -57,14 +57,9 @@ struct RunPanelView: View {
     }
 
     var summary: String {
-        if selectedProjectIsRunning { return "Running" }
+        if store.selectedProjectIsRunning { return "Running" }
         if let project = store.selectedProject { return ArtifactScanner.summary(for: project) }
         return "No project"
-    }
-
-    var selectedProjectIsRunning: Bool {
-        guard let project = store.selectedProject else { return false }
-        return store.runningProcesses[project.id] != nil
     }
 }
 
