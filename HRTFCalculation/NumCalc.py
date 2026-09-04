@@ -34,6 +34,7 @@ def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: f
         candidate = executable / ("NumCalc.exe" if os.name == "nt" else "NumCalc")
         if candidate.exists():
             executable = candidate
+    numcalc_path = executable
     adaptive_arguments = []
     if adaptive_fmm_length and os.name != "nt":
         wrapper_dir = Path(tempfile.mkdtemp(prefix="pinna2hrtf-numcalc-"))

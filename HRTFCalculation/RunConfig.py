@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import platform
 import subprocess
 import shutil
-import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable, Iterable
@@ -130,7 +128,7 @@ def predicted_stl(folder: Path, preferred_stem: str) -> Path | None:
     legacy_preferred = folder / f"{preferred_stem}.stl"
     if legacy_preferred.exists():
         return legacy_preferred
-    files = sorted(path for path in folder.iterdir() if path.suffix.lower() == ".stl")
+    files = [path for path in folder.iterdir() if path.suffix.lower() == ".stl"]
     if len(files) == 1:
         return files[0]
     return None
@@ -156,15 +154,6 @@ def run_numcalc_local(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
     if platform.system() == "Windows" and numcalc_path.is_file():
         numcalc_path = numcalc_path.parent
         logger(f"Using Windows NumCalc runtime folder: {numcalc_path}")
-    elif " " in str(numcalc_path):
-        link_dir = Path(tempfile.gettempdir()) / "Pinna2HRTF"
-        link_dir.mkdir(parents=True, exist_ok=True)
-        link_path = link_dir / "NumCalc"
-        if link_path.exists() or link_path.is_symlink():
-            link_path.unlink()
-        link_path.symlink_to(numcalc_path)
-        numcalc_path = link_path
-        logger(f"Using shell-safe NumCalc link: {numcalc_path}")
     logger(f"Local NumCalc project root: {projects_root}")
     if dry_run:
         return
@@ -230,7 +219,6 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
     logger(f"Running postprocessing into {config.postprocessing.output_sofa_dir}")
     if dry_run:
         return
-    import shutil
     import mesh2hrtf as m2h
     output_dir = config.postprocessing.output_sofa_dir
     if output_dir.exists() and config.postprocessing.overwrite:
@@ -310,7 +298,6 @@ def parse_sofa_args() -> argparse.Namespace:
 
 def sofa_cli() -> None:
     args = parse_sofa_args()
-    import shutil
     import mesh2hrtf as m2h
     output_dir = Path(args.output_dir)
     if output_dir.exists() and args.overwrite:

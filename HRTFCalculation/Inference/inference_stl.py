@@ -3,6 +3,7 @@ import argparse
 import os
 import torch
 import numpy as np
+from scipy.spatial import cKDTree
 from PIL import Image
 import trimesh
 from trimesh.registration import icp
@@ -94,11 +95,15 @@ def minimal_distances(P, Q,) -> np.ndarray:
         Minimal distances between P and Q.
     """
 
+    if P.dtype == np.float64 and Q.dtype == np.float64 and len(Q) and np.isfinite(P).all() and np.isfinite(Q).all():
+        nearest = cKDTree(Q).query(P)[1]
+        if (nearest < len(Q)).all():
+            return np.sqrt(np.sum((P - Q[nearest])**2, axis=1)).astype(np.float32)
     min_distances = np.zeros(P.shape[0], dtype=np.float32)
     for idx_pred in range(min_distances.shape[0]):
         min_distances[idx_pred] = np.sqrt(np.min(np.sum((P[idx_pred, :] - Q)**2, axis=1)))
-
     return min_distances
+
 
 def get_camera_position(camera_jitter=False, cam_radius=0.18):
 
@@ -383,12 +388,13 @@ def main(args):
             prediction_ppm = get_model_prediction(model, data)
 
             tempdir = tempfile.mkdtemp()
-            BezierPPM(from_dict=prediction_ppm).export_stl(file=f"{tempdir}/{stl_file[:-4]}.stl")
+            prediction = BezierPPM(from_dict=prediction_ppm)
+            prediction.export_stl(file=f"{tempdir}/{stl_file[:-4]}.stl")
 
             prediction_parameters_dir = output_path(folders[direction]["parameters"])
             if not os.path.isdir(prediction_parameters_dir):
                 os.makedirs(prediction_parameters_dir)
-            BezierPPM(from_dict=prediction_ppm).export_csv(file=f"{prediction_parameters_dir}/Prediction_Parameters_{stl_file[:-4]}.csv")
+            prediction.export_csv(file=f"{prediction_parameters_dir}/Prediction_Parameters_{stl_file[:-4]}.csv")
 
             predicted_cloud = trimesh.load_mesh(f"{tempdir}/{stl_file[:-4]}.stl")
             predicted_cloud = predicted_cloud.apply_transform(np.linalg.inv(transform_matrix))
@@ -423,10 +429,10 @@ def main(args):
             out["Hausdorff Distance"] = np.max([np.max(minimal_distances_direction_1), np.max(minimal_distances_direction_2)])
             out["Chamfer Distance"] = np.mean(minimal_distances_direction_1) + np.mean(minimal_distances_direction_2)
             
-            regions = BezierPPM(from_dict=prediction_ppm).get_region_indices()
+            regions = prediction.get_region_indices()
 
             # calculate region specific errors
-            points = BezierPPM(from_dict=prediction_ppm).points
+            points = prediction.points
             inverse_trasformation_matrix = np.linalg.inv(transform_matrix)
             transformed_point_cloud =  (inverse_trasformation_matrix[:3,:3] @ points.T + inverse_trasformation_matrix[:3,3:]).T
             

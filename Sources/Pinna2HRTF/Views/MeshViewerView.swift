@@ -18,6 +18,11 @@ struct MeshViewerView: View {
                         .font(.title2.weight(.semibold))
                     Text("Create or select a project to inspect meshes and logs.")
                         .foregroundStyle(.secondary)
+                    HStack {
+                        Button("New Project", action: store.createProject)
+                        Button("Import Project…", action: store.importProject)
+                    }
+                    .buttonStyle(.bordered)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -54,7 +59,7 @@ struct MeshViewerView: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                PersistentSceneView(scene: store.selectedScene, cameraState: $store.selectedCameraState, darkMode: colorScheme == .dark, placementMode: store.isPlacingMicrophone, cameraPositionChanged: store.updateCameraPosition, surfaceSelected: store.previewMicrophonePosition)
+                PersistentSceneView(scene: store.selectedScene, darkMode: colorScheme == .dark, placementMode: store.isPlacingMicrophone, cameraPositionChanged: store.updateCameraPosition, surfaceSelected: store.previewMicrophonePosition)
                     .onAppear {
                         store.updateSceneBackground(darkMode: colorScheme == .dark)
                     }
@@ -97,6 +102,7 @@ struct MeshViewerView: View {
                         Button("Cancel") {
                             store.cancelMicrophonePlacement()
                         }
+                        .keyboardShortcut(.cancelAction)
                         Button("Done") {
                             store.completeMicrophonePlacement()
                         }
@@ -159,7 +165,7 @@ struct MeshViewerView: View {
     }
 
     var logSummary: String {
-        if !store.runningProcesses.isEmpty || store.environmentProcess != nil { return "Running" }
+        if store.selectedProjectIsRunning || store.environmentProcess != nil { return "Running" }
         if store.logText.isEmpty { return "No output yet" }
         return store.logText.split(separator: "\n").last.map(String.init) ?? "Ready"
     }
@@ -186,14 +192,13 @@ struct MicrophonePlacementSurface: ViewModifier {
 
 struct PersistentSceneView: NSViewRepresentable {
     let scene: SCNScene
-    @Binding var cameraState: ViewerCameraState?
     let darkMode: Bool
     let placementMode: Bool
     let cameraPositionChanged: (SCNVector3) -> Void
     let surfaceSelected: (SCNVector3) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(cameraState: $cameraState, placementMode: placementMode, cameraPositionChanged: cameraPositionChanged, surfaceSelected: surfaceSelected)
+        Coordinator(placementMode: placementMode, cameraPositionChanged: cameraPositionChanged, surfaceSelected: surfaceSelected)
     }
 
     func makeNSView(context: Context) -> SCNView {
@@ -204,34 +209,28 @@ struct PersistentSceneView: NSViewRepresentable {
         view.backgroundColor = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
         view.delegate = context.coordinator
         view.addGestureRecognizer(NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.selectSurface(_:))))
-        context.coordinator.scene = scene
         return view
     }
 
     func updateNSView(_ view: SCNView, context: Context) {
-        context.coordinator.cameraState = $cameraState
         context.coordinator.placementMode = placementMode
         context.coordinator.cameraPositionChanged = cameraPositionChanged
         context.coordinator.surfaceSelected = surfaceSelected
         view.allowsCameraControl = true
         if view.scene !== scene {
             view.scene = scene
-            context.coordinator.scene = scene
             context.coordinator.lastPosition = nil
         }
         view.backgroundColor = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
     }
 
     final class Coordinator: NSObject, SCNSceneRendererDelegate {
-        var cameraState: Binding<ViewerCameraState?>
         var placementMode: Bool
         var cameraPositionChanged: (SCNVector3) -> Void
         var surfaceSelected: (SCNVector3) -> Void
-        weak var scene: SCNScene?
         var lastPosition: SCNVector3?
 
-        init(cameraState: Binding<ViewerCameraState?>, placementMode: Bool, cameraPositionChanged: @escaping (SCNVector3) -> Void, surfaceSelected: @escaping (SCNVector3) -> Void) {
-            self.cameraState = cameraState
+        init(placementMode: Bool, cameraPositionChanged: @escaping (SCNVector3) -> Void, surfaceSelected: @escaping (SCNVector3) -> Void) {
             self.placementMode = placementMode
             self.cameraPositionChanged = cameraPositionChanged
             self.surfaceSelected = surfaceSelected
