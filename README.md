@@ -26,7 +26,7 @@ Project files stay in the folder you choose. App settings and caches are stored 
 
 ## Install from source
 
-Python 3.11, [uv](https://docs.astral.sh/uv/getting-started/installation/), and Git are required.
+[uv](https://docs.astral.sh/uv/getting-started/installation/), and [Git](https://git-scm.com/install/) are required. All other dependencies are managed through uv and the prepare scripts
 
 ```sh
 git clone https://github.com/Any2HRTF/Pinna2HRTF.git
@@ -58,7 +58,7 @@ Run commands from the repository root.
 
 ## Command-line workflow
 
-The examples below use a POSIX shell. Paths and frequency settings are examples; adjust them for your data and experiment.
+The examples below use a POSIX shell such as Bash: Terminal on macOS/Linux, or Git Bash on Windows (which comes installed with git). In Git Bash, write Windows paths as `/c/Users/...` rather than `C:\Users\...`. Paths and frequency settings are examples; adjust them for your data and experiment.
 
 ### 1. Choose the input meshes
 
