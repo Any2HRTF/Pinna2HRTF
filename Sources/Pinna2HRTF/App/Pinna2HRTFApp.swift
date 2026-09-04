@@ -22,6 +22,7 @@ struct Pinna2HRTFApp: App {
                         .credits: NSAttributedString(string: "A desktop pipeline for ear-mesh preprocessing, Mesh2PPM inference, Mesh2HRTF simulation, and SOFA export.\n\nGit HEAD: \(gitHead)\n© 2026 Any2HRTF")
                     ]
                     if let iconURL = Bundle.main.url(forResource: "icon", withExtension: "png"), let icon = NSImage(contentsOf: iconURL) {
+                        icon.size = NSSize(width: 128, height: 85)
                         options[.applicationIcon] = icon
                     }
                     NSApp.orderFrontStandardAboutPanel(options: options)
