@@ -10,7 +10,7 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SelfContained>true</SelfContained>
     <PublishTrimmed>false</PublishTrimmed>
-    <AssemblyName>Pinna2HRTF.Windows</AssemblyName>
+    <AssemblyName>Pinna2HRTF</AssemblyName>
     <RootNamespace>Pinna2HRTF.Windows</RootNamespace>
     <Version>1.0.0</Version>
     <InformationalVersion>1.0.0</InformationalVersion>

@@ -57,9 +57,9 @@ foreach ($xamlResource in @("App.xbf", "MainWindow.xbf")) {
         Copy-Item $sourceXamlResource (Join-Path $dist $xamlResource) -Force
     }
 }
-$appPri = Join-Path $buildOutput "Pinna2HRTF.Windows.pri"
+$appPri = Join-Path $buildOutput "Pinna2HRTF.pri"
 if (Test-Path $appPri) {
-    Copy-Item $appPri (Join-Path $dist "Pinna2HRTF.Windows.pri") -Force
+    Copy-Item $appPri (Join-Path $dist "Pinna2HRTF.pri") -Force
 }
 Copy-Item (Join-Path $root "HRTFCalculation") (Join-Path $dist "HRTFCalculation") -Recurse -Force
 Copy-Item (Join-Path $root "pyproject.toml") (Join-Path $dist "pyproject.toml") -Force

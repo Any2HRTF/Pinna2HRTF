@@ -18,7 +18,7 @@ The pipeline consists of:
 Packaged releases include Python, the inference models, NumCalc, mesh grading, and Mesh2HRTF. They run offline and do not require Blender or `uv`.
 
 - **macOS:** extract `Pinna2HRTF-macos.zip`, move the app to Applications, and open it. The current build requires Apple Silicon and macOS 13 or later. It is ad-hoc signed and not notarized.
-- **Windows:** extract the complete `Pinna2HRTF-windows.zip` archive and run `Pinna2HRTF.Windows.exe` from the extracted folder. The current build requires x64 Windows 10 version 2004 or later.
+- **Windows:** extract the complete `Pinna2HRTF-windows.zip` archive and run `Pinna2HRTF.exe` from the extracted folder. The current build requires x64 Windows 10 version 2004 or later.
 
 Downloads are available from the [SONICOM tool page](https://ecosystem.sonicom.eu/tools/30).
 
