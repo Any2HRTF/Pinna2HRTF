@@ -117,7 +117,7 @@ enum Defaults {
             name: "Project \(index)",
             leftEar: "",
             rightEar: "",
-            saveLocation: "",
+            saveLocation: appDataURL.appendingPathComponent("Projects/Project \(index)").path,
             settings: settings(packageRoot: packageRoot)
         )
     }

@@ -20,6 +20,12 @@ struct RunPanelView: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if store.preprocessingNeedsRerun(for: project) {
+                    Text("Settings changed · rerun preprocessing before NumCalc")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                }
             }
             VStack(spacing: 6) {
                 ForEach(Stage.allCases) { stage in
@@ -78,10 +84,10 @@ struct StageRunButton: View {
                     Text(stage.title)
                         .foregroundStyle(available ? .primary : .secondary)
                         .lineLimit(1)
-                    Text(state.rawValue.capitalized)
+                    Text(stateLabel)
                         .font(.caption)
                         .foregroundStyle(stateColor)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
                 Spacer(minLength: 0)
             }
@@ -101,5 +107,9 @@ struct StageRunButton: View {
         case .done: .green
         case .skipped: .secondary
         }
+    }
+
+    var stateLabel: String {
+        state == .skipped && stage == .inference ? "Skipped · not run" : state.rawValue.capitalized
     }
 }

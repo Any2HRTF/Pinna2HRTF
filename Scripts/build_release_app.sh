@@ -1,26 +1,59 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+MODE="development"
+if [[ $# -gt 0 ]]; then
+  if [[ "$1" != "--distribution" || $# -ne 1 ]]; then
+    echo "usage: $0 [--distribution]" >&2
+    exit 2
+  fi
+  MODE="distribution"
+fi
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$ROOT/.." && pwd)"
 APP_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$ROOT/pyproject.toml" | head -n 1)"
 GIT_HEAD="$(git -C "$ROOT" rev-parse --short HEAD)"
+APP_BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD)"
 SCRATCH="/private/tmp/pinna2hrtf-swift-build"
 STAGE_ROOT="$(mktemp -d /private/tmp/pinna2hrtf-release-stage.XXXXXX)"
 CLEAN_ROOT="$(mktemp -d /private/tmp/pinna2hrtf-release-clean.XXXXXX)"
 trap 'rm -rf "$STAGE_ROOT" "$CLEAN_ROOT"' EXIT
 APP_DIR="$STAGE_ROOT/Pinna2HRTF.app"
+CLEAN_APP_DIR="$CLEAN_ROOT/Pinna2HRTF.app"
 FINAL_APP_DIR="$ROOT/build/release/Pinna2HRTF.app"
+DIST_DIR="$ROOT/dist"
 CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 ICON="$ROOT/Sources/Pinna2HRTF/Resources/app_icon.icns"
 EXTERNAL_ROOT="$ROOT/External"
+SIGNING_IDENTITY="-"
+NOTARY_PROFILE="${PINNA2HRTF_NOTARY_PROFILE:-Pinna2HRTF-notary}"
 if [[ ! -d "$EXTERNAL_ROOT" ]]; then
   EXTERNAL_ROOT="$REPO_ROOT/External"
 fi
-if [[ -z "$APP_VERSION" ]]; then
+if [[ -z "$APP_VERSION" || -z "$APP_BUILD_NUMBER" ]]; then
   exit 1
+fi
+if [[ "$MODE" == "distribution" ]]; then
+  SIGNING_IDENTITY="${PINNA2HRTF_SIGNING_IDENTITY:-}"
+  if [[ -z "$SIGNING_IDENTITY" ]]; then
+    IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p')"
+    IDENTITY_COUNT="$(printf "%s\n" "$IDENTITIES" | sed '/^$/d' | wc -l | tr -d ' ')"
+    if [[ "$IDENTITY_COUNT" != "1" ]]; then
+      echo "Distribution requires exactly one Developer ID Application identity or PINNA2HRTF_SIGNING_IDENTITY." >&2
+      exit 1
+    fi
+    SIGNING_IDENTITY="$IDENTITIES"
+  elif ! security find-identity -v -p codesigning 2>/dev/null | grep -Fq "\"$SIGNING_IDENTITY\""; then
+    echo "Developer ID identity not found: $SIGNING_IDENTITY" >&2
+    exit 1
+  fi
+  if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+    echo "Notary profile '$NOTARY_PROFILE' is missing or invalid." >&2
+    exit 1
+  fi
 fi
 UV_BIN="$(command -v uv || true)"
 if [[ ! -x "$UV_BIN" ]]; then
@@ -71,6 +104,7 @@ if [[ -d "$EXTERNAL_ROOT/src/Mesh2HRTF/mesh2hrtf" && -f "$EXTERNAL_ROOT/src/Mesh
   mkdir -p "$RESOURCES/External/src/Mesh2HRTF"
   cp -R "$EXTERNAL_ROOT/src/Mesh2HRTF/mesh2hrtf" "$RESOURCES/External/src/Mesh2HRTF/mesh2hrtf"
   cp "$EXTERNAL_ROOT/src/Mesh2HRTF/VERSION" "$RESOURCES/External/src/Mesh2HRTF/VERSION"
+  find "$RESOURCES/External/src/Mesh2HRTF" -type f -name '*.o' -delete
 fi
 if [[ -f "$ICON" ]]; then
   cp "$ICON" "$RESOURCES/app_icon.icns"
@@ -139,34 +173,82 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <key>CFBundleShortVersionString</key>
   <string>$APP_VERSION</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>$APP_BUILD_NUMBER</string>
   <key>Pinna2HRTFGitHead</key>
   <string>$GIT_HEAD</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.utilities</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSHumanReadableCopyright</key>
+  <string>© 2026 Any2HRTF</string>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
   <key>NSUserNotificationUsageDescription</key>
   <string>Notify when a Pinna2HRTF pipeline stage completes.</string>
 </dict>
 </plist>
 PLIST
 chmod +x "$MACOS/Pinna2HRTF"
-ditto --norsrc --noextattr --noqtn "$APP_DIR" "$CLEAN_ROOT/Pinna2HRTF.app"
-codesign --force --deep --sign - "$CLEAN_ROOT/Pinna2HRTF.app"
-codesign --verify --deep --strict "$CLEAN_ROOT/Pinna2HRTF.app"
-rm -rf "$FINAL_APP_DIR"
-mkdir -p "$(dirname "$FINAL_APP_DIR")"
-if ditto --norsrc --noextattr --noqtn "$CLEAN_ROOT/Pinna2HRTF.app" "$FINAL_APP_DIR"; then
-  if xattr -cr "$FINAL_APP_DIR" 2>/dev/null && codesign --force --deep --sign - "$FINAL_APP_DIR" >/dev/null 2>&1 && xattr -cr "$FINAL_APP_DIR" 2>/dev/null && codesign --verify --deep --strict "$FINAL_APP_DIR" >/dev/null 2>&1; then
-    echo "$FINAL_APP_DIR"
-  else
-    echo "Could not verify the copied release bundle at $FINAL_APP_DIR; using the signed temporary bundle at $CLEAN_ROOT/Pinna2HRTF.app" >&2
-    trap - EXIT
-    echo "$CLEAN_ROOT/Pinna2HRTF.app"
+ditto --norsrc --noextattr --noqtn "$APP_DIR" "$CLEAN_APP_DIR"
+xattr -cr "$CLEAN_APP_DIR"
+while IFS= read -r -d '' candidate; do
+  if file -b "$candidate" | grep -q "Mach-O"; then
+    if ! lipo -archs "$candidate" | tr ' ' '\n' | grep -qx "arm64"; then
+      echo "Embedded executable is not Apple Silicon compatible: $candidate" >&2
+      exit 1
+    fi
+    if [[ "$MODE" == "distribution" ]]; then
+      codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$candidate"
+    else
+      codesign --force --sign - "$candidate"
+    fi
   fi
+done < <(find "$CLEAN_APP_DIR/Contents" -type f -print0)
+while IFS= read -r bundle; do
+  if [[ "$MODE" == "distribution" ]]; then
+    codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$bundle"
+  else
+    codesign --force --sign - "$bundle"
+  fi
+done < <(find "$CLEAN_APP_DIR/Contents" -type d \( -name '*.framework' -o -name '*.bundle' -o -name '*.xpc' -o -name '*.app' \) -print | awk '{ print length($0) "\t" $0 }' | sort -rn | cut -f2-)
+if [[ "$MODE" == "distribution" ]]; then
+  codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$CLEAN_APP_DIR"
 else
-  echo "Could not write the release bundle to $FINAL_APP_DIR; using the signed temporary bundle at $CLEAN_ROOT/Pinna2HRTF.app" >&2
-  trap - EXIT
-  echo "$CLEAN_ROOT/Pinna2HRTF.app"
+  codesign --force --sign - "$CLEAN_APP_DIR"
+fi
+codesign --verify --deep --strict --verbose=2 "$CLEAN_APP_DIR"
+if [[ "$MODE" == "distribution" ]]; then
+  APP_ARCHIVE="$STAGE_ROOT/Pinna2HRTF.zip"
+  DMG_STAGE="$STAGE_ROOT/dmg"
+  DMG_PATH="$DIST_DIR/Pinna2HRTF-$APP_VERSION-macOS-arm64.dmg"
+  ditto -c -k --sequesterRsrc --keepParent "$CLEAN_APP_DIR" "$APP_ARCHIVE"
+  xcrun notarytool submit "$APP_ARCHIVE" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun stapler staple "$CLEAN_APP_DIR"
+  xcrun stapler validate "$CLEAN_APP_DIR"
+  spctl --assess --type execute --verbose=2 "$CLEAN_APP_DIR"
+  mkdir -p "$DMG_STAGE" "$DIST_DIR"
+  ditto --norsrc --noextattr --noqtn "$CLEAN_APP_DIR" "$DMG_STAGE/Pinna2HRTF.app"
+  ln -s /Applications "$DMG_STAGE/Applications"
+  rm -f "$DMG_PATH" "$DMG_PATH.sha256"
+  hdiutil create -volname "Pinna2HRTF $APP_VERSION" -srcfolder "$DMG_STAGE" -format UDZO -ov "$DMG_PATH"
+  codesign --force --sign "$SIGNING_IDENTITY" --timestamp "$DMG_PATH"
+  xcrun notarytool submit "$DMG_PATH" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun stapler staple "$DMG_PATH"
+  xcrun stapler validate "$DMG_PATH"
+  spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG_PATH"
+  shasum -a 256 "$DMG_PATH" > "$DMG_PATH.sha256"
+  rm -rf "$FINAL_APP_DIR"
+  mkdir -p "$(dirname "$FINAL_APP_DIR")"
+  ditto --norsrc --noextattr --noqtn "$CLEAN_APP_DIR" "$FINAL_APP_DIR"
+  codesign --verify --deep --verbose=2 "$FINAL_APP_DIR"
+  echo "$DMG_PATH"
+else
+  rm -rf "$FINAL_APP_DIR"
+  mkdir -p "$(dirname "$FINAL_APP_DIR")"
+  ditto --norsrc --noextattr --noqtn "$CLEAN_APP_DIR" "$FINAL_APP_DIR"
+  codesign --verify --deep --verbose=2 "$FINAL_APP_DIR"
+  echo "$FINAL_APP_DIR"
 fi

@@ -334,11 +334,22 @@ def main(args):
     def output_path(path):
         return path if os.path.isabs(path) else os.path.join(args.data_dir, path)
 
-    left_alignments = {}
+    directions = []
     for direction in ["Left", "Right"]:
-        data_dir = output_path(folders[direction]["target"])
+        target_folder = folders[direction]["target"]
+        if not target_folder:
+            continue
+        data_dir = output_path(target_folder)
         if not os.path.isdir(data_dir):
-            raise FileNotFoundError(f"BezierPPM target folder not found: {data_dir}")
+            continue
+        if not any(path.lower().endswith(".stl") for path in os.listdir(data_dir)):
+            continue
+        directions.append((direction, data_dir))
+    if not directions:
+        raise FileNotFoundError(f"No BezierPPM target folder found in: {args.data_dir}")
+
+    left_alignments = {}
+    for direction, data_dir in directions:
 
         for stl_file in sorted(os.listdir(data_dir)):
             if stl_file[-4:] != ".stl":

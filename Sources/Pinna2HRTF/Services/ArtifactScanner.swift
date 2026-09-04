@@ -48,7 +48,7 @@ enum ArtifactScanner {
         let sourcePath = side == .left ? project.leftEar : project.rightEar
         guard !sourcePath.isEmpty else { return nil }
         let source = URL(fileURLWithPath: sourcePath)
-        guard project.settings.inference.usePredictionsForPreprocessing, !project.leftEar.isEmpty, !project.rightEar.isEmpty else {
+        guard project.settings.inference.usePredictionsForPreprocessing else {
             return FileManager.default.fileExists(atPath: source.path) ? source : nil
         }
         let folderName = side == .left ? project.settings.inference.predictionLeftFolder : project.settings.inference.predictionRightFolder
@@ -86,7 +86,7 @@ enum ArtifactScanner {
             if failedStages.contains(stage), !stageIsComplete(stage, project: project) {
                 return (stage, .failed)
             }
-            if stage == .inference, !project.settings.inference.usePredictionsForPreprocessing {
+            if stage == .inference, !project.settings.inference.usePredictionsForPreprocessing || (project.leftEar.isEmpty && project.rightEar.isEmpty) {
                 return (stage, .skipped)
             }
             return (stage, stageIsComplete(stage, project: project) ? .done : .ready)
@@ -118,7 +118,6 @@ enum ArtifactScanner {
         case .inference:
             if !settings.usePredictionsForPreprocessing { return true }
             if project.leftEar.isEmpty && project.rightEar.isEmpty { return false }
-            if project.leftEar.isEmpty || project.rightEar.isEmpty { return true }
             let leftDone = project.leftEar.isEmpty || containsMesh(output.appendingPathComponent(settings.predictionLeftFolder))
             let rightDone = project.rightEar.isEmpty || containsMesh(output.appendingPathComponent(settings.predictionRightFolder))
             return leftDone && rightDone
@@ -143,7 +142,8 @@ enum ArtifactScanner {
 
     static func containsMesh(_ url: URL) -> Bool {
         guard let files = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else { return false }
-        return files.contains { ["stl", "ply"].contains($0.pathExtension.lowercased()) }
+        let meshes = files.filter { ["stl", "ply"].contains($0.pathExtension.lowercased()) && $0.deletingPathExtension().lastPathComponent.caseInsensitiveCompare("graded_head") != .orderedSame }
+        return meshes.contains { $0.deletingPathExtension().lastPathComponent.hasPrefix("Prediction_") } || meshes.count == 1
     }
 
     static func containsSOFA(_ url: URL) -> Bool {

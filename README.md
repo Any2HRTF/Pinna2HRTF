@@ -17,7 +17,7 @@ The pipeline consists of:
 
 Packaged releases include Python, the inference models, NumCalc, mesh grading, and Mesh2HRTF. They run offline and do not require Blender or `uv`.
 
-- **macOS:** extract `Pinna2HRTF-macos.zip`, move the app to Applications, and open it. The current build requires Apple Silicon and macOS 13 or later. It is ad-hoc signed and not notarized.
+- **macOS:** open `Pinna2HRTF-<version>-macOS-arm64.dmg`, drag Pinna2HRTF to Applications, and open it. Distribution builds require Apple Silicon and macOS 13 or later and are Developer ID signed and notarized. Local development builds remain ad-hoc signed.
 - **Windows:** extract the complete `Pinna2HRTF-windows.zip` archive and run `Pinna2HRTF.exe` from the extracted folder. The current build requires x64 Windows 10 version 2004 or later.
 
 Downloads are available from the [SONICOM tool page](https://ecosystem.sonicom.eu/tools/30).
@@ -73,7 +73,7 @@ mkdir -p "$OUT"
 
 ### 2. Run inference if needed
 
-Inference is optional. For a bilateral run, place both scans under the same subject filename:
+Inference is optional. For a bilateral run, place both scans under the same subject filename. A single-ear run can provide only the available side:
 
 ```sh
 mkdir -p "$OUT/Input/Left" "$OUT/Input/Right"
@@ -173,6 +173,14 @@ bash Scripts/build_release_app.sh
 ```
 
 The app is written to `build/release/Pinna2HRTF.app`. Use `Scripts/build_and_run.sh` to build and launch it.
+
+To create a distributable DMG, install a Developer ID Application certificate and save notarization credentials in the login Keychain under the profile `Pinna2HRTF-notary`, then run:
+
+```sh
+bash Scripts/build_release_app.sh --distribution
+```
+
+The script signs all embedded executable code with the hardened runtime, notarizes and staples the app and DMG, and writes `dist/Pinna2HRTF-<version>-macOS-arm64.dmg` with a matching SHA-256 checksum. Set `PINNA2HRTF_SIGNING_IDENTITY` only when the Keychain contains more than one Developer ID Application identity. Set `PINNA2HRTF_NOTARY_PROFILE` to override the default Keychain profile name.
 
 Build the Windows app on Windows with the .NET 8 SDK, `uv`, and Git:
 

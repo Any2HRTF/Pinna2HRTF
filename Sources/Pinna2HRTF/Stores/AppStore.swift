@@ -32,6 +32,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     private var automaticMicrophonePositionsByMesh: [String: ManualMicrophonePosition] = [:]
     @Published private var automaticMicrophoneProcesses: [String: Process] = [:]
     private let microphoneMarkerName = "pinna2hrtf-microphone-marker"
+    private var notificationsConfigured = false
 
     let rootURL: URL
     let packageURL: URL
@@ -55,7 +56,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         environment = registry.environment
         viewerStateByProject = Self.loadViewerStates()
         super.init()
-        configureNotifications()
         registryStore.save(ProjectRegistry(projects: projects, selectedProjectID: selectedProjectID, environment: environment))
         refreshArtifacts()
         restoreViewer()
@@ -197,7 +197,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         failedStagesByProject[project.id] = []
         persist()
         refreshArtifacts()
-        let completed = Stage.allCases.filter { ArtifactScanner.stageIsComplete($0, project: project) }.map(\.title)
+        let completed = ArtifactScanner.stageStates(for: project, runningStage: nil, failedStages: []).filter { $0.value == .done }.map { $0.key.title }
         let completedText = completed.isEmpty ? "none detected" : completed.joined(separator: ", ")
         appendLog("Imported. Completed: \(completedText).")
     }
@@ -291,8 +291,13 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             stageStates = Dictionary(uniqueKeysWithValues: Stage.allCases.map { ($0, .ready) })
             return
         }
+        recordInitialPreprocessingSignature(for: selectedProject)
         artifacts = ArtifactScanner.artifacts(for: selectedProject)
-        stageStates = ArtifactScanner.stageStates(for: selectedProject, runningStage: runningStages[selectedProject.id], failedStages: failedStagesByProject[selectedProject.id] ?? [])
+        var states = ArtifactScanner.stageStates(for: selectedProject, runningStage: runningStages[selectedProject.id], failedStages: failedStagesByProject[selectedProject.id] ?? [])
+        if preprocessingNeedsRerun(for: selectedProject), states[.preprocessing] == .done {
+            states[.preprocessing] = .ready
+        }
+        stageStates = states
     }
 
     func restoreViewer() {
@@ -705,7 +710,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func stageBlocked(_ stage: Stage) -> Bool {
         guard let project = selectedProject else { return false }
-        return stage == .preprocessing && project.settings.inference.usePredictionsForPreprocessing && !ArtifactScanner.stageIsComplete(.inference, project: project)
+        return stage == .preprocessing && project.settings.inference.usePredictionsForPreprocessing && !project.leftEar.isEmpty && !project.rightEar.isEmpty && !ArtifactScanner.stageIsComplete(.inference, project: project)
     }
 
     func canRun(stage: Stage) -> Bool {
@@ -728,7 +733,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         guard (project.leftEar.isEmpty || FileManager.default.fileExists(atPath: project.leftEar)), (project.rightEar.isEmpty || FileManager.default.fileExists(atPath: project.rightEar)) else { return false }
         switch stage {
         case .inference:
-            return project.settings.inference.usePredictionsForPreprocessing && !project.leftEar.isEmpty && !project.rightEar.isEmpty && FileManager.default.fileExists(atPath: project.settings.inference.modelConfig) && FileManager.default.fileExists(atPath: project.settings.inference.modelCheckpoint)
+            return project.settings.inference.usePredictionsForPreprocessing && FileManager.default.fileExists(atPath: project.settings.inference.modelConfig) && FileManager.default.fileExists(atPath: project.settings.inference.modelCheckpoint)
         case .preprocessing:
             guard !stageBlocked(stage), FileManager.default.fileExists(atPath: environment.meshGradingExecutable), FileManager.default.fileExists(atPath: environment.externalDir + "/src/Mesh2HRTF/mesh2hrtf"), !isPlacingMicrophone else { return false }
             return true
@@ -739,6 +744,37 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
     }
 
+    func preprocessingNeedsRerun(for project: ProjectRecord) -> Bool {
+        guard ArtifactScanner.stageIsComplete(.preprocessing, project: project) else { return false }
+        let signatureURL = URL(fileURLWithPath: project.saveLocation).appendingPathComponent(".pinna2hrtf-preprocessing-signature")
+        guard let saved = try? String(contentsOf: signatureURL, encoding: .utf8) else { return false }
+        return saved != preprocessingSignature(for: project)
+    }
+
+    func preprocessingSignature(for project: ProjectRecord) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let inference = (try? encoder.encode(project.settings.inference)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let preprocessing = (try? encoder.encode(project.settings.preprocessing)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let leftIdentity = project.leftEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: project.leftEar)) ?? "")
+        let rightIdentity = project.rightEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: project.rightEar)) ?? "")
+        return [project.leftEar, project.rightEar, project.inputHandling.rawValue, leftIdentity, rightIdentity, inference, preprocessing].joined(separator: "\n")
+    }
+
+    func recordInitialPreprocessingSignature(for project: ProjectRecord) {
+        guard ArtifactScanner.stageIsComplete(.preprocessing, project: project), !project.saveLocation.isEmpty else { return }
+        let signatureURL = URL(fileURLWithPath: project.saveLocation).appendingPathComponent(".pinna2hrtf-preprocessing-signature")
+        guard !FileManager.default.fileExists(atPath: signatureURL.path) else { return }
+        try? preprocessingSignature(for: project).write(to: signatureURL, atomically: true, encoding: .utf8)
+    }
+
+    func recordPreprocessingSignature(for project: ProjectRecord) {
+        guard !project.saveLocation.isEmpty else { return }
+        let output = URL(fileURLWithPath: project.saveLocation)
+        try? FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        try? preprocessingSignature(for: project).write(to: output.appendingPathComponent(".pinna2hrtf-preprocessing-signature"), atomically: true, encoding: .utf8)
+    }
+
     func run(stage: Stage) {
         guard let project = selectedProject else {
             appendLog("Create or select a project before running.")
@@ -746,6 +782,11 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
         guard runningProcesses[project.id] == nil else {
             appendLog("A task is already running.")
+            return
+        }
+        if stage == .numcalc, preprocessingNeedsRerun(for: project) {
+            guard confirmRerunPreprocessing(for: project) else { return }
+            run(stage: .preprocessing)
             return
         }
         guard !stageBlocked(stage) else {
@@ -760,6 +801,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             appendLog("Select an ear mesh and save location first.")
             return
         }
+        guard stageCanRun(stage, project: project) else {
+            appendLog("\(stage.title) is not ready. Check the project inputs and previous stages.")
+            return
+        }
         do {
             try prepareRuntimeProject()
             let configURL = try PipelineConfigWriter.prepare(project: project, environment: environment)
@@ -772,6 +817,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func startProcess(stage: Stage, project: ProjectRecord, configURL: URL) {
+        configureNotifications()
         let process = Process()
         if Defaults.isPackagedApp {
             process.executableURL = runtimePythonURL
@@ -815,6 +861,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 if stage == .inference, process.terminationStatus == 0 {
                     store.clearStaleMicrophonePositions(for: project.id)
                 }
+                if stage == .preprocessing, process.terminationStatus == 0 {
+                    store.recordPreprocessingSignature(for: project)
+                }
                 store.refreshArtifacts()
             }
         }
@@ -848,6 +897,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func configureNotifications() {
+        guard !notificationsConfigured else { return }
+        notificationsConfigured = true
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         center.requestAuthorization(options: [.alert, .sound]) { [weak self] granted, error in
@@ -1068,6 +1119,16 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         setBezierPPM(enabled)
     }
 
+    func confirmRerunPreprocessing(for project: ProjectRecord) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Preprocessing must be rerun"
+        alert.informativeText = "Project settings changed after preprocessing. Run preprocessing again before NumCalc?"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     func confirmResetOutputs(for project: ProjectRecord) -> Bool {
         let alert = NSAlert()
         alert.messageText = "Reset pipeline outputs?"
@@ -1102,7 +1163,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             "Projects",
             "HRTF",
             "Results Inference.csv",
-            ".pinna2hrtf_native_run.yaml"
+            ".pinna2hrtf_native_run.yaml",
+            ".pinna2hrtf-preprocessing-signature"
         ]
         for name in names {
             let url = output.appendingPathComponent(name)
@@ -1180,6 +1242,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             updated.leftEar = migratedPath(updated.leftEar, replacements: replacements)
             updated.rightEar = migratedPath(updated.rightEar, replacements: replacements)
             updated.saveLocation = migratedPath(updated.saveLocation, replacements: replacements)
+            if updated.saveLocation.isEmpty {
+                let folderName = updated.name.replacingOccurrences(of: "/", with: "-")
+                updated.saveLocation = Defaults.appDataURL.appendingPathComponent("Projects/\(folderName)").path
+            }
             let projectFolder = URL(fileURLWithPath: updated.saveLocation)
             let entries = try? FileManager.default.contentsOfDirectory(at: projectFolder, includingPropertiesForKeys: nil)
             let legacyIntermediates = entries?.first(where: { $0.lastPathComponent == "intermediates" })

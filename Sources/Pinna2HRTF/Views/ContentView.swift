@@ -57,7 +57,6 @@ struct ContentView: View {
                     Label(inspectorPresented ? "Hide Project Settings" : "Show Project Settings", systemImage: "sidebar.right")
                 }
                 .help(inspectorPresented ? "Hide Project Settings" : "Show Project Settings")
-                .keyboardShortcut("i", modifiers: [.command, .option])
             }
         }
         .focusedSceneValue(\.pipelineCommands, commandContext)
@@ -70,13 +69,17 @@ struct ContentView: View {
     }
 
     @ViewBuilder var workspace: some View {
-        HSplitView {
+        if #available(macOS 14.0, *) {
             navigationWorkspace
-                .frame(minWidth: 640, maxWidth: .infinity)
-                .layoutPriority(1)
-            if inspectorPresented {
-                ProjectInspectorView(store: store)
-                    .frame(minWidth: 320, idealWidth: 400, maxWidth: 720)
+        } else {
+            HSplitView {
+                navigationWorkspace
+                    .frame(minWidth: 460, maxWidth: .infinity)
+                    .layoutPriority(1)
+                if inspectorPresented {
+                    ProjectInspectorView(store: store)
+                        .frame(minWidth: 260, idealWidth: 360, maxWidth: 720)
+                }
             }
         }
     }
@@ -84,12 +87,24 @@ struct ContentView: View {
     var navigationWorkspace: some View {
         NavigationSplitView {
             ProjectSidebarView(store: store)
-                .navigationSplitViewColumnWidth(240)
+                .navigationSplitViewColumnWidth(min: 180, ideal: 240, max: 320)
         } detail: {
-            MeshViewerView(store: store, logExpanded: $logExpanded)
-                .frame(minWidth: 360, maxWidth: .infinity)
+            meshViewer
+                .frame(minWidth: 280, maxWidth: .infinity)
         }
         .navigationSplitViewStyle(.balanced)
+    }
+
+    @ViewBuilder var meshViewer: some View {
+        if #available(macOS 14.0, *) {
+            MeshViewerView(store: store, logExpanded: $logExpanded)
+                .inspector(isPresented: $inspectorPresented) {
+                    ProjectInspectorView(store: store)
+                        .inspectorColumnWidth(min: 260, ideal: 360, max: 720)
+                }
+        } else {
+            MeshViewerView(store: store, logExpanded: $logExpanded)
+        }
     }
 
     var commandContext: PipelineCommandContext {
@@ -102,6 +117,14 @@ struct ContentView: View {
             canRunStage: { stage in store.canRun(stage: stage) },
             canStopProject: selectedProjectIsRunning,
             canResetProject: selectedProject != nil && !selectedProjectIsRunning,
+            artifacts: store.artifacts.filter(\.exists),
+            selectedArtifactURL: store.selectedMesh,
+            canPreview: selectedProject != nil && !store.isPlacingMicrophone,
+            canPlaceMicrophone: { side in
+                !store.isPlacingMicrophone && (selectedProject.map { side == .left ? !$0.leftEar.isEmpty : !$0.rightEar.isEmpty } ?? false)
+            },
+            isLogExpanded: logExpanded,
+            isInspectorPresented: inspectorPresented,
             createProject: { store.createProject() },
             importProject: { store.importProject() },
             duplicateProject: { store.duplicateSelectedProject() },
@@ -110,7 +133,11 @@ struct ContentView: View {
             runStage: { store.run(stage: $0) },
             stopProject: { store.stopRunningProcess() },
             resetProject: { store.confirmResetSelectedProjectOutputs() },
-            refreshArtifacts: { store.refreshArtifacts() }
+            refreshArtifacts: { store.refreshArtifacts() },
+            openArtifact: { store.openArtifact($0) },
+            placeMicrophone: { store.beginMicrophonePlacement($0) },
+            toggleLog: { withAnimation { logExpanded.toggle() } },
+            toggleInspector: { withAnimation { inspectorPresented.toggle() } }
         )
     }
 }

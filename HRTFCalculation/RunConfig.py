@@ -41,11 +41,13 @@ def run_from_config(config: PipelineConfig, stages: Iterable[str] | None = None,
 
 def run_inference(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
     logger(f"Running inference in {config.paths.output_dir}")
-    if config.paths.left_ear is None or config.paths.right_ear is None:
-        logger("Skipping inference because single-ear projects do not use the bilateral inference model.")
+    if config.paths.left_ear is None and config.paths.right_ear is None:
+        logger("No ear meshes were selected for inference.")
         return
-    logger(f"Left input mesh: {config.paths.left_ear}")
-    logger(f"Right input mesh: {config.paths.right_ear}")
+    if config.paths.left_ear is not None:
+        logger(f"Left input mesh: {config.paths.left_ear}")
+    if config.paths.right_ear is not None:
+        logger(f"Right input mesh: {config.paths.right_ear}")
     if dry_run:
         return
     config.paths.output_dir.mkdir(parents=True, exist_ok=True)
@@ -60,7 +62,7 @@ def run_inference(config: PipelineConfig, dry_run: bool, logger: Logger) -> None
         "Intermediates/Prediction Parameters Left", "Intermediates/Prediction Parameters Right",
         "Intermediates/ICP STL Left", "Intermediates/ICP STL Right"
     ])
-    input_paths = [config.paths.left_ear.resolve(), config.paths.right_ear.resolve()]
+    input_paths = [path.resolve() for path in (config.paths.left_ear, config.paths.right_ear) if path is not None]
     for name in legacy_folders:
         legacy_path = config.paths.output_dir / name
         if legacy_path.is_dir() and not any(legacy_path.resolve() in path.parents for path in input_paths):
@@ -71,8 +73,8 @@ def run_inference(config: PipelineConfig, dry_run: bool, logger: Logger) -> None
         configuration=str(config.inference.model_config_file),
         model_checkpoint=str(config.inference.model_checkpoint),
         data_dir=str(config.paths.output_dir),
-        target_left_folder=str(config.paths.left_ear.parent),
-        target_right_folder=str(config.paths.right_ear.parent),
+        target_left_folder=str(config.paths.left_ear.parent) if config.paths.left_ear is not None else None,
+        target_right_folder=str(config.paths.right_ear.parent) if config.paths.right_ear is not None else None,
         prediction_left_folder=config.inference.prediction_left_folder,
         prediction_right_folder=config.inference.prediction_right_folder,
         prediction_parameters_left_folder=config.inference.prediction_parameters_left_folder,

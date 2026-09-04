@@ -7,6 +7,12 @@ struct PipelineCommandContext {
     var canRunStage: (Stage) -> Bool
     var canStopProject: Bool
     var canResetProject: Bool
+    var artifacts: [Artifact]
+    var selectedArtifactURL: URL?
+    var canPreview: Bool
+    var canPlaceMicrophone: (EarSide) -> Bool
+    var isLogExpanded: Bool
+    var isInspectorPresented: Bool
     var createProject: () -> Void
     var importProject: () -> Void
     var duplicateProject: () -> Void
@@ -16,6 +22,10 @@ struct PipelineCommandContext {
     var stopProject: () -> Void
     var resetProject: () -> Void
     var refreshArtifacts: () -> Void
+    var openArtifact: (Artifact) -> Void
+    var placeMicrophone: (EarSide) -> Void
+    var toggleLog: () -> Void
+    var toggleInspector: () -> Void
 }
 
 struct PipelineCommands: Commands {
@@ -45,7 +55,32 @@ struct PipelineCommands: Commands {
             .keyboardShortcut(.delete, modifiers: [.command])
             .disabled(commands?.canRemoveProject != true)
         }
+        CommandGroup(after: .toolbar) {
+            Menu("Preview") {
+                ForEach(commands?.artifacts ?? []) { artifact in
+                    Button {
+                        commands?.openArtifact(artifact)
+                    } label: {
+                        Label(artifact.title, systemImage: artifact.url == commands?.selectedArtifactURL ? "checkmark" : artifact.systemImage)
+                    }
+                }
+            }
+            .disabled(commands?.canPreview != true || commands?.artifacts.isEmpty != false)
+
+            Button(commands?.isLogExpanded == true ? "Hide Live Log" : "Show Live Log") {
+                commands?.toggleLog()
+            }
+        }
         CommandMenu("Pipeline") {
+            ForEach(EarSide.allCases) { side in
+                Button("Place \(side.title) Microphone") {
+                    commands?.placeMicrophone(side)
+                }
+                .disabled(commands?.canPlaceMicrophone(side) != true)
+            }
+
+            Divider()
+
             Button("Run Next Step") {
                 commands?.runNextStage()
             }
@@ -80,6 +115,19 @@ struct PipelineCommands: Commands {
                 commands?.refreshArtifacts()
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
+        }
+    }
+}
+
+struct ProjectInspectorCommands: Commands {
+    @FocusedValue(\.pipelineCommands) private var commands
+
+    var body: some Commands {
+        CommandGroup(after: .sidebar) {
+            Button(commands?.isInspectorPresented == true ? "Hide Inspector" : "Show Inspector") {
+                commands?.toggleInspector()
+            }
+            .keyboardShortcut("i", modifiers: [.command, .option])
         }
     }
 }
