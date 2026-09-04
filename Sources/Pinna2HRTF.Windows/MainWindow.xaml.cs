@@ -101,6 +101,7 @@ public partial class MainWindow : Window
     bool calculatingAutomaticPosition;
     ManualMicrophonePosition? pendingMicrophonePosition;
     bool closingConfirmed;
+    bool shutdownCleanupDone;
     Grid? contentGrid;
     ColumnDefinition? projectsColumn;
     ColumnDefinition? settingsColumn;
@@ -132,6 +133,11 @@ public partial class MainWindow : Window
     bool projectsCollapsed;
     bool logCollapsed;
     bool suppressLogExpansionCallback;
+    ScrollViewer? logScrollViewer;
+    bool logFollowTail = true;
+    bool logProgrammaticScroll;
+    bool logTailScrollPending;
+    bool logTailUserInteraction;
     // The native Expander header is 48 px high; the surrounding one-pixel
     // border adds two more pixels to the collapsed grid row.
     const double LogHeaderHeight = 48;
@@ -722,6 +728,7 @@ public partial class MainWindow : Window
         header.Children.Add(clear);
         logText = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Consolas"), FontSize = 12, BorderThickness = new Thickness(0), Margin = new Thickness(10) };
         ScrollViewer.SetVerticalScrollBarVisibility(logText, ScrollBarVisibility.Auto);
+        logText.Loaded += (_, _) => AttachLogScrollViewer();
         logExpander = new Expander
         {
             Header = header,
@@ -1986,11 +1993,33 @@ public partial class MainWindow : Window
             AppendLog($"{stage.Title} process: {executable}", project.Id);
             RefreshPipelineStatus();
         }
-        catch (Exception error) { FailedStages(project.Id).Add(stage); AppendLog("Could not start " + stage.Title + ": " + error, project.Id); RefreshPipelineStatus(); }
+        catch (Exception error)
+        {
+            // Remove a process that was registered before Start() completed.
+            // Otherwise a failed launch could keep the window in a perpetual
+            // "running" state and prevent deterministic shutdown cleanup.
+            if (runningProcesses.TryGetValue(project.Id, out var failedProcess))
+            {
+                runningProcesses.Remove(project.Id);
+                runningStages.Remove(project.Id);
+                TryTerminate(failedProcess);
+                try { failedProcess.Dispose(); } catch { }
+            }
+            FailedStages(project.Id).Add(stage);
+            AppendLog("Could not start " + stage.Title + ": " + error, project.Id);
+            RefreshPipelineStatus();
+        }
     }
 
     void ProcessFinished(Process process, ProjectRecord project, Stage stage)
     {
+        // Exited callbacks can be queued after the native window has already
+        // begun shutting down. The shutdown path owns cleanup in that case.
+        if (shutdownCleanupDone)
+        {
+            try { process.Dispose(); } catch { }
+            return;
+        }
         var code = process.ExitCode;
         if (code != 0) FailedStages(project.Id).Add(stage);
         runningProcesses.Remove(project.Id);
@@ -2274,13 +2303,76 @@ ui:
         return null;
     }
 
-    void RestoreLogScroll(double offset, bool followTail)
+    void AttachLogScrollViewer()
     {
+        var scroll = FindDescendant<ScrollViewer>(logText);
+        if (scroll == null)
+        {
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, AttachLogScrollViewer);
+            return;
+        }
+        if (ReferenceEquals(logScrollViewer, scroll)) return;
+        if (logScrollViewer != null) logScrollViewer.ViewChanged -= LogScrollViewerViewChanged;
+        logScrollViewer = scroll;
+        logScrollViewer.ViewChanged += LogScrollViewerViewChanged;
+        logScrollViewer.PointerWheelChanged += (_, _) => MarkLogUserScroll();
+        logFollowTail = true;
+    }
+
+    void MarkLogUserScroll()
+    {
+        if (logProgrammaticScroll) return;
+        logTailUserInteraction = true;
+        logFollowTail = false;
+    }
+
+    void LogScrollViewerViewChanged(object? sender, ScrollViewerViewChangedEventArgs args)
+    {
+        if (sender is not ScrollViewer scroll) return;
+        if (logProgrammaticScroll || logTailScrollPending && !logTailUserInteraction) return;
+        logFollowTail = scroll.ScrollableHeight - scroll.VerticalOffset <= 4;
+    }
+
+    void RequestLogTail()
+    {
+        logFollowTail = true;
+        logTailUserInteraction = false;
+        if (logTailScrollPending) return;
+        logTailScrollPending = true;
+        AttachLogScrollViewer();
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
-            var scroll = FindDescendant<ScrollViewer>(logText);
+            // A second low-priority pass allows the TextBox/ScrollViewer to
+            // measure the complete burst of appended lines first.
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                logTailScrollPending = false;
+                if (!logFollowTail || logTailUserInteraction) return;
+                var scroll = logScrollViewer ?? FindDescendant<ScrollViewer>(logText);
+                if (scroll == null) return;
+                logProgrammaticScroll = true;
+                try { scroll.ChangeView(null, scroll.ScrollableHeight, null); }
+                finally { logProgrammaticScroll = false; }
+            });
+        });
+    }
+
+    void RestoreLogScroll(double offset, bool followTail)
+    {
+        AttachLogScrollViewer();
+        if (followTail)
+        {
+            RequestLogTail();
+            return;
+        }
+        logFollowTail = false;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            var scroll = logScrollViewer ?? FindDescendant<ScrollViewer>(logText);
             if (scroll == null) return;
-            scroll.ChangeView(null, followTail ? scroll.ScrollableHeight : offset, null);
+            logProgrammaticScroll = true;
+            try { scroll.ChangeView(null, Math.Clamp(offset, 0, scroll.ScrollableHeight), null); }
+            finally { logProgrammaticScroll = false; }
         });
     }
 
@@ -2293,9 +2385,10 @@ ui:
         if (id == null) return;
         void Append()
         {
-            var scroll = FindDescendant<ScrollViewer>(logText);
+            AttachLogScrollViewer();
+            var scroll = logScrollViewer ?? FindDescendant<ScrollViewer>(logText);
             var oldOffset = scroll?.VerticalOffset ?? 0;
-            var followTail = scroll == null || scroll.ScrollableHeight - scroll.VerticalOffset < 4;
+            var followTail = logFollowTail;
             var current = projectLogs.TryGetValue(id.Value, out var value) ? value : "";
             projectLogs[id.Value] = current.Length == 0 ? compact : current + Environment.NewLine + compact;
             if (selectedProject?.Id == id)
@@ -2315,7 +2408,7 @@ ui:
         for (var i = 0; i < stages.Length; i++)
         {
             var stage = stages[i];
-            var skipped = stage == Stage.Inference && !InferenceIsAutomatic(selectedProject);
+            var skipped = stage == Stage.Inference && !selectedProject.Settings.Inference.UsePredictionsForPreprocessing;
             var running = runningStages.TryGetValue(selectedProject.Id, out var active) && active == stage;
             var failed = FailedStages(selectedProject.Id).Contains(stage);
             var reason = StageUnavailableReason(stage, selectedProject);
@@ -2371,11 +2464,12 @@ ui:
         return stage == Stage.Postprocessing && StageIsComplete(Stage.Numcalc, project) ? null : "Run NumCalc first.";
     }
 
-    Stage[] AutomaticStages(ProjectRecord project) => InferenceIsAutomatic(project) ? Stage.GetValues() : [Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing];
+    Stage[] AutomaticStages(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing ? Stage.GetValues() : [Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing];
     bool StageIsComplete(Stage stage, ProjectRecord project)
     {
         var output = project.SaveLocation;
-        if (stage == Stage.Inference) return !InferenceIsAutomatic(project) || (PredictionMesh(project, "left") != null && PredictionMesh(project, "right") != null);
+        if (stage == Stage.Inference) return !project.Settings.Inference.UsePredictionsForPreprocessing || (InferenceIsAutomatic(project) && PredictionMesh(project, "left") != null && PredictionMesh(project, "right") != null);
+        if (string.IsNullOrWhiteSpace(output) || string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar)) return false;
         if (stage == Stage.Preprocessing) return (string.IsNullOrWhiteSpace(project.LeftEar) || (File.Exists(Path.Combine(output, "Projects", "Left", "parameters.json")) && File.Exists(Path.Combine(output, "Intermediates", "Left", "graded_head.ply")))) && (string.IsNullOrWhiteSpace(project.RightEar) || (File.Exists(Path.Combine(output, "Projects", "Right", "parameters.json")) && File.Exists(Path.Combine(output, "Intermediates", "Right", "graded_head.ply"))));
         if (stage == Stage.Numcalc) return (string.IsNullOrWhiteSpace(project.LeftEar) || ContainsOutput2HRTF(Path.Combine(output, "Projects", "Left", "Output2HRTF"))) && (string.IsNullOrWhiteSpace(project.RightEar) || ContainsOutput2HRTF(Path.Combine(output, "Projects", "Right", "Output2HRTF")));
         return stage == Stage.Postprocessing && Directory.Exists(Path.Combine(output, "HRTF")) && Directory.GetFiles(Path.Combine(output, "HRTF"), "*.sofa").Any();
@@ -2473,9 +2567,28 @@ ui:
         }
     }
 
+    public void ShutdownForAppClose()
+    {
+        if (shutdownCleanupDone) return;
+        shutdownCleanupDone = true;
+        try { if (placementSide != null) EndPlacement(); } catch { }
+        try { statusTimer.Stop(); } catch { }
+        foreach (var process in runningProcesses.Values.ToList())
+        {
+            TryTerminate(process);
+            try { process.Dispose(); } catch { }
+        }
+        runningProcesses.Clear();
+        runningStages.Clear();
+        queuedStages.Clear();
+        try { Persist(); } catch { }
+        try { SaveUiState(); } catch { }
+        try { SaveViewerStates(); } catch { }
+    }
+
     void AppWindowClosing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
     {
-        if (closingConfirmed || runningProcesses.Count == 0) { if (placementSide != null) EndPlacement(); statusTimer.Stop(); Persist(); SaveUiState(); return; }
+        if (closingConfirmed || runningProcesses.Count == 0) { ShutdownForAppClose(); return; }
         args.Cancel = true;
         _ = ConfirmQuitAsync(sender);
     }
@@ -2485,7 +2598,7 @@ ui:
         var dialog = new ContentDialog { Title = "Quit Pinna2HRTF?", Content = "A pipeline task is still running. Quitting will stop it and may leave incomplete outputs.", PrimaryButtonText = "Quit", CloseButtonText = "Keep Running", DefaultButton = ContentDialogButton.Close, XamlRoot = Root.XamlRoot };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
         closingConfirmed = true;
-        foreach (var process in runningProcesses.Values.ToList()) TryTerminate(process);
+        ShutdownForAppClose();
         appWindow.Destroy();
     }
 

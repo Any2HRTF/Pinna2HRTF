@@ -25,6 +25,13 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         window = new MainWindow();
+        window.Closed += (_, _) =>
+        {
+            if (window is MainWindow mainWindow)
+                mainWindow.ShutdownForAppClose();
+            window = null;
+            Exit();
+        };
         if (window.AppWindow.Presenter is OverlappedPresenter presenter)
             presenter.Maximize();
         window.Activate();
