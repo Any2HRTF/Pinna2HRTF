@@ -98,6 +98,7 @@ public partial class MainWindow : Window
     readonly SolidColorBrush viewerHintBackgroundBrush = new();
     readonly SolidColorBrush viewerHintTextBrush = new();
     bool loading;
+    bool registryNeedsPersist;
     bool refreshingArtifacts;
     bool rotatingMesh;
     bool pointerMoved;
@@ -130,8 +131,6 @@ public partial class MainWindow : Window
     Border? logPanelBorder;
     Border? settingsPaneBorder;
     TextBlock? projectsHeaderText;
-    FrameworkElement? projectsHeader;
-    StackPanel? projectsActions;
     FrameworkElement? projectsBody;
     Expander? projectsExpander;
     ColumnDefinition? projectsSplitterColumn;
@@ -312,6 +311,11 @@ public partial class MainWindow : Window
             if (int.TryParse(project.Settings.Preprocessing.FrequencyStepCount, out var steps))
                 project.Settings.Preprocessing.FrequencyStepCount = Math.Max(steps, 2).ToString(CultureInfo.InvariantCulture);
             InvalidateManualPositions(project);
+        }
+        if (registryNeedsPersist)
+        {
+            Persist();
+            registryNeedsPersist = false;
         }
         RefreshModelOptions();
         RefreshProjectList();
@@ -1216,8 +1220,11 @@ public partial class MainWindow : Window
         if (desired == StoredSettingValue(selectedProject, id)) return;
         if (runningProcesses.ContainsKey(selectedProject.Id)) { LoadSelectedProject(); return; }
         var resetStage = SettingResetStage(id);
-        if (resetStage == null || !HasOutputsFrom(resetStage, selectedProject))
+        var promptForReset = resetStage != null && HasOutputsFrom(resetStage, selectedProject) &&
+            !(id == "project.use_bezierppm" && !StageIsComplete(Stage.Preprocessing, selectedProject));
+        if (!promptForReset)
         {
+            ApplySettingToProject(selectedProject!, id, desired);
             ProjectEdited(this, new RoutedEventArgs());
             return;
         }
@@ -1225,18 +1232,29 @@ public partial class MainWindow : Window
         var dialog = new ContentDialog
         {
             Title = "Reset pipeline outputs?",
-            Content = $"Changing this setting resets {resetStage.Title} and all following outputs. Input meshes and project settings will be kept.",
+            Content = $"Changing this setting resets {resetStage!.Title} and all following outputs. Input meshes and project settings will be kept.",
             PrimaryButtonText = "Reset and apply",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = Root.XamlRoot
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-        ResetSelectedProjectOutputs(resetStage);
+        ResetSelectedProjectOutputs(resetStage!);
         loading = true;
         SetSettingControlValue(id, desired);
         loading = false;
+        ApplySettingToProject(selectedProject!, id, desired);
         ProjectEdited(this, new RoutedEventArgs());
+    }
+
+    void ApplySettingToProject(ProjectRecord project, string id, string value)
+    {
+        if (id != "inference.model" || string.IsNullOrWhiteSpace(value)) return;
+        var resources = Path.Combine(packageRoot, "HRTFCalculation", "Inference", "resources");
+        var config = Path.Combine(resources, value + ".yaml");
+        var checkpoint = Path.Combine(resources, value + ".pth");
+        if (File.Exists(config)) project.Settings.Inference.ModelConfig = config;
+        if (File.Exists(checkpoint)) project.Settings.Inference.ModelCheckpoint = checkpoint;
     }
 
     void SetSettingControlValue(string id, string value)
@@ -2679,7 +2697,8 @@ ui:
         RefreshNumCalcStatus();
     }
 
-    bool InferenceIsAutomatic(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing && !string.IsNullOrWhiteSpace(project.LeftEar) && !string.IsNullOrWhiteSpace(project.RightEar);
+    bool InferenceIsAutomatic(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing &&
+        (!string.IsNullOrWhiteSpace(project.LeftEar) || !string.IsNullOrWhiteSpace(project.RightEar));
     bool HasGeneratedPipelineOutputs(ProjectRecord project) => (!string.IsNullOrWhiteSpace(project.LeftEar) || !string.IsNullOrWhiteSpace(project.RightEar)) && !string.IsNullOrWhiteSpace(project.SaveLocation) && ((InferenceIsAutomatic(project) && StageIsComplete(Stage.Inference, project)) || StageIsComplete(Stage.Preprocessing, project) || StageIsComplete(Stage.Numcalc, project) || StageIsComplete(Stage.Postprocessing, project));
     bool PreprocessingBlocked(ProjectRecord project) => InferenceIsAutomatic(project) && !StageIsComplete(Stage.Inference, project);
     bool StageCanRun(Stage stage, ProjectRecord? project) => StageUnavailableReason(stage, project) == null;
@@ -2694,12 +2713,12 @@ ui:
         if ((!string.IsNullOrWhiteSpace(project.LeftEar) && !File.Exists(project.LeftEar)) || (!string.IsNullOrWhiteSpace(project.RightEar) && !File.Exists(project.RightEar))) return "An input ear file is missing. Select it again.";
         if (stage == Stage.Inference)
         {
-            if (!InferenceIsAutomatic(project)) return "Enable Use Mesh2PPM and select both input ears.";
+            if (!InferenceIsAutomatic(project)) return "Enable Use Mesh2PPM and select at least one input ear.";
             return File.Exists(project.Settings.Inference.ModelConfig) && File.Exists(project.Settings.Inference.ModelCheckpoint) ? null : "The selected inference model is missing.";
         }
         if (stage == Stage.Preprocessing)
         {
-            if (PreprocessingBlocked(project)) return "Run Mesh2PPM Inference to create both predicted ears first.";
+            if (PreprocessingBlocked(project)) return "Run Mesh2PPM Inference to create the predicted input ear(s) first.";
             if (!File.Exists(environment.MeshGradingExecutable)) return "The Windows mesh-grading tool is missing. Rebuild the app with its external tools.";
             var bin = Path.Combine(environment.ExternalDir, "bin");
             if (new[] { "libpmp.dll", "libpmp_vis.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll" }.Any(name => !File.Exists(Path.Combine(bin, name))))
@@ -2714,7 +2733,14 @@ ui:
     bool StageIsComplete(Stage stage, ProjectRecord project)
     {
         var output = project.SaveLocation;
-        if (stage == Stage.Inference) return !project.Settings.Inference.UsePredictionsForPreprocessing || (InferenceIsAutomatic(project) && PredictionMesh(project, "left") != null && PredictionMesh(project, "right") != null);
+        if (stage == Stage.Inference)
+        {
+            if (!project.Settings.Inference.UsePredictionsForPreprocessing) return true;
+            if (!InferenceIsAutomatic(project)) return false;
+            var leftDone = string.IsNullOrWhiteSpace(project.LeftEar) || PredictionMesh(project, "left") != null;
+            var rightDone = string.IsNullOrWhiteSpace(project.RightEar) || PredictionMesh(project, "right") != null;
+            return leftDone && rightDone;
+        }
         if (string.IsNullOrWhiteSpace(output) || string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar)) return false;
         if (stage == Stage.Preprocessing) return (string.IsNullOrWhiteSpace(project.LeftEar) || (File.Exists(Path.Combine(output, "Projects", "Left", "parameters.json")) && File.Exists(Path.Combine(output, "Intermediates", "Left", "graded_head.ply")))) && (string.IsNullOrWhiteSpace(project.RightEar) || (File.Exists(Path.Combine(output, "Projects", "Right", "parameters.json")) && File.Exists(Path.Combine(output, "Intermediates", "Right", "graded_head.ply"))));
         if (stage == Stage.Numcalc) return NumCalcIsComplete(project);
@@ -2899,7 +2925,33 @@ ui:
         projects.Clear();
         foreach (var project in registry.Projects) projects.Add(project);
         if (projects.Count == 0) { var project = NewProject(1); projects.Add(project); }
+        registryNeedsPersist = false;
+        foreach (var project in projects) registryNeedsPersist |= NormalizeInferenceModelPaths(project);
         selectedProject = projects.FirstOrDefault(x => x.Id == registry.SelectedProjectID) ?? projects.FirstOrDefault();
+    }
+
+    bool NormalizeInferenceModelPaths(ProjectRecord project)
+    {
+        var resources = Path.Combine(packageRoot, "HRTFCalculation", "Inference", "resources");
+        if (!Directory.Exists(resources)) return false;
+        var changed = false;
+        var modelName = ModelName(project.Settings.Inference.ModelConfig);
+        if (string.IsNullOrWhiteSpace(modelName)) modelName = "Local 3 Views";
+        var config = Path.Combine(resources, modelName + ".yaml");
+        if (File.Exists(config) && !File.Exists(project.Settings.Inference.ModelConfig))
+        {
+            project.Settings.Inference.ModelConfig = config;
+            changed = true;
+        }
+        var checkpointName = Path.GetFileNameWithoutExtension(project.Settings.Inference.ModelCheckpoint);
+        if (string.IsNullOrWhiteSpace(checkpointName)) checkpointName = modelName;
+        var checkpoint = Path.Combine(resources, checkpointName + ".pth");
+        if (File.Exists(checkpoint) && !File.Exists(project.Settings.Inference.ModelCheckpoint))
+        {
+            project.Settings.Inference.ModelCheckpoint = checkpoint;
+            changed = true;
+        }
+        return changed;
     }
 
     void LoadProjectLogs()
@@ -3206,18 +3258,26 @@ static class MeshLoader
         Indices = new IntCollection()
     };
 
+    static (Vector3Collection Positions, IntCollection Indices) GetMeshCollections(MeshGeometry3D mesh)
+    {
+        if (mesh.Positions is not { } positions || mesh.Indices is not { } indices)
+            throw new InvalidOperationException("Mesh geometry collections are not initialized.");
+        return (positions, indices);
+    }
+
     public static MeshData Load(string path)
     {
         if (!File.Exists(path)) throw new FileNotFoundException("Mesh file was not found.", path);
         var mesh = NewGeometry();
         if (Path.GetExtension(path).Equals(".ply", StringComparison.OrdinalIgnoreCase)) LoadPly(path, mesh); else LoadStl(path, mesh);
-        if (mesh.Positions == null || mesh.Indices == null || mesh.Positions.Count == 0 || mesh.Indices.Count < 3) throw new InvalidDataException($"Mesh contains no usable triangles: {path}");
-        var min = new System.Numerics.Vector3(mesh.Positions.Min(x => x.X), mesh.Positions.Min(x => x.Y), mesh.Positions.Min(x => x.Z));
-        var max = new System.Numerics.Vector3(mesh.Positions.Max(x => x.X), mesh.Positions.Max(x => x.Y), mesh.Positions.Max(x => x.Z));
+        var (positions, indices) = GetMeshCollections(mesh);
+        if (positions.Count == 0 || indices.Count < 3) throw new InvalidDataException($"Mesh contains no usable triangles: {path}");
+        var min = new System.Numerics.Vector3(positions.Min(x => x.X), positions.Min(x => x.Y), positions.Min(x => x.Z));
+        var max = new System.Numerics.Vector3(positions.Max(x => x.X), positions.Max(x => x.Y), positions.Max(x => x.Z));
         var center = (min + max) / 2;
         var maximum = Math.Max(max.X - min.X, Math.Max(max.Y - min.Y, max.Z - min.Z));
         var scale = 180 / Math.Max(maximum, 1);
-        for (var i = 0; i < mesh.Positions.Count; i++) mesh.Positions[i] = (mesh.Positions[i] - center) * (float)scale;
+        for (var i = 0; i < positions.Count; i++) positions[i] = (positions[i] - center) * (float)scale;
         CalculateNormals(mesh);
         mesh.UpdateBounds();
         return new MeshData(path, mesh, center, scale, maximum * scale);
@@ -3225,6 +3285,7 @@ static class MeshLoader
 
     static void LoadStl(string path, MeshGeometry3D mesh)
     {
+        var (positions, indices) = GetMeshCollections(mesh);
         var bytes = File.ReadAllBytes(path);
         if (bytes.Length >= 84)
         {
@@ -3237,13 +3298,13 @@ static class MeshLoader
                 {
                     if (offset + 50 > bytes.Length) throw new InvalidDataException($"Binary STL triangle {i} is truncated: {path}");
                     offset += 12;
-                    var start = mesh.Positions.Count;
+                    var start = positions.Count;
                     for (var v = 0; v < 3; v++)
                     {
-                        mesh.Positions.Add(new System.Numerics.Vector3(BitConverter.ToSingle(bytes, offset), BitConverter.ToSingle(bytes, offset + 4), BitConverter.ToSingle(bytes, offset + 8)));
+                        positions.Add(new System.Numerics.Vector3(BitConverter.ToSingle(bytes, offset), BitConverter.ToSingle(bytes, offset + 4), BitConverter.ToSingle(bytes, offset + 8)));
                         offset += 12;
                     }
-                    mesh.Indices.Add(start); mesh.Indices.Add(start + 1); mesh.Indices.Add(start + 2);
+                    indices.Add(start); indices.Add(start + 1); indices.Add(start + 2);
                     offset += 2;
                 }
                 return;
@@ -3262,13 +3323,13 @@ static class MeshLoader
             vertices.Add(new System.Numerics.Vector3(x, y, z));
             if (vertices.Count == 3)
             {
-                var start = mesh.Positions.Count;
-                foreach (var vertex in vertices) mesh.Positions.Add(vertex);
-                mesh.Indices.Add(start); mesh.Indices.Add(start + 1); mesh.Indices.Add(start + 2);
+                var start = positions.Count;
+                foreach (var vertex in vertices) positions.Add(vertex);
+                indices.Add(start); indices.Add(start + 1); indices.Add(start + 2);
                 vertices.Clear();
             }
         }
-        if (mesh.Indices.Count == 0) throw new InvalidDataException($"STL contains no usable triangles: {path}");
+        if (indices.Count == 0) throw new InvalidDataException($"STL contains no usable triangles: {path}");
     }
 
     sealed class PlyElement
@@ -3289,6 +3350,7 @@ static class MeshLoader
 
     static void LoadPly(string path, MeshGeometry3D mesh)
     {
+        var (positions, indices) = GetMeshCollections(mesh);
         var bytes = File.ReadAllBytes(path);
         var headerEnd = FindPlyHeaderEnd(bytes);
         if (headerEnd < 0) throw new InvalidDataException($"PLY header is missing end_header: {path}");
@@ -3328,16 +3390,16 @@ static class MeshLoader
             {
                 var tokens = (reader.ReadLine() ?? "").Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
                 if (tokens.Length < vertexElement.Properties.Count || !float.TryParse(tokens[xProperty], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) || !float.TryParse(tokens[yProperty], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) || !float.TryParse(tokens[zProperty], NumberStyles.Float, CultureInfo.InvariantCulture, out var z)) throw new InvalidDataException($"PLY vertex {i} is invalid: {path}");
-                mesh.Positions.Add(new System.Numerics.Vector3(x, y, z));
+                positions.Add(new System.Numerics.Vector3(x, y, z));
             }
             for (var i = 0; i < faceElement.Count; i++)
             {
                 var tokens = (reader.ReadLine() ?? "").Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
                 if (tokens.Length == 0 || !int.TryParse(tokens[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) || count < 3 || tokens.Length < count + 1) continue;
-                var indices = new int[count]; var valid = true;
-                for (var j = 0; j < count; j++) if (!int.TryParse(tokens[j + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out indices[j]) || indices[j] < 0 || indices[j] >= vertexElement.Count) { valid = false; break; }
+                var faceIndices = new int[count]; var valid = true;
+                for (var j = 0; j < count; j++) if (!int.TryParse(tokens[j + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out faceIndices[j]) || faceIndices[j] < 0 || faceIndices[j] >= vertexElement.Count) { valid = false; break; }
                 if (!valid) continue;
-                for (var j = 1; j < count - 1; j++) { mesh.Indices.Add(indices[0]); mesh.Indices.Add(indices[j]); mesh.Indices.Add(indices[j + 1]); }
+                for (var j = 1; j < count - 1; j++) { indices.Add(faceIndices[0]); indices.Add(faceIndices[j]); indices.Add(faceIndices[j + 1]); }
             }
         }
         else if (format == "binary_little_endian")
@@ -3358,20 +3420,20 @@ static class MeshLoader
                             else if (property.Name.Equals("y", StringComparison.OrdinalIgnoreCase)) coords[1] = (float)value;
                             else if (property.Name.Equals("z", StringComparison.OrdinalIgnoreCase)) coords[2] = (float)value;
                         }
-                        mesh.Positions.Add(new System.Numerics.Vector3(coords[0], coords[1], coords[2]));
+                        positions.Add(new System.Numerics.Vector3(coords[0], coords[1], coords[2]));
                     }
                     else if (element == faceElement)
                     {
-                        List<int>? indices = null;
+                        List<int>? faceIndices = null;
                         foreach (var property in element.Properties)
                         {
                             if (!property.IsList) { _ = ReadPlyScalar(reader, property.Type); continue; }
                             var n = checked((int)ReadPlyScalar(reader, property.CountType!)); var values = new List<int>(Math.Max(0, n));
                             for (var j = 0; j < n; j++) { var value = ReadPlyScalar(reader, property.ItemType!); values.Add(value is < 0 or > int.MaxValue ? -1 : (int)value); }
-                            if (ReferenceEquals(property, faceList)) indices = values;
+                            if (ReferenceEquals(property, faceList)) faceIndices = values;
                         }
-                        if (indices == null || indices.Count < 3 || indices.Any(index => index < 0 || index >= vertexElement.Count)) continue;
-                        for (var j = 1; j < indices.Count - 1; j++) { mesh.Indices.Add(indices[0]); mesh.Indices.Add(indices[j]); mesh.Indices.Add(indices[j + 1]); }
+                        if (faceIndices == null || faceIndices.Count < 3 || faceIndices.Any(index => index < 0 || index >= vertexElement.Count)) continue;
+                        for (var j = 1; j < faceIndices.Count - 1; j++) { indices.Add(faceIndices[0]); indices.Add(faceIndices[j]); indices.Add(faceIndices[j + 1]); }
                     }
                     else
                     {
@@ -3385,7 +3447,7 @@ static class MeshLoader
             }
         }
         else throw new InvalidDataException($"Unsupported PLY format '{format}'. Supported formats are ASCII and binary_little_endian: {path}");
-        if (mesh.Indices.Count == 0) throw new InvalidDataException($"PLY contains no usable faces: {path}");
+        if (indices.Count == 0) throw new InvalidDataException($"PLY contains no usable faces: {path}");
     }
 
     static int FindPlyHeaderEnd(byte[] bytes)
@@ -3408,28 +3470,27 @@ static class MeshLoader
 
     public static MeshGeometry3D CreateSphere(System.Numerics.Vector3 center, double radius)
     {
-        var mesh = NewGeometry(); const int slices = 16; const int stacks = 8;
-        for (var stack = 0; stack <= stacks; stack++) { var phi = Math.PI * stack / stacks; for (var slice = 0; slice <= slices; slice++) { var theta = 2 * Math.PI * slice / slices; mesh.Positions.Add(center + new System.Numerics.Vector3((float)(radius * Math.Sin(phi) * Math.Cos(theta)), (float)(radius * Math.Sin(phi) * Math.Sin(theta)), (float)(radius * Math.Cos(phi)))); } }
-        for (var stack = 0; stack < stacks; stack++) for (var slice = 0; slice < slices; slice++) { var first = stack * (slices + 1) + slice; var second = first + slices + 1; mesh.Indices.Add(first); mesh.Indices.Add(second); mesh.Indices.Add(first + 1); mesh.Indices.Add(first + 1); mesh.Indices.Add(second); mesh.Indices.Add(second + 1); }
+        var mesh = NewGeometry(); var (positions, indices) = GetMeshCollections(mesh); const int slices = 16; const int stacks = 8;
+        for (var stack = 0; stack <= stacks; stack++) { var phi = Math.PI * stack / stacks; for (var slice = 0; slice <= slices; slice++) { var theta = 2 * Math.PI * slice / slices; positions.Add(center + new System.Numerics.Vector3((float)(radius * Math.Sin(phi) * Math.Cos(theta)), (float)(radius * Math.Sin(phi) * Math.Sin(theta)), (float)(radius * Math.Cos(phi)))); } }
+        for (var stack = 0; stack < stacks; stack++) for (var slice = 0; slice < slices; slice++) { var first = stack * (slices + 1) + slice; var second = first + slices + 1; indices.Add(first); indices.Add(second); indices.Add(first + 1); indices.Add(first + 1); indices.Add(second); indices.Add(second + 1); }
         CalculateNormals(mesh);
         mesh.UpdateBounds(); return mesh;
     }
 
     static void CalculateNormals(MeshGeometry3D mesh)
     {
-        if (mesh.Positions == null || mesh.Indices == null)
-            return;
+        var (positions, indices) = GetMeshCollections(mesh);
         var normals = new Vector3Collection();
-        for (var i = 0; i < mesh.Positions.Count; i++)
+        for (var i = 0; i < positions.Count; i++)
             normals.Add(System.Numerics.Vector3.Zero);
-        for (var i = 0; i + 2 < mesh.Indices.Count; i += 3)
+        for (var i = 0; i + 2 < indices.Count; i += 3)
         {
-            var ia = mesh.Indices[i];
-            var ib = mesh.Indices[i + 1];
-            var ic = mesh.Indices[i + 2];
-            if (ia < 0 || ib < 0 || ic < 0 || ia >= mesh.Positions.Count || ib >= mesh.Positions.Count || ic >= mesh.Positions.Count)
+            var ia = indices[i];
+            var ib = indices[i + 1];
+            var ic = indices[i + 2];
+            if (ia < 0 || ib < 0 || ic < 0 || ia >= positions.Count || ib >= positions.Count || ic >= positions.Count)
                 continue;
-            var face = System.Numerics.Vector3.Cross(mesh.Positions[ib] - mesh.Positions[ia], mesh.Positions[ic] - mesh.Positions[ia]);
+            var face = System.Numerics.Vector3.Cross(positions[ib] - positions[ia], positions[ic] - positions[ia]);
             if (face.LengthSquared() < 1e-12f)
                 continue;
             normals[ia] += face;
