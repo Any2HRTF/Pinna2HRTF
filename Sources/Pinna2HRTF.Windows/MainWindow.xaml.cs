@@ -110,6 +110,7 @@ public partial class MainWindow : Window
     Image imagePreview = new();
     TextBlock viewerPlaceholder = new();
     Border viewerInteractionHint = new();
+    Border resetViewButtonHost = new();
     Viewport3DX meshViewport = new();
     Border meshViewerBackground = new();
     CursorGrid? meshViewportHost;
@@ -118,6 +119,8 @@ public partial class MainWindow : Window
     Border? logPanelBorder;
     Border? settingsPaneBorder;
     TextBlock? projectsHeaderText;
+    FrameworkElement? projectsHeader;
+    StackPanel? projectsActions;
     FrameworkElement? projectsBody;
     Expander? projectsExpander;
     ColumnDefinition? projectsSplitterColumn;
@@ -128,6 +131,11 @@ public partial class MainWindow : Window
     FrameworkElement? logSplitter;
     bool projectsCollapsed;
     bool logCollapsed;
+    bool suppressLogExpansionCallback;
+    // The native Expander header is 48 px high; the surrounding one-pixel
+    // border adds two more pixels to the collapsed grid row.
+    const double LogHeaderHeight = 48;
+    const double CollapsedLogHeaderHeight = LogHeaderHeight + 2;
     bool viewportReady;
     CancellationTokenSource? meshLoadCancellation;
     int meshLoadGeneration;
@@ -409,10 +417,10 @@ public partial class MainWindow : Window
         var bar = new MenuBar { Background = new SolidColorBrush(Colors.Transparent) };
         var project = new MenuBarItem { Title = "Project", VerticalAlignment = VerticalAlignment.Center };
         project.Items.Add(MenuItem("New Project", CreateProjectClicked, "Ctrl+N"));
-        project.Items.Add(MenuItem("Import Project", ImportProjectClicked, "Ctrl+Shift+O"));
+        project.Items.Add(MenuItem("Import Project", ImportProjectClicked, "Ctrl+O"));
         project.Items.Add(MenuItem("Duplicate Project", DuplicateProjectClicked, "Ctrl+D"));
         project.Items.Add(new MenuFlyoutSeparator());
-        project.Items.Add(MenuItem("Delete Project", RemoveProjectClicked, "Ctrl+Delete"));
+        project.Items.Add(MenuItem("Delete Project", RemoveProjectClicked, "Delete"));
         var pipeline = new MenuBarItem { Title = "Pipeline", VerticalAlignment = VerticalAlignment.Center };
         pipeline.Items.Add(MenuItem("Run All", RunAllClicked));
         pipeline.Items.Add(MenuItem("Run Next Step", RunNextClicked, "Ctrl+R"));
@@ -423,7 +431,7 @@ public partial class MainWindow : Window
         run.Items.Add(MenuItem("Postprocessing", RunPostprocessingClicked));
         pipeline.Items.Add(run);
         pipeline.Items.Add(new MenuFlyoutSeparator());
-        pipeline.Items.Add(MenuItem("Stop", StopClicked, "Ctrl+."));
+        pipeline.Items.Add(MenuItem("Stop", StopClicked, "Esc"));
         pipeline.Items.Add(MenuItem("Reset Outputs", ResetOutputsClicked));
         var help = new MenuBarItem { Title = "Help", VerticalAlignment = VerticalAlignment.Center };
         help.Items.Add(MenuItem("Online Documentation", OpenDocumentationClicked));
@@ -439,12 +447,39 @@ public partial class MainWindow : Window
     {
         var item = new MenuFlyoutItem { Text = text, KeyboardAcceleratorTextOverride = shortcut ?? "" };
         item.Click += handler;
+        if (shortcut is not null && TryCreateKeyboardAccelerator(shortcut) is { } accelerator)
+            item.KeyboardAccelerators.Add(accelerator);
         return item;
+    }
+
+    static KeyboardAccelerator? TryCreateKeyboardAccelerator(string shortcut)
+    {
+        var parts = shortcut.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return null;
+        var key = parts[^1].ToUpperInvariant() switch
+        {
+            "N" => VirtualKey.N,
+            "O" => VirtualKey.O,
+            "D" => VirtualKey.D,
+            "R" => VirtualKey.R,
+            "DELETE" => VirtualKey.Delete,
+            "ESC" or "ESCAPE" => VirtualKey.Escape,
+            _ => VirtualKey.None
+        };
+        if (key == VirtualKey.None) return null;
+        var modifiers = VirtualKeyModifiers.None;
+        foreach (var modifier in parts.Take(parts.Length - 1))
+        {
+            if (modifier.Equals("Ctrl", StringComparison.OrdinalIgnoreCase) || modifier.Equals("Control", StringComparison.OrdinalIgnoreCase)) modifiers |= VirtualKeyModifiers.Control;
+            else if (modifier.Equals("Shift", StringComparison.OrdinalIgnoreCase)) modifiers |= VirtualKeyModifiers.Shift;
+            else if (modifier.Equals("Alt", StringComparison.OrdinalIgnoreCase)) modifiers |= VirtualKeyModifiers.Menu;
+        }
+        return new KeyboardAccelerator { Key = key, Modifiers = modifiers };
     }
 
     Border BuildProjectsPane()
     {
-        projectsPaneBorder = new Border { Background = surfaceBrush, BorderBrush = borderBrush, BorderThickness = new Thickness(0, 0, 1, 0) };
+        projectsPaneBorder = new Border { CornerRadius = new CornerRadius(8), Background = surfaceBrush, BorderBrush = borderBrush, BorderThickness = new Thickness(0, 0, 1, 0) };
         var pane = projectsPaneBorder;
         var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -498,16 +533,13 @@ public partial class MainWindow : Window
 
     Grid BuildCenterPane()
     {
-        // Keep the vertical breathing room while bringing the viewer closer to
-        // both sidebars. The 12-pixel splitter columns still provide the drag
-        // target between panes.
-        var grid = new Grid { Margin = new Thickness(6, 14, 6, 14) };
+        var grid = new Grid { Margin = new Thickness(2, 0, 2, 0) };
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         logSplitterRow = new RowDefinition { Height = new GridLength(12) };
         grid.RowDefinitions.Add(logSplitterRow);
         centerLogRow = new RowDefinition { Height = new GridLength(Math.Clamp(liveLogExpandedHeight, 100, 600)) };
         grid.RowDefinitions.Add(centerLogRow);
-        previewPanelBorder = new Border { CornerRadius = new CornerRadius(8), BorderBrush = borderBrush, BorderThickness = new Thickness(1), Background = surfaceBrush };
+        previewPanelBorder = new Border { CornerRadius = new CornerRadius(8), BorderBrush = borderBrush, BorderThickness = new Thickness(1, 0, 1, 1), Background = surfaceBrush };
         var preview = previewPanelBorder;
         var previewGrid = new Grid();
         previewGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(57) });
@@ -541,10 +573,6 @@ public partial class MainWindow : Window
         var viewerGrid = new Grid();
         meshViewport = new Viewport3DX
         {
-            // Let Helix handle camera manipulation. The previous implementation
-            // disabled rotation/pan and tried to mutate the camera from routed
-            // pointer events, which competed with Helix and left zoom as the only
-            // reliable gesture.
             IsRotationEnabled = true,
             IsPanEnabled = true,
             IsMoveEnabled = false,
@@ -564,8 +592,6 @@ public partial class MainWindow : Window
             EnsureSceneLighting();
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RefreshArtifacts);
         };
-        // Helix consumes camera gestures, so observe these events with
-        // handledEventsToo for placement-click detection and camera persistence.
         meshViewport.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(MeshViewportPointerPressed), true);
         meshViewport.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(MeshViewportPointerMoved), true);
         meshViewport.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(MeshViewportPointerReleased), true);
@@ -584,7 +610,7 @@ public partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(16),
-            Padding = new Thickness(10, 6, 10, 6),
+            Padding = new Thickness(8, 4, 8, 4),
             CornerRadius = new CornerRadius(5),
             Background = viewerHintBackgroundBrush,
             Visibility = Visibility.Collapsed,
@@ -598,6 +624,33 @@ public partial class MainWindow : Window
             }
         };
         viewerGrid.Children.Add(viewerInteractionHint);
+        var resetViewButton = new Button
+        {
+            Content = "Reset view",
+            FontSize = 12,
+            Foreground = viewerHintTextBrush,
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(8, 4, 8, 4),
+            MinWidth = 0,
+            MinHeight = 0,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+        resetViewButton.Click += ResetViewClicked;
+        resetViewButtonHost = new Border
+        {
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(16),
+            CornerRadius = new CornerRadius(5),
+            Background = viewerHintBackgroundBrush,
+            Visibility = Visibility.Collapsed,
+            IsHitTestVisible = true,
+            Child = resetViewButton
+        };
+        ToolTipService.SetToolTip(resetViewButton, "Reset this mesh view");
+        viewerGrid.Children.Add(resetViewButtonHost);
         placementBorder = new Border { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(10, 12, 10, 0), Visibility = Visibility.Collapsed, Background = viewerHintBackgroundBrush, CornerRadius = new CornerRadius(5), Padding = new Thickness(10, 7, 10, 7) };
         placementPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         placementCoordinates = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Text = "Click the mesh to place the microphone" };
@@ -655,9 +708,9 @@ public partial class MainWindow : Window
 
     Border BuildLogPane()
     {
-        logPanelBorder = new Border { Margin = new Thickness(0), Background = surfaceBrush, BorderBrush = borderBrush, BorderThickness = new Thickness(1) };
+        logPanelBorder = new Border { CornerRadius = new CornerRadius(8), Margin = new Thickness(0, 3, 0, 0), Background = surfaceBrush, BorderBrush = borderBrush, BorderThickness = new Thickness(1) };
         var panel = logPanelBorder;
-        var header = new Grid { Margin = new Thickness(10, 0, 6, 0), HorizontalAlignment = HorizontalAlignment.Stretch };
+        var header = new Grid { Height = LogHeaderHeight, MinHeight = LogHeaderHeight, Margin = new Thickness(10, 0, 6, 0), HorizontalAlignment = HorizontalAlignment.Stretch };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var title = new TextBlock { Text = "Live Log", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
@@ -679,11 +732,18 @@ public partial class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalContentAlignment = VerticalAlignment.Stretch,
+            MinHeight = LogHeaderHeight,
             Padding = new Thickness(0),
             Margin = new Thickness(0)
         };
         logExpander.RegisterPropertyChangedCallback(Expander.IsExpandedProperty, (_, _) =>
-            SetLogCollapsed(!logExpander.IsExpanded, true));
+        {
+            if (suppressLogExpansionCallback) return;
+            var collapsed = !logExpander.IsExpanded;
+            SetLogCollapsed(collapsed, true);
+            if (!collapsed)
+                RestoreLogScroll(0, true);
+        });
         ToolTipService.SetToolTip(logExpander, "Expand or collapse Live Log");
         AutomationProperties.SetName(logExpander, "Live Log");
         panel.Child = logExpander;
@@ -693,22 +753,36 @@ public partial class MainWindow : Window
     void SetLogCollapsed(bool collapsed, bool persist)
     {
         logCollapsed = collapsed;
-        if (centerLogRow != null)
-            centerLogRow.Height = collapsed ? GridLength.Auto : new GridLength(Math.Clamp(liveLogExpandedHeight, 100, 600));
-        if (logSplitterRow != null) logSplitterRow.Height = new GridLength(collapsed ? 0 : 12);
-        if (logSplitter != null) logSplitter.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        if (collapsed)
+        {
+            if (logSplitterRow != null) logSplitterRow.Height = new GridLength(0);
+            if (logSplitter != null) logSplitter.Visibility = Visibility.Collapsed;
+            if (centerLogRow != null) centerLogRow.Height = new GridLength(CollapsedLogHeaderHeight);
+        }
+        else
+        {
+            if (centerLogRow != null) centerLogRow.Height = new GridLength(Math.Clamp(liveLogExpandedHeight, 100, 600));
+            if (logSplitterRow != null) logSplitterRow.Height = new GridLength(12);
+            if (logSplitter != null) logSplitter.Visibility = Visibility.Visible;
+        }
         if (logExpander != null)
         {
-            if (logExpander.IsExpanded == collapsed) logExpander.IsExpanded = !collapsed;
             logExpander.VerticalAlignment = collapsed ? VerticalAlignment.Top : VerticalAlignment.Stretch;
             ToolTipService.SetToolTip(logExpander, collapsed ? "Expand Live Log" : "Collapse Live Log");
+            if (logExpander.IsExpanded == collapsed)
+            {
+                suppressLogExpansionCallback = true;
+                try { logExpander.IsExpanded = !collapsed; }
+                finally { suppressLogExpansionCallback = false; }
+            }
         }
+        if (!collapsed) RestoreLogScroll(0, true);
         if (persist) SaveUiState();
     }
 
     Border BuildSettingsPane()
     {
-        settingsPaneBorder = new Border { Background = secondarySurfaceBrush, BorderBrush = borderBrush, BorderThickness = new Thickness(1, 0, 0, 0) };
+        settingsPaneBorder = new Border { CornerRadius = new CornerRadius(8), Background = secondarySurfaceBrush, BorderBrush = borderBrush, BorderThickness = new Thickness(1, 0, 0, 0) };
         var pane = settingsPaneBorder;
         var outer = new Grid();
         outer.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -913,6 +987,8 @@ public partial class MainWindow : Window
     {
         if (projectList.SelectedIndex >= 0 && projectList.SelectedIndex < projects.Count && !ReferenceEquals(selectedProject, projects[projectList.SelectedIndex]))
         {
+            SaveMeshCamera();
+            ResetViewer();
             selectedProject = projects[projectList.SelectedIndex];
             LoadSelectedProject();
             RefreshArtifacts();
@@ -956,6 +1032,8 @@ public partial class MainWindow : Window
         if (loading || selectedProject == null)
             return;
         var project = selectedProject;
+        var previousLeftEar = project.LeftEar;
+        var previousRightEar = project.RightEar;
         project.Name = projectNameBox.Text.Trim();
         project.LeftEar = leftEarBox.Text.Trim();
         project.RightEar = rightEarBox.Text.Trim();
@@ -982,6 +1060,12 @@ public partial class MainWindow : Window
         project.Settings.Postprocessing.LevelOffsetDB = levelOffsetBox.Text.Trim();
         InvalidateManualPositions(project);
         Persist();
+        var inputMeshesChanged = !string.Equals(previousLeftEar, project.LeftEar, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(previousRightEar, project.RightEar, StringComparison.OrdinalIgnoreCase);
+        if (inputMeshesChanged && placementSide == null &&
+            (string.IsNullOrWhiteSpace(project.LeftEar) || string.IsNullOrWhiteSpace(project.RightEar) ||
+             File.Exists(project.LeftEar) || File.Exists(project.RightEar)))
+            RefreshArtifacts();
         RefreshProjectList();
         RefreshPipelineStatus();
     }
@@ -1401,6 +1485,11 @@ public partial class MainWindow : Window
 
     void OpenArtifact(Artifact artifact)
     {
+        // Preserve the camera of the mesh that is currently visible before
+        // replacing it with another artifact in the same project.
+        if (currentMesh != null && selectedArtifactPath != null &&
+            SamePath(currentMesh.Path, selectedArtifactPath))
+            SaveMeshCamera();
         ResetViewer();
         selectedArtifactPath = artifact.Path;
         selectedArtifactSide = ArtifactSide(artifact);
@@ -1448,10 +1537,20 @@ public partial class MainWindow : Window
             meshViewport.Items.Add(meshVisual);
             meshVisuals.Add(meshVisual);
             AddMicrophoneMarker(artifact.Path);
+            var hasSavedCamera = HasSavedMeshCamera();
             ResetMeshCamera();
-            meshViewport.Camera?.ZoomExtents(meshViewport, 80);
+            if (!hasSavedCamera)
+            {
+                var isStl = string.Equals(Path.GetExtension(artifact.Path), ".stl", StringComparison.OrdinalIgnoreCase);
+                // Fit both formats through Helix so the camera target and
+                // rotation pivot are initialized from the actual mesh bounds.
+                // STL gets only a small deterministic zoom-out afterwards.
+                meshViewport.Camera?.ZoomExtents(meshViewport, isStl ? 0 : 80);
+                if (isStl) ZoomOutMeshCamera(2.8);
+            }
             viewerPlaceholder.Visibility = Visibility.Collapsed;
             viewerInteractionHint.Visibility = Visibility.Visible;
+            resetViewButtonHost.Visibility = Visibility.Visible;
             meshViewport.Visibility = Visibility.Visible;
             UpdatePlacementButtons();
         }
@@ -1460,6 +1559,7 @@ public partial class MainWindow : Window
         {
             currentMesh = null;
             viewerInteractionHint.Visibility = Visibility.Collapsed;
+            resetViewButtonHost.Visibility = Visibility.Collapsed;
             viewerPlaceholder.Text = "Could not open mesh";
             viewerPlaceholder.Visibility = Visibility.Visible;
             AppendLog("Cannot open mesh: " + error, selectedProject?.Id);
@@ -1497,6 +1597,7 @@ public partial class MainWindow : Window
         imagePreview.Source = null;
         imagePreview.Visibility = Visibility.Collapsed;
         viewerInteractionHint.Visibility = Visibility.Collapsed;
+        resetViewButtonHost.Visibility = Visibility.Collapsed;
         meshViewport.Visibility = Visibility.Visible;
         viewerPlaceholder.Text = "No preview selected";
         viewerPlaceholder.Visibility = Visibility.Visible;
@@ -1554,7 +1655,7 @@ public partial class MainWindow : Window
         var mode = meshPointerMode;
         var wasClick = !pointerMoved;
         ResetMeshPointerState();
-        SaveMeshCamera();
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, SaveMeshCamera);
         if (PlacementIsCurrent() && !calculatingAutomaticPosition && mode == MeshPointerMode.Rotate && wasClick && currentMesh != null && meshVisual != null)
         {
             var hit = meshViewport.FindHits(point.Position).FirstOrDefault(x => ReferenceEquals(x.ModelHit, meshVisual));
@@ -1575,7 +1676,7 @@ public partial class MainWindow : Window
 
     void MeshViewportPointerCaptureLost(object sender, PointerRoutedEventArgs e) => ResetMeshPointerState();
 
-    void MeshViewportPointerWheelChanged(object sender, PointerRoutedEventArgs e) => SaveMeshCamera();
+    void MeshViewportPointerWheelChanged(object sender, PointerRoutedEventArgs e) => DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, SaveMeshCamera);
 
     void ResetMeshPointerState()
     {
@@ -1767,18 +1868,49 @@ public partial class MainWindow : Window
         var yaw = state.Yaw * Math.PI / 180;
         var pitch = state.Pitch * Math.PI / 180;
         var horizontal = state.Distance * Math.Cos(pitch);
-        var position = new System.Numerics.Vector3(currentMesh!.Center.X + (float)(horizontal * Math.Sin(yaw)), currentMesh.Center.Y - (float)(horizontal * Math.Cos(yaw)), currentMesh.Center.Z + (float)(state.Distance * Math.Sin(pitch)));
+        var center = System.Numerics.Vector3.Zero;
+        var position = new System.Numerics.Vector3(center.X + (float)(horizontal * Math.Sin(yaw)), center.Y - (float)(horizontal * Math.Cos(yaw)), center.Z + (float)(state.Distance * Math.Sin(pitch)));
         camera.Position = position;
-        camera.LookDirection = currentMesh.Center - position;
+        camera.LookDirection = center - position;
         camera.UpDirection = new System.Numerics.Vector3(0, 0, 1);
         meshViewport.Camera = camera;
     }
+
+    void ZoomOutMeshCamera(double factor)
+    {
+        if (meshViewport.Camera is not PerspectiveCamera camera || factor <= 1)
+            return;
+        var target = camera.Position + camera.LookDirection;
+        var direction = camera.Position - target;
+        if (direction.LengthSquared() < 1e-6f)
+            return;
+        camera.Position = target + direction * (float)factor;
+        camera.LookDirection = target - camera.Position;
+    }
+
+    void ResetViewClicked(object sender, RoutedEventArgs e)
+    {
+        if (selectedProject == null || selectedArtifactPath == null || currentMesh == null || meshViewport.Items == null)
+            return;
+        if (viewerStates.TryGetValue(selectedProject.Id, out var state))
+            state.CameraByArtifact.Remove(selectedArtifactPath);
+        SaveViewerStates();
+        ResetMeshCamera();
+        var isStl = string.Equals(Path.GetExtension(selectedArtifactPath), ".stl", StringComparison.OrdinalIgnoreCase);
+        meshViewport.Camera?.ZoomExtents(meshViewport, isStl ? 0 : 80);
+        if (isStl) ZoomOutMeshCamera(2.8);
+        SaveMeshCamera();
+    }
+
+    bool HasSavedMeshCamera() => selectedProject != null && selectedArtifactPath != null &&
+        viewerStates.TryGetValue(selectedProject.Id, out var state) &&
+        state.CameraByArtifact.ContainsKey(selectedArtifactPath);
 
     void SaveMeshCamera()
     {
         if (selectedProject == null || selectedArtifactPath == null || currentMesh == null || meshViewport.Camera is not PerspectiveCamera camera)
             return;
-        var direction = camera.Position - currentMesh.Center;
+        var direction = camera.Position - System.Numerics.Vector3.Zero;
         if (!viewerStates.TryGetValue(selectedProject.Id, out var state)) viewerStates[selectedProject.Id] = state = new ProjectViewerState();
         state.CameraByArtifact[selectedArtifactPath] = new MeshCameraState { Distance = direction.Length(), Pitch = Math.Asin(direction.Z / Math.Max(direction.Length(), 1e-6f)) * 180 / Math.PI, Yaw = Math.Atan2(direction.X, -direction.Y) * 180 / Math.PI };
         SaveViewerStates();
@@ -2283,7 +2415,7 @@ ui:
     {
         var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "1.0.0";
         var content = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
-        var logoPath = Path.Combine(AppContext.BaseDirectory, "app_icon.png");
+        var logoPath = Path.Combine(AppContext.BaseDirectory, "icon.png");
         if (File.Exists(logoPath)) content.Children.Add(new Image { Source = new BitmapImage(new Uri(logoPath)), Width = 96, Height = 96, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center });
         content.Children.Add(new TextBlock { Text = "Pinna2HRTF", FontSize = 24, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center });
         content.Children.Add(new TextBlock { Text = "Version " + version, HorizontalAlignment = HorizontalAlignment.Center });
