@@ -37,13 +37,23 @@ public partial class App : Application
         {
             if (closedCleanupCompleted) return;
             closedCleanupCompleted = true;
-            if (window is MainWindow mainWindow)
-                mainWindow.ShutdownForAppClose();
-            window = null;
-            try { instanceMutex?.ReleaseMutex(); } catch (ApplicationException) { }
-            instanceMutex?.Dispose();
-            instanceMutex = null;
-            Exit();
+            try
+            {
+                if (window is MainWindow mainWindow)
+                    mainWindow.ShutdownForAppClose();
+            }
+            catch
+            {
+            }
+            finally
+            {
+                window = null;
+                try { instanceMutex?.ReleaseMutex(); } catch (ApplicationException) { }
+                try { instanceMutex?.Dispose(); } catch { }
+                instanceMutex = null;
+
+                try { Exit(); } finally { Environment.Exit(0); }
+            }
         };
         if (window.AppWindow.Presenter is OverlappedPresenter presenter)
             presenter.Maximize();

@@ -53,9 +53,6 @@ public partial class MainWindow : Window
     const uint JobObjectLimitKillOnJobClose = 0x2000;
     const uint LoadLibrarySearchDllLoadDir = 0x00000100;
     const uint LoadLibrarySearchDefaultDirs = 0x00001000;
-    // Mesh coordinates are expressed in millimetres by the pipeline.  The
-    // marker radius is deliberately independent of the mesh bounds; only the
-    // loader's display transform is applied when creating the viewer sphere.
     const double MicrophoneMarkerRadiusMeshUnits = 0.5;
     readonly ObservableCollection<ProjectRecord> projects = [];
     readonly ObservableCollection<Artifact> artifacts = [];
@@ -153,8 +150,6 @@ public partial class MainWindow : Window
     bool logProgrammaticScroll;
     bool logTailScrollPending;
     bool logTailUserInteraction;
-    // The native Expander header is 48 px high; the surrounding one-pixel
-    // border adds two more pixels to the collapsed grid row.
     const double LogHeaderHeight = 48;
     const double CollapsedLogHeaderHeight = LogHeaderHeight + 2;
     bool viewportReady;
@@ -345,9 +340,6 @@ public partial class MainWindow : Window
         SetProjectsCollapsed(projectsCollapsed, false);
         SetLogCollapsed(logCollapsed, false);
         if (settingsColumn != null) settingsColumn.Width = new GridLength(Math.Clamp(settingsExpandedWidth, 320, 560));
-        // Windows builds always use the bundled native tools. Older registries
-        // may contain absolute paths from a previous build directory; ignoring
-        // those paths prevents preprocessing from loading stale/missing DLLs.
         environment = DefaultEnvironment();
         foreach (var project in projects)
         {
@@ -365,8 +357,6 @@ public partial class MainWindow : Window
         if (selectedProject != null)
             projectList.SelectedIndex = projects.IndexOf(selectedProject);
         LoadSelectedProject();
-        // Viewport3DX creates its item collection when its template is applied. Defer
-        // the first artifact load until the newly-created visual tree has completed layout.
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => RefreshArtifacts());
         UpdateViewerAppearance();
         statusTimer.Start();
@@ -420,8 +410,6 @@ public partial class MainWindow : Window
 
     Grid BuildSplitter(bool vertical, DragDeltaEventHandler handler)
     {
-        // Reserve the proven 12-pixel interaction slot. The interaction host and
-        // Thumb remain transparent; only the centered one-pixel guide is visible.
         var host = new CursorGrid(vertical ? InputSystemCursorShape.SizeWestEast : InputSystemCursorShape.SizeNorthSouth)
         {
             Background = new SolidColorBrush(Colors.Transparent),
@@ -430,16 +418,13 @@ public partial class MainWindow : Window
         
         if (vertical)
         {
-            // Vertical splitter: fills the 12-pixel column and stretches height.
             host.VerticalAlignment = VerticalAlignment.Stretch;
         }
         else
         {
-            // Horizontal splitter: fills the 12-pixel row and stretches width.
             host.HorizontalAlignment = HorizontalAlignment.Stretch;
         }
         
-        // Visual indicator line: one pixel, centered in the interaction slot.
         var line = new Border
         {
             Width = vertical ? 1 : double.NaN,
@@ -450,7 +435,6 @@ public partial class MainWindow : Window
             IsHitTestVisible = false
         };
         
-        // The Thumb fills the complete slot and remains the drag target.
         var thumb = new Thumb
         {
             HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -509,8 +493,6 @@ public partial class MainWindow : Window
             if (projectsExpander.IsExpanded == collapsed) projectsExpander.IsExpanded = !collapsed;
             projectsExpander.Header = collapsed ? null : projectsHeaderText;
             projectsExpander.VerticalAlignment = collapsed ? VerticalAlignment.Top : VerticalAlignment.Stretch;
-            // WinUI's static header padding reserves room even with no title.
-            // Apply the template first; Loaded can fire before its header exists.
             projectsExpander.ApplyTemplate();
             if (FindDescendant<ToggleButton>(projectsExpander) is { } header)
             {
@@ -518,8 +500,6 @@ public partial class MainWindow : Window
                 header.ApplyTemplate();
                 if (FindDescendant<AnimatedIcon>(header) is { } chevron)
                 {
-                    // Keep WinUI's native up/down animation, rotated so its two
-                    // states point right when closed and left when open.
                     chevron.RenderTransformOrigin = new Point(0.5, 0.5);
                     chevron.RenderTransform = new RotateTransform { Angle = -90 };
                 }
@@ -527,8 +507,6 @@ public partial class MainWindow : Window
             }
             ToolTipService.SetToolTip(projectsExpander, null);
         }
-        // Hide the body immediately: the vertical Expander animation must not
-        // keep the project's list width in the measurement of the compact rail.
         if (projectsBody != null) projectsBody.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         if (projectsColumn != null)
         {
@@ -613,8 +591,6 @@ public partial class MainWindow : Window
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         projectsHeaderText = new TextBlock { Text = "Projects", FontSize = 20, Margin = new Thickness(12, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = primaryTextBrush };
-        // Actions belong to the body, outside the native expander's toggle.
-        // A separate toolbar also fits at the sidebar's minimum width.
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(10, 8, 10, 8) };
         buttons.Children.Add(ProjectButton("\uE710", "New project", CreateProjectClicked));
         buttons.Children.Add(ProjectButton("\uE896", "Import project", ImportProjectClicked));
@@ -637,9 +613,6 @@ public partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch
         };
-        // Keep WinUI's animated chevron and keyboard/accessibility behavior.
-        // Remove only the space reserved around it, so an empty header measures
-        // to the native 32-pixel toggle plus its border when collapsed.
         projectsExpander.Resources["ExpanderChevronMargin"] = new Thickness(0);
         projectsExpander.Loaded += (_, _) => SetProjectsCollapsed(!projectsExpander.IsExpanded, false);
         projectsExpander.RegisterPropertyChangedCallback(Expander.IsExpandedProperty, (_, _) =>
@@ -814,9 +787,6 @@ public partial class MainWindow : Window
     {
         if (!viewportReady || meshViewport.Items == null || sceneLights.Count > 0)
             return;
-        // Viewport3DX does not guarantee useful lighting when no scene lights are
-        // supplied by the host. Keep the setup neutral and diffuse so mesh shape
-        // remains readable in both light and dark themes.
         var ambient = new AmbientLight3D { Color = Colors.White };
         var key = new DirectionalLight3D { Color = Colors.White, Direction = new System.Numerics.Vector3(-0.45f, -0.65f, -0.6f) };
         var fill = new DirectionalLight3D { Color = ColorHelper.FromArgb(210, 220, 235, 255), Direction = new System.Numerics.Vector3(0.7f, 0.25f, -0.35f) };
@@ -1041,8 +1011,6 @@ public partial class MainWindow : Window
 
     Button InfoButton(string id)
     {
-        // Match the macOS info.circle affordance while keeping the existing
-        // flyout content and publication links used by the Windows app.
         var info = new Button
         {
             Content = new FontIcon
@@ -1640,9 +1608,6 @@ public partial class MainWindow : Window
 
     static void ConfigurePickerStart(object picker, string? currentPath)
     {
-        // WinUI pickers expose only a coarse SuggestedStartLocation. A stable
-        // SettingsIdentifier lets Windows remember the last folder separately for
-        // each existing path, while still falling back to the normal picker.
         var folder = ExistingPickerFolder(currentPath);
         if (picker is FileOpenPicker filePicker)
         {
@@ -1682,7 +1647,6 @@ public partial class MainWindow : Window
 
     void RefreshArtifacts()
     {
-        // A background stage finishing must not replace an active placement mesh.
         if (placementSide != null) return;
         if (selectedProject == null)
         {
@@ -1754,8 +1718,6 @@ public partial class MainWindow : Window
 
     void OpenArtifact(Artifact artifact)
     {
-        // Preserve the camera of the mesh that is currently visible before
-        // replacing it with another artifact in the same project.
         if (currentMesh != null && selectedArtifactPath != null &&
             SamePath(currentMesh.Path, selectedArtifactPath))
             SaveMeshCamera();
@@ -1811,9 +1773,6 @@ public partial class MainWindow : Window
             if (!hasSavedCamera)
             {
                 var isStl = string.Equals(Path.GetExtension(artifact.Path), ".stl", StringComparison.OrdinalIgnoreCase);
-                // Fit both formats through Helix so the camera target and
-                // rotation pivot are initialized from the actual mesh bounds.
-                // STL gets only a small deterministic zoom-out afterwards.
                 meshViewport.Camera?.ZoomExtents(meshViewport, isStl ? 0 : 80);
                 if (isStl) ZoomOutMeshCamera(2.8);
             }
@@ -2075,7 +2034,6 @@ public partial class MainWindow : Window
         using var registration = cancellation.Register(() => TryTerminate(process));
         try
         {
-            // Drain both pipes together: filling stderr must not block stdout or Done.
             var outputTask = process.StandardOutput.ReadToEndAsync(cancellation);
             var errorTask = process.StandardError.ReadToEndAsync(cancellation);
             await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(cancellation));
@@ -2278,9 +2236,6 @@ public partial class MainWindow : Window
         }
         catch (Exception error)
         {
-            // Remove a process that was registered before Start() completed.
-            // Otherwise a failed launch could keep the window in a perpetual
-            // "running" state and prevent deterministic shutdown cleanup.
             if (runningProcesses.TryGetValue(project.Id, out var failedProcess))
             {
                 runningProcesses.Remove(project.Id);
@@ -2296,8 +2251,6 @@ public partial class MainWindow : Window
 
     void ProcessFinished(Process process, ProjectRecord project, Stage stage)
     {
-        // Exited callbacks can be queued after the native window has already
-        // begun shutting down. The shutdown path owns cleanup in that case.
         if (shutdownCleanupDone)
         {
             try { process.Dispose(); } catch { }
@@ -2392,9 +2345,6 @@ public partial class MainWindow : Window
 
     string? BundledPythonExecutable()
     {
-        // uv's Windows trampoline can retain an absolute interpreter reference
-        // when a portable .venv is moved. Prefer the bundled managed CPython
-        // directly; ApplyProcessEnvironment adds the venv site-packages path.
         var pythonRoot = Path.Combine(packageRoot, "Python");
         if (Directory.Exists(pythonRoot))
         {
@@ -2427,7 +2377,6 @@ public partial class MainWindow : Window
 
     void RebaseManualPosition(ManualMicrophonePosition? position, string source, string path)
     {
-        // Copying an input does not change a placement made on its predicted ear.
         if (PositionMatchesMesh(position, source) && !string.IsNullOrWhiteSpace(path)) { position!.MeshPath = path; position.MeshIdentity = MeshIdentity(path); }
     }
 
@@ -2676,8 +2625,6 @@ ui:
         AttachLogScrollViewer();
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
-            // A second low-priority pass allows the TextBox/ScrollViewer to
-            // measure the complete burst of appended lines first.
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
                 logTailScrollPending = false;
@@ -2842,7 +2789,6 @@ ui:
     bool NumCalcSideIsComplete(ProjectRecord project, string side)
     {
         var sideRoot = Path.Combine(project.SaveLocation, "Projects", side);
-        // Keep compatibility with projects produced by older releases.
         if (ContainsOutput2HRTF(Path.Combine(sideRoot, "Output2HRTF"))) return true;
         var total = NumCalcTotal(project, side);
         if (total <= 0) return false;
@@ -2954,18 +2900,28 @@ ui:
         if (shutdownCleanupDone) return;
         shutdownCleanupDone = true;
         try { if (placementSide != null) EndPlacement(); } catch { }
+        try
+        {
+            meshLoadCancellation?.Cancel();
+            meshLoadCancellation?.Dispose();
+            meshLoadCancellation = null;
+        }
+        catch { }
         try { statusTimer.Stop(); } catch { }
+
+        try
+        {
+            if (meshViewport.RenderHost != null)
+                meshViewport.Detach();
+        }
+        catch { }
+
         var processes = runningProcesses.Values.Distinct().ToList();
         foreach (var process in processes)
         {
-            StopTrackedProcess(process, 1500);
+            try { StopTrackedProcess(process, 1500); } catch { }
         }
 
-        // Process.Kill(entireProcessTree: true) is asynchronous and its wait
-        // state does not include every descendant. Terminating the job after
-        // the individual requests catches NumCalc and any other descendants
-        // that are still alive, while KILL_ON_JOB_CLOSE remains the final
-        // safety net when the handle is released.
         if (pipelineJob != IntPtr.Zero && processes.Any(process => !HasExitedSafe(process)))
         {
             try
@@ -3011,7 +2967,7 @@ ui:
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
         closingConfirmed = true;
         ShutdownForAppClose();
-        appWindow.Destroy();
+        Close();
     }
 
     void LoadRegistry()
@@ -3098,7 +3054,6 @@ ui:
         var folder = Path.Combine(project.SaveLocation, side == "left" ? project.Settings.Inference.PredictionLeftFolder : project.Settings.Inference.PredictionRightFolder);
         if (!Directory.Exists(folder)) return null;
         var stem = Path.GetFileNameWithoutExtension(raw);
-        // Match RunConfig.predicted_stl's preferred filenames, never an ICP or head mesh.
         foreach (var name in new[] { $"Prediction_{stem}.stl", $"{stem}.stl" })
         {
             var path = Path.Combine(folder, name);
@@ -3133,8 +3088,6 @@ ui:
             var simulationMesh = Path.Combine(selectedProject.SaveLocation, "Intermediates", sideTitle, "graded_head.ply");
             if (SamePath(meshPath, simulationMesh))
             {
-                // Simulation coordinates are transformed during preprocessing. Always
-                // use the exported source center, not a position on the original ear.
                 var parameters = Path.Combine(selectedProject.SaveLocation, "Projects", sideTitle, "parameters.json");
                 try
                 {
@@ -3310,9 +3263,6 @@ sealed class CursorGrid : Grid
 {
     public CursorGrid(InputSystemCursorShape shape)
     {
-        // Cursor is assigned after the element is connected to the visual tree.
-        // Creating WinUI input cursors during construction can crash unpackaged
-        // WinUI apps on some Windows App SDK versions.
         Loaded += (_, _) => ProtectedCursor = InputSystemCursor.Create(shape);
     }
 
@@ -3323,10 +3273,7 @@ sealed class CursorGrid : Grid
 }
 
 sealed class MeshInputController : InputController
-{
-    // Helix's WinUI defaults use a different button mapping for pan/rotate.
-    // Keep the viewer's model-inspection convention explicit and deterministic.
-    protected override bool IsStartRotate(Microsoft.UI.Input.PointerPointProperties properties) =>
+{    protected override bool IsStartRotate(Microsoft.UI.Input.PointerPointProperties properties) =>
         properties.IsLeftButtonPressed && !properties.IsMiddleButtonPressed && !properties.IsRightButtonPressed;
 
     protected override bool IsStartPan(Microsoft.UI.Input.PointerPointProperties properties) =>
