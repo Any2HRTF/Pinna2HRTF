@@ -44,7 +44,13 @@ public partial class MainWindow : Window
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
     [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+    [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool CloseHandle(IntPtr handle);
+    const int JobObjectExtendedLimitInformation = 9;
+    const uint JobObjectLimitKillOnJobClose = 0x2000;
     const uint LoadLibrarySearchDllLoadDir = 0x00000100;
     const uint LoadLibrarySearchDefaultDirs = 0x00001000;
     // Mesh coordinates are expressed in millimetres by the pipeline.  The
@@ -259,12 +265,12 @@ public partial class MainWindow : Window
         if (!OperatingSystem.IsWindows()) return;
         pipelineJob = CreateJobObject(IntPtr.Zero, null);
         if (pipelineJob == IntPtr.Zero) return;
-        var info = new ExtendedLimitInformation { BasicLimitInformation = new JobBasicLimitInformation { LimitFlags = 0x2000 } };
+        var info = new ExtendedLimitInformation { BasicLimitInformation = new JobBasicLimitInformation { LimitFlags = JobObjectLimitKillOnJobClose } };
         var pointer = Marshal.AllocHGlobal(Marshal.SizeOf<ExtendedLimitInformation>());
         try
         {
             Marshal.StructureToPtr(info, pointer, false);
-            if (!SetInformationJobObject(pipelineJob, 9, pointer, (uint)Marshal.SizeOf<ExtendedLimitInformation>()))
+            if (!SetInformationJobObject(pipelineJob, JobObjectExtendedLimitInformation, pointer, (uint)Marshal.SizeOf<ExtendedLimitInformation>()))
             {
                 CloseHandle(pipelineJob);
                 pipelineJob = IntPtr.Zero;
@@ -275,8 +281,45 @@ public partial class MainWindow : Window
 
     void AssignPipelineJob(Process process, Guid projectId)
     {
-        if (pipelineJob == IntPtr.Zero || AssignProcessToJobObject(pipelineJob, process.Handle)) return;
-        AppendLog($"Process association warning: could not assign {process.ProcessName} to the application job (Win32 {Marshal.GetLastWin32Error()}); explicit tree cleanup remains active.", projectId);
+        var processName = SafeProcessName(process);
+        if (pipelineJob == IntPtr.Zero)
+        {
+            AppendLog($"Process association warning: application job is unavailable for {processName} (PID {SafeProcessId(process)}); explicit tree cleanup remains active.", projectId);
+            return;
+        }
+
+        try
+        {
+            if (!AssignProcessToJobObject(pipelineJob, process.Handle))
+            {
+                var error = Marshal.GetLastWin32Error();
+                AppendLog($"Process association warning: could not assign {processName} (PID {SafeProcessId(process)}) to the application job (Win32 {error}); explicit tree cleanup remains active.", projectId);
+                return;
+            }
+
+            if (!IsProcessInJob(process.Handle, pipelineJob, out var inJob) || !inJob)
+            {
+                var error = Marshal.GetLastWin32Error();
+                AppendLog($"Process association warning: {processName} (PID {SafeProcessId(process)}) was not confirmed in the application job (Win32 {error}); explicit tree cleanup remains active.", projectId);
+                return;
+            }
+
+            AppendLog($"Pipeline process associated with application job: {processName} (PID {SafeProcessId(process)}). Child processes inherit this job by default.", projectId);
+        }
+        catch (Exception error)
+        {
+            AppendLog($"Process association warning: {processName} (PID {SafeProcessId(process)}) could not be checked ({error.Message}); explicit tree cleanup remains active.", projectId);
+        }
+    }
+
+    static string SafeProcessName(Process process)
+    {
+        try { return process.ProcessName; } catch { return "pipeline process"; }
+    }
+
+    static int SafeProcessId(Process process)
+    {
+        try { return process.Id; } catch { return 0; }
     }
 
     void WindowLoaded(object sender, RoutedEventArgs e)
@@ -2494,14 +2537,42 @@ ui:
         queuedStages.Remove(project.Id);
         if (runningProcesses.TryGetValue(project.Id, out var process))
         {
-            TryTerminate(process);
+            StopTrackedProcess(process, 1500);
             runningProcesses.Remove(project.Id);
             runningStages.Remove(project.Id);
+            try { process.Dispose(); } catch { }
             AppendLog("Stopping task.", project.Id);
         }
         RefreshPipelineStatus();
     }
-    void TryTerminate(Process process) { try { if (!process.HasExited) process.Kill(true); } catch { } }
+    void TryTerminate(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch { }
+    }
+
+    static bool WaitForExitSafe(Process process, int timeoutMilliseconds)
+    {
+        try { return process.HasExited || process.WaitForExit(timeoutMilliseconds); }
+        catch { return true; }
+    }
+
+    static bool HasExitedSafe(Process process)
+    {
+        try { return process.HasExited; }
+        catch { return true; }
+    }
+
+    void StopTrackedProcess(Process process, int timeoutMilliseconds)
+    {
+        TryTerminate(process);
+        if (!WaitForExitSafe(process, timeoutMilliseconds))
+            AppendLog($"Process {SafeProcessName(process)} (PID {SafeProcessId(process)}) did not exit within {timeoutMilliseconds} ms; application job cleanup remains active.", selectedProject?.Id);
+    }
     void ResetOutputsClicked(object sender, RoutedEventArgs e) => ResetSelectedProjectOutputs();
     void ResetSelectedProjectOutputs(Stage? fromStage = null)
     {
@@ -2884,9 +2955,33 @@ ui:
         shutdownCleanupDone = true;
         try { if (placementSide != null) EndPlacement(); } catch { }
         try { statusTimer.Stop(); } catch { }
-        foreach (var process in runningProcesses.Values.ToList())
+        var processes = runningProcesses.Values.Distinct().ToList();
+        foreach (var process in processes)
         {
-            TryTerminate(process);
+            StopTrackedProcess(process, 1500);
+        }
+
+        // Process.Kill(entireProcessTree: true) is asynchronous and its wait
+        // state does not include every descendant. Terminating the job after
+        // the individual requests catches NumCalc and any other descendants
+        // that are still alive, while KILL_ON_JOB_CLOSE remains the final
+        // safety net when the handle is released.
+        if (pipelineJob != IntPtr.Zero && processes.Any(process => !HasExitedSafe(process)))
+        {
+            try
+            {
+                if (!TerminateJobObject(pipelineJob, 1))
+                    AppendLog($"Application job termination warning (Win32 {Marshal.GetLastWin32Error()}).", selectedProject?.Id);
+            }
+            catch (Exception error)
+            {
+                AppendLog("Application job termination warning: " + error.Message, selectedProject?.Id);
+            }
+        }
+
+        foreach (var process in processes)
+        {
+            WaitForExitSafe(process, 1000);
             try { process.Dispose(); } catch { }
         }
         runningProcesses.Clear();

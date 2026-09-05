@@ -11,6 +11,7 @@ public partial class App : Application
     Window? window;
     private Mutex? instanceMutex;
     private const string InstanceMutexName = @"Local\Pinna2HRTF.Instance";
+    private bool closedCleanupCompleted;
 
     [DllImport("user32.dll")]
     static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
@@ -34,6 +35,8 @@ public partial class App : Application
         window = new MainWindow();
         window.Closed += (_, _) =>
         {
+            if (closedCleanupCompleted) return;
+            closedCleanupCompleted = true;
             if (window is MainWindow mainWindow)
                 mainWindow.ShutdownForAppClose();
             window = null;
