@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="icon.png" alt="Pinna2HRTF icon" width="256">
+  <img src="icon_v1.0.0.png" alt="Pinna2HRTF icon" width="256">
 </p>
 
 # Pinna2HRTF
