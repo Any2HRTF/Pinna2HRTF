@@ -11,7 +11,7 @@ The pipeline runs optional Mesh2PPM inference, prepares the meshes, solves the a
 ## Desktop apps
 
 - **macOS:** Apple Silicon, macOS 13 or later. Open the DMG and drag Pinna2HRTF to Applications. [Download the macOS app](https://ecosystem.sonicom.eu/tools/30).
-- **Windows:** x64, Windows 10 version 2004 or later. Extract the entire ZIP and open `Pinna2HRTF.exe` inside it. [Download the Windows app](https://ecosystem.sonicom.eu/tools/31)
+- **Windows:** x64 portable App, Windows 10 version 2004 or later. [Download the Windows installer](https://ecosystem.sonicom.eu/tools/31)
 
 Packaged apps include Python, the models, and the simulation tools. They work offline without a separate Blender or `uv` installation.
 
