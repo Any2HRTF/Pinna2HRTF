@@ -60,6 +60,12 @@ public partial class MainWindow : Window
     readonly Dictionary<Guid, Stage> runningStages = [];
     readonly Dictionary<Guid, Queue<Stage>> queuedStages = [];
     readonly Dictionary<Guid, HashSet<Stage>> failedStages = [];
+    readonly Dictionary<string, GeneratedOutputManifest> outputStores = new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<Guid, HashSet<GeneratedOutputManifest.OutputStage>> knownOutputs = [];
+    readonly HashSet<Guid> outputOperations = [];
+    readonly HashSet<Guid> outputScans = [];
+    readonly Dictionary<Guid, DateTime> lastOutputScan = [];
+    readonly Dictionary<Process, GeneratedOutputManifest> processOutputStores = [];
     readonly Dictionary<Guid, string> projectLogs = [];
     readonly Dictionary<Guid, ProjectRowUi> projectRows = [];
     readonly Dictionary<Guid, ProjectViewerState> viewerStates = [];
@@ -165,6 +171,8 @@ public partial class MainWindow : Window
     Border placementBorder = new();
     Button placeLeftButton = new();
     Button placeRightButton = new();
+    Border placeLeftButtonHost = new();
+    Border placeRightButtonHost = new();
     Button automaticPositionButton = new();
     Button donePositionButton = new();
     Button cancelPositionButton = new();
@@ -178,6 +186,7 @@ public partial class MainWindow : Window
     readonly TextBox minFrequencyBox = new();
     readonly TextBox maxFrequencyBox = new();
     readonly TextBox frequencyStepsBox = new();
+    readonly TextBox samplingRateBox = new();
     readonly TextBox microphoneFacesBox = new();
     readonly TextBox meshMinEdgeBox = new();
     readonly TextBox meshMaxEdgeBox = new();
@@ -191,6 +200,7 @@ public partial class MainWindow : Window
     readonly CheckBox useHeadRadiusBox = new();
     readonly CheckBox adaptiveFmmLengthBox = new();
     readonly CheckBox normalizeHrtfsBox = new();
+    readonly CheckBox resampleHrirsBox = new();
     readonly ComboBox modelPicker = new();
     readonly TextBlock[] stageStatus = [new(), new(), new(), new()];
 
@@ -279,7 +289,7 @@ public partial class MainWindow : Window
         var processName = SafeProcessName(process);
         if (pipelineJob == IntPtr.Zero)
         {
-            AppendLog($"Process association warning: application job is unavailable for {processName} (PID {SafeProcessId(process)}); explicit tree cleanup remains active.", projectId);
+            AppendLog($"Process association warning: application job is unavailable for {processName}; explicit tree cleanup remains active.", projectId);
             return;
         }
 
@@ -288,33 +298,27 @@ public partial class MainWindow : Window
             if (!AssignProcessToJobObject(pipelineJob, process.Handle))
             {
                 var error = Marshal.GetLastWin32Error();
-                AppendLog($"Process association warning: could not assign {processName} (PID {SafeProcessId(process)}) to the application job (Win32 {error}); explicit tree cleanup remains active.", projectId);
+                AppendLog($"Process association warning: could not assign {processName} to the application job (Win32 {error}); explicit tree cleanup remains active.", projectId);
                 return;
             }
 
             if (!IsProcessInJob(process.Handle, pipelineJob, out var inJob) || !inJob)
             {
                 var error = Marshal.GetLastWin32Error();
-                AppendLog($"Process association warning: {processName} (PID {SafeProcessId(process)}) was not confirmed in the application job (Win32 {error}); explicit tree cleanup remains active.", projectId);
+                AppendLog($"Process association warning: {processName} was not confirmed in the application job (Win32 {error}); explicit tree cleanup remains active.", projectId);
                 return;
             }
 
-            AppendLog($"Pipeline process associated with application job: {processName} (PID {SafeProcessId(process)}). Child processes inherit this job by default.", projectId);
         }
         catch (Exception error)
         {
-            AppendLog($"Process association warning: {processName} (PID {SafeProcessId(process)}) could not be checked ({error.Message}); explicit tree cleanup remains active.", projectId);
+            AppendLog($"Process association warning: {processName} could not be checked ({error.Message}); explicit tree cleanup remains active.", projectId);
         }
     }
 
     static string SafeProcessName(Process process)
     {
         try { return process.ProcessName; } catch { return "pipeline process"; }
-    }
-
-    static int SafeProcessId(Process process)
-    {
-        try { return process.Id; } catch { return 0; }
     }
 
     void WindowLoaded(object sender, RoutedEventArgs e)
@@ -656,10 +660,12 @@ public partial class MainWindow : Window
         var pickerPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
         placeLeftButton = new Button { Content = "Place Left Mic", MinWidth = 108, MinHeight = 30 };
         placeRightButton = new Button { Content = "Place Right Mic", MinWidth = 112, MinHeight = 30 };
+        placeLeftButtonHost = MicButtonHost(placeLeftButton);
+        placeRightButtonHost = MicButtonHost(placeRightButton);
         placeLeftButton.Click += (_, _) => BeginPlacement("left");
         placeRightButton.Click += (_, _) => BeginPlacement("right");
-        pickerPanel.Children.Add(placeLeftButton);
-        pickerPanel.Children.Add(placeRightButton);
+        pickerPanel.Children.Add(placeLeftButtonHost);
+        pickerPanel.Children.Add(placeRightButtonHost);
         artifactPicker.Width = 230;
         artifactPicker.MinHeight = 30;
         artifactPicker.ItemsSource = artifacts;
@@ -903,7 +909,7 @@ public partial class MainWindow : Window
         AddExpander(settings, "Mesh2HRTF", [PathSettingPanel("Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked), AddSettingPanel("Use custom head radius", "mesh2hrtf.use_head_radius", useHeadRadiusBox, "Use custom head radius"), AddSettingPanel("Head radius", "mesh2hrtf.head_radius", headRadiusBox), AddSettingPanel("Min frequency", "mesh2hrtf.min_frequency", minFrequencyBox), AddSettingPanel("Max frequency", "mesh2hrtf.max_frequency", maxFrequencyBox), AddSettingPanel("Frequency steps (minimum 2)", "mesh2hrtf.frequency_steps", frequencyStepsBox), AddSettingPanel("Microphone faces", "mesh2hrtf.microphone_faces", microphoneFacesBox)]);
         AddExpander(settings, "Mesh Grading", [AddSettingPanel("Min edge length", "mesh_grading.min_edge_length", meshMinEdgeBox), AddSettingPanel("Max edge length", "mesh_grading.max_edge_length", meshMaxEdgeBox), AddSettingPanel("Max error", "mesh_grading.max_error", meshMaxErrorBox), AddSettingPanel("Gamma", "mesh_grading.gamma", meshGammaBox), AddSettingPanel("Gamma opposite", "mesh_grading.gamma_opposite", meshGammaOppositeBox)]);
         AddExpander(settings, "NumCalc", [AddSettingPanel("Parallel instances", "numcalc.parallel_instances", maxInstancesBox), AddSettingPanel("CPU limit (%)", "numcalc.cpu_limit", maxCpuLoadBox), AddSettingPanel("Adaptive FMM expansion length", "numcalc.adaptive_fmm", adaptiveFmmLengthBox, "Adaptive FMM expansion length")]);
-        AddExpander(settings, "Postprocessing", [AddSettingPanel("Normalize HRTFs", "postprocessing.normalize", normalizeHrtfsBox, "Normalize HRTFs"), AddSettingPanel("Level offset (dB)", "postprocessing.level_offset", levelOffsetBox)]);
+        AddExpander(settings, "Postprocessing", [AddSettingPanel("Normalize HRTFs", "postprocessing.normalize", normalizeHrtfsBox, "Normalize HRTFs"), AddSettingPanel("Level offset (dB)", "postprocessing.level_offset", levelOffsetBox), AddSettingPanel("Resample HRIRs", "postprocessing.resample_hrirs", resampleHrirsBox, "Resample HRIRs"), AddSettingPanel("Sampling rate (Hz)", "postprocessing.sampling_rate", samplingRateBox)]);
         scroll.Content = settings;
         outer.Children.Add(scroll);
         var stages = BuildStagesPane();
@@ -1143,9 +1149,13 @@ public partial class MainWindow : Window
         adaptiveFmmLengthBox.IsChecked = project?.Settings.NumCalc.AdaptiveFmmLength ?? true;
         normalizeHrtfsBox.IsChecked = project?.Settings.Postprocessing?.Normalize ?? true;
         levelOffsetBox.Text = project?.Settings.Postprocessing?.LevelOffsetDB ?? "-30";
+        resampleHrirsBox.IsChecked = project?.Settings.Postprocessing?.ResampleHrirs ?? false;
+        samplingRateBox.Text = project?.Settings.Postprocessing?.SamplingRate ?? "48000";
         SelectModel(project);
         LoadSelectedProjectLog();
         loading = false;
+        UpdatePostprocessingControls();
+        UpdatePlacementButtons();
     }
 
     Stage? SettingResetStage(string id)
@@ -1177,6 +1187,8 @@ public partial class MainWindow : Window
         "numcalc.adaptive_fmm" => (adaptiveFmmLengthBox.IsChecked == true).ToString(),
         "postprocessing.normalize" => (normalizeHrtfsBox.IsChecked == true).ToString(),
         "postprocessing.level_offset" => levelOffsetBox.Text,
+        "postprocessing.resample_hrirs" => (resampleHrirsBox.IsChecked == true).ToString(),
+        "postprocessing.sampling_rate" => samplingRateBox.Text,
         _ => ""
     };
 
@@ -1201,16 +1213,49 @@ public partial class MainWindow : Window
         "numcalc.adaptive_fmm" => project.Settings.NumCalc.AdaptiveFmmLength.ToString(),
         "postprocessing.normalize" => (project.Settings.Postprocessing?.Normalize ?? true).ToString(),
         "postprocessing.level_offset" => project.Settings.Postprocessing?.LevelOffsetDB ?? "",
+        "postprocessing.resample_hrirs" => (project.Settings.Postprocessing?.ResampleHrirs ?? false).ToString(),
+        "postprocessing.sampling_rate" => project.Settings.Postprocessing?.SamplingRate ?? "48000",
         _ => ""
     };
 
-    bool HasOutputsFrom(Stage stage, ProjectRecord project) => stage == Stage.Inference
-        ? StageIsComplete(Stage.Inference, project) || StageIsComplete(Stage.Preprocessing, project) || StageIsComplete(Stage.Numcalc, project) || StageIsComplete(Stage.Postprocessing, project)
-        : stage == Stage.Preprocessing
-            ? StageIsComplete(Stage.Preprocessing, project) || StageIsComplete(Stage.Numcalc, project) || StageIsComplete(Stage.Postprocessing, project)
-            : stage == Stage.Numcalc
-                ? NumCalcCompleted(project, "Left") > 0 || NumCalcCompleted(project, "Right") > 0 || StageIsComplete(Stage.Postprocessing, project)
-                : StageIsComplete(Stage.Postprocessing, project);
+    static GeneratedOutputManifest.OutputStage OutputStageFor(Stage stage) => stage == Stage.Inference
+        ? GeneratedOutputManifest.OutputStage.Inference : stage == Stage.Preprocessing
+        ? GeneratedOutputManifest.OutputStage.Preprocessing : stage == Stage.Numcalc
+        ? GeneratedOutputManifest.OutputStage.Numcalc : GeneratedOutputManifest.OutputStage.Postprocessing;
+
+    GeneratedOutputManifest OutputsFor(ProjectRecord project)
+    {
+        var root = Path.GetFullPath(project.SaveLocation);
+        // A shared or nested output root would allow one project to erase another's data.
+        if (projects.Any(other => other.Id != project.Id && !string.IsNullOrWhiteSpace(other.SaveLocation) &&
+            (ContainsPath(root, other.SaveLocation) || ContainsPath(other.SaveLocation, root))))
+            throw new IOException("Choose a separate output folder for this project before resetting or running it.");
+        var inputs = projects.SelectMany(p => new[] { p.LeftEar, p.RightEar, p.Settings.Preprocessing.EvaluationGrid ?? "" })
+            .Where(p => !string.IsNullOrWhiteSpace(p)).OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToArray();
+        var key = root + "\n" + string.Join("\n", inputs);
+        if (!outputStores.TryGetValue(key, out var store)) outputStores[key] = store = new GeneratedOutputManifest(root, inputs);
+        return store;
+    }
+
+    async Task ReconcileOutputsAsync(ProjectRecord project, bool required = false)
+    {
+        if (shutdownCleanupDone || string.IsNullOrWhiteSpace(project.SaveLocation) || !Directory.Exists(project.SaveLocation) ||
+            runningProcesses.ContainsKey(project.Id) || outputOperations.Contains(project.Id)) return;
+        if (!required && (outputScans.Contains(project.Id) || lastOutputScan.TryGetValue(project.Id, out var previous) && DateTime.UtcNow - previous < TimeSpan.FromSeconds(10))) return;
+        var root = project.SaveLocation;
+        outputScans.Add(project.Id);
+        try
+        {
+            var store = OutputsFor(project);
+            var stages = await Task.Run(store.Reconcile);
+            if (project.SaveLocation == root) knownOutputs[project.Id] = stages;
+        }
+        catch when (!required) { /* Busy/copied outputs are retried; explicit operations report errors. */ }
+        finally { outputScans.Remove(project.Id); lastOutputScan[project.Id] = DateTime.UtcNow; }
+    }
+
+    bool HasOutputsFrom(Stage stage, ProjectRecord project) => knownOutputs.TryGetValue(project.Id, out var entries) &&
+        entries.Any(s => s >= OutputStageFor(stage));
 
     void SettingChanged(object sender, RoutedEventArgs e)
     {
@@ -1227,12 +1272,18 @@ public partial class MainWindow : Window
     async Task HandleSettingChangeAsync(string id)
     {
         if (loading || selectedProject == null) return;
+        var project = selectedProject;
         var desired = CurrentSettingValue(id);
-        if (desired == StoredSettingValue(selectedProject, id)) return;
-        if (runningProcesses.ContainsKey(selectedProject.Id)) { LoadSelectedProject(); return; }
+        if (desired == StoredSettingValue(project, id)) return;
+        if (runningProcesses.ContainsKey(project.Id) || outputOperations.Contains(project.Id)) { LoadSelectedProject(); return; }
         var resetStage = SettingResetStage(id);
-        var promptForReset = resetStage != null && HasOutputsFrom(resetStage, selectedProject) &&
-            !(id == "project.use_bezierppm" && !StageIsComplete(Stage.Preprocessing, selectedProject));
+        if (resetStage != null)
+        {
+            try { await ReconcileOutputsAsync(project, true); }
+            catch { LoadSelectedProject(); AppendLog("Could not inspect output ownership; setting was not changed.", project.Id); return; }
+            if (selectedProject != project || shutdownCleanupDone) return;
+        }
+        var promptForReset = resetStage != null && HasOutputsFrom(resetStage, project);
         if (!promptForReset)
         {
             ApplySettingToProject(selectedProject!, id, desired);
@@ -1250,7 +1301,7 @@ public partial class MainWindow : Window
             XamlRoot = Root.XamlRoot
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-        ResetSelectedProjectOutputs(resetStage!);
+        if (selectedProject != project || !await ResetProjectOutputsAsync(project, resetStage!) || selectedProject != project) return;
         loading = true;
         SetSettingControlValue(id, desired);
         loading = false;
@@ -1291,6 +1342,8 @@ public partial class MainWindow : Window
             case "numcalc.adaptive_fmm": adaptiveFmmLengthBox.IsChecked = bool.TryParse(value, out var adaptive) && adaptive; break;
             case "postprocessing.normalize": normalizeHrtfsBox.IsChecked = bool.TryParse(value, out var normalize) && normalize; break;
             case "postprocessing.level_offset": levelOffsetBox.Text = value; break;
+            case "postprocessing.resample_hrirs": resampleHrirsBox.IsChecked = bool.TryParse(value, out var resample) && resample; UpdatePostprocessingControls(); break;
+            case "postprocessing.sampling_rate": samplingRateBox.Text = value; break;
         }
     }
 
@@ -1306,7 +1359,8 @@ public partial class MainWindow : Window
         project.RightEar = rightEarBox.Text.Trim();
         project.SaveLocation = saveLocationBox.Text.Trim();
         project.Settings.Inference.UsePredictionsForPreprocessing = usePredictionsBox.IsChecked == true;
-        if (placementSide != null && !PlacementIsCurrent()) EndPlacement();
+        UpdatePlacementButtons();
+        if (placementSide != null && (project.Settings.Inference.UsePredictionsForPreprocessing || !PlacementIsCurrent())) EndPlacement();
         project.Settings.Preprocessing.EvaluationGrid = evaluationGridBox.Text.Trim();
         project.Settings.Preprocessing.UseCustomHeadRadius = useHeadRadiusBox.IsChecked == true;
         project.Settings.Preprocessing.HeadRadius = headRadiusBox.Text.Trim();
@@ -1325,6 +1379,10 @@ public partial class MainWindow : Window
         project.Settings.Postprocessing ??= new PostprocessingSettings();
         project.Settings.Postprocessing.Normalize = normalizeHrtfsBox.IsChecked == true;
         project.Settings.Postprocessing.LevelOffsetDB = levelOffsetBox.Text.Trim();
+        project.Settings.Postprocessing.ResampleHrirs = resampleHrirsBox.IsChecked == true;
+        project.Settings.Postprocessing.SamplingRate = NormalizeSamplingRate(samplingRateBox.Text);
+        samplingRateBox.Text = project.Settings.Postprocessing.SamplingRate;
+        UpdatePostprocessingControls();
         InvalidateManualPositions(project);
         Persist();
         var inputMeshesChanged = !string.Equals(previousLeftEar, project.LeftEar, StringComparison.OrdinalIgnoreCase) ||
@@ -1336,6 +1394,15 @@ public partial class MainWindow : Window
         RefreshProjectList();
         RefreshPipelineStatus();
     }
+
+    static string NormalizeSamplingRate(string value)
+    {
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var rate) && rate > 0 && rate % 10 == 0
+            ? rate.ToString(CultureInfo.InvariantCulture)
+            : "48000";
+    }
+
+    void UpdatePostprocessingControls() => samplingRateBox.IsEnabled = resampleHrirsBox.IsChecked == true;
 
     async void BezierPPMSettingChanged(object sender, RoutedEventArgs e) => await HandleSettingChangeAsync("project.use_bezierppm");
 
@@ -1924,14 +1991,31 @@ public partial class MainWindow : Window
         meshViewport.Items.Add(microphoneVisual);
     }
 
+    static Border MicButtonHost(Button button)
+    {
+        var host = new Border
+        {
+            Background = new SolidColorBrush(Colors.Transparent),
+            Child = button,
+            IsHitTestVisible = true
+        };
+        // Keep one stable tooltip instance. Replacing it while the status timer
+        // refreshes the buttons makes WinUI close an otherwise valid hover.
+        ToolTipService.SetToolTip(host, new ToolTip { Content = string.Empty });
+        return host;
+    }
+
     void UpdatePlacementButtons()
     {
-        foreach (var (side, button) in new[] { ("left", placeLeftButton), ("right", placeRightButton) })
+        var mesh2PpmEnabled = selectedProject?.Settings.Inference.UsePredictionsForPreprocessing == true;
+        foreach (var (side, button, host) in new[] { ("left", placeLeftButton, placeLeftButtonHost), ("right", placeRightButton, placeRightButtonHost) })
         {
             var available = selectedProject != null && PreprocessingMesh(selectedProject, side) != null;
-            button.IsEnabled = placementSide == null && available && !runningProcesses.ContainsKey(selectedProject!.Id);
-            ToolTipService.SetToolTip(button, available ? $"Place the {side} microphone on the mesh used for preprocessing." :
-                selectedProject != null && InferenceIsAutomatic(selectedProject) ? $"Run Mesh2PPM Inference to create the predicted {side} ear first." : $"Select an input {side} ear first.");
+            button.IsEnabled = !mesh2PpmEnabled && placementSide == null && available && selectedProject != null && !runningProcesses.ContainsKey(selectedProject.Id);
+            var tooltipText = mesh2PpmEnabled ? "Automatic microphone placement is used for Mesh2PPM-inferred meshes." : available ? $"Place the {side} microphone on the mesh used for preprocessing." :
+                selectedProject != null && InferenceIsAutomatic(selectedProject) ? $"Run Mesh2PPM Inference to create the predicted {side} ear first." : $"Select an input {side} ear first.";
+            if (ToolTipService.GetToolTip(host) is ToolTip tooltip && !string.Equals(tooltip.Content as string, tooltipText, StringComparison.Ordinal))
+                tooltip.Content = tooltipText;
         }
     }
 
@@ -1946,6 +2030,12 @@ public partial class MainWindow : Window
     {
         var project = selectedProject;
         if (project == null || placementSide != null || runningProcesses.ContainsKey(project.Id)) return;
+        if (InferenceIsAutomatic(project))
+        {
+            AppendLog("Automatic microphone placement is used for Mesh2PPM-inferred meshes.", project.Id);
+            UpdatePlacementButtons();
+            return;
+        }
         var mesh = PreprocessingMesh(project, side);
         if (mesh == null)
         {
@@ -2062,7 +2152,10 @@ public partial class MainWindow : Window
         var side = placementSide!;
         var position = pendingMicrophonePosition;
         var placementEndedForReset = false;
-        if (StageIsComplete(Stage.Preprocessing, project))
+        try { await ReconcileOutputsAsync(project, true); }
+        catch { AppendLog("Could not inspect output ownership; microphone position was not changed.", project.Id); return; }
+        if (!PlacementIsCurrent() || selectedProject != project) return;
+        if (HasOutputsFrom(Stage.Preprocessing, project))
         {
             var dialog = new ContentDialog
             {
@@ -2076,7 +2169,7 @@ public partial class MainWindow : Window
             if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
             EndPlacement();
             placementEndedForReset = true;
-            ResetSelectedProjectOutputs(Stage.Preprocessing);
+            if (!await ResetProjectOutputsAsync(project, Stage.Preprocessing)) return;
         }
         if (side == "left") project.Settings.Preprocessing.SourcePositionInputLeft = position; else project.Settings.Preprocessing.SourcePositionInputRight = position;
         Persist();
@@ -2194,7 +2287,7 @@ public partial class MainWindow : Window
         RunStage(stages[0], selectedProject, true);
     }
 
-    void RunStage(Stage stage, ProjectRecord? targetProject = null, bool continueQueued = false)
+    async void RunStage(Stage stage, ProjectRecord? targetProject = null, bool continueQueued = false)
     {
         var project = targetProject ?? selectedProject;
         if (project == null) return;
@@ -2204,6 +2297,8 @@ public partial class MainWindow : Window
             return;
         }
         if (!continueQueued) queuedStages.Remove(project.Id);
+        GeneratedOutputManifest? outputStore = null;
+        outputOperations.Add(project.Id);
         try
         {
             if (stage == Stage.Preprocessing && !ValidateExternalRuntime(project)) return;
@@ -2215,6 +2310,9 @@ public partial class MainWindow : Window
                 Persist();
             }
             var config = PrepareConfig(project);
+            outputStore = OutputsFor(project);
+            await Task.Run(() => outputStore.Begin(OutputStageFor(stage)));
+            if (shutdownCleanupDone) { outputStore.ReleaseForRecovery(); return; }
             var executable = BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
             var info = new ProcessStartInfo(executable, $"-m HRTFCalculation.CLI {stage.Value} --config {QuoteArgument(config)}") { WorkingDirectory = packageRoot, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
             ApplyProcessEnvironment(info);
@@ -2224,6 +2322,7 @@ public partial class MainWindow : Window
             process.Exited += (_, _) => DispatcherQueue.TryEnqueue(() => ProcessFinished(process, project, stage));
             runningProcesses[project.Id] = process;
             runningStages[project.Id] = stage;
+            processOutputStores[process] = outputStore;
             FailedStages(project.Id).Remove(stage);
             if (!process.Start())
                 throw new InvalidOperationException("Process.Start returned false.");
@@ -2241,29 +2340,50 @@ public partial class MainWindow : Window
                 runningProcesses.Remove(project.Id);
                 runningStages.Remove(project.Id);
                 TryTerminate(failedProcess);
+                processOutputStores.Remove(failedProcess);
                 try { failedProcess.Dispose(); } catch { }
             }
             FailedStages(project.Id).Add(stage);
             AppendLog("Could not start " + stage.Title + ": " + error, project.Id);
             RefreshPipelineStatus();
         }
+        finally
+        {
+            outputOperations.Remove(project.Id);
+            if (!runningProcesses.ContainsKey(project.Id) && outputStore != null)
+            {
+                try { await Task.Run(outputStore.Complete); }
+                catch { AppendLog("Output tracking is pending; it will be retried before reset.", project.Id); }
+            }
+            if (!shutdownCleanupDone) RefreshPipelineStatus();
+        }
     }
 
-    void ProcessFinished(Process process, ProjectRecord project, Stage stage)
+    async void ProcessFinished(Process process, ProjectRecord project, Stage stage)
     {
         if (shutdownCleanupDone)
         {
             try { process.Dispose(); } catch { }
             return;
         }
+        // StopProject may already have handled and disposed this process.
+        if (!runningProcesses.TryGetValue(project.Id, out var current) || !ReferenceEquals(current, process)) return;
         var code = process.ExitCode;
         if (code != 0) FailedStages(project.Id).Add(stage);
+        outputOperations.Add(project.Id);
+        var captured = true;
+        if (processOutputStores.Remove(process, out var store))
+        {
+            try { await Task.Run(store.Complete); }
+            catch { captured = false; AppendLog("Output tracking is pending; it will be retried before reset.", project.Id); }
+        }
         runningProcesses.Remove(project.Id);
         runningStages.Remove(project.Id);
+        outputOperations.Remove(project.Id);
         AppendLog(code == 0 ? stage.Title + " finished." : stage.Title + " failed (status " + code + ").", project.Id);
         process.Dispose();
         RefreshArtifacts();
-        if (code == 0 && queuedStages.TryGetValue(project.Id, out var queue) && queue.Count > 0) RunStage(queue.Dequeue(), project, true); else queuedStages.Remove(project.Id);
+        if (!shutdownCleanupDone && captured && code == 0 && queuedStages.TryGetValue(project.Id, out var queue) && queue.Count > 0) RunStage(queue.Dequeue(), project, true); else queuedStages.Remove(project.Id);
         RefreshPipelineStatus();
     }
 
@@ -2276,7 +2396,8 @@ public partial class MainWindow : Window
         info.Environment["BLENDER_USER_CONFIG"] = Path.Combine(appData, "Blender", "config");
         info.Environment["BLENDER_USER_SCRIPTS"] = Path.Combine(appData, "Blender", "scripts");
         info.Environment["BLENDER_USER_DATAFILES"] = Path.Combine(appData, "Blender", "datafiles");
-        info.Environment["PYTHONPATH"] = packageRoot + Path.PathSeparator + Path.Combine(packageRoot, ".venv", "Lib", "site-packages");
+        var sitePackages = PythonSitePackagesPath();
+        info.Environment["PYTHONPATH"] = packageRoot + (sitePackages == null ? "" : Path.PathSeparator + sitePackages);
         info.Environment["PATH"] = Path.Combine(environment.ExternalDir, "bin") + Path.PathSeparator + (info.Environment.TryGetValue("PATH", out var path) ? path : "");
     }
 
@@ -2353,11 +2474,16 @@ public partial class MainWindow : Window
                 .OrderByDescending(path => path, StringComparer.OrdinalIgnoreCase)
                 .Select(path => Path.Combine(path, "python.exe"))
                 .FirstOrDefault(File.Exists);
-            if (versioned != null)
-                return versioned;
+            if (versioned != null) return versioned;
         }
         var venvPath = Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
         return File.Exists(venvPath) ? venvPath : null;
+    }
+
+    string? PythonSitePackagesPath()
+    {
+        var candidate = Path.Combine(packageRoot, ".venv", "Lib", "site-packages");
+        return Directory.Exists(candidate) ? candidate : null;
     }
 
     string PrepareConfig(ProjectRecord project)
@@ -2469,6 +2595,8 @@ postprocessing:
   overwrite: true
   normalize: {Bool(post.Normalize)}
   level_offset_db: {post.LevelOffsetDB}
+  resample_hrirs: {Bool(post.ResampleHrirs)}
+  sampling_rate: {NormalizeSamplingRate(post.SamplingRate)}
 ui:
   mesh_background: white
   show_axes: true
@@ -2489,6 +2617,7 @@ ui:
             StopTrackedProcess(process, 1500);
             runningProcesses.Remove(project.Id);
             runningStages.Remove(project.Id);
+            if (processOutputStores.Remove(process, out var store)) store.ReleaseForRecovery();
             try { process.Dispose(); } catch { }
             AppendLog("Stopping task.", project.Id);
         }
@@ -2520,48 +2649,43 @@ ui:
     {
         TryTerminate(process);
         if (!WaitForExitSafe(process, timeoutMilliseconds))
-            AppendLog($"Process {SafeProcessName(process)} (PID {SafeProcessId(process)}) did not exit within {timeoutMilliseconds} ms; application job cleanup remains active.", selectedProject?.Id);
+            AppendLog($"Process {SafeProcessName(process)} did not exit within {timeoutMilliseconds} ms; application job cleanup remains active.", selectedProject?.Id);
     }
-    void ResetOutputsClicked(object sender, RoutedEventArgs e) => ResetSelectedProjectOutputs();
-    void ResetSelectedProjectOutputs(Stage? fromStage = null)
+    async void ResetOutputsClicked(object sender, RoutedEventArgs e)
     {
-        if (selectedProject == null || runningProcesses.ContainsKey(selectedProject.Id)) return;
-        if (placementSide != null) EndPlacement();
-        var output = selectedProject.SaveLocation;
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        void Add(string relative) { if (!string.IsNullOrWhiteSpace(relative)) names.Add(relative); }
-        if (fromStage == null || fromStage == Stage.Inference)
+        if (selectedProject is not { } project || runningProcesses.ContainsKey(project.Id) || outputOperations.Contains(project.Id)) return;
+        var dialog = new ContentDialog
         {
-            Add(selectedProject.Settings.Inference.TargetLeftFolder);
-            Add(selectedProject.Settings.Inference.TargetRightFolder);
-            Add(selectedProject.Settings.Inference.PredictionLeftFolder);
-            Add(selectedProject.Settings.Inference.PredictionRightFolder);
-            Add("Results Inference.csv");
-        }
-        foreach (var side in new[] { "Left", "Right" })
-        {
-            if (fromStage == null || fromStage == Stage.Inference || fromStage == Stage.Preprocessing)
-                Add(Path.Combine("Intermediates", side, "graded_head.ply"));
-            if (fromStage == null || fromStage == Stage.Inference || fromStage == Stage.Preprocessing || fromStage == Stage.Numcalc)
-            {
-                Add(Path.Combine("Projects", side, "parameters.json"));
-                Add(Path.Combine("Projects", side, "NumCalc"));
-                Add(Path.Combine("Projects", side, "Output2HRTF"));
-            }
-        }
-        if (fromStage == null || fromStage == Stage.Inference || fromStage == Stage.Preprocessing || fromStage == Stage.Numcalc || fromStage == Stage.Postprocessing) Add("HRTF");
-        foreach (var name in names)
-        {
-            var path = Path.Combine(output, name);
-            if (ContainsPath(path, selectedProject.LeftEar) || ContainsPath(path, selectedProject.RightEar)) continue;
-            try { if (Directory.Exists(path)) Directory.Delete(path, true); else if (File.Exists(path)) File.Delete(path); } catch (Exception error) { AppendLog("Could not reset " + path + ": " + error.Message, selectedProject.Id); }
-        }
-        selectedProject.Settings.Preprocessing.SourcePositionInputLeft = null;
-        selectedProject.Settings.Preprocessing.SourcePositionInputRight = null;
-        failedStages[selectedProject.Id] = [];
-        Persist();
-        RefreshArtifacts();
+            Title = "Reset pipeline outputs?",
+            Content = "Remove generated outputs from all stages? Input meshes, microphone positions, settings and project logs will be kept.",
+            PrimaryButtonText = "Reset Outputs", CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close, XamlRoot = Root.XamlRoot
+        };
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary) await ResetProjectOutputsAsync(project);
+    }
+
+    async Task<bool> ResetProjectOutputsAsync(ProjectRecord project, Stage? fromStage = null)
+    {
+        if (shutdownCleanupDone || runningProcesses.ContainsKey(project.Id) || !outputOperations.Add(project.Id)) return false;
+        if (placementProjectId == project.Id) EndPlacement();
+        queuedStages.Remove(project.Id);
         RefreshPipelineStatus();
+        var boundary = fromStage == null ? (GeneratedOutputManifest.OutputStage?)null : OutputStageFor(fromStage);
+        GeneratedOutputManifest.ResetResult result;
+        try { var store = OutputsFor(project); result = await Task.Run(() => store.Reset(boundary)); }
+        catch { result = new GeneratedOutputManifest.ResetResult { Errors = 1 }; }
+        finally { outputOperations.Remove(project.Id); }
+        AppendLog(result.Summary(boundary), project.Id);
+        if (result.Success)
+        {
+            FailedStages(project.Id).RemoveWhere(s => fromStage == null || OutputStageFor(s) >= boundary);
+            knownOutputs.Remove(project.Id);
+            lastOutputScan.Remove(project.Id);
+        }
+        Persist();
+        if (selectedProject == project) RefreshArtifacts();
+        RefreshPipelineStatus();
+        return result.Success;
     }
 
     bool ContainsPath(string parent, string child)
@@ -2685,6 +2809,7 @@ ui:
     void RefreshNumCalcStatus() { numCalcStatusText.Text = selectedProject == null ? "No project selected" : NumCalcStatus(selectedProject); }
     void RefreshPipelineStatus()
     {
+        if (selectedProject != null) _ = ReconcileOutputsAsync(selectedProject);
         if (selectedProject == null) return;
         var stages = Stage.GetValues();
         for (var i = 0; i < stages.Length; i++)
@@ -2724,6 +2849,7 @@ ui:
     string? StageUnavailableReason(Stage stage, ProjectRecord? project)
     {
         if (project == null) return "Select a project first.";
+        if (outputOperations.Contains(project.Id)) return "Wait for project outputs to finish updating.";
         if (runningProcesses.ContainsKey(project.Id)) return "Wait for the running stage to finish.";
         if (placementProjectId == project.Id) return "Finish microphone placement with Done or Cancel.";
         if (string.IsNullOrWhiteSpace(project.SaveLocation)) return "Choose a project folder first.";
@@ -2941,6 +3067,8 @@ ui:
             try { process.Dispose(); } catch { }
         }
         runningProcesses.Clear();
+        foreach (var store in processOutputStores.Values.Distinct()) store.ReleaseForRecovery();
+        processOutputStores.Clear();
         runningStages.Clear();
         queuedStages.Clear();
         if (pipelineJob != IntPtr.Zero)
@@ -3037,7 +3165,12 @@ ui:
     void LoadUiState() { if (!File.Exists(uiStatePath)) return; try { var state = JsonSerializer.Deserialize<WindowUiState>(File.ReadAllText(uiStatePath), jsonOptions); if (state != null) { projectsExpandedWidth = state.ProjectsWidth; liveLogExpandedHeight = state.LiveLogHeight; settingsExpandedWidth = state.SettingsWidth; } } catch { } }
     void SaveUiState() { if (!string.IsNullOrWhiteSpace(uiStatePath)) File.WriteAllText(uiStatePath, JsonSerializer.Serialize(new WindowUiState { ProjectsWidth = projectsExpandedWidth, LiveLogHeight = liveLogExpandedHeight, SettingsWidth = settingsExpandedWidth }, jsonOptions)); }
     string FindPackageRoot() { var current = new DirectoryInfo(AppContext.BaseDirectory); while (current != null) { if (File.Exists(Path.Combine(current.FullName, "pyproject.toml")) && Directory.Exists(Path.Combine(current.FullName, "HRTFCalculation"))) return current.FullName; current = current.Parent; } return AppContext.BaseDirectory; }
-    EnvironmentConfig DefaultEnvironment() { var external = Path.Combine(packageRoot, "External"); var bin = Path.Combine(external, "bin"); return new EnvironmentConfig { UvExecutable = Path.Combine(bin, "uv.exe"), NumCalcExecutable = Path.Combine(bin, "NumCalc.exe"), MeshGradingExecutable = Path.Combine(bin, "hrtf_mesh_grading.exe"), ExternalDir = external }; }
+    EnvironmentConfig DefaultEnvironment()
+    {
+        var external = Path.Combine(packageRoot, "External");
+        var bin = Path.Combine(external, "bin");
+        return new EnvironmentConfig { UvExecutable = Path.Combine(bin, "uv.exe"), NumCalcExecutable = Path.Combine(bin, "NumCalc.exe"), MeshGradingExecutable = Path.Combine(bin, "hrtf_mesh_grading.exe"), ExternalDir = external };
+    }
     ProjectRecord Clone(ProjectRecord project) => JsonSerializer.Deserialize<ProjectRecord>(JsonSerializer.Serialize(project, jsonOptions), jsonOptions) ?? project;
 
     string? PreprocessingMesh(ProjectRecord project, string side)
@@ -3168,7 +3301,7 @@ class ProjectSettings { public InferenceSettings Inference { get; set; } = new()
 class InferenceSettings { public string ModelConfig { get; set; } = ""; public string ModelCheckpoint { get; set; } = ""; public string TargetLeftFolder { get; set; } = "Input/Left"; public string TargetRightFolder { get; set; } = "Input/Right"; public string PredictionLeftFolder { get; set; } = "Intermediates/Left"; public string PredictionRightFolder { get; set; } = "Intermediates/Right"; public bool UsePredictionsForPreprocessing { get; set; } = true; }
 class PreprocessingSettings { public string MinFrequency { get; set; } = "0"; public string MaxFrequency { get; set; } = "24000"; public string FrequencyStepCount { get; set; } = "129"; public string? EvaluationGrid { get; set; } public string? HeadRadius { get; set; } public bool? UseCustomHeadRadius { get; set; } public string SourceAssignmentFaceCount { get; set; } = "6"; public string MeshMinEdgeLength { get; set; } = "0.5"; public string MeshMaxEdgeLength { get; set; } = "10.0"; public string MeshMaxError { get; set; } = "0.5"; public string MeshGamma { get; set; } = "0.2"; public string MeshGammaOpposite { get; set; } = "0.1"; public ManualMicrophonePosition? SourcePositionInputLeft { get; set; } public ManualMicrophonePosition? SourcePositionInputRight { get; set; } }
 class ManualMicrophonePosition { public double X { get; set; } public double Y { get; set; } public double Z { get; set; } public string MeshPath { get; set; } = ""; public string MeshIdentity { get; set; } = ""; }
-class PostprocessingSettings { public bool Normalize { get; set; } = true; public string LevelOffsetDB { get; set; } = "-30"; }
+class PostprocessingSettings { public bool Normalize { get; set; } = true; public string LevelOffsetDB { get; set; } = "-30";  public bool ResampleHrirs { get; set; } = false; public string SamplingRate { get; set; } = "48000" }
 class NumCalcSettings { public string MaxInstances { get; set; } = "1"; public string MaxCpuLoad { get; set; } = "90"; public bool AdaptiveFmmLength { get; set; } = true; }
 
 [ComImport, Guid("42f85136-db7e-439c-85f1-e4075d135fc8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

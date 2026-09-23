@@ -227,6 +227,10 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
     projects = project_dirs(config)
     for project in projects:
         m2h.output2hrtf(str(project))
+    if config.postprocessing.resample_hrirs:
+        from .Postprocessing.postprocessing import resample_hrir_files
+        for project in projects:
+            resample_hrir_files(project / "Output2HRTF", config.postprocessing.sampling_rate)
     if config.postprocessing.normalize:
         from .Postprocessing.postprocessing import normalize_sofa_files
         for project in projects:

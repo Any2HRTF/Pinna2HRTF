@@ -24,6 +24,14 @@ public partial class App : Application
         // uses the same mutex to detect a running app before install/uninstall.
         bool createdNew;
         instanceMutex = new Mutex(initiallyOwned: true, name: InstanceMutexName, createdNew: out createdNew);
+        if (!createdNew)
+        {
+            // Do not create a second visible app instance.
+            try { instanceMutex.Dispose(); } catch { }
+            instanceMutex = null;
+            Environment.Exit(0);
+            return;
+        }
         // Render at the monitor's native DPI instead of allowing Windows to
         // bitmap-scale the complete unpackaged process at 125%/150%/200%.
         _ = SetProcessDpiAwarenessContext(PerMonitorV2);

@@ -85,6 +85,18 @@
     ]
   },
   {
+    "id": "postprocessing.resample_hrirs",
+    "title": "Resample HRIRs",
+    "description": "Optionally resamples the HRIR SOFA files after Mesh2HRTF has generated them at its native sampling rate. This leaves the simulated HRTFs unchanged and avoids imposing the selected output rate on the simulated frequency vector. Resampling is disabled by default.",
+    "publications": []
+  },
+  {
+    "id": "postprocessing.sampling_rate",
+    "title": "Sampling rate",
+    "description": "The target sampling rate in hertz used only when Resample HRIRs is enabled. Mesh2HRTF first creates the HRIRs at its native rate, then the resulting HRIR SOFA files are resampled to this value. HRTF SOFA files are not changed. Use a positive value divisible by 10; the default is 48000 Hz.",
+    "publications": []
+  },
+  {
     "id": "mesh2hrtf.microphone_faces",
     "title": "Microphone faces",
     "description": "The number of nearby mesh faces used to define the reciprocal microphone/source region around the estimated ear-canal entrance. The default is 6.",

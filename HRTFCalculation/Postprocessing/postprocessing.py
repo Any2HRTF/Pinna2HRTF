@@ -3,6 +3,7 @@ import shutil
 import argparse
 import glob
 import logging
+from pathlib import Path
 
 import pandas as pd
 import mesh2hrtf as m2h
@@ -11,6 +12,24 @@ import sofar as sf
 
 
 logger = logging.getLogger(__name__)
+
+
+def resample_hrir_files(output_dir, sampling_rate=48000):
+    """Resample generated HRIR SOFA files to an optional output rate."""
+    try:
+        rate = int(sampling_rate)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Sampling rate must be a positive integer divisible by 10 Hz.") from error
+    if rate <= 0 or rate % 10:
+        raise ValueError("Sampling rate must be a positive integer divisible by 10 Hz.")
+
+    for hrir_path in sorted(Path(output_dir).glob("HRIR_*.sofa")):
+        hrir = sf.read_sofa(str(hrir_path))
+        current_rate = float(np.asarray(hrir.Data_SamplingRate).reshape(-1)[0])
+        if np.isclose(current_rate, rate):
+            continue
+        resampled = m2h.resample_sofa_file(hrir, rate)
+        sf.write_sofa(str(hrir_path), resampled)
 
 
 def normalize_sofa_files(output_dir, level_offset_db):
@@ -64,7 +83,10 @@ def main(args):
                     print(f"-------------------------------")
                     try:
                         path = f"{args.data_dir}/{scan_type} {direction}"
-                        m2h.output2hrtf(f"{path}/{id}")
+                        project_path = f"{path}/{id}"
+                        m2h.output2hrtf(project_path)
+                        if args.resample_hrirs:
+                            resample_hrir_files(f"{project_path}/Output2HRTF", args.sampling_rate)
                         if args.normalize:
                             normalize_sofa_files(f"{path}/{id}/Output2HRTF", args.level_offset_db)
                         if os.path.isfile(f'{path}/{id}/Output2HRTF/report_issues.txt'):
@@ -131,6 +153,8 @@ def parse_args():
     parser.add_argument('--data_dir', required=True)
     parser.add_argument('--normalize', action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument('--level-offset-db', type=float, default=-30)
+    parser.add_argument('--resample-hrirs', action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument('--sampling-rate', type=int, default=48000)
     return parser.parse_args()
 
 def cli():

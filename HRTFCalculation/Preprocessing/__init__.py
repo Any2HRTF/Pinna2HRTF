@@ -80,15 +80,23 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
     if settings.write_intermediates:
         work_dir = intermediates
         work_dir.mkdir(parents=True, exist_ok=True)
-        for side_dir in side_dirs.values():
-            side_dir.mkdir(parents=True, exist_ok=True)
-            for name in ["input_ear.stl", "source_landmark.json", "closed_ear.stl", "cut_head.stl", "stitched_head.stl", "graded_head.ply", "dummy_head.stl"]:
-                path = side_dir / name
-                if path.exists():
-                    path.unlink()
+        generated_names = ["input_ear.stl", "source_landmark.json", "closed_ear.stl", "cut_head.stl", "stitched_head.stl", "graded_head.ply", "dummy_head.stl"]
         for side, path in (("left", left_path), ("right", right_path)):
+            side_dir = side_dirs[side]
+            if side_dir.exists():
+                for name in generated_names:
+                    generated_path = side_dir / name
+                    if generated_path.exists():
+                        generated_path.unlink()
             if path is not None:
-                side_dirs[side].mkdir(parents=True, exist_ok=True)
+                side_dir.mkdir(parents=True, exist_ok=True)
+            elif side_dir.exists():
+                # Preserve inference results and unfamiliar files. An unused side
+                # directory is removed only when no such content remains.
+                try:
+                    side_dir.rmdir()
+                except OSError:
+                    pass
         cleanup = None
     else:
         cleanup = tempfile.TemporaryDirectory()
@@ -111,7 +119,9 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
                 ear.export(side_dirs[side] / "input_ear.stl")
         closed = {side: side_dirs[side] / "closed_ear.stl" for side, ear in ears.items() if ear is not None}
         landmark_paths = {side: side_dirs[side] / "source_landmark.json" for side, ear in ears.items() if ear is not None}
-        dummy_head = side_dirs["left"] / "dummy_head.stl"
+        # The dummy head is shared by both sides. Keeping it at the work root
+        # avoids creating an artificial Left folder for a right-only project.
+        dummy_head = work_dir / "dummy_head.stl"
         cut = {side: side_dirs[side] / "cut_head.stl" for side, ear in ears.items() if ear is not None}
         stitched = {side: side_dirs[side] / "stitched_head.stl" for side, ear in ears.items() if ear is not None}
         graded = {side: side_dirs[side] / "graded_head.ply" for side, ear in ears.items() if ear is not None}

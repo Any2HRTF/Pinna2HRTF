@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def worktree_root() -> Path:
@@ -117,7 +117,6 @@ class PreprocessingConfig(BaseModel):
     source_position_input_left: tuple[float, float, float] | None = None
     source_position_input_right: tuple[float, float, float] | None = None
 
-
 class NumCalcConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -143,8 +142,17 @@ class PostprocessingConfig(BaseModel):
     enabled: bool = False
     output_sofa_dir: Path | None = None
     overwrite: bool = True
+    resample_hrirs: bool = False
+    sampling_rate: int = Field(default=48000, ge=2)
     normalize: bool = True
     level_offset_db: float = -30.0
+
+    @field_validator("sampling_rate")
+    @classmethod
+    def validate_sampling_rate(cls, value: int) -> int:
+        if value <= 0 or value % 10:
+            raise ValueError("sampling_rate must be a positive integer divisible by 10 Hz")
+        return value
 
 
 class UIConfig(BaseModel):
