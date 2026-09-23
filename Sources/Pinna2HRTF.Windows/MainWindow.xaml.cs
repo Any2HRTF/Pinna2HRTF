@@ -141,7 +141,9 @@ public partial class MainWindow : Window
     Border? settingsPaneBorder;
     TextBlock? projectsHeaderText;
     FrameworkElement? projectsBody;
-    Expander? projectsExpander;
+    StackPanel? projectsActions;
+    Grid? projectsHeader;
+    Button? projectsToggle;
     ColumnDefinition? projectsSplitterColumn;
     FrameworkElement? projectsSplitter;
     Expander? logExpander;
@@ -157,7 +159,8 @@ public partial class MainWindow : Window
     bool logTailScrollPending;
     bool logTailUserInteraction;
     const double LogHeaderHeight = 48;
-    const double CollapsedLogHeaderHeight = LogHeaderHeight + 2;
+    // Header content + native header border + enclosing border + top margin.
+    const double CollapsedLogHeaderHeight = LogHeaderHeight + 2 + 2 + 3;
     bool viewportReady;
     CancellationTokenSource? meshLoadCancellation;
     int meshLoadGeneration;
@@ -382,14 +385,14 @@ public partial class MainWindow : Window
         contentGrid = new Grid { Background = appBackgroundBrush };
         projectsColumn = new ColumnDefinition
         {
-            Width = new GridLength(projectsExpandedWidth), MinWidth = 240, MaxWidth = 520
+            Width = new GridLength(projectsExpandedWidth), MinWidth = 200, MaxWidth = 550
         };
         contentGrid.ColumnDefinitions.Add(projectsColumn);
         projectsSplitterColumn = new ColumnDefinition { Width = new GridLength(12) };
         contentGrid.ColumnDefinitions.Add(projectsSplitterColumn);
         contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 420 });
         contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12), MinWidth = 12, MaxWidth = 12 });
-        settingsColumn = new ColumnDefinition { Width = new GridLength(settingsExpandedWidth), MinWidth = 320, MaxWidth = 560 };
+        settingsColumn = new ColumnDefinition { Width = new GridLength(settingsExpandedWidth), MinWidth = 300, MaxWidth = 600 };
         contentGrid.ColumnDefinitions.Add(settingsColumn);
         contentGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         Grid.SetRow(contentGrid, 1);
@@ -476,7 +479,7 @@ public partial class MainWindow : Window
     void ProjectSplitterDragged(object sender, DragDeltaEventArgs e)
     {
         if (projectsCollapsed || projectsColumn == null) return;
-        projectsExpandedWidth = Math.Clamp(projectsExpandedWidth + e.HorizontalChange, 240, 520);
+        projectsExpandedWidth = Math.Clamp(projectsExpandedWidth + e.HorizontalChange, 280, 520);
         projectsColumn.Width = new GridLength(projectsExpandedWidth);
         SaveUiState();
     }
@@ -492,30 +495,29 @@ public partial class MainWindow : Window
     void SetProjectsCollapsed(bool collapsed, bool persist)
     {
         projectsCollapsed = collapsed;
-        if (projectsExpander != null)
+        if (projectsHeader != null) projectsHeader.ColumnSpacing = collapsed ? 0 : 8;
+        if (projectsToggle != null)
         {
-            if (projectsExpander.IsExpanded == collapsed) projectsExpander.IsExpanded = !collapsed;
-            projectsExpander.Header = collapsed ? null : projectsHeaderText;
-            projectsExpander.VerticalAlignment = collapsed ? VerticalAlignment.Top : VerticalAlignment.Stretch;
-            projectsExpander.ApplyTemplate();
-            if (FindDescendant<ToggleButton>(projectsExpander) is { } header)
-            {
-                header.Padding = new Thickness(0);
-                header.ApplyTemplate();
-                if (FindDescendant<AnimatedIcon>(header) is { } chevron)
-                {
-                    chevron.RenderTransformOrigin = new Point(0.5, 0.5);
-                    chevron.RenderTransform = new RotateTransform { Angle = -90 };
-                }
-                ToolTipService.SetToolTip(header, collapsed ? "Expand Projects" : "Collapse Projects");
-            }
-            ToolTipService.SetToolTip(projectsExpander, null);
+            projectsToggle.Content = new FontIcon { Glyph = collapsed ? "\uE76C" : "\uE76B", FontSize = 12 };
+            var label = collapsed ? "Expand Projects" : "Collapse Projects";
+            ToolTipService.SetToolTip(projectsToggle, label);
+            AutomationProperties.SetName(projectsToggle, label);
+        }
+        if (projectsHeaderText != null) projectsHeaderText.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        if (projectsActions != null)
+        {
+            projectsActions.Orientation = collapsed ? Orientation.Vertical : Orientation.Horizontal;
+            projectsActions.HorizontalAlignment = collapsed ? HorizontalAlignment.Center : HorizontalAlignment.Right;
+            projectsActions.Margin = collapsed ? new Thickness(0, 0, 0, 10) : new Thickness(0);
+            Grid.SetRow(projectsActions, collapsed ? 1 : 0);
+            Grid.SetColumn(projectsActions, collapsed ? 0 : 1);
+            Grid.SetColumnSpan(projectsActions, collapsed ? 3 : 1);
         }
         if (projectsBody != null) projectsBody.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         if (projectsColumn != null)
         {
-            projectsColumn.MinWidth = collapsed ? 0 : 240;
-            projectsColumn.Width = collapsed ? GridLength.Auto : new GridLength(Math.Clamp(projectsExpandedWidth, 240, 520));
+            projectsColumn.MinWidth = collapsed ? 0 : 280;
+            projectsColumn.Width = new GridLength(collapsed ? 49 : Math.Clamp(projectsExpandedWidth, 280, 520));
         }
         if (projectsSplitterColumn != null) projectsSplitterColumn.Width = new GridLength(collapsed ? 0 : 12);
         if (projectsSplitter != null) projectsSplitter.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
@@ -594,13 +596,28 @@ public partial class MainWindow : Window
         var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        projectsHeaderText = new TextBlock { Text = "Projects", FontSize = 20, Margin = new Thickness(12, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = primaryTextBrush };
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(10, 8, 10, 8) };
+        var header = new Grid { Margin = new Thickness(10, 0, 10, 0), ColumnSpacing = 8 };
+        header.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) });
+        header.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        projectsHeader = header;
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        projectsHeaderText = new TextBlock { Text = "Projects", FontSize = 18, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, Foreground = primaryTextBrush };
+        header.Children.Add(projectsHeaderText);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+        projectsActions = buttons;
         buttons.Children.Add(ProjectButton("\uE710", "New project", CreateProjectClicked));
         buttons.Children.Add(ProjectButton("\uE896", "Import project", ImportProjectClicked));
         buttons.Children.Add(ProjectButton("\uE8C8", "Duplicate selected project", DuplicateProjectClicked));
         buttons.Children.Add(ProjectButton("\uE74D", "Delete selected project", RemoveProjectClicked));
-        grid.Children.Add(buttons);
+        Grid.SetColumn(buttons, 1);
+        header.Children.Add(buttons);
+        projectsToggle = new Button { Width = 28, Height = 28, MinWidth = 0, MinHeight = 0, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+        projectsToggle.Click += (_, _) => SetProjectsCollapsed(!projectsCollapsed, true);
+        Grid.SetColumn(projectsToggle, 2);
+        header.Children.Add(projectsToggle);
+        grid.Children.Add(header);
         projectList.SelectionChanged += ProjectSelectionChanged;
         projectList.Background = new SolidColorBrush(Colors.Transparent);
         projectList.BorderThickness = new Thickness(0);
@@ -609,27 +626,15 @@ public partial class MainWindow : Window
         projectList.Margin = new Thickness(10, 0, 10, 10);
         Grid.SetRow(projectList, 1);
         grid.Children.Add(projectList);
-        projectsBody = grid;
-        projectsExpander = new Expander
-        {
-            Header = projectsHeaderText, Content = grid, IsExpanded = !projectsCollapsed,
-            ExpandDirection = ExpandDirection.Down, MinWidth = 0, Padding = new Thickness(0),
-            HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch
-        };
-        projectsExpander.Resources["ExpanderChevronMargin"] = new Thickness(0);
-        projectsExpander.Loaded += (_, _) => SetProjectsCollapsed(!projectsExpander.IsExpanded, false);
-        projectsExpander.RegisterPropertyChangedCallback(Expander.IsExpandedProperty, (_, _) =>
-            SetProjectsCollapsed(!projectsExpander.IsExpanded, true));
-        AutomationProperties.SetName(projectsExpander, "Projects");
-        pane.Child = projectsExpander;
+        projectsBody = projectList;
+        pane.Child = grid;
         return pane;
     }
 
     Button ProjectButton(string glyph, string tip, RoutedEventHandler handler)
     {
-        var fontIcon = new FontIcon { FontFamily = new FontFamily("Segoe MDL2 Assets"), Glyph = glyph, FontSize = 16, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var button = new Button { Content = fontIcon, Width = 32, Height = 32, Padding = new Thickness(0) };
+        var fontIcon = new FontIcon { FontFamily = new FontFamily("Segoe MDL2 Assets"), Glyph = glyph, FontSize = 14, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var button = new Button { Content = fontIcon, Width = 28, Height = 28, MinWidth = 0, MinHeight = 0, Padding = new Thickness(0) };
         ToolTipService.SetToolTip(button, tip);
         AutomationProperties.SetName(button, tip);
         button.Click += handler;
@@ -850,6 +855,7 @@ public partial class MainWindow : Window
                 RestoreLogScroll(0, true);
         });
         ToolTipService.SetToolTip(logExpander, null);
+        logExpander.Loaded += (_, _) => SetLogCollapsed(logCollapsed, false);
         if (FindDescendant<ToggleButton>(logExpander) is { } logHeader)
             ToolTipService.SetToolTip(logHeader, "Expand or collapse Live Log");
         AutomationProperties.SetName(logExpander, "Live Log");
@@ -877,7 +883,17 @@ public partial class MainWindow : Window
             logExpander.VerticalAlignment = collapsed ? VerticalAlignment.Top : VerticalAlignment.Stretch;
             ToolTipService.SetToolTip(logExpander, null);
             if (FindDescendant<ToggleButton>(logExpander) is { } logHeader)
+            {
+                // Keep the actual native toggle the same height in both visual states.
+                var height = LogHeaderHeight + logHeader.BorderThickness.Top + logHeader.BorderThickness.Bottom;
+                logHeader.Height = height;
+                logHeader.MinHeight = height;
+                logHeader.MaxHeight = height;
                 ToolTipService.SetToolTip(logHeader, collapsed ? "Expand Live Log" : "Collapse Live Log");
+                if (collapsed && centerLogRow != null && logPanelBorder != null)
+                    centerLogRow.Height = new GridLength(height + logPanelBorder.BorderThickness.Top +
+                        logPanelBorder.BorderThickness.Bottom + logPanelBorder.Margin.Top + logPanelBorder.Margin.Bottom);
+            }
             if (logExpander.IsExpanded == collapsed)
             {
                 suppressLogExpansionCallback = true;
@@ -3301,7 +3317,7 @@ class ProjectSettings { public InferenceSettings Inference { get; set; } = new()
 class InferenceSettings { public string ModelConfig { get; set; } = ""; public string ModelCheckpoint { get; set; } = ""; public string TargetLeftFolder { get; set; } = "Input/Left"; public string TargetRightFolder { get; set; } = "Input/Right"; public string PredictionLeftFolder { get; set; } = "Intermediates/Left"; public string PredictionRightFolder { get; set; } = "Intermediates/Right"; public bool UsePredictionsForPreprocessing { get; set; } = true; }
 class PreprocessingSettings { public string MinFrequency { get; set; } = "0"; public string MaxFrequency { get; set; } = "24000"; public string FrequencyStepCount { get; set; } = "129"; public string? EvaluationGrid { get; set; } public string? HeadRadius { get; set; } public bool? UseCustomHeadRadius { get; set; } public string SourceAssignmentFaceCount { get; set; } = "6"; public string MeshMinEdgeLength { get; set; } = "0.5"; public string MeshMaxEdgeLength { get; set; } = "10.0"; public string MeshMaxError { get; set; } = "0.5"; public string MeshGamma { get; set; } = "0.2"; public string MeshGammaOpposite { get; set; } = "0.1"; public ManualMicrophonePosition? SourcePositionInputLeft { get; set; } public ManualMicrophonePosition? SourcePositionInputRight { get; set; } }
 class ManualMicrophonePosition { public double X { get; set; } public double Y { get; set; } public double Z { get; set; } public string MeshPath { get; set; } = ""; public string MeshIdentity { get; set; } = ""; }
-class PostprocessingSettings { public bool Normalize { get; set; } = true; public string LevelOffsetDB { get; set; } = "-30";  public bool ResampleHrirs { get; set; } = false; public string SamplingRate { get; set; } = "48000" }
+class PostprocessingSettings { public bool Normalize { get; set; } = true; public string LevelOffsetDB { get; set; } = "-30";  public bool ResampleHrirs { get; set; } = false; public string SamplingRate { get; set; } = "48000"; }
 class NumCalcSettings { public string MaxInstances { get; set; } = "1"; public string MaxCpuLoad { get; set; } = "90"; public bool AdaptiveFmmLength { get; set; } = true; }
 
 [ComImport, Guid("42f85136-db7e-439c-85f1-e4075d135fc8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
