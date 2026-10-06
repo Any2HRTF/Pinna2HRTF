@@ -13,7 +13,7 @@ The pipeline runs optional Mesh2PPM inference, prepares the meshes, solves the a
 - **macOS:** Apple Silicon, macOS 13 or later. Open the DMG and drag Pinna2HRTF to Applications.
 - **Windows:** x64 portable App, Windows 10 version 2004 or later.
 
-[Downloads available on the release page.](https://github.com/Any2HRTF/Pinna2HRTF/releases/tag/v1.0.0)
+[Downloads available on the release page.](https://github.com/Any2HRTF/Pinna2HRTF/releases)
 
 Packaged apps include Python, the models, and the simulation tools. They work offline without a separate Blender or `uv` installation.
 
@@ -165,6 +165,14 @@ bash Scripts/build_and_run.sh
 ```
 
 This prepares the tools, builds `build/release/Pinna2HRTF.app`, and opens it. To build without launching, run `Scripts/prepare_external_tools.sh`, then `Scripts/build_release_app.sh`. Local builds are ad-hoc signed.
+
+To package an ad-hoc signed, unnotarized drag-to-Applications DMG:
+
+```sh
+bash Scripts/build_release_app.sh --installer
+```
+
+This creates `dist/Pinna2HRTF-<version>-macOS-arm64.dmg` and a SHA-256 checksum. Apple may block the first launch because this build is not notarized. The macOS build defaults to SDK 26.5; set `PINNA2HRTF_MACOS_SDK` to select another installed SDK.
 
 For a signed and notarized DMG, install a Developer ID Application certificate and save notarization credentials in Keychain under `Pinna2HRTF-notary`, then:
 

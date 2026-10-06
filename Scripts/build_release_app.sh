@@ -3,11 +3,15 @@ set -euo pipefail
 
 MODE="development"
 if [[ $# -gt 0 ]]; then
-  if [[ "$1" != "--distribution" || $# -ne 1 ]]; then
-    echo "usage: $0 [--distribution]" >&2
+  if [[ $# -ne 1 ]]; then
+    echo "usage: $0 [--installer|--distribution]" >&2
     exit 2
   fi
-  MODE="distribution"
+  case "$1" in
+    --distribution) MODE="distribution" ;;
+    --installer) MODE="installer" ;;
+    *) echo "usage: $0 [--installer|--distribution]" >&2; exit 2 ;;
+  esac
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -253,5 +257,20 @@ else
   mkdir -p "$(dirname "$FINAL_APP_DIR")"
   ditto --norsrc --noextattr --noqtn "$CLEAN_APP_DIR" "$FINAL_APP_DIR"
   codesign --verify --deep --verbose=2 "$FINAL_APP_DIR"
-  echo "$FINAL_APP_DIR"
+  if [[ "$MODE" == "installer" ]]; then
+    DMG_STAGE="$STAGE_ROOT/dmg"
+    DMG_NAME="Pinna2HRTF-$APP_VERSION-macOS-arm64.dmg"
+    DMG_PATH="$DIST_DIR/$DMG_NAME"
+    mkdir -p "$DMG_STAGE" "$DIST_DIR"
+    ditto --norsrc --noextattr --noqtn "$CLEAN_APP_DIR" "$DMG_STAGE/Pinna2HRTF.app"
+    ln -s /Applications "$DMG_STAGE/Applications"
+    hdiutil create -volname "Pinna2HRTF $APP_VERSION" -srcfolder "$DMG_STAGE" -format UDZO -ov "$DMG_PATH"
+    codesign --force --sign - "$DMG_PATH"
+    hdiutil verify "$DMG_PATH"
+    (cd "$DIST_DIR" && shasum -a 256 "$DMG_NAME" > "$DMG_NAME.sha256")
+    echo "Installer is ad-hoc signed and not notarized." >&2
+    echo "$DMG_PATH"
+  else
+    echo "$FINAL_APP_DIR"
+  fi
 fi
