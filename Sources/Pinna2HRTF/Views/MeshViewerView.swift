@@ -59,7 +59,11 @@ struct MeshViewerView: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                PersistentSceneView(scene: store.selectedScene, darkMode: colorScheme == .dark, placementMode: store.isPlacingMicrophone, cameraPositionChanged: store.updateCameraPosition, surfaceSelected: store.previewMicrophonePosition)
+                PersistentSceneView(scene: store.selectedScene, darkMode: colorScheme == .dark, placementMode: store.isPlacingMicrophone, cameraPositionChanged: { [scene = store.selectedScene] position in
+                    guard store.selectedScene === scene else { return }
+                    store.updateCameraPosition(position)
+                }, surfaceSelected: store.previewMicrophonePosition)
+                    .id(ObjectIdentifier(store.selectedScene))
                     .onAppear {
                         store.updateSceneBackground(darkMode: colorScheme == .dark)
                     }
@@ -69,6 +73,17 @@ struct MeshViewerView: View {
             }
         }
         .frame(maxHeight: .infinity)
+        .overlay(alignment: .topTrailing) {
+            if store.selectedMesh != nil && store.selectedImage == nil {
+                Button(action: store.resetSelectedMeshView) {
+                    Label("Reset view", systemImage: "arrow.counterclockwise")
+                }
+                .modifier(ViewerGlassButtonStyle())
+                .controlSize(.regular)
+                .help("Restore the default view of this mesh")
+                .padding(16)
+            }
+        }
         .overlay(alignment: .bottom) {
             if let side = store.microphonePlacementSide {
                 VStack(alignment: .leading, spacing: 12) {
@@ -176,6 +191,20 @@ struct MeshViewerView: View {
     }
 }
 
+struct ViewerGlassButtonStyle: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.buttonStyle(.bordered)
+        } else if #available(macOS 26.0, *) {
+            content.buttonStyle(.glass).buttonBorderShape(.capsule)
+        } else {
+            content.buttonStyle(.bordered)
+        }
+    }
+}
+
 struct MicrophonePlacementSurface: ViewModifier {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -204,6 +233,7 @@ struct PersistentSceneView: NSViewRepresentable {
     func makeNSView(context: Context) -> SCNView {
         let view = SCNView()
         view.scene = scene
+        view.pointOfView = scene.rootNode.childNodes.first { $0.camera != nil }
         view.allowsCameraControl = true
         view.autoenablesDefaultLighting = false
         view.backgroundColor = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)

@@ -336,13 +336,21 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
     }
 
-    func openMesh(_ url: URL) {
+    func resetSelectedMeshView() {
+        guard let projectID = selectedProjectID, let mesh = selectedMesh, selectedImage == nil else { return }
+        viewerStateByProject[projectID]?.cameraByArtifact.removeValue(forKey: mesh.path)
+        saveViewerStates()
+        openMesh(mesh, resetCamera: true)
+    }
+
+    func openMesh(_ url: URL, resetCamera: Bool = false) {
         guard FileManager.default.fileExists(atPath: url.path), ["stl", "ply"].contains(url.pathExtension.lowercased()) else {
             appendLog("Could not open \(url.lastPathComponent).")
             return
         }
         let darkMode = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let savedCamera = selectedProjectID.flatMap { viewerStateByProject[$0]?.cameraByArtifact[url.path] }
+        let projectID = selectedProjectID
+        let savedCamera = resetCamera ? nil : projectID.flatMap { viewerStateByProject[$0]?.cameraByArtifact[url.path] }
         let microphone = microphonePosition(for: url)
         let loadID = UUID()
         meshLoadID = loadID
@@ -412,7 +420,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             ambientLightNode.light = ambientLight
             scene.rootNode.addChildNode(ambientLightNode)
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.meshLoadID == loadID else { return }
+                guard let self, self.meshLoadID == loadID, self.selectedProjectID == projectID else { return }
                 self.selectedMesh = url
                 self.selectedImage = nil
                 self.selectedScene = scene
@@ -420,6 +428,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 self.selectedCameraScale = max(Double(maximumDimension), 1)
                 let scale = self.selectedCameraScale
                 self.selectedCameraState = savedCamera ?? ViewerCameraState(x: (Double(cameraPosition.x) - Double(center.x)) / scale, y: (Double(cameraPosition.y) - Double(center.y)) / scale, z: (Double(cameraPosition.z) - Double(center.z)) / scale)
+                if resetCamera, let projectID {
+                    self.viewerStateByProject[projectID, default: ProjectViewerState(selectedArtifactPath: url.path)].cameraByArtifact[url.path] = self.selectedCameraState
+                }
                 self.rememberSelectedArtifact(url)
                 self.appendLog("Loaded \(url.lastPathComponent).")
             }
