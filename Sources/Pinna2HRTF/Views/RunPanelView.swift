@@ -41,7 +41,7 @@ struct RunPanelView: View {
                     .frame(maxWidth: .infinity)
             }
             .tint(.red)
-            .disabled(!store.selectedProjectIsRunning)
+            .disabled(store.selectedProject.map { store.runningProcesses[$0.id] == nil } ?? true)
             Button(role: .destructive) {
                 store.confirmResetSelectedProjectOutputs()
             } label: {
@@ -57,6 +57,7 @@ struct RunPanelView: View {
     }
 
     var summary: String {
+        if store.selectedProjectIsManagingOutputs { return "Updating outputs" }
         if store.selectedProjectIsRunning { return "Running" }
         if let project = store.selectedProject { return ArtifactScanner.summary(for: project) }
         return "No project"

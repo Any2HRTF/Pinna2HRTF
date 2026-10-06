@@ -146,6 +146,27 @@ struct NumCalcSettings: Codable, Equatable {
 struct PostprocessingSettings: Codable, Equatable {
     var normalize = true
     var levelOffsetDB = "-30"
+    var resampleHrirs = false
+    var samplingRate = "48000"
+
+    enum CodingKeys: String, CodingKey {
+        case normalize, levelOffsetDB, resampleHrirs, samplingRate
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        normalize = try values.decodeIfPresent(Bool.self, forKey: .normalize) ?? true
+        levelOffsetDB = try values.decodeIfPresent(String.self, forKey: .levelOffsetDB) ?? "-30"
+        resampleHrirs = try values.decodeIfPresent(Bool.self, forKey: .resampleHrirs) ?? false
+        samplingRate = try values.decodeIfPresent(String.self, forKey: .samplingRate) ?? "48000"
+    }
+
+    var normalizedSamplingRate: Int {
+        guard let rate = Int(samplingRate.trimmingCharacters(in: .whitespacesAndNewlines)), rate > 0, rate % 10 == 0 else { return 48000 }
+        return rate
+    }
 }
 
 struct ProjectSettings: Codable, Equatable {

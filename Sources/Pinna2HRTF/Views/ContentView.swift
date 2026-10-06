@@ -116,7 +116,7 @@ struct ContentView: View {
             canRunProject: store.canRunNextStage(),
             canRunStage: { stage in store.canRun(stage: stage) },
             canStopProject: selectedProjectIsRunning,
-            canResetProject: selectedProject != nil && !selectedProjectIsRunning,
+            canResetProject: selectedProject != nil && !store.selectedProjectIsRunning,
             artifacts: store.artifacts.filter(\.exists),
             selectedArtifactURL: store.selectedMesh,
             canPreview: selectedProject != nil && !store.isPlacingMicrophone,

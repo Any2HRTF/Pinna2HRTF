@@ -21,6 +21,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published var stageStates: [Stage: StageState] = Dictionary(uniqueKeysWithValues: Stage.allCases.map { ($0, .ready) })
     @Published var runningProcesses: [UUID: Process] = [:]
     @Published var runningStages: [UUID: Stage] = [:]
+    @Published private var outputOperations = Set<UUID>()
+    private var outputStores: [String: GeneratedOutputManifest] = [:]
     @Published var environmentProcess: Process?
     @Published var failedStagesByProject: [UUID: Set<Stage>] = [:]
     private var logTextByProject: [UUID: String] = [:]
@@ -71,7 +73,11 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     var selectedProjectIsRunning: Bool {
         guard let selectedProject else { return false }
-        return runningProcesses[selectedProject.id] != nil
+        return runningProcesses[selectedProject.id] != nil || outputOperations.contains(selectedProject.id)
+    }
+
+    var selectedProjectIsManagingOutputs: Bool {
+        selectedProjectID.map { outputOperations.contains($0) } ?? false
     }
 
     var selectedProjectHasGeneratedOutputs: Bool {
@@ -230,6 +236,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func forgetSelectedProject() {
         guard let selectedProjectID else { return }
+        guard !outputOperations.contains(selectedProjectID) else { return }
         runningProcesses[selectedProjectID]?.terminate()
         runningProcesses[selectedProjectID] = nil
         runningStages[selectedProjectID] = nil
@@ -243,6 +250,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func updateSelectedProject(refresh: Bool = true, _ update: (inout ProjectRecord) -> Void) {
         guard let index = selectedProjectIndex else { return }
+        guard !selectedProjectIsRunning else { return }
         update(&projects[index])
         persist()
         if refresh {
@@ -735,6 +743,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func canRun(stage: Stage) -> Bool {
         guard let project = selectedProject else { return false }
+        guard !outputOperations.contains(project.id) else { return false }
         if runningStages[project.id] != nil, runningProcesses[project.id] != nil {
             return false
         }
@@ -800,7 +809,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             appendLog("Create or select a project before running.")
             return
         }
-        guard runningProcesses[project.id] == nil else {
+        guard runningProcesses[project.id] == nil, !outputOperations.contains(project.id) else {
             appendLog("A task is already running.")
             return
         }
@@ -837,6 +846,46 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func startProcess(stage: Stage, project: ProjectRecord, configURL: URL) {
+        guard !outputOperations.contains(project.id), runningProcesses[project.id] == nil else { return }
+        do {
+            let outputs = try outputsFor(project)
+            outputOperations.insert(project.id)
+            Task { @MainActor in
+                defer { outputOperations.remove(project.id); refreshArtifacts() }
+                do {
+                    try await Task.detached(priority: .userInitiated) {
+                        try outputs.begin(GeneratedOutputManifest.OutputStage(rawValue: stage.rawValue.capitalized)!)
+                    }.value
+                    await launchProcess(stage: stage, project: project, configURL: configURL, outputs: outputs)
+                } catch {
+                    appendLog("Could not track project outputs: \(error.localizedDescription)", for: project.id)
+                }
+            }
+        } catch {
+            appendLog("Could not track project outputs: \(error.localizedDescription)", for: project.id)
+        }
+    }
+
+    func outputsFor(_ project: ProjectRecord) throws -> GeneratedOutputManifest {
+        guard !project.saveLocation.isEmpty else { throw GeneratedOutputManifest.Failure.invalidRoot }
+        let root = URL(fileURLWithPath: project.saveLocation).standardizedFileURL.resolvingSymlinksInPath().path
+        for other in projects where other.id != project.id && !other.saveLocation.isEmpty {
+            let otherRoot = URL(fileURLWithPath: other.saveLocation).standardizedFileURL.resolvingSymlinksInPath().path
+            guard root != otherRoot, !root.hasPrefix(otherRoot + "/"), !otherRoot.hasPrefix(root + "/") else {
+                throw GeneratedOutputManifest.Failure.invalidRoot
+            }
+        }
+        let inputs = projects.flatMap { [$0.leftEar, $0.rightEar, $0.settings.preprocessing.evaluationGrid ?? ""] }
+            .filter { !$0.isEmpty && $0 != "Default" }.sorted()
+        let key = project.saveLocation + "\n" + inputs.joined(separator: "\n")
+        if let existing = outputStores[key] { return existing }
+        let outputs = try GeneratedOutputManifest(projectRoot: project.saveLocation, inputs: inputs)
+        outputStores[key] = outputs
+        return outputs
+    }
+
+    @MainActor
+    private func launchProcess(stage: Stage, project: ProjectRecord, configURL: URL, outputs: GeneratedOutputManifest) async {
         configureNotifications()
         let process = Process()
         if Defaults.isPackagedApp {
@@ -884,6 +933,13 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 if stage == .preprocessing, process.terminationStatus == 0 {
                     store.recordPreprocessingSignature(for: project)
                 }
+                store.outputOperations.insert(project.id)
+                do {
+                    try await Task.detached(priority: .userInitiated) { try outputs.complete() }.value
+                } catch {
+                    store.appendLog("Output tracking is pending; it will be retried before reset.", for: project.id)
+                }
+                store.outputOperations.remove(project.id)
                 store.refreshArtifacts()
             }
         }
@@ -895,6 +951,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             runningStages[project.id] = nil
             refreshArtifacts()
             appendLog("Could not start \(stage.title): \(error.localizedDescription)", for: project.id)
+            do { try await Task.detached { try outputs.complete() }.value }
+            catch { appendLog("Output tracking is pending; it will be retried before reset.", for: project.id) }
         }
     }
 
@@ -1123,18 +1181,22 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func confirmResetSelectedProjectOutputs() {
-        guard let project = selectedProject, runningProcesses[project.id] == nil else { return }
+        guard let project = selectedProject, !selectedProjectIsRunning else { return }
         if confirmResetOutputs(for: project) {
             resetSelectedProjectOutputs()
         }
     }
 
     func confirmSetBezierPPM(_ enabled: Bool) {
-        guard let project = selectedProject, runningProcesses[project.id] == nil else { return }
+        guard let project = selectedProject, !selectedProjectIsRunning else { return }
         guard project.settings.inference.usePredictionsForPreprocessing != enabled else { return }
         if selectedProjectHasGeneratedOutputs {
             guard confirmResetOutputs(for: project) else { return }
-            resetSelectedProjectOutputs()
+            resetSelectedProjectOutputs { [weak self] success in
+                guard success, let self, self.selectedProjectID == project.id else { return }
+                self.setBezierPPM(enabled)
+            }
+            return
         }
         setBezierPPM(enabled)
     }
@@ -1152,56 +1214,41 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     func confirmResetOutputs(for project: ProjectRecord) -> Bool {
         let alert = NSAlert()
         alert.messageText = "Reset pipeline outputs?"
-        alert.informativeText = "Generated files in \(project.saveLocation.isEmpty ? "the project output folder" : project.saveLocation) will be removed. Input meshes and settings will be kept."
+        alert.informativeText = "Remove generated outputs from all stages? Input meshes, microphone positions, settings, project logs, and modified or unrelated files will be kept."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Reset Outputs")
         alert.addButton(withTitle: "Cancel")
         return alert.runModal() == .alertFirstButtonReturn
     }
 
-    func resetSelectedProjectOutputs() {
+    func resetSelectedProjectOutputs(completion: ((Bool) -> Void)? = nil) {
         guard let project = selectedProject else { return }
-        guard runningProcesses[project.id] == nil else {
+        guard !selectedProjectIsRunning else {
             appendLog("Stop the running pipeline before resetting outputs.")
             return
         }
-        let output = URL(fileURLWithPath: project.saveLocation)
-        let names = [
-            project.settings.inference.targetLeftFolder,
-            project.settings.inference.targetRightFolder,
-            project.settings.inference.predictionLeftFolder,
-            project.settings.inference.predictionRightFolder,
-            "Prediction Parameters Left",
-            "Prediction Parameters Right",
-            "intermediates",
-            "Target STL Left",
-            "Target STL Right",
-            "ICP STL Left",
-            "ICP STL Right",
-            "Prediction STL Left",
-            "Prediction STL Right",
-            "Projects",
-            "HRTF",
-            "Results Inference.csv",
-            ".pinna2hrtf_native_run.yaml",
-            ".pinna2hrtf-preprocessing-signature"
-        ]
-        for name in names {
-            let url = output.appendingPathComponent(name)
-            if (!project.leftEar.isEmpty && path(url, contains: URL(fileURLWithPath: project.leftEar))) || (!project.rightEar.isEmpty && path(url, contains: URL(fileURLWithPath: project.rightEar))) {
-                appendLog("Kept \(url.lastPathComponent): configured input mesh.")
-                continue
+        do {
+            let outputs = try outputsFor(project)
+            outputOperations.insert(project.id)
+            if isPlacingMicrophone { cancelMicrophonePlacement() }
+            Task { @MainActor in
+                let result = await Task.detached(priority: .userInitiated) { outputs.reset() }.value
+                outputOperations.remove(project.id)
+                if result.success { failedStagesByProject[project.id] = [] }
+                if selectedProjectID == project.id {
+                    selectedMesh = nil
+                    selectedImage = nil
+                    selectedScene = SCNScene()
+                    refreshArtifacts()
+                }
+                appendLog(result.summary, for: project.id)
+                persist()
+                completion?(result.success)
             }
-            if FileManager.default.fileExists(atPath: url.path) {
-                try? FileManager.default.removeItem(at: url)
-            }
+        } catch {
+            appendLog("Could not reset outputs: \(error.localizedDescription)", for: project.id)
+            completion?(false)
         }
-        failedStagesByProject[project.id] = []
-        selectedMesh = nil
-        selectedImage = nil
-        selectedScene = SCNScene()
-        refreshArtifacts()
-        appendLog("Generated outputs reset.")
     }
 
     func loadSelectedProjectLog() {

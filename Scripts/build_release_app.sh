@@ -65,7 +65,8 @@ if [[ ! -f "$ROOT/uv.lock" ]]; then
   exit 1
 fi
 export UV_CACHE_DIR="/private/tmp/pinna2hrtf-uv-cache"
-SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+SDK_PATH="$(xcrun --sdk "${PINNA2HRTF_MACOS_SDK:-macosx26.5}" --show-sdk-path)"
+SDK_VERSION="$(xcrun --sdk "$SDK_PATH" --show-sdk-version)"
 SDK_SWIFT_INTERFACE="$(find "$SDK_PATH/usr/lib/swift/Swift.swiftmodule" -name '*-apple-macos.swiftinterface' -print -quit)"
 SDK_SWIFT_VERSION="$(sed -n 's|// swift-compiler-version: Apple Swift version \([^ ]*\).*|\1|p' "$SDK_SWIFT_INTERFACE")"
 SWIFT_COMPATIBILITY_FLAGS=()
@@ -76,11 +77,13 @@ fi
 cd "$ROOT"
 CLANG_MODULE_CACHE_PATH="/private/tmp/pinna2hrtf-clang-cache" \
 SWIFTPM_HOME="/private/tmp/pinna2hrtf-swiftpm-cache" \
-swift build -c release --disable-sandbox --scratch-path "$SCRATCH" --product Pinna2HRTF "${SWIFT_COMPATIBILITY_FLAGS[@]}"
+swift build -c release --sdk "$SDK_PATH" --disable-sandbox --scratch-path "$SCRATCH" --product Pinna2HRTF "${SWIFT_COMPATIBILITY_FLAGS[@]}"
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS" "$RESOURCES"
 cp "$SCRATCH/release/Pinna2HRTF" "$MACOS/Pinna2HRTF"
+# Preserve the selected SDK's compatibility behavior with newer SwiftPM linkers.
+xcrun vtool -set-build-version macos 13.0 "$SDK_VERSION" -replace -output "$MACOS/Pinna2HRTF" "$MACOS/Pinna2HRTF"
 cp -R "$ROOT/HRTFCalculation" "$RESOURCES/HRTFCalculation"
 cp "$ROOT/pyproject.toml" "$RESOURCES/pyproject.toml"
 cp "$ROOT/uv.lock" "$RESOURCES/uv.lock"

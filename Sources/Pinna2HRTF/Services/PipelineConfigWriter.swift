@@ -129,6 +129,8 @@ enum PipelineConfigWriter {
           overwrite: true
           normalize: \(postprocessing.normalize ? "true" : "false")
           level_offset_db: \(levelOffsetDB)
+          resample_hrirs: \(postprocessing.resampleHrirs ? "true" : "false")
+          sampling_rate: \(postprocessing.normalizedSamplingRate)
         ui:
           mesh_background: white
           show_axes: true

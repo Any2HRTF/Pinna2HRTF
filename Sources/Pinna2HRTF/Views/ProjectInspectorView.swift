@@ -104,6 +104,8 @@ struct ProjectInspectorView: View {
                 SettingsDisclosure("Postprocessing", systemImage: "slider.horizontal.3") {
                     SettingToggle(title: "Normalize HRTFs", helpID: "postprocessing.normalize", isOn: postprocessingNormalizeBinding)
                     LabeledTextField("Level offset (dB)", helpID: "postprocessing.level_offset", text: postprocessingLevelOffsetBinding, fieldEnabled: postprocessingNormalizeBinding.wrappedValue)
+                    SettingToggle(title: "Resample HRIRs", helpID: "postprocessing.resample_hrirs", isOn: postprocessingResampleBinding)
+                    LabeledTextField("Sampling rate (Hz)", helpID: "postprocessing.sampling_rate", text: postprocessingSamplingRateBinding, fieldEnabled: postprocessingResampleBinding.wrappedValue)
                 }
             }
         }
@@ -260,6 +262,32 @@ struct ProjectInspectorView: View {
             set: { value in
                 store.updateSelectedProject {
                     $0.settings.preprocessing.frequencyStepCount = "\(min(max(value, 2), 10000))"
+                }
+            }
+        )
+    }
+
+    var postprocessingResampleBinding: Binding<Bool> {
+        Binding(
+            get: { store.selectedProject?.settings.postprocessing?.resampleHrirs ?? false },
+            set: { value in
+                store.updateSelectedProject {
+                    var settings = $0.settings.postprocessing ?? PostprocessingSettings()
+                    settings.resampleHrirs = value
+                    $0.settings.postprocessing = settings
+                }
+            }
+        )
+    }
+
+    var postprocessingSamplingRateBinding: Binding<String> {
+        Binding(
+            get: { store.selectedProject?.settings.postprocessing?.samplingRate ?? "48000" },
+            set: { value in
+                store.updateSelectedProject {
+                    var settings = $0.settings.postprocessing ?? PostprocessingSettings()
+                    settings.samplingRate = value
+                    $0.settings.postprocessing = settings
                 }
             }
         )
