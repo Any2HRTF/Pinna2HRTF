@@ -35,7 +35,7 @@ struct Pinna2HRTFApp: App {
         Window("About Pinna2HRTF", id: "about") {
             AboutView()
         }
-        .defaultSize(width: 440, height: 340)
+        .defaultSize(width: 440, height: 420)
         .windowResizability(.contentSize)
     }
 }
@@ -70,6 +70,7 @@ struct AboutView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
         .frame(width: 440)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
