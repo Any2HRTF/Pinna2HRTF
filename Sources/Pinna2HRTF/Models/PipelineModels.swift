@@ -183,11 +183,44 @@ struct ProjectRecord: Identifiable, Codable, Equatable {
     var rightEar: String
     var saveLocation: String
     var inputHandling: InputHandling = .copy
+    var folderID: UUID?
     var settings: ProjectSettings
+}
+
+struct ProjectFolder: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var name: String
+    var isExpanded = true
 }
 
 struct ProjectRegistry: Codable, Equatable {
     var projects: [ProjectRecord]
     var selectedProjectID: UUID?
     var environment: EnvironmentConfig
+    var folders: [ProjectFolder] = []
+
+    init(projects: [ProjectRecord], selectedProjectID: UUID?, environment: EnvironmentConfig, folders: [ProjectFolder] = []) {
+        self.projects = projects
+        self.selectedProjectID = selectedProjectID
+        self.environment = environment
+        self.folders = folders
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case projects, selectedProjectID, environment, folders
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        projects = try values.decode([ProjectRecord].self, forKey: .projects)
+        selectedProjectID = try values.decodeIfPresent(UUID.self, forKey: .selectedProjectID)
+        environment = try values.decode(EnvironmentConfig.self, forKey: .environment)
+        folders = try values.decodeIfPresent([ProjectFolder].self, forKey: .folders) ?? []
+        let folderIDs = Set(folders.map(\.id))
+        for index in projects.indices {
+            if let id = projects[index].folderID, !folderIDs.contains(id) {
+                projects[index].folderID = nil
+            }
+        }
+    }
 }

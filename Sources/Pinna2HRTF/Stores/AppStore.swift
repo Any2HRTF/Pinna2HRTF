@@ -6,6 +6,7 @@ import AppKit
 import UserNotifications
 
 final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
+    @Published var folders: [ProjectFolder]
     @Published var projects: [ProjectRecord]
     @Published var selectedProjectID: UUID?
     @Published var environment: EnvironmentConfig
@@ -53,12 +54,13 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         if Defaults.isPackagedApp {
             registry.environment = Defaults.environment(root: rootURL)
         }
+        folders = registry.folders
         projects = registry.projects
         selectedProjectID = registry.selectedProjectID ?? registry.projects.first?.id
         environment = registry.environment
         viewerStateByProject = Self.loadViewerStates()
         super.init()
-        registryStore.save(ProjectRegistry(projects: projects, selectedProjectID: selectedProjectID, environment: environment))
+        registryStore.save(ProjectRegistry(projects: projects, selectedProjectID: selectedProjectID, environment: environment, folders: folders))
         refreshArtifacts()
         restoreViewer()
     }
@@ -96,11 +98,50 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     var registry: ProjectRegistry {
-        ProjectRegistry(projects: projects, selectedProjectID: selectedProjectID, environment: environment)
+        ProjectRegistry(projects: projects, selectedProjectID: selectedProjectID, environment: environment, folders: folders)
     }
 
     func persist() {
         registryStore.save(registry)
+    }
+
+    @discardableResult
+    func createFolder(named name: String) -> UUID {
+        let folder = ProjectFolder(name: name)
+        folders.append(folder)
+        persist()
+        return folder.id
+    }
+
+    func renameFolder(_ id: UUID, to name: String) {
+        guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
+        folders[index].name = name
+        persist()
+    }
+
+    func removeFolder(_ id: UUID) {
+        for index in projects.indices where projects[index].folderID == id {
+            projects[index].folderID = nil
+        }
+        folders.removeAll { $0.id == id }
+        persist()
+    }
+
+    func moveProject(_ id: UUID, toFolder folderID: UUID?, before destinationID: UUID? = nil) {
+        guard folderID == nil || folders.contains(where: { $0.id == folderID }),
+              let index = projects.firstIndex(where: { $0.id == id }) else { return }
+        projects[index].folderID = folderID
+        if let destinationID, destinationID != id,
+           projects.contains(where: { $0.id == destinationID && $0.folderID == folderID }) {
+            let project = projects.remove(at: index)
+            if let destinationIndex = projects.firstIndex(where: { $0.id == destinationID }) {
+                projects.insert(project, at: destinationIndex)
+            }
+        }
+        if let folderIndex = folders.firstIndex(where: { $0.id == folderID }) {
+            folders[folderIndex].isExpanded = true
+        }
+        persist()
     }
 
     func createProject() {
