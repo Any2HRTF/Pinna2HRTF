@@ -71,10 +71,6 @@ struct ContentView: View {
     @ViewBuilder var workspace: some View {
         if #available(macOS 14.0, *) {
             navigationWorkspace
-                .inspector(isPresented: $inspectorPresented) {
-                    ProjectInspectorView(store: store)
-                        .inspectorColumnWidth(min: 260, ideal: 360, max: 720)
-                }
         } else {
             HSplitView {
                 navigationWorkspace
@@ -99,8 +95,16 @@ struct ContentView: View {
         .navigationSplitViewStyle(.balanced)
     }
 
-    var meshViewer: some View {
-        MeshViewerView(store: store, logExpanded: $logExpanded)
+    @ViewBuilder var meshViewer: some View {
+        if #available(macOS 14.0, *) {
+            MeshViewerView(store: store, logExpanded: $logExpanded)
+                .inspector(isPresented: $inspectorPresented) {
+                    ProjectInspectorView(store: store)
+                        .inspectorColumnWidth(min: 260, ideal: 360, max: 720)
+                }
+        } else {
+            MeshViewerView(store: store, logExpanded: $logExpanded)
+        }
     }
 
     var commandContext: PipelineCommandContext {
