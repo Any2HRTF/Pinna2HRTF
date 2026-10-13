@@ -38,23 +38,23 @@ struct RunPanelView: View {
                     }
                 }
             }
-            Button {
-                store.stopRunningProcess()
-            } label: {
-                Label("Stop", systemImage: "stop.fill")
-                    .frame(maxWidth: .infinity)
-                    .frame(height: RunButtonLayout.contentHeight)
+            HStack(spacing: 8) {
+                Button {
+                    store.stopRunningProcess()
+                } label: {
+                    Label("Stop", systemImage: "stop.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .tint(.red)
+                .disabled(store.selectedProject.map { store.runningProcesses[$0.id] == nil } ?? true)
+                Button(role: .destructive) {
+                    store.confirmResetSelectedProjectOutputs()
+                } label: {
+                    Label("Reset Outputs…", systemImage: "trash")
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(store.selectedProjectIsRunning)
             }
-            .tint(.red)
-            .disabled(store.selectedProject.map { store.runningProcesses[$0.id] == nil } ?? true)
-            Button(role: .destructive) {
-                store.confirmResetSelectedProjectOutputs()
-            } label: {
-                Label("Reset Outputs…", systemImage: "trash")
-                    .frame(maxWidth: .infinity)
-                    .frame(height: RunButtonLayout.contentHeight)
-            }
-            .disabled(store.selectedProjectIsRunning)
         }
         }
         .buttonStyle(.bordered)
