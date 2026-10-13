@@ -225,6 +225,11 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                     }
                     duplicate.leftEar = relocated(duplicate.leftEar)
                     duplicate.rightEar = relocated(duplicate.rightEar)
+                    if var postprocessing = duplicate.settings.postprocessing,
+                       let outputFolder = postprocessing.outputFolder {
+                        postprocessing.outputFolder = relocated(outputFolder)
+                        duplicate.settings.postprocessing = postprocessing
+                    }
                     let settingsURL = duplicateURL.appendingPathComponent("Project Settings.yaml")
                     if let settings = try? String(contentsOf: settingsURL, encoding: .utf8) {
                         try? settings.replacingOccurrences(of: originalPath, with: duplicatePath).write(to: settingsURL, atomically: true, encoding: .utf8)
