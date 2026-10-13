@@ -63,11 +63,12 @@ struct NativeProjectSidebar: NSViewRepresentable {
         init(_ parent: NativeProjectSidebar) { self.parent = parent }
 
         func children(of item: Any?) -> [Node] {
-            guard let node = item as? Node else { return [root] }
-            switch node.kind {
-            case .root:
-                return parent.store.projects.filter { $0.folderID == nil }.compactMap { projectNodes[$0.id] }
+            guard let node = item as? Node else {
+                return [root] + parent.store.projects.filter { $0.folderID == nil }.compactMap { projectNodes[$0.id] }
                     + parent.store.folders.compactMap { folderNodes[$0.id] }
+            }
+            switch node.kind {
+            case .root: return []
             case let .folder(id):
                 return parent.store.projects.filter { $0.folderID == id }.compactMap { projectNodes[$0.id] }
             case .project: return []
@@ -87,7 +88,6 @@ struct NativeProjectSidebar: NSViewRepresentable {
                 projectNodes = Dictionary(uniqueKeysWithValues: parent.store.projects.map { ($0.id, projectNodes[$0.id] ?? Node(.project($0.id))) })
                 folderNodes = Dictionary(uniqueKeysWithValues: parent.store.folders.map { ($0.id, folderNodes[$0.id] ?? Node(.folder($0.id))) })
                 outline.reloadData()
-                outline.expandItem(root)
                 for folder in parent.store.folders {
                     guard let node = folderNodes[folder.id] else { continue }
                     if folder.isExpanded { outline.expandItem(node) } else { outline.collapseItem(node) }
@@ -105,8 +105,8 @@ struct NativeProjectSidebar: NSViewRepresentable {
         func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any { children(of: item)[index] }
         func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
             guard let node = item as? Node else { return false }
-            if case .project = node.kind { return false }
-            return true
+            if case .folder = node.kind { return true }
+            return false
         }
         func outlineView(_ outlineView: NSOutlineView, isGroupItem item: Any) -> Bool {
             (item as? Node) === root
@@ -185,7 +185,7 @@ struct NativeProjectSidebar: NSViewRepresentable {
             if let value = info.draggingPasteboard.string(forType: Self.projectType), let id = UUID(uuidString: value) {
                 var folderID: UUID?
                 if let node = item as? Node, case let .folder(folder) = node.kind { folderID = folder }
-                let siblings = children(of: item ?? root)
+                let siblings = children(of: item)
                 var beforeID: UUID?
                 if index >= 0 && index < siblings.count, case let .project(destination) = siblings[index].kind { beforeID = destination }
                 parent.store.moveProject(id, toFolder: folderID, before: beforeID)
@@ -201,7 +201,7 @@ struct NativeProjectSidebar: NSViewRepresentable {
             if let value = info.draggingPasteboard.string(forType: Self.folderType), let id = UUID(uuidString: value),
                let source = parent.store.folders.firstIndex(where: { $0.id == id }) {
                 let rootProjectCount = parent.store.projects.filter { $0.folderID == nil }.count
-                let destination = max(0, min(parent.store.folders.count, index - rootProjectCount))
+                let destination = max(0, min(parent.store.folders.count, index - rootProjectCount - 1))
                 parent.store.folders.move(fromOffsets: IndexSet(integer: source), toOffset: destination)
                 parent.store.persist()
                 return true
