@@ -1,5 +1,9 @@
 import SwiftUI
 
+private enum RunButtonLayout {
+    static let contentHeight: CGFloat = 58
+}
+
 struct RunPanelView: View {
     @ObservedObject var store: AppStore
 
@@ -39,6 +43,7 @@ struct RunPanelView: View {
             } label: {
                 Label("Stop", systemImage: "stop.fill")
                     .frame(maxWidth: .infinity)
+                    .frame(height: RunButtonLayout.contentHeight)
             }
             .tint(.red)
             .disabled(store.selectedProject.map { store.runningProcesses[$0.id] == nil } ?? true)
@@ -47,6 +52,7 @@ struct RunPanelView: View {
             } label: {
                 Label("Reset Outputs…", systemImage: "trash")
                     .frame(maxWidth: .infinity)
+                    .frame(height: RunButtonLayout.contentHeight)
             }
             .disabled(store.selectedProjectIsRunning)
         }
@@ -85,12 +91,12 @@ struct StageRunButton: View {
                     Text(stateLabel)
                         .font(.caption)
                         .foregroundStyle(stateColor)
-                        .lineLimit(2)
+                        .lineLimit(1)
                     if !available, let unavailableReason {
                         Text(unavailableReason)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(1)
                     }
                 }
                 Spacer(minLength: 0)
@@ -98,8 +104,10 @@ struct StageRunButton: View {
             .padding(.horizontal, 4)
             .padding(.vertical, 5)
             .frame(maxWidth: .infinity)
+            .frame(height: RunButtonLayout.contentHeight)
         }
         .buttonStyle(.bordered)
+        .help(unavailableReason ?? stateLabel)
         .disabled(!available)
     }
 
