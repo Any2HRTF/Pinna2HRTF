@@ -29,7 +29,8 @@ final class GeneratedOutputManifest {
     }
     struct ResetResult {
         var deleted = 0, modified = 0, nonEmpty = 0, errors = 0
-        var success: Bool { modified == 0 && errors == 0 }
+        // Keeping edited files is intentional; only reset errors block completion.
+        var success: Bool { errors == 0 }
         var summary: String {
             "Outputs reset (all): deleted \(deleted), kept modified \(modified), kept non-empty directories \(nonEmpty), errors \(errors)."
         }
