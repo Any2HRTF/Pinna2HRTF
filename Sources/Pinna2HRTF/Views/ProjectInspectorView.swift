@@ -58,32 +58,38 @@ struct ProjectInspectorView: View {
                     SettingToggle(title: "Use custom head radius", helpID: "mesh2hrtf.use_head_radius", isOn: useCustomHeadRadiusBinding)
                     LabeledMillimeterSlider("Head radius", helpID: "mesh2hrtf.head_radius", value: headRadiusBinding, range: 0...200, sliderEnabled: useCustomHeadRadiusBinding.wrappedValue)
                     LabeledTextField("Min frequency", helpID: "mesh2hrtf.min_frequency", text: preprocessingBinding(\.minFrequency))
-                    LabeledTextField("Max frequency", helpID: "mesh2hrtf.max_frequency", text: preprocessingBinding(\.maxFrequency))
-                    HStack {
-                        SettingLabel(title: "Frequency steps", helpID: "mesh2hrtf.frequency_steps")
-                        Spacer()
-                        TextField("Frequency steps", value: frequencyStepCountBinding, format: .number)
-                            .labelsHidden()
-                            .textFieldStyle(.roundedBorder)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 52)
-                        Stepper("", value: frequencyStepCountBinding, in: 2...10000)
-                            .labelsHidden()
-                            .fixedSize()
-                            .accessibilityLabel("Adjust Frequency steps")
+                    LabeledTextField("Max frequency", helpID: "mesh2hrtf.max_frequency", text: preprocessingBinding(\.maxFrequency), validationError: validationMessage("mesh2hrtf.max_frequency"))
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            SettingLabel(title: "Frequency steps", helpID: "mesh2hrtf.frequency_steps")
+                            Spacer()
+                            TextField("Frequency steps", text: preprocessingBinding(\.frequencyStepCount))
+                                .labelsHidden()
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 52)
+                            Stepper("", value: frequencyStepCountBinding, in: 2...10000)
+                                .labelsHidden()
+                                .fixedSize()
+                                .accessibilityLabel("Adjust Frequency steps")
+                        }
+                        if let error = validationMessage("mesh2hrtf.frequency_steps") { Text(error).font(.caption).foregroundStyle(.red) }
                     }
-                    HStack {
-                        SettingLabel(title: "Microphone faces", helpID: "mesh2hrtf.microphone_faces")
-                        Spacer()
-                        TextField("Microphone faces", value: sourceAssignmentFaceCountBinding, format: .number)
-                            .labelsHidden()
-                            .textFieldStyle(.roundedBorder)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 52)
-                        Stepper("", value: sourceAssignmentFaceCountBinding, in: 1...100)
-                            .labelsHidden()
-                            .fixedSize()
-                            .accessibilityLabel("Adjust Microphone faces")
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            SettingLabel(title: "Microphone faces", helpID: "mesh2hrtf.microphone_faces")
+                            Spacer()
+                            TextField("Microphone faces", text: optionalPreprocessingBinding(\.sourceAssignmentFaceCount))
+                                .labelsHidden()
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 52)
+                            Stepper("", value: sourceAssignmentFaceCountBinding, in: 1...100)
+                                .labelsHidden()
+                                .fixedSize()
+                                .accessibilityLabel("Adjust Microphone faces")
+                        }
+                        if let error = validationMessage("mesh2hrtf.microphone_faces") { Text(error).font(.caption).foregroundStyle(.red) }
                     }
                 }
                 SettingsDisclosure("Mesh Grading", systemImage: "ruler") {
@@ -91,7 +97,7 @@ struct ProjectInspectorView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     LabeledTextField("Min edge length", helpID: "mesh_grading.min_edge_length", text: preprocessingBinding(\.meshMinEdgeLength))
-                    LabeledTextField("Max edge length", helpID: "mesh_grading.max_edge_length", text: preprocessingBinding(\.meshMaxEdgeLength))
+                    LabeledTextField("Max edge length", helpID: "mesh_grading.max_edge_length", text: preprocessingBinding(\.meshMaxEdgeLength), validationError: validationMessage("mesh_grading.max_edge_length"))
                     LabeledTextField("Max error", helpID: "mesh_grading.max_error", text: preprocessingBinding(\.meshMaxError))
                     LabeledTextField("Gamma", helpID: "mesh_grading.gamma", text: preprocessingBinding(\.meshGamma))
                     LabeledTextField("Gamma opposite", helpID: "mesh_grading.gamma_opposite", text: preprocessingBinding(\.meshGammaOpposite))
@@ -102,6 +108,7 @@ struct ProjectInspectorView: View {
                     SettingToggle(title: "Adaptive FMM expansion length", helpID: "numcalc.adaptive_fmm", isOn: numcalcBoolBinding(\.adaptiveFmmLength))
                 }
                 SettingsDisclosure("Postprocessing", systemImage: "slider.horizontal.3") {
+                    PathField("SOFA output folder (optional)", helpID: "postprocessing.output_folder", text: postprocessingOutputFolderBinding, mode: .directory)
                     SettingToggle(title: "Normalize HRTFs", helpID: "postprocessing.normalize", isOn: postprocessingNormalizeBinding)
                     LabeledTextField("Level offset (dB)", helpID: "postprocessing.level_offset", text: postprocessingLevelOffsetBinding, fieldEnabled: postprocessingNormalizeBinding.wrappedValue)
                     SettingToggle(title: "Resample HRIRs", helpID: "postprocessing.resample_hrirs", isOn: postprocessingResampleBinding)
@@ -109,8 +116,14 @@ struct ProjectInspectorView: View {
                 }
             }
         }
+        .disabled(store.selectedProjectIsRunning)
         .formStyle(.grouped)
         .modifier(WorkspaceScrollEdges())
+    }
+
+    func validationMessage(_ id: String) -> String? {
+        guard let project = store.selectedProject else { return nil }
+        return ProjectValidation.issues(for: project).first { $0.id == id }?.message
     }
 
     var requiredPanel: some View {
@@ -121,7 +134,7 @@ struct ProjectInspectorView: View {
             Text("Choose at least one ear mesh.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            PathField("Save location", helpID: "project.save_location", text: projectStringBinding(\.saveLocation), mode: .directory)
+            PathField("Save location", helpID: "project.save_location", text: projectStringBinding(\.saveLocation), mode: .directory, showsOpenButton: true)
             SettingToggle(title: "Use Mesh2PPM", helpID: "project.use_bezierppm", isOn: bezierPPMBinding)
                 .padding(.top, 6)
                 .disabled(store.selectedProjectIsRunning)
@@ -262,6 +275,19 @@ struct ProjectInspectorView: View {
             set: { value in
                 store.updateSelectedProject {
                     $0.settings.preprocessing.frequencyStepCount = "\(min(max(value, 2), 10000))"
+                }
+            }
+        )
+    }
+
+    var postprocessingOutputFolderBinding: Binding<String> {
+        Binding(
+            get: { store.selectedProject?.settings.postprocessing?.outputFolder ?? "" },
+            set: { value in
+                store.updateSelectedProject {
+                    var settings = $0.settings.postprocessing ?? PostprocessingSettings()
+                    settings.outputFolder = value.isEmpty ? nil : value
+                    $0.settings.postprocessing = settings
                 }
             }
         )

@@ -18,7 +18,7 @@ import psutil
 def frequency_step_complete(source_dir: Path, step: int) -> bool:
     output_dir = source_dir / "be.out" / f"be.{step}"
     required_outputs = {"pBoundary", "pEvalGrid", "vBoundary", "vEvalGrid"}
-    if not output_dir.is_dir() or not required_outputs.issubset({path.name for path in output_dir.iterdir()}):
+    if not output_dir.is_dir() or not all((output_dir / name).is_file() and (output_dir / name).stat().st_size > 0 for name in required_outputs):
         return False
     log_path = source_dir / f"NC{step}-{step}_log.txt"
     if not log_path.is_file():

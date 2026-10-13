@@ -91,6 +91,12 @@
     "publications": []
   },
   {
+    "id": "postprocessing.output_folder",
+    "title": "SOFA output folder",
+    "description": "The subfolder inside the project folder where finished SOFA files and plots are written. Leave this empty to use the project's HRTF folder. Imported projects retain their saved output subfolder.",
+    "publications": []
+  },
+  {
     "id": "postprocessing.sampling_rate",
     "title": "Sampling rate",
     "description": "The target sampling rate in hertz used only when Resample HRIRs is enabled. Mesh2HRTF first creates the HRIRs at its native rate, then the resulting HRIR SOFA files are resampled to this value. HRTF SOFA files are not changed. Use a positive value divisible by 10; the default is 48000 Hz.",

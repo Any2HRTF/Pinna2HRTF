@@ -33,6 +33,7 @@ enum StageState: String, Codable {
     case failed
     case done
     case skipped
+    case stopped
 }
 
 enum InputHandling: String, CaseIterable, Identifiable, Codable {
@@ -148,9 +149,10 @@ struct PostprocessingSettings: Codable, Equatable {
     var levelOffsetDB = "-30"
     var resampleHrirs = false
     var samplingRate = "48000"
+    var outputFolder: String?
 
     enum CodingKeys: String, CodingKey {
-        case normalize, levelOffsetDB, resampleHrirs, samplingRate
+        case normalize, levelOffsetDB, resampleHrirs, samplingRate, outputFolder
     }
 
     init() {}
@@ -161,6 +163,7 @@ struct PostprocessingSettings: Codable, Equatable {
         levelOffsetDB = try values.decodeIfPresent(String.self, forKey: .levelOffsetDB) ?? "-30"
         resampleHrirs = try values.decodeIfPresent(Bool.self, forKey: .resampleHrirs) ?? false
         samplingRate = try values.decodeIfPresent(String.self, forKey: .samplingRate) ?? "48000"
+        outputFolder = try values.decodeIfPresent(String.self, forKey: .outputFolder)
     }
 
     var normalizedSamplingRate: Int {
@@ -184,6 +187,8 @@ struct ProjectRecord: Identifiable, Codable, Equatable {
     var saveLocation: String
     var inputHandling: InputHandling = .copy
     var folderID: UUID?
+    var preservedConfigJSON: String?
+    var stageOutcomes: [String: StageState]?
     var settings: ProjectSettings
 }
 

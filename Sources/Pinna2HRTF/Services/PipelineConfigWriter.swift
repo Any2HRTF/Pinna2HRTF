@@ -2,6 +2,7 @@ import Foundation
 
 enum PipelineConfigWriter {
     static func prepare(project: ProjectRecord, environment: EnvironmentConfig) throws -> URL {
+        try ProjectValidation.validate(project)
         let output = URL(fileURLWithPath: project.saveLocation)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let manualPositions = Dictionary(uniqueKeysWithValues: EarSide.allCases.compactMap { side in
@@ -17,7 +18,9 @@ enum PipelineConfigWriter {
             }
         }
         let configURL = output.appendingPathComponent("Project Settings.yaml")
-        try yaml(project: prepared, environment: environment, manualPositions: manualPositions).write(to: configURL, atomically: true, encoding: .utf8)
+        let generated = yaml(project: prepared, environment: environment, manualPositions: manualPositions)
+        let document = try project.preservedConfigJSON.map { try ProjectConfigDocument.mergedYAML(generated: generated, preservedJSON: $0) } ?? generated
+        try document.write(to: configURL, atomically: true, encoding: .utf8)
         return configURL
     }
 
@@ -125,7 +128,7 @@ enum PipelineConfigWriter {
           adaptive_fmm_length: \(numcalc.adaptiveFmmLength ? "true" : "false")
         postprocessing:
           enabled: false
-          output_sofa_dir: \(yamlString(output.appendingPathComponent("HRTF").path))
+          output_sofa_dir: \(yamlString((postprocessing.outputFolder ?? output.appendingPathComponent("HRTF").path)))
           overwrite: true
           normalize: \(postprocessing.normalize ? "true" : "false")
           level_offset_db: \(levelOffsetDB)

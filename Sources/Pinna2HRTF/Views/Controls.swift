@@ -191,12 +191,14 @@ struct LabeledTextField: View {
     let helpID: String
     let fieldEnabled: Bool
     @Binding var text: String
+    var validationError: String?
 
-    init(_ title: String, helpID: String, text: Binding<String>, fieldEnabled: Bool = true) {
+    init(_ title: String, helpID: String, text: Binding<String>, fieldEnabled: Bool = true, validationError: String? = nil) {
         self.title = title
         self.helpID = helpID
         self.fieldEnabled = fieldEnabled
         self._text = text
+        self.validationError = validationError
     }
 
     var body: some View {
@@ -207,6 +209,9 @@ struct LabeledTextField: View {
                 .labelsHidden()
                 .disabled(!fieldEnabled)
                 .opacity(fieldEnabled ? 1 : 0.55)
+            if fieldEnabled, let error = validationError ?? ProjectValidation.fieldMessage(helpID, text: text) {
+                Text(error).font(.caption).foregroundStyle(.red)
+            }
         }
     }
 }
@@ -255,12 +260,19 @@ struct PathField: View {
     let helpID: String
     @Binding var text: String
     var mode: PathFieldMode = .any
+    var showsOpenButton = false
 
-    init(_ title: String, helpID: String, text: Binding<String>, mode: PathFieldMode = .any) {
+    init(_ title: String, helpID: String, text: Binding<String>, mode: PathFieldMode = .any, showsOpenButton: Bool = false) {
         self.title = title
         self.helpID = helpID
         self._text = text
         self.mode = mode
+        self.showsOpenButton = showsOpenButton
+    }
+
+    var folderExists: Bool {
+        var isDirectory: ObjCBool = false
+        return !text.isEmpty && FileManager.default.fileExists(atPath: text, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
     var body: some View {
@@ -277,6 +289,15 @@ struct PathField: View {
                     if panel.runModal() == .OK, let url = panel.url {
                         text = url.path
                     }
+                }
+                if showsOpenButton {
+                    Button("Open") {
+                        guard folderExists else { return }
+                        NSWorkspace.shared.open(URL(fileURLWithPath: text, isDirectory: true))
+                    }
+                    .accessibilityLabel("Open Save Location in Finder")
+                    .help(folderExists ? "Open this project folder in Finder" : "This folder does not exist yet")
+                    .disabled(!folderExists)
                 }
             }
         }

@@ -59,6 +59,12 @@ struct ContentView: View {
                 .help(inspectorPresented ? "Hide Project Settings" : "Show Project Settings")
             }
         }
+        .alert("Project list recovery", isPresented: $store.registryRecoveryPresented) {
+            Button("Restore displayed project list") { store.recoverProjectRegistry() }
+            Button("Keep original file protected", role: .cancel) {}
+        } message: {
+            Text(store.registryStore.recoveryMessage ?? store.persistenceMessage ?? "The original project list will be preserved before recovery.")
+        }
         .focusedSceneValue(\.pipelineCommands, commandContext)
         .onChange(of: store.selectedProjectID) { _ in
             store.persist()
@@ -90,18 +96,14 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 180, ideal: 240, max: 320)
         } detail: {
             meshViewer
-                .frame(minWidth: 280, maxWidth: .infinity)
+                .frame(minWidth: 280, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
         }
         .navigationSplitViewStyle(.balanced)
     }
 
     @ViewBuilder var meshViewer: some View {
         if #available(macOS 14.0, *) {
-            MeshViewerView(store: store, logExpanded: $logExpanded)
-                .inspector(isPresented: $inspectorPresented) {
-                    ProjectInspectorView(store: store)
-                        .inspectorColumnWidth(min: 260, ideal: 360, max: 720)
-                }
+            NativeMeshWorkspace(store: store, logExpanded: $logExpanded, inspectorPresented: inspectorPresented)
         } else {
             MeshViewerView(store: store, logExpanded: $logExpanded)
         }
@@ -111,7 +113,7 @@ struct ContentView: View {
         let selectedProject = store.selectedProject
         let selectedProjectIsRunning = selectedProject.map { store.runningProcesses[$0.id] != nil } ?? false
         return PipelineCommandContext(
-            canRemoveProject: selectedProject != nil,
+            canRemoveProject: store.canRemoveSelectedProject,
             canDuplicateProject: selectedProject != nil,
             canRunProject: store.canRunNextStage(),
             canRunStage: { stage in store.canRun(stage: stage) },

@@ -9,8 +9,19 @@ struct ProjectSidebarView: View {
 
 
     var body: some View {
-        NativeProjectSidebar(store: store) { folder, projectID in
-            editFolder(folder, moving: projectID)
+        VStack(spacing: 0) {
+            if let message = store.persistenceMessage {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(message).font(.caption).foregroundStyle(.orange)
+                    if store.registryStore.savingBlocked {
+                        Button("Review recovery options") { store.registryRecoveryPresented = true }
+                    }
+                }
+                .padding(10)
+            }
+            NativeProjectSidebar(store: store) { folder, projectID in
+                editFolder(folder, moving: projectID)
+            }
         }
         .navigationTitle("Projects")
         .safeAreaInset(edge: .bottom) {
@@ -29,7 +40,7 @@ struct ProjectSidebarView: View {
                         .frame(width: 28, height: 28)
                 }
                 .help("Remove the selected project from Pinna2HRTF")
-                .disabled(store.selectedProject == nil)
+                .disabled(!store.canRemoveSelectedProject)
                 Button { editFolder() } label: {
                     Label("New Folder", systemImage: "folder.badge.plus").frame(width: 28, height: 28)
                 }
@@ -49,7 +60,7 @@ struct ProjectSidebarView: View {
                 }
                 .help("Duplicate the selected project, including its results")
                 .disabled(store.selectedProject == nil)
-                Spacer()
+                Spacer(minLength: 0)
             }
             .buttonStyle(.borderless)
             .labelStyle(.iconOnly)

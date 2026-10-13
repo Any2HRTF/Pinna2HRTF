@@ -19,6 +19,7 @@ struct NativeProjectSidebar: NSViewRepresentable {
         outline.outlineTableColumn = column
         outline.headerView = nil
         outline.style = .sourceList
+        outline.floatsGroupRows = false
         outline.backgroundColor = .clear
         outline.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         outline.intercellSpacing = NSSize(width: 0, height: 4)
@@ -29,6 +30,7 @@ struct NativeProjectSidebar: NSViewRepresentable {
         outline.registerForDraggedTypes([Coordinator.projectType, Coordinator.folderType])
         outline.setDraggingSourceOperationMask(.move, forLocal: true)
         let menu = NSMenu()
+        menu.autoenablesItems = false
         menu.delegate = context.coordinator
         outline.menu = menu
         scroll.documentView = outline
@@ -59,6 +61,7 @@ struct NativeProjectSidebar: NSViewRepresentable {
         var displayedProjects: [ProjectRecord] = []
         var displayedFolders: [ProjectFolder] = []
         var displayedStages: [UUID: Stage] = [:]
+        var lastRevealToken: UUID?
 
         init(_ parent: NativeProjectSidebar) { self.parent = parent }
 
@@ -96,6 +99,10 @@ struct NativeProjectSidebar: NSViewRepresentable {
             if let id = parent.store.selectedProjectID, let node = projectNodes[id], outline.row(forItem: node) >= 0 {
                 let row = outline.row(forItem: node)
                 if outline.selectedRow != row { outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
+                if lastRevealToken != parent.store.projectRevealToken {
+                    outline.scrollRowToVisible(row)
+                    lastRevealToken = parent.store.projectRevealToken
+                }
             } else {
                 outline.deselectAll(nil)
             }
@@ -214,9 +221,10 @@ struct NativeProjectSidebar: NSViewRepresentable {
             init(_ action: @escaping () -> Void) { self.action = action }
         }
         @objc func performMenuAction(_ sender: NSMenuItem) { (sender.representedObject as? MenuAction)?.action() }
-        func add(_ title: String, to menu: NSMenu, action: @escaping () -> Void) {
+        func add(_ title: String, to menu: NSMenu, enabled: Bool = true, action: @escaping () -> Void) {
             let item = NSMenuItem(title: title, action: #selector(performMenuAction(_:)), keyEquivalent: "")
             item.target = self
+            item.isEnabled = enabled
             item.representedObject = MenuAction(action)
             menu.addItem(item)
         }
@@ -238,6 +246,7 @@ struct NativeProjectSidebar: NSViewRepresentable {
             case let .project(id):
                 let move = NSMenuItem(title: "Move to Folder", action: nil, keyEquivalent: "")
                 let submenu = NSMenu()
+                submenu.autoenablesItems = false
                 add("No Folder", to: submenu) { self.parent.store.moveProject(id, toFolder: nil) }
                 for folder in parent.store.folders {
                     add(folder.name, to: submenu) { self.parent.store.moveProject(id, toFolder: folder.id) }
@@ -247,7 +256,7 @@ struct NativeProjectSidebar: NSViewRepresentable {
                 move.submenu = submenu
                 menu.addItem(move)
                 add("Duplicate Project", to: menu) { self.parent.store.selectedProjectID = id; self.parent.store.duplicateSelectedProject() }
-                add("Remove Project", to: menu) { self.parent.store.selectedProjectID = id; self.parent.store.forgetSelectedProject() }
+                add("Remove Project", to: menu, enabled: parent.store.canRemoveProject(id)) { self.parent.store.selectedProjectID = id; self.parent.store.forgetSelectedProject() }
             }
         }
     }

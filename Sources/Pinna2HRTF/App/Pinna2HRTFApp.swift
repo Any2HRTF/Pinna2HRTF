@@ -85,7 +85,9 @@ final class Pinna2HRTFAppDelegate: NSObject, NSApplicationDelegate {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Quit")
         alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+        guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
+        store.stopAllRunningProcesses { sender.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {

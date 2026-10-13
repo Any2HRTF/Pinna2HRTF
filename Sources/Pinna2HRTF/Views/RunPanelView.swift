@@ -29,7 +29,7 @@ struct RunPanelView: View {
             }
             VStack(spacing: 6) {
                 ForEach(Stage.allCases) { stage in
-                    StageRunButton(stage: stage, state: store.stageStates[stage] ?? .ready, available: store.canRun(stage: stage)) {
+                    StageRunButton(stage: stage, state: store.stageStates[stage] ?? .ready, available: store.canRun(stage: stage), unavailableReason: store.runUnavailableReason(stage: stage), previousResults: store.selectedProject.map { ArtifactScanner.stageIsComplete(stage, project: $0) } ?? false) {
                         store.run(stage: stage)
                     }
                 }
@@ -68,6 +68,8 @@ struct StageRunButton: View {
     let stage: Stage
     let state: StageState
     let available: Bool
+    let unavailableReason: String?
+    let previousResults: Bool
     let action: () -> Void
 
     var body: some View {
@@ -84,6 +86,12 @@ struct StageRunButton: View {
                         .font(.caption)
                         .foregroundStyle(stateColor)
                         .lineLimit(2)
+                    if !available, let unavailableReason {
+                        Text(unavailableReason)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -101,11 +109,12 @@ struct StageRunButton: View {
         case .running: .orange
         case .failed: .red
         case .done: .green
-        case .skipped: .secondary
+        case .skipped, .stopped: .secondary
         }
     }
 
     var stateLabel: String {
-        state == .skipped && stage == .inference ? "Skipped · not run" : state.rawValue.capitalized
+        if [.failed, .stopped].contains(state) && previousResults { return "\(state.rawValue.capitalized) · previous results available" }
+        return state == .skipped && stage == .inference ? "Skipped · not run" : state.rawValue.capitalized
     }
 }

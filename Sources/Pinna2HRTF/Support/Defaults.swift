@@ -113,11 +113,13 @@ enum Defaults {
     }
 
     static func newProject(packageRoot: URL, index: Int) -> ProjectRecord {
-        ProjectRecord(
+        let id = UUID()
+        return ProjectRecord(
+            id: id,
             name: "Project \(index)",
             leftEar: "",
             rightEar: "",
-            saveLocation: appDataURL.appendingPathComponent("Projects/Project \(index)").path,
+            saveLocation: appDataURL.appendingPathComponent("Projects/Project \(index)-\(id.uuidString)").path,
             settings: settings(packageRoot: packageRoot)
         )
     }
