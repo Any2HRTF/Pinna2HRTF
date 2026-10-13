@@ -13,26 +13,8 @@ struct ProjectInspectorView: View {
             .padding(16)
             Divider()
             if store.selectedProject == nil {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("No project selected")
-                        .font(.title3.weight(.semibold))
-                    Text("Create or select a project in the sidebar to edit settings and run the pipeline.")
-                        .foregroundStyle(.secondary)
-                    HStack {
-                        Button {
-                            store.createProject()
-                        } label: {
-                            Label("New Project", systemImage: "plus")
-                        }
-                        Button {
-                            store.importProject()
-                        } label: {
-                            Label("Import Project…", systemImage: "folder.badge.plus")
-                        }
-                    }
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 settingsPanel
                     .frame(maxHeight: .infinity)

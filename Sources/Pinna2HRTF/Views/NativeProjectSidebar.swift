@@ -4,6 +4,7 @@ import AppKit
 // Use the native outline view's single drag session for both grouping and ordering.
 struct NativeProjectSidebar: NSViewRepresentable {
     @ObservedObject var store: AppStore
+    @Binding var selectedFolderID: UUID?
     var editFolder: (ProjectFolder?, UUID?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -13,7 +14,7 @@ struct NativeProjectSidebar: NSViewRepresentable {
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         scroll.autohidesScrollers = true
-        let outline = NSOutlineView()
+        let outline = ProjectOutlineView()
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("projects"))
         outline.addTableColumn(column)
         outline.outlineTableColumn = column
@@ -29,10 +30,9 @@ struct NativeProjectSidebar: NSViewRepresentable {
         outline.delegate = context.coordinator
         outline.registerForDraggedTypes([Coordinator.projectType, Coordinator.folderType])
         outline.setDraggingSourceOperationMask(.move, forLocal: true)
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        menu.delegate = context.coordinator
-        outline.menu = menu
+        outline.contextMenuForRow = { [weak coordinator = context.coordinator] row in
+            coordinator?.contextMenu(forRow: row)
+        }
         scroll.documentView = outline
         context.coordinator.outline = outline
         return scroll
@@ -49,7 +49,7 @@ struct NativeProjectSidebar: NSViewRepresentable {
         init(_ kind: Kind) { self.kind = kind }
     }
 
-    final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
+    final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
         static let projectType = NSPasteboard.PasteboardType("at.ac.vbc.cbe.Pinna2HRTF.sidebar-project")
         static let folderType = NSPasteboard.PasteboardType("at.ac.vbc.cbe.Pinna2HRTF.sidebar-folder")
         var parent: NativeProjectSidebar
@@ -96,7 +96,10 @@ struct NativeProjectSidebar: NSViewRepresentable {
                     if folder.isExpanded { outline.expandItem(node) } else { outline.collapseItem(node) }
                 }
             }
-            if let id = parent.store.selectedProjectID, let node = projectNodes[id], outline.row(forItem: node) >= 0 {
+            if let id = parent.selectedFolderID, let node = folderNodes[id], outline.row(forItem: node) >= 0 {
+                let row = outline.row(forItem: node)
+                if outline.selectedRow != row { outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
+            } else if let id = parent.store.selectedProjectID, let node = projectNodes[id], outline.row(forItem: node) >= 0 {
                 let row = outline.row(forItem: node)
                 if outline.selectedRow != row { outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
                 if lastRevealToken != parent.store.projectRevealToken {
@@ -121,8 +124,10 @@ struct NativeProjectSidebar: NSViewRepresentable {
         func outlineView(_ outlineView: NSOutlineView, shouldCollapseItem item: Any) -> Bool { (item as? Node) !== root }
         func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
             guard let node = item as? Node else { return false }
-            if case .project = node.kind { return true }
-            return false
+            switch node.kind {
+            case .project, .folder: return true
+            case .root: return false
+            }
         }
         func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
             guard let node = item as? Node else { return 30 }
@@ -152,9 +157,16 @@ struct NativeProjectSidebar: NSViewRepresentable {
         }
         func outlineViewSelectionDidChange(_ notification: Notification) {
             guard !updating, let outline, let node = outline.item(atRow: outline.selectedRow) as? Node else { return }
-            if case let .project(id) = node.kind, parent.store.selectedProjectID != id {
-                parent.store.selectedProjectID = id
-                parent.store.persist()
+            switch node.kind {
+            case let .folder(id):
+                parent.selectedFolderID = id
+            case let .project(id):
+                parent.selectedFolderID = nil
+                if parent.store.selectedProjectID != id {
+                    parent.store.selectedProjectID = id
+                    parent.store.persist()
+                }
+            case .root: break
             }
         }
         func outlineViewItemDidExpand(_ notification: Notification) { saveExpansion(notification, expanded: true) }
@@ -228,21 +240,25 @@ struct NativeProjectSidebar: NSViewRepresentable {
             item.representedObject = MenuAction(action)
             menu.addItem(item)
         }
-        func menuNeedsUpdate(_ menu: NSMenu) {
-            menu.removeAllItems()
-            guard let outline, let node = outline.item(atRow: outline.clickedRow) as? Node else { return }
+        func contextMenu(forRow row: Int) -> NSMenu? {
+            guard let outline, row >= 0, let node = outline.item(atRow: row) as? Node else { return nil }
+            let menu = NSMenu()
+            menu.autoenablesItems = false
             switch node.kind {
             case .root:
                 add("New Project", to: menu) { self.parent.store.createProject() }
                 add("New Folder…", to: menu) { self.parent.editFolder(nil, nil) }
             case let .folder(id):
-                guard let folder = parent.store.folders.first(where: { $0.id == id }) else { return }
+                guard let folder = parent.store.folders.first(where: { $0.id == id }) else { return nil }
                 add("Rename Folder…", to: menu) { self.parent.editFolder(folder, nil) }
                 add("New Project in Folder", to: menu) {
                     self.parent.store.createProject()
                     if let projectID = self.parent.store.selectedProjectID { self.parent.store.moveProject(projectID, toFolder: id) }
                 }
-                add("Remove Folder", to: menu) { self.parent.store.removeFolder(id) }
+                add("Remove Folder", to: menu) {
+                    if self.parent.selectedFolderID == id { self.parent.selectedFolderID = nil }
+                    self.parent.store.removeFolder(id)
+                }
             case let .project(id):
                 let move = NSMenuItem(title: "Move to Folder", action: nil, keyEquivalent: "")
                 let submenu = NSMenu()
@@ -258,7 +274,26 @@ struct NativeProjectSidebar: NSViewRepresentable {
                 add("Duplicate Project", to: menu) { self.parent.store.selectedProjectID = id; self.parent.store.duplicateSelectedProject() }
                 add("Remove Project", to: menu, enabled: parent.store.canRemoveProject(id)) { self.parent.store.selectedProjectID = id; self.parent.store.forgetSelectedProject() }
             }
+            return menu
         }
+    }
+}
+
+// Resolve the clicked row before constructing the menu.
+private final class ProjectOutlineView: NSOutlineView {
+    var contextMenuForRow: ((Int) -> NSMenu?)?
+
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control), let menu = menu(for: event) {
+            NSMenu.popUpContextMenu(menu, with: event, for: self)
+            return
+        }
+        super.mouseDown(with: event)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let point = convert(event.locationInWindow, from: nil)
+        return contextMenuForRow?(row(at: point))
     }
 }
 

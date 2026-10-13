@@ -6,6 +6,7 @@ struct ProjectSidebarView: View {
     @State private var folderName = ""
     @State private var editingFolderID: UUID?
     @State private var movingProjectID: UUID?
+    @State private var selectedFolderID: UUID?
 
 
     var body: some View {
@@ -19,11 +20,12 @@ struct ProjectSidebarView: View {
                 }
                 .padding(10)
             }
-            NativeProjectSidebar(store: store) { folder, projectID in
+            NativeProjectSidebar(store: store, selectedFolderID: $selectedFolderID) { folder, projectID in
                 editFolder(folder, moving: projectID)
             }
         }
         .navigationTitle("Projects")
+        .onChange(of: store.selectedProjectID) { _ in selectedFolderID = nil }
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 8) {
                 Button {
@@ -34,13 +36,18 @@ struct ProjectSidebarView: View {
                 }
                 .help("Create a new empty project")
                 Button(role: .destructive) {
-                    store.forgetSelectedProject()
+                    if let id = selectedFolderID {
+                        selectedFolderID = nil
+                        store.removeFolder(id)
+                    } else {
+                        store.forgetSelectedProject()
+                    }
                 } label: {
-                    Label("Remove Project", systemImage: "minus")
+                    Label(selectedFolderID == nil ? "Remove Project" : "Remove Folder", systemImage: "minus")
                         .frame(width: 28, height: 28)
                 }
-                .help("Remove the selected project from Pinna2HRTF")
-                .disabled(!store.canRemoveSelectedProject)
+                .help(selectedFolderID == nil ? "Remove the selected project from Pinna2HRTF" : "Remove the selected folder and keep its projects")
+                .disabled(selectedFolderID == nil && !store.canRemoveSelectedProject)
                 Button { editFolder() } label: {
                     Label("New Folder", systemImage: "folder.badge.plus").frame(width: 28, height: 28)
                 }

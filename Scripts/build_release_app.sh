@@ -17,8 +17,13 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$ROOT/.." && pwd)"
 APP_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$ROOT/pyproject.toml" | head -n 1)"
-GIT_HEAD="$(git -C "$ROOT" rev-parse --short HEAD)"
-APP_BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD)"
+if git -C "$ROOT" rev-parse --verify HEAD >/dev/null 2>&1; then
+  GIT_HEAD="$(git -C "$ROOT" rev-parse --short HEAD)"
+  APP_BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD)"
+else
+  GIT_HEAD="source-snapshot"
+  APP_BUILD_NUMBER="0"
+fi
 SCRATCH="/private/tmp/pinna2hrtf-swift-build"
 STAGE_ROOT="$(mktemp -d /private/tmp/pinna2hrtf-release-stage.XXXXXX)"
 CLEAN_ROOT="$(mktemp -d /private/tmp/pinna2hrtf-release-clean.XXXXXX)"
@@ -68,7 +73,7 @@ if [[ ! -f "$ROOT/uv.lock" ]]; then
   echo "uv.lock is required to build the release app"
   exit 1
 fi
-export UV_CACHE_DIR="/private/tmp/pinna2hrtf-uv-cache"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/pinna2hrtf-uv-cache}"
 SDK_PATH="$(xcrun --sdk "${PINNA2HRTF_MACOS_SDK:-macosx26.5}" --show-sdk-path)"
 SDK_VERSION="$(xcrun --sdk "$SDK_PATH" --show-sdk-version)"
 SDK_SWIFT_INTERFACE="$(find "$SDK_PATH/usr/lib/swift/Swift.swiftmodule" -name '*-apple-macos.swiftinterface' -print -quit)"
@@ -126,7 +131,7 @@ cd "$RESOURCES"
 GIT_CONFIG_COUNT=1 \
 GIT_CONFIG_KEY_0="url.https://github.com/.insteadOf" \
 GIT_CONFIG_VALUE_0="git@github.com:" \
-UV_CACHE_DIR="/private/tmp/pinna2hrtf-uv-cache" \
+UV_CACHE_DIR="$UV_CACHE_DIR" \
 "$UV_BIN" sync --locked --no-dev --no-install-project --managed-python --python 3.11
 cd "$ROOT"
 PYTHON_REALPATH="$("$RESOURCES/.venv/bin/python" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$RESOURCES/.venv/bin/python")"
