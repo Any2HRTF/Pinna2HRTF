@@ -28,6 +28,7 @@ enum ProjectConfigDocument {
         let process = Process()
         process.executableURL = pythonURL
         process.arguments = ["-B", "-c", script] + arguments
+        process.currentDirectoryURL = Defaults.pipelineRoot
         process.standardInput = inputHandle
         process.standardOutput = outputHandle
         process.standardError = errorHandle
@@ -69,6 +70,7 @@ enum ProjectConfigDocument {
         }
         let current = try parse(generated)
         let editable: [String: [String]] = [
+            "scan_preparation": ["enabled", "scan_path", "rotation_degrees", "prepare_left", "prepare_right", "target_edge_mm", "left_margin_mm", "right_margin_mm", "side_min_mm", "side_max_mm"],
             "paths": ["left_ear", "right_ear", "output_dir", "external_deps_dir", "numcalc_executable", "mesh_grading_executable", "evaluation_grid"],
             "inference": ["model_config_file", "model_checkpoint", "target_left_folder", "target_right_folder", "prediction_left_folder", "prediction_right_folder", "use_predictions_for_preprocessing"],
             "preprocessing": ["title", "head_radius", "min_frequency", "max_frequency", "frequency_step_count", "source_assignment_face_count", "source_position_input_left", "source_position_input_right", "mesh_min_edge_length", "mesh_max_edge_length", "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite", "skip_mesh_grading"],
@@ -109,6 +111,18 @@ enum ProjectConfigDocument {
             if !value.hasPrefix("/") { return folder.appendingPathComponent(value).standardizedFileURL.path }
             return value
         }
+        let scan = config["scan_preparation"] as? [String: Any] ?? [:]
+        var restoredScan = ScanPreparationSettings()
+        restoredScan.enabled = bool(scan, "enabled") ?? false
+        restoredScan.scanPath = text(scan, "scan_path").map(relocated) ?? ""
+        restoredScan.rotationDegrees = text(scan, "rotation_degrees") ?? ""
+        restoredScan.prepareLeft = bool(scan, "prepare_left") ?? true
+        restoredScan.prepareRight = bool(scan, "prepare_right") ?? true
+        let scanKeys: [(String, WritableKeyPath<ScanPreparationSettings, String>)] = [
+            ("target_edge_mm", \.targetEdgeMM), ("left_margin_mm", \.leftMarginMM),
+            ("right_margin_mm", \.rightMarginMM), ("side_min_mm", \.sideMinMM), ("side_max_mm", \.sideMaxMM)]
+        for (key, path) in scanKeys { if let value = text(scan, key) { restoredScan[keyPath: path] = value } }
+        project.settings.scanPreparation = restoredScan
         if let name = text(pre, "title"), !name.isEmpty { project.name = name }
         for (key, side) in [("left_ear", EarSide.left), ("right_ear", EarSide.right)] {
             if paths[key] is NSNull {

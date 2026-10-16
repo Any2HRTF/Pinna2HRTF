@@ -19,14 +19,40 @@ def log_default(message: str) -> None:
     print(message, flush=True)
 
 
+def input_paths(config: PipelineConfig, validate: bool = False):
+    if not config.scan_preparation.enabled:
+        return config.paths.left_ear, config.paths.right_ear
+    settings = config.scan_preparation
+    if not settings.prepare_left and not settings.prepare_right:
+        raise ValueError("Select at least one ear to prepare.")
+    if validate:
+        from .ScanPreparation import validate_prepared
+        validate_prepared(config)
+    folder = config.paths.output_dir / "Prepared"
+    return (folder / "Left.stl" if settings.prepare_left else None,
+            folder / "Right.stl" if settings.prepare_right else None)
+
+
+def run_scan_preparation(config, dry_run, logger):
+    settings = config.scan_preparation
+    if settings.scan_path is None or settings.rotation_degrees is None:
+        raise ValueError("Choose a full-head scan and an explicit crop rotation.")
+    logger(f"Preparing full-head scan {settings.scan_path} into {config.paths.output_dir / 'Prepared'}; crop rotation {settings.rotation_degrees} degrees")
+    if not dry_run:
+        from .ScanPreparation import prepare_scan
+        prepare_scan(config, logger)
+
+
 def project_dirs(config: PipelineConfig) -> list[Path]:
-    return [config.paths.output_dir / "Projects" / side for side, path in (("Left", config.paths.left_ear), ("Right", config.paths.right_ear)) if path is not None]
+    return [config.paths.output_dir / "Projects" / side for side, path in zip(("Left", "Right"), input_paths(config)) if path is not None]
 
 
 def run_from_config(config: PipelineConfig, stages: Iterable[str] | None = None, dry_run: bool = False, logger: Logger = log_default) -> None:
     selected = list(stages or ["all"])
     config = config.resolved()
     run_all = "all" in selected
+    if "scan-preparation" in selected or (run_all and config.scan_preparation.enabled):
+        run_scan_preparation(config, dry_run, logger)
     if "inference" in selected or (run_all and config.inference.enabled):
         run_inference(config, dry_run, logger)
     if "preprocessing" in selected or (run_all and config.preprocessing.enabled):
@@ -38,6 +64,8 @@ def run_from_config(config: PipelineConfig, stages: Iterable[str] | None = None,
 
 
 def run_inference(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
+    config = config.model_copy(deep=True)
+    config.paths.left_ear, config.paths.right_ear = input_paths(config, validate=not dry_run)
     logger(f"Running inference in {config.paths.output_dir}")
     if config.paths.left_ear is None and config.paths.right_ear is None:
         logger("No ear meshes were selected for inference.")
@@ -60,17 +88,19 @@ def run_inference(config: PipelineConfig, dry_run: bool, logger: Logger) -> None
         "Intermediates/Prediction Parameters Left", "Intermediates/Prediction Parameters Right",
         "Intermediates/ICP STL Left", "Intermediates/ICP STL Right"
     ])
-    input_paths = [path.resolve() for path in (config.paths.left_ear, config.paths.right_ear) if path is not None]
+    selected_input_paths = [path.resolve() for path in (config.paths.left_ear, config.paths.right_ear) if path is not None]
     for name in legacy_folders:
         legacy_path = config.paths.output_dir / name
-        if legacy_path.is_dir() and not any(legacy_path.resolve() in path.parents for path in input_paths):
+        if legacy_path.is_dir() and not any(legacy_path.resolve() in path.parents for path in selected_input_paths):
             shutil.rmtree(legacy_path)
-        elif legacy_path.is_file() and legacy_path.resolve() not in input_paths:
+        elif legacy_path.is_file() and legacy_path.resolve() not in selected_input_paths:
             legacy_path.unlink()
     args = SimpleNamespace(
         configuration=str(config.inference.model_config_file),
         model_checkpoint=str(config.inference.model_checkpoint),
         data_dir=str(config.paths.output_dir),
+        target_left_file=config.paths.left_ear.name if config.paths.left_ear is not None else None,
+        target_right_file=config.paths.right_ear.name if config.paths.right_ear is not None else None,
         target_left_folder=str(config.paths.left_ear.parent) if config.paths.left_ear is not None else None,
         target_right_folder=str(config.paths.right_ear.parent) if config.paths.right_ear is not None else None,
         prediction_left_folder=config.inference.prediction_left_folder,
@@ -80,6 +110,14 @@ def run_inference(config: PipelineConfig, dry_run: bool, logger: Logger) -> None
         intermediates_folder="Intermediates",
     )
     main(args)
+    if config.scan_preparation.enabled:
+        from .ScanPreparation import record_stage
+        predictions = [predicted_stl(config.paths.output_dir / folder, source.stem)
+                       for source, folder in ((config.paths.left_ear, config.inference.prediction_left_folder),
+                                              (config.paths.right_ear, config.inference.prediction_right_folder)) if source is not None]
+        if any(path is None for path in predictions):
+            raise ValueError("Inference did not produce all selected prepared-ear predictions.")
+        record_stage(config, "inference", predictions)
 
 
 def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
@@ -98,13 +136,20 @@ def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
         preprocessing=config.preprocessing,
         logger=logger,
     )
+    if config.scan_preparation.enabled:
+        from .ScanPreparation import record_stage
+        record_stage(config, "preprocessing", [path / "NumCalc/source_1/NC.inp" for path in project_dirs(config)])
 
 
 def preprocessing_input_paths(config: PipelineConfig, logger: Logger) -> tuple[Path | None, Path | None]:
+    left, right = input_paths(config, validate=True)
+    if config.scan_preparation.enabled and config.inference.use_predictions_for_preprocessing:
+        from .ScanPreparation import validate_stage
+        validate_stage(config, "inference")
     inputs = []
     for side, source, folder_name in [
-        ("left", config.paths.left_ear, config.inference.prediction_left_folder),
-        ("right", config.paths.right_ear, config.inference.prediction_right_folder),
+        ("left", left, config.inference.prediction_left_folder),
+        ("right", right, config.inference.prediction_right_folder),
     ]:
         if source is None:
             inputs.append(None)
@@ -135,6 +180,10 @@ def predicted_stl(folder: Path, preferred_stem: str) -> Path | None:
 
 
 def run_numcalc(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
+    if config.scan_preparation.enabled and not dry_run:
+        input_paths(config, validate=True)
+        from .ScanPreparation import validate_stage
+        validate_stage(config, "preprocessing")
     if config.numcalc.mode == "slurm":
         run_numcalc_slurm(config, dry_run, logger)
     else:
@@ -252,7 +301,7 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, help="Path to a pipeline YAML config file.")
-    parser.add_argument("--stage", action="append", choices=["all", "inference", "preprocessing", "numcalc", "postprocessing"], help="Stage to run. Can be supplied multiple times.")
+    parser.add_argument("--stage", action="append", choices=["all", "scan-preparation", "inference", "preprocessing", "numcalc", "postprocessing"], help="Stage to run. Can be supplied multiple times.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--write-template", type=str, help="Write a default config template and exit.")
     return parser.parse_args()
@@ -330,6 +379,14 @@ def cli() -> None:
     if not args.config:
         raise SystemExit("--config is required unless --write-template is used")
     run_from_config(load_config(args.config), stages=args.stage, dry_run=args.dry_run)
+
+
+def scan_preparation_cli():
+    parser = argparse.ArgumentParser(description="Crop and repair ears from a full-head scan using a project YAML.")
+    parser.add_argument("--config", required=True)
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+    run_scan_preparation(load_config(args.config), args.dry_run, log_default)
 
 
 if __name__ == "__main__":

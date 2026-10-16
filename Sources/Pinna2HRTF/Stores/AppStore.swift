@@ -96,8 +96,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     var selectedProjectHasGeneratedOutputs: Bool {
         guard let selectedProject else { return false }
-        guard (!selectedProject.leftEar.isEmpty || !selectedProject.rightEar.isEmpty) && !selectedProject.saveLocation.isEmpty else { return false }
-        return (selectedProject.settings.inference.usePredictionsForPreprocessing && ArtifactScanner.stageIsComplete(.inference, project: selectedProject)) || ArtifactScanner.stageIsComplete(.preprocessing, project: selectedProject) || ArtifactScanner.stageIsComplete(.numcalc, project: selectedProject) || ArtifactScanner.stageIsComplete(.postprocessing, project: selectedProject)
+        guard (!selectedProject.pipelineLeftEar.isEmpty || !selectedProject.pipelineRightEar.isEmpty) && !selectedProject.saveLocation.isEmpty else { return false }
+        return (selectedProject.scanPreparation.enabled && ArtifactScanner.stageIsComplete(.scanPreparation, project: selectedProject)) || (selectedProject.settings.inference.usePredictionsForPreprocessing && ArtifactScanner.stageIsComplete(.inference, project: selectedProject)) || ArtifactScanner.stageIsComplete(.preprocessing, project: selectedProject) || ArtifactScanner.stageIsComplete(.numcalc, project: selectedProject) || ArtifactScanner.stageIsComplete(.postprocessing, project: selectedProject)
     }
 
     var inferenceResourceURL: URL {
@@ -225,6 +225,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                     }
                     duplicate.leftEar = relocated(duplicate.leftEar)
                     duplicate.rightEar = relocated(duplicate.rightEar)
+                    if var scan = duplicate.settings.scanPreparation {
+                        scan.scanPath = relocated(scan.scanPath)
+                        duplicate.settings.scanPreparation = scan
+                    }
                     if var postprocessing = duplicate.settings.postprocessing,
                        let outputFolder = postprocessing.outputFolder {
                         postprocessing.outputFolder = relocated(outputFolder)
@@ -579,8 +583,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func meshSide(for meshURL: URL, project: ProjectRecord) -> EarSide? {
         let path = meshURL.standardizedFileURL.path
-        if !project.leftEar.isEmpty && path == URL(fileURLWithPath: project.leftEar).standardizedFileURL.path { return .left }
-        if !project.rightEar.isEmpty && path == URL(fileURLWithPath: project.rightEar).standardizedFileURL.path { return .right }
+        if !project.pipelineLeftEar.isEmpty && path == URL(fileURLWithPath: project.pipelineLeftEar).standardizedFileURL.path { return .left }
+        if !project.pipelineRightEar.isEmpty && path == URL(fileURLWithPath: project.pipelineRightEar).standardizedFileURL.path { return .right }
         let output = URL(fileURLWithPath: project.saveLocation).standardizedFileURL
         let leftPrefixes = [
             output.appendingPathComponent("Intermediates/Left").path,
@@ -621,13 +625,13 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func beginMicrophonePlacement(_ side: EarSide) {
         guard let project = selectedProject else { return }
-        let sourcePath = side == .left ? project.leftEar : project.rightEar
+        let sourcePath = side == .left ? project.pipelineLeftEar : project.pipelineRightEar
         guard !sourcePath.isEmpty else {
             microphonePlacementError = "Select a \(side.rawValue) ear mesh before placing its microphone."
             return
         }
         guard let meshURL = ArtifactScanner.preprocessingMesh(for: project, side: side), let identity = ArtifactScanner.meshIdentity(meshURL) else {
-            let inferenceRequired = project.settings.inference.usePredictionsForPreprocessing && !project.leftEar.isEmpty && !project.rightEar.isEmpty
+            let inferenceRequired = project.settings.inference.usePredictionsForPreprocessing && !project.pipelineLeftEar.isEmpty && !project.pipelineRightEar.isEmpty
             microphonePlacementError = inferenceRequired ? "Run Mesh2PPM Inference before placing the \(side.rawValue) microphone." : "The \(side.rawValue) preprocessing mesh could not be opened."
             return
         }
@@ -841,7 +845,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             appendLog("Create or select a project before running.")
             return
         }
-        let stage = Stage.allCases.first { [.failed, .stopped].contains(project.stageOutcomes?[$0.rawValue] ?? .ready) || !ArtifactScanner.stageIsComplete($0, project: project) } ?? .postprocessing
+        let stage = Stage.allCases.filter { $0 != .scanPreparation || project.scanPreparation.enabled }.first { [.failed, .stopped].contains(project.stageOutcomes?[$0.rawValue] ?? .ready) || !ArtifactScanner.stageIsComplete($0, project: project) } ?? .postprocessing
         run(stage: stage)
     }
 
@@ -861,21 +865,27 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func canRunNextStage() -> Bool {
         guard let project = selectedProject, runningProcesses[project.id] == nil else { return false }
-        guard let next = Stage.allCases.first(where: { [.failed, .stopped].contains(project.stageOutcomes?[$0.rawValue] ?? .ready) || !ArtifactScanner.stageIsComplete($0, project: project) }) else { return false }
+        guard let next = Stage.allCases.filter({ $0 != .scanPreparation || project.scanPreparation.enabled }).first(where: { [.failed, .stopped].contains(project.stageOutcomes?[$0.rawValue] ?? .ready) || !ArtifactScanner.stageIsComplete($0, project: project) }) else { return false }
         return canRun(stage: next)
     }
 
     func stageCanRun(_ stage: Stage, project: ProjectRecord) -> Bool { stageUnavailableReason(stage, project: project) == nil }
 
     func stageUnavailableReason(_ stage: Stage, project: ProjectRecord) -> String? {
-        if project.leftEar.isEmpty && project.rightEar.isEmpty { return "Choose at least one ear mesh." }
+        if project.pipelineLeftEar.isEmpty && project.pipelineRightEar.isEmpty { return "Choose at least one ear mesh." }
         if project.saveLocation.isEmpty { return "Choose a save location." }
-        for path in [project.leftEar, project.rightEar] where !path.isEmpty {
+        if project.scanPreparation.enabled && stage != .scanPreparation && (!ArtifactScanner.stageIsComplete(.scanPreparation, project: project) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.scanPreparation.rawValue] ?? .ready)) {
+            return "Run Scan Preparation successfully with the current scan settings first."
+        }
+        let requiredInputs = project.scanPreparation.enabled ? [project.scanPreparation.scanPath] : [project.leftEar, project.rightEar]
+        for path in requiredInputs where !path.isEmpty {
             if !FileManager.default.fileExists(atPath: path) { return "Input mesh is missing: \(URL(fileURLWithPath: path).lastPathComponent)" }
         }
         if let issue = ProjectValidation.issues(for: project).first { return "Fix \(issue.id.split(separator: ".").last?.replacingOccurrences(of: "_", with: " ") ?? "settings"): \(issue.message)" }
         if let conflict = outputLocationConflict(for: project) { return conflict }
         switch stage {
+        case .scanPreparation:
+            if !project.scanPreparation.enabled { return "Enable full-head scan preparation first." }
         case .inference:
             if !project.settings.inference.usePredictionsForPreprocessing { return "Use Mesh2PPM is turned off." }
             if !FileManager.default.fileExists(atPath: project.settings.inference.modelConfig) || !FileManager.default.fileExists(atPath: project.settings.inference.modelCheckpoint) { return "The selected model or checkpoint is missing." }
@@ -916,13 +926,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func preprocessingSignature(for project: ProjectRecord) -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let inference = (try? encoder.encode(project.settings.inference)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        let preprocessing = (try? encoder.encode(project.settings.preprocessing)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        let leftIdentity = project.leftEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: project.leftEar)) ?? "")
-        let rightIdentity = project.rightEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: project.rightEar)) ?? "")
-        return [project.leftEar, project.rightEar, project.inputHandling.rawValue, leftIdentity, rightIdentity, inference, preprocessing].joined(separator: "\n")
+        ArtifactScanner.preprocessingSignature(for: project)
     }
 
     func recordInitialPreprocessingSignature(for project: ProjectRecord) {
@@ -965,7 +969,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             appendLog("Finish microphone placement first.")
             return
         }
-        guard (!project.leftEar.isEmpty || !project.rightEar.isEmpty), !project.saveLocation.isEmpty else {
+        guard (!project.pipelineLeftEar.isEmpty || !project.pipelineRightEar.isEmpty), !project.saveLocation.isEmpty else {
             appendLog("Select an ear mesh and save location first.")
             return
         }
@@ -1019,7 +1023,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 throw GeneratedOutputManifest.Failure.invalidRoot
             }
         }
-        let inputs = projects.flatMap { [$0.leftEar, $0.rightEar, $0.settings.preprocessing.evaluationGrid ?? ""] }
+        let inputs = projects.flatMap { [$0.leftEar, $0.rightEar, $0.scanPreparation.scanPath, $0.settings.preprocessing.evaluationGrid ?? ""] }
             .filter { !$0.isEmpty && $0 != "Default" }.sorted()
         let key = project.saveLocation + "\n" + inputs.joined(separator: "\n")
         if let existing = outputStores[key] { return existing }
@@ -1072,7 +1076,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                         outcome = .done
                     } catch { validationError = error.localizedDescription }
                 }
-                if stage == .inference, outcome == .done { store.clearStaleMicrophonePositions(for: project.id) }
+                if (stage == .scanPreparation || stage == .inference), outcome == .done { store.clearStaleMicrophonePositions(for: project.id) }
                 if stage == .preprocessing, outcome == .done { store.recordPreprocessingSignature(for: project) }
                 do {
                     try await Task.detached(priority: .userInitiated) { try outputs.complete() }.value

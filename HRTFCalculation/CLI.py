@@ -3,6 +3,7 @@ import sys
 
 
 STEPS = {
+    "scan-preparation": ("HRTFCalculation.RunConfig", "scan_preparation_cli"),
     "inference": ("HRTFCalculation.Inference.inference_stl", "cli"),
     "preprocessing": ("HRTFCalculation.Preprocessing", "preprocess"),
     "numcalc": ("HRTFCalculation.RunConfig", "numcalc_cli"),
@@ -15,13 +16,13 @@ STEPS = {
 def cli() -> None:
     arguments = sys.argv[1:]
     if not arguments or arguments[0] in {"-h", "--help"}:
-        print("usage: Pinna2HRTF {inference|preprocessing|numcalc|sofa|postprocessing|run-config} [options]")
+        print("usage: Pinna2HRTF {scan-preparation|inference|preprocessing|numcalc|sofa|postprocessing|run-config} [options]")
         return
     step = arguments[0]
     if step not in STEPS:
         raise SystemExit(f"Unknown Pinna2HRTF step: {step}")
     step_arguments = arguments[1:]
-    if step in {"inference", "preprocessing", "numcalc", "sofa", "postprocessing"} and "--config" in step_arguments:
+    if step in {"scan-preparation", "inference", "preprocessing", "numcalc", "sofa", "postprocessing"} and "--config" in step_arguments:
         config_index = step_arguments.index("--config")
         if config_index + 1 >= len(step_arguments):
             raise SystemExit("--config requires a path")

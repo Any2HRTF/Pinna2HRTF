@@ -6,6 +6,7 @@ import Darwin
 // owned files are deleted; directories are removed only when empty.
 final class GeneratedOutputManifest {
     enum OutputStage: String, Codable, CaseIterable {
+        case scanPreparation = "Scan-Preparation"
         case inference = "Inference", preprocessing = "Preprocessing"
         case numcalc = "Numcalc", postprocessing = "Postprocessing"
         var order: Int { Self.allCases.firstIndex(of: self)! }
@@ -137,6 +138,7 @@ final class GeneratedOutputManifest {
                 guard let owned = doc.Files[relative], owned.Size == before.Size, owned.ModifiedUtcTicks == before.ModifiedUtcTicks else { continue }
             }
             guard let stage = Self.classify(relative), let url = safePath(relative) else { continue }
+            if pending.Stage == .scanPreparation && stage != .scanPreparation { continue }
             if pending.Stage == .inference && stage != .inference { continue }
             if pending.Stage == .postprocessing && stage != .postprocessing { continue }
             var owned = try fingerprint(url); owned.Stage = stage
@@ -183,6 +185,9 @@ final class GeneratedOutputManifest {
         path.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
     }
     static func classify(_ path: String) -> OutputStage? {
+        if match(path, #"^Prepared/inference\.json$"#) { return .inference }
+        if match(path, #"^Prepared/preprocessing\.json$"#) { return .preprocessing }
+        if match(path, #"^Prepared/(Left\.stl|Right\.stl|mesh_preparation\.json)$"#) { return .scanPreparation }
         if match(path, #"^\.pinna2hrtf_native_run\.yaml$"#) || match(path, #"^(Intermediates/)?Results Inference\.csv$"#) ||
             match(path, #"^Intermediates/(Left|Right)/(ICP_[^/]+\.stl|Prediction_[^/]+\.stl|Prediction_Parameters_[^/]+\.csv)$"#) ||
             match(path, #"^(Intermediates/)?(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)/[^/]+\.(stl|csv)$"#) { return .inference }
@@ -196,6 +201,7 @@ final class GeneratedOutputManifest {
         return nil
     }
     private static func classifyEmptyDirectory(_ path: String) -> OutputStage? {
+        if match(path, #"^Prepared$"#) { return .scanPreparation }
         if match(path, #"^Intermediates$"#) || match(path, #"^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)$"#) { return .inference }
         if match(path, #"^Projects/(Left|Right)/NumCalc/source_[0-9]+/be\.out(/be\.[0-9]+)?$"#) { return .numcalc }
         if match(path, #"^Intermediates/(Left|Right)$"#) || match(path, #"^Projects$"#) ||
@@ -205,6 +211,7 @@ final class GeneratedOutputManifest {
     }
     private static func directoryCanBeCreated(_ path: String, by stage: OutputStage) -> Bool {
         switch stage {
+        case .scanPreparation: return match(path, #"^Prepared$"#)
         case .inference: return match(path, #"^Intermediates(/(Left|Right))?$"#) || match(path, #"^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)$"#)
         case .preprocessing: return match(path, #"^Intermediates(/(Left|Right))?$"#) || match(path, #"^Projects(/(Left|Right)(/.*)?)?$"#)
         case .numcalc: return match(path, #"^Projects/(Left|Right)/NumCalc/source_[0-9]+/be\.out(/be\.[0-9]+)?$"#)
@@ -214,7 +221,7 @@ final class GeneratedOutputManifest {
     private func safePath(_ relative: String) -> URL? {
         let parts = relative.split(separator: "/", omittingEmptySubsequences: false)
         guard !relative.contains(":"), !relative.contains("\\"), !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." || $0.hasSuffix(" ") || $0.hasSuffix(".") }),
-            Self.match(relative, #"^(Intermediates|Projects|HRTF)(/|$)|^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)(/|$)|^Results Inference\.csv$|^\.pinna2hrtf(-preprocessing-signature|_native_run\.yaml)$"#) else { return nil }
+            Self.match(relative, #"^(Prepared|Intermediates|Projects|HRTF)(/|$)|^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)(/|$)|^Results Inference\.csv$|^\.pinna2hrtf(-preprocessing-signature|_native_run\.yaml)$"#) else { return nil }
         let url = root.appendingPathComponent(relative)
         let candidate = Self.canonicalPath(url.path).lowercased()
         guard url.path.hasPrefix(root.path + "/"), !inputs.contains(where: { candidate == $0 || candidate.hasPrefix($0 + "/") }), !hasLinkedAncestor(url) else { return nil }

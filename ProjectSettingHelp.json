@@ -186,5 +186,53 @@
     "title": "Level offset",
     "description": "The broadband gain adjustment in decibels applied during postprocessing when Normalize HRTFs is enabled. The default is -30 dB.",
     "publications": []
+  },
+  {
+    "id": "scan.enabled",
+    "title": "Prepare ears from full-head scan",
+    "description": "Prepare left and/or right ears using the EvaPPM crop, remeshing, Screened Poisson, and attachment-boundary restoration workflow before optional Mesh2PPM inference.",
+    "publications": []
+  },
+  {
+    "id": "scan.path",
+    "title": "Full-head scan",
+    "description": "An edited, aligned full-head surface in millimeters. Original scan data are preserved. Prepared ears are saved under Prepared in the project folder.",
+    "publications": []
+  },
+  {
+    "id": "scan.rotation",
+    "title": "Crop rotation",
+    "description": "Explicit temporary rotation around Z, in degrees, for the crop coordinates. EvaPPM uses 90 or 270 depending on scan alignment. This is scan-specific; it is never guessed from a filename. Outputs restore the original orientation.",
+    "publications": []
+  },
+  {
+    "id": "scan.target_edge",
+    "title": "Target edge",
+    "description": "Isotropic remeshing edge length in millimeters, default 0.75. Screened Poisson depth 7 and one worker follow the EvaPPM workflow.",
+    "publications": []
+  },
+  {
+    "id": "scan.left_margin",
+    "title": "Left crop margin",
+    "description": "Margin around the left ear crop in millimeters, default 20.",
+    "publications": []
+  },
+  {
+    "id": "scan.right_margin",
+    "title": "Right crop margin",
+    "description": "Margin around the right ear crop in millimeters, default 10.",
+    "publications": []
+  },
+  {
+    "id": "scan.side_min",
+    "title": "Inner crop limit",
+    "description": "Inner lateral crop distance in millimeters before the margin is applied, default 30.",
+    "publications": []
+  },
+  {
+    "id": "scan.side_max",
+    "title": "Outer crop limit",
+    "description": "Outer lateral crop distance in millimeters before the margin is applied, default 110.",
+    "publications": []
   }
 ]

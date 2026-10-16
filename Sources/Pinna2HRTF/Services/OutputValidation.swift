@@ -5,9 +5,18 @@ enum OutputValidation {
         guard ArtifactScanner.stageIsComplete(stage, project: project) else {
             throw ProjectValidation.Failure(message: "The task exited successfully, but its expected output files are missing, empty, or incomplete.")
         }
+        if stage == .scanPreparation {
+            let config = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Project Settings.yaml")
+            _ = try ProjectConfigDocument.runPython("""
+            import sys
+            from HRTFCalculation.Config import load_config
+            from HRTFCalculation.ScanPreparation import validate_prepared
+            validate_prepared(load_config(sys.argv[1]))
+            """, input: Data(), arguments: [config.path])
+        }
         if stage == .numcalc {
             let root = URL(fileURLWithPath: project.saveLocation)
-            for (side, input) in [("Left", project.leftEar), ("Right", project.rightEar)] where !input.isEmpty {
+            for (side, input) in [("Left", project.pipelineLeftEar), ("Right", project.pipelineRightEar)] where !input.isEmpty {
                 guard ArtifactScanner.numcalcIsComplete(root.appendingPathComponent("Projects/\(side)")) else {
                     throw ProjectValidation.Failure(message: "NumCalc exited, but \(side.lowercased())-ear frequency results are incomplete. Previous SOFA files do not validate the new run.")
                 }
@@ -16,7 +25,7 @@ enum OutputValidation {
         guard stage == .postprocessing else { return }
         let folder = ArtifactScanner.postprocessingDirectory(for: project)
         let root = URL(fileURLWithPath: project.saveLocation)
-        let ears = [("Left", project.leftEar), ("Right", project.rightEar)].filter { !$0.1.isEmpty }
+        let ears = [("Left", project.pipelineLeftEar), ("Right", project.pipelineRightEar)].filter { !$0.1.isEmpty }
         let sourceNames = try ears.map { side, _ -> Set<String> in
             let source = root.appendingPathComponent("Projects/\(side)/Output2HRTF")
             return Set(try FileManager.default.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)

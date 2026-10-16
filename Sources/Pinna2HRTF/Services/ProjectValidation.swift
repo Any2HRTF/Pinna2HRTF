@@ -42,6 +42,21 @@ enum ProjectValidation {
         if let min = Double(pre.meshMinEdgeLength), let max = Double(pre.meshMaxEdgeLength), max < min {
             errors.append(("mesh_grading.max_edge_length", "Max edge length must be at least the min edge length."))
         }
+        let scan = project.scanPreparation
+        if scan.enabled {
+            if scan.scanPath.isEmpty { errors.append(("scan.path", "Choose a full-head scan.")) }
+            if !scan.prepareLeft && !scan.prepareRight { errors.append(("scan.sides", "Select at least one ear.")) }
+            let fields = [("rotation", scan.rotationDegrees, -Double.infinity), ("target_edge", scan.targetEdgeMM, 0.0),
+                          ("left_margin", scan.leftMarginMM, -0.001), ("right_margin", scan.rightMarginMM, -0.001),
+                          ("side_min", scan.sideMinMM, -0.001), ("side_max", scan.sideMaxMM, 0.0)]
+            for (key, value, minimum) in fields {
+                if let number = Double(value), number.isFinite, number > minimum { continue }
+                errors.append(("scan.\(key)", "Enter a valid finite \(key.replacingOccurrences(of: "_", with: " ")) value."))
+            }
+            if let minimum = Double(scan.sideMinMM), let maximum = Double(scan.sideMaxMM), minimum >= maximum {
+                errors.append(("scan.side_max", "Outer crop limit must exceed inner crop limit."))
+            }
+        }
         return errors
     }
 

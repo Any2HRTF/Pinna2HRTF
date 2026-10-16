@@ -38,7 +38,7 @@ struct ContentView: View {
                     }
                     .labelStyle(.titleAndIcon)
                     .help("Place \(side.title) Microphone")
-                    .disabled(store.isPlacingMicrophone || store.selectedProject.map { side == .left ? $0.leftEar.isEmpty : $0.rightEar.isEmpty } ?? true)
+                    .disabled(store.isPlacingMicrophone || store.selectedProject.map { side == .left ? $0.pipelineLeftEar.isEmpty : $0.pipelineRightEar.isEmpty } ?? true)
                 }
             }
             if #available(macOS 26.0, *) {
@@ -123,7 +123,7 @@ struct ContentView: View {
             selectedArtifactURL: store.selectedMesh,
             canPreview: selectedProject != nil && !store.isPlacingMicrophone,
             canPlaceMicrophone: { side in
-                !store.isPlacingMicrophone && (selectedProject.map { side == .left ? !$0.leftEar.isEmpty : !$0.rightEar.isEmpty } ?? false)
+                !store.isPlacingMicrophone && (selectedProject.map { side == .left ? !$0.pipelineLeftEar.isEmpty : !$0.pipelineRightEar.isEmpty } ?? false)
             },
             isLogExpanded: logExpanded,
             isInspectorPresented: inspectorPresented,

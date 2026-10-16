@@ -32,6 +32,15 @@ struct ProjectInspectorView: View {
                 requiredPanel
             }
             Section {
+                SettingsDisclosure("Scan Preparation", systemImage: "bandage") {
+                    LabeledTextField("Target edge (mm)", helpID: "scan.target_edge", text: scanTextBinding(\.targetEdgeMM))
+                    LabeledTextField("Left crop margin (mm)", helpID: "scan.left_margin", text: scanTextBinding(\.leftMarginMM))
+                    LabeledTextField("Right crop margin (mm)", helpID: "scan.right_margin", text: scanTextBinding(\.rightMarginMM))
+                    LabeledTextField("Inner crop limit (mm)", helpID: "scan.side_min", text: scanTextBinding(\.sideMinMM))
+                    LabeledTextField("Outer crop limit (mm)", helpID: "scan.side_max", text: scanTextBinding(\.sideMaxMM))
+                    Text("Crops ears, remeshes, closes defects with Screened Poisson, and preserves one attachment boundary per ear. Use an aligned scan in millimeters; review the prepared ears in Preview.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 SettingsDisclosure("Mesh2PPM", systemImage: "wand.and.stars") {
                     ModelPicker(selection: modelNameBinding, options: store.modelOptions, helpID: "inference.model")
                 }
@@ -111,16 +120,46 @@ struct ProjectInspectorView: View {
     var requiredPanel: some View {
         VStack(alignment: .leading, spacing: 9) {
             LabeledTextField("Project name", helpID: "project.name", text: projectStringBinding(\.name, refresh: false))
+            SettingToggle(title: "Prepare ears from full-head scan", helpID: "scan.enabled", isOn: scanBoolBinding(\.enabled))
+            if store.selectedProject?.scanPreparation.enabled == true {
+                PathField("Full-head scan", helpID: "scan.path", text: scanTextBinding(\.scanPath), mode: .file)
+                LabeledTextField("Crop rotation (degrees)", helpID: "scan.rotation", text: scanTextBinding(\.rotationDegrees), validationError: validationMessage("scan.rotation"))
+                HStack {
+                    Toggle("Prepare left", isOn: scanBoolBinding(\.prepareLeft))
+                    Toggle("Prepare right", isOn: scanBoolBinding(\.prepareRight))
+                }
+            } else {
             PathField("Left ear (optional)", helpID: "project.left_ear", text: projectStringBinding(\.leftEar), mode: .file)
             PathField("Right ear (optional)", helpID: "project.right_ear", text: projectStringBinding(\.rightEar), mode: .file)
             Text("Choose at least one ear mesh.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            }
             PathField("Save location", helpID: "project.save_location", text: projectStringBinding(\.saveLocation), mode: .directory, showsOpenButton: true)
             SettingToggle(title: "Use Mesh2PPM", helpID: "project.use_bezierppm", isOn: bezierPPMBinding)
                 .padding(.top, 6)
                 .disabled(store.selectedProjectIsRunning)
         }
+    }
+
+    func scanTextBinding(_ keyPath: WritableKeyPath<ScanPreparationSettings, String>) -> Binding<String> {
+        Binding(get: { store.selectedProject?.scanPreparation[keyPath: keyPath] ?? "" }, set: { value in
+            store.updateSelectedProject { project in
+                var scan = project.scanPreparation
+                scan[keyPath: keyPath] = value
+                project.settings.scanPreparation = scan
+            }
+        })
+    }
+
+    func scanBoolBinding(_ keyPath: WritableKeyPath<ScanPreparationSettings, Bool>) -> Binding<Bool> {
+        Binding(get: { store.selectedProject?.scanPreparation[keyPath: keyPath] ?? false }, set: { value in
+            store.updateSelectedProject { project in
+                var scan = project.scanPreparation
+                scan[keyPath: keyPath] = value
+                project.settings.scanPreparation = scan
+            }
+        })
     }
 
     var bezierPPMBinding: Binding<Bool> {

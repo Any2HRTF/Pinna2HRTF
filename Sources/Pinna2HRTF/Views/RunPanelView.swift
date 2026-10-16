@@ -32,7 +32,7 @@ struct RunPanelView: View {
                 }
             }
             VStack(spacing: 6) {
-                ForEach(Stage.allCases) { stage in
+                ForEach(Stage.allCases.filter { $0 != .scanPreparation || store.selectedProject?.scanPreparation.enabled == true }) { stage in
                     StageRunButton(stage: stage, state: store.stageStates[stage] ?? .ready, available: store.canRun(stage: stage), unavailableReason: store.runUnavailableReason(stage: stage), previousResults: store.selectedProject.map { ArtifactScanner.stageIsComplete(stage, project: $0) } ?? false) {
                         store.run(stage: stage)
                     }

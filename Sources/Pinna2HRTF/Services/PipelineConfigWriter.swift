@@ -9,7 +9,12 @@ enum PipelineConfigWriter {
             ArtifactScanner.validManualMicrophonePosition(for: project, side: side).map { (side, $0) }
         })
         var prepared = project
-        if project.inputHandling == .copy {
+        if project.inputHandling == .copy && project.scanPreparation.enabled {
+            var scan = project.scanPreparation
+            scan.scanPath = try copyInput(scan.scanPath, to: output.appendingPathComponent("Input/Scan"))
+            prepared.settings.scanPreparation = scan
+        }
+        if project.inputHandling == .copy && !project.scanPreparation.enabled {
             if !project.leftEar.isEmpty {
                 prepared.leftEar = try copyInput(project.leftEar, to: output.appendingPathComponent("Input/Left"))
             }
@@ -40,6 +45,7 @@ enum PipelineConfigWriter {
 
     static func yaml(project: ProjectRecord, environment: EnvironmentConfig, manualPositions: [EarSide: ManualMicrophonePosition]? = nil) -> String {
         let output = URL(fileURLWithPath: project.saveLocation)
+        let scan = project.scanPreparation
         let inference = project.settings.inference
         let preprocessing = project.settings.preprocessing
         let numcalc = project.settings.numcalc
@@ -70,8 +76,19 @@ enum PipelineConfigWriter {
           numcalc_executable: \(yamlString(environment.numcalcExecutable))
           mesh_grading_executable: \(yamlString(environment.meshGradingExecutable))
           evaluation_grid: \(yamlString(evaluationGrid))
+        scan_preparation:
+          enabled: \(scan.enabled ? "true" : "false")
+          scan_path: \(scan.scanPath.isEmpty ? "null" : yamlString(scan.scanPath))
+          rotation_degrees: \(yamlNumber(scan.rotationDegrees) ?? "null")
+          prepare_left: \(scan.prepareLeft ? "true" : "false")
+          prepare_right: \(scan.prepareRight ? "true" : "false")
+          target_edge_mm: \(yamlNumber(scan.targetEdgeMM) ?? "0.75")
+          left_margin_mm: \(yamlNumber(scan.leftMarginMM) ?? "20")
+          right_margin_mm: \(yamlNumber(scan.rightMarginMM) ?? "10")
+          side_min_mm: \(yamlNumber(scan.sideMinMM) ?? "30")
+          side_max_mm: \(yamlNumber(scan.sideMaxMM) ?? "110")
         inference:
-          enabled: true
+          enabled: \(inference.usePredictionsForPreprocessing ? "true" : "false")
           model_config_file: \(yamlString(inference.modelConfig))
           model_checkpoint: \(yamlString(inference.modelCheckpoint))
           target_left_folder: \(yamlString(inference.targetLeftFolder))
@@ -145,7 +162,7 @@ enum PipelineConfigWriter {
         if trimmed.isEmpty {
             return nil
         }
-        guard Double(trimmed) != nil else {
+        guard let number = Double(trimmed), number.isFinite else {
             return nil
         }
         return trimmed

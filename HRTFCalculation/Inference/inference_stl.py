@@ -357,6 +357,9 @@ def main(args):
     for direction, data_dir in directions:
 
         for stl_file in sorted(os.listdir(data_dir)):
+            selected_file = getattr(args, f"target_{direction.lower()}_file", None)
+            if selected_file is not None and stl_file != selected_file:
+                continue
             if stl_file[-4:] != ".stl":
                 continue
             print(f"{data_dir}/{stl_file}")

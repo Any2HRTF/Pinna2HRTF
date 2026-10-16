@@ -1,6 +1,7 @@
 import Foundation
 
 enum Stage: String, CaseIterable, Identifiable, Codable {
+    case scanPreparation = "scan-preparation"
     case inference
     case preprocessing
     case numcalc
@@ -10,6 +11,7 @@ enum Stage: String, CaseIterable, Identifiable, Codable {
 
     var title: String {
         switch self {
+        case .scanPreparation: "Scan Preparation"
         case .inference: "Mesh2PPM Inference"
         case .preprocessing: "Preprocessing"
         case .numcalc: "NumCalc"
@@ -19,6 +21,7 @@ enum Stage: String, CaseIterable, Identifiable, Codable {
 
     var systemImage: String {
         switch self {
+        case .scanPreparation: "bandage"
         case .inference: "wand.and.stars"
         case .preprocessing: "scissors"
         case .numcalc: "cpu"
@@ -93,6 +96,19 @@ struct EnvironmentConfig: Codable, Equatable {
     var numcalcExecutable: String
     var meshGradingExecutable: String
     var externalDir: String
+}
+
+struct ScanPreparationSettings: Codable, Equatable {
+    var enabled = false
+    var scanPath = ""
+    var rotationDegrees = ""
+    var prepareLeft = true
+    var prepareRight = true
+    var targetEdgeMM = "0.75"
+    var leftMarginMM = "20"
+    var rightMarginMM = "10"
+    var sideMinMM = "30"
+    var sideMaxMM = "110"
 }
 
 struct InferenceSettings: Codable, Equatable {
@@ -174,6 +190,7 @@ struct PostprocessingSettings: Codable, Equatable {
 
 struct ProjectSettings: Codable, Equatable {
     var inference: InferenceSettings
+    var scanPreparation: ScanPreparationSettings?
     var preprocessing = PreprocessingSettings()
     var numcalc = NumCalcSettings()
     var postprocessing: PostprocessingSettings? = PostprocessingSettings()
@@ -190,6 +207,16 @@ struct ProjectRecord: Identifiable, Codable, Equatable {
     var preservedConfigJSON: String?
     var stageOutcomes: [String: StageState]?
     var settings: ProjectSettings
+}
+
+extension ProjectRecord {
+    var scanPreparation: ScanPreparationSettings { settings.scanPreparation ?? ScanPreparationSettings() }
+    var pipelineLeftEar: String {
+        scanPreparation.enabled ? (scanPreparation.prepareLeft ? URL(fileURLWithPath: saveLocation).appendingPathComponent("Prepared/Left.stl").path : "") : leftEar
+    }
+    var pipelineRightEar: String {
+        scanPreparation.enabled ? (scanPreparation.prepareRight ? URL(fileURLWithPath: saveLocation).appendingPathComponent("Prepared/Right.stl").path : "") : rightEar
+    }
 }
 
 struct ProjectFolder: Identifiable, Codable, Equatable {

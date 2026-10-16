@@ -5,15 +5,18 @@ enum ArtifactScanner {
         let output = URL(fileURLWithPath: project.saveLocation)
         let settings = project.settings.inference
         var next: [Artifact] = []
-        if !project.leftEar.isEmpty {
-            next.append(Artifact(title: "Input left ear", url: URL(fileURLWithPath: project.leftEar)))
+        if project.scanPreparation.enabled && !project.scanPreparation.scanPath.isEmpty {
+            next.append(Artifact(title: "Full-head scan", url: URL(fileURLWithPath: project.scanPreparation.scanPath)))
+        }
+        if !project.pipelineLeftEar.isEmpty {
+            next.append(Artifact(title: "Input left ear", url: URL(fileURLWithPath: project.pipelineLeftEar)))
             next.append(Artifact(title: "Left simulation mesh", url: output.appendingPathComponent("Intermediates/Left/graded_head.ply")))
         }
-        if !project.rightEar.isEmpty {
-            next.append(Artifact(title: "Input right ear", url: URL(fileURLWithPath: project.rightEar)))
+        if !project.pipelineRightEar.isEmpty {
+            next.append(Artifact(title: "Input right ear", url: URL(fileURLWithPath: project.pipelineRightEar)))
             next.append(Artifact(title: "Right simulation mesh", url: output.appendingPathComponent("Intermediates/Right/graded_head.ply")))
         }
-        for pair in [("Predicted left ear", output.appendingPathComponent(settings.predictionLeftFolder), project.leftEar), ("Predicted right ear", output.appendingPathComponent(settings.predictionRightFolder), project.rightEar)] where !pair.2.isEmpty {
+        for pair in [("Predicted left ear", output.appendingPathComponent(settings.predictionLeftFolder), project.pipelineLeftEar), ("Predicted right ear", output.appendingPathComponent(settings.predictionRightFolder), project.pipelineRightEar)] where !pair.2.isEmpty {
             next.append(contentsOf: predictionArtifacts(title: pair.0, folder: pair.1))
         }
         let hrtfFolder = postprocessingDirectory(for: project)
@@ -36,7 +39,7 @@ enum ArtifactScanner {
     }
 
     static func preprocessingMesh(for project: ProjectRecord, side: EarSide) -> URL? {
-        let sourcePath = side == .left ? project.leftEar : project.rightEar
+        let sourcePath = side == .left ? project.pipelineLeftEar : project.pipelineRightEar
         guard !sourcePath.isEmpty else { return nil }
         let source = URL(fileURLWithPath: sourcePath)
         guard project.settings.inference.usePredictionsForPreprocessing else {
@@ -74,12 +77,13 @@ enum ArtifactScanner {
             if runningStage == stage {
                 return (stage, .running)
             }
+            if stage == .scanPreparation && !project.scanPreparation.enabled { return (stage, .skipped) }
             let complete = stageIsComplete(stage, project: project)
             if failedStages.contains(stage) || project.stageOutcomes?[stage.rawValue] == .failed {
                 return (stage, .failed)
             }
             if project.stageOutcomes?[stage.rawValue] == .stopped { return (stage, .stopped) }
-            if stage == .inference, !project.settings.inference.usePredictionsForPreprocessing || (project.leftEar.isEmpty && project.rightEar.isEmpty) {
+            if stage == .inference, !project.settings.inference.usePredictionsForPreprocessing || (project.pipelineLeftEar.isEmpty && project.pipelineRightEar.isEmpty) {
                 return (stage, .skipped)
             }
             return (stage, complete ? .done : .ready)
@@ -89,7 +93,7 @@ enum ArtifactScanner {
     static func summary(for project: ProjectRecord) -> String {
         if project.stageOutcomes?.values.contains(.failed) == true { return "Latest run failed · previous results may remain" }
         if project.stageOutcomes?.values.contains(.stopped) == true { return "Task stopped · previous results may remain" }
-        if project.leftEar.isEmpty && project.rightEar.isEmpty { return "Not configured" }
+        if project.pipelineLeftEar.isEmpty && project.pipelineRightEar.isEmpty { return "Not configured" }
         if stageIsComplete(.postprocessing, project: project) { return "Postprocessed" }
         if stageIsComplete(.numcalc, project: project) { return "Solved" }
         if stageIsComplete(.preprocessing, project: project) { return "Projects ready" }
@@ -99,7 +103,7 @@ enum ArtifactScanner {
 
     static func numcalcStatus(for project: ProjectRecord) -> String {
         let output = URL(fileURLWithPath: project.saveLocation)
-        let sides = [("Left", project.leftEar), ("Right", project.rightEar)].compactMap { side, ear in
+        let sides = [("Left", project.pipelineLeftEar), ("Right", project.pipelineRightEar)].compactMap { side, ear in
             ear.isEmpty ? nil : "\(side) \(numcalcCompleted(output.appendingPathComponent("Projects/\(side)")))/\(numcalcTotal(output.appendingPathComponent("Projects/\(side)")))"
         }
         return sides.isEmpty ? "NumCalc: no ear selected" : "NumCalc: " + sides.joined(separator: " · ")
@@ -108,26 +112,92 @@ enum ArtifactScanner {
     static func stageIsComplete(_ stage: Stage, project: ProjectRecord) -> Bool {
         let output = URL(fileURLWithPath: project.saveLocation)
         let settings = project.settings.inference
+        if project.scanPreparation.enabled && stage != .scanPreparation {
+            guard scanPreparationIsCurrent(project) else { return false }
+            if stage == .inference && settings.usePredictionsForPreprocessing && !scanReceiptIsCurrent(project, stage: "inference") { return false }
+            if [.preprocessing, .numcalc, .postprocessing].contains(stage) && !scanReceiptIsCurrent(project, stage: "preprocessing") { return false }
+        }
         switch stage {
+        case .scanPreparation:
+            if !project.scanPreparation.enabled { return true }
+            return scanPreparationIsCurrent(project)
         case .inference:
             if !settings.usePredictionsForPreprocessing { return true }
-            if project.leftEar.isEmpty && project.rightEar.isEmpty { return false }
-            let leftDone = project.leftEar.isEmpty || containsMesh(output.appendingPathComponent(settings.predictionLeftFolder))
-            let rightDone = project.rightEar.isEmpty || containsMesh(output.appendingPathComponent(settings.predictionRightFolder))
+            if project.pipelineLeftEar.isEmpty && project.pipelineRightEar.isEmpty { return false }
+            let leftDone = project.pipelineLeftEar.isEmpty || containsMesh(output.appendingPathComponent(settings.predictionLeftFolder))
+            let rightDone = project.pipelineRightEar.isEmpty || containsMesh(output.appendingPathComponent(settings.predictionRightFolder))
             return leftDone && rightDone
         case .preprocessing:
-            if project.leftEar.isEmpty && project.rightEar.isEmpty { return false }
-            let leftDone = project.leftEar.isEmpty || (fileHasData(output.appendingPathComponent("Projects/Left/parameters.json")) && fileHasData(output.appendingPathComponent("Intermediates/Left/graded_head.ply")))
-            let rightDone = project.rightEar.isEmpty || (fileHasData(output.appendingPathComponent("Projects/Right/parameters.json")) && fileHasData(output.appendingPathComponent("Intermediates/Right/graded_head.ply")))
+            if project.pipelineLeftEar.isEmpty && project.pipelineRightEar.isEmpty { return false }
+            let leftDone = project.pipelineLeftEar.isEmpty || (fileHasData(output.appendingPathComponent("Projects/Left/parameters.json")) && fileHasData(output.appendingPathComponent("Intermediates/Left/graded_head.ply")))
+            let rightDone = project.pipelineRightEar.isEmpty || (fileHasData(output.appendingPathComponent("Projects/Right/parameters.json")) && fileHasData(output.appendingPathComponent("Intermediates/Right/graded_head.ply")))
             return leftDone && rightDone
         case .numcalc:
-            if project.leftEar.isEmpty && project.rightEar.isEmpty { return false }
-            let leftDone = project.leftEar.isEmpty || numcalcIsComplete(output.appendingPathComponent("Projects/Left")) || containsSOFA(output.appendingPathComponent("Projects/Left/Output2HRTF"))
-            let rightDone = project.rightEar.isEmpty || numcalcIsComplete(output.appendingPathComponent("Projects/Right")) || containsSOFA(output.appendingPathComponent("Projects/Right/Output2HRTF"))
+            if project.pipelineLeftEar.isEmpty && project.pipelineRightEar.isEmpty { return false }
+            let leftDone = project.pipelineLeftEar.isEmpty || numcalcIsComplete(output.appendingPathComponent("Projects/Left")) || containsSOFA(output.appendingPathComponent("Projects/Left/Output2HRTF"))
+            let rightDone = project.pipelineRightEar.isEmpty || numcalcIsComplete(output.appendingPathComponent("Projects/Right")) || containsSOFA(output.appendingPathComponent("Projects/Right/Output2HRTF"))
             return leftDone && rightDone
         case .postprocessing:
             return containsSOFA(postprocessingDirectory(for: project))
         }
+    }
+
+    static func preprocessingSignature(for project: ProjectRecord) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let inference = (try? encoder.encode(project.settings.inference)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let preprocessing = (try? encoder.encode(project.settings.preprocessing)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let leftIdentity = project.pipelineLeftEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: project.pipelineLeftEar)) ?? "")
+        let rightIdentity = project.pipelineRightEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: project.pipelineRightEar)) ?? "")
+        let original = [project.pipelineLeftEar, project.pipelineRightEar, project.inputHandling.rawValue, leftIdentity, rightIdentity, inference, preprocessing].joined(separator: "\n")
+        guard project.scanPreparation.enabled else { return original }
+        let scan = (try? encoder.encode(project.scanPreparation)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        return original + "\n" + scan
+    }
+
+    static func scanPreparationIsCurrent(_ project: ProjectRecord) -> Bool {
+        let scan = project.scanPreparation
+        let root = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Prepared")
+        guard let data = try? Data(contentsOf: root.appendingPathComponent("mesh_preparation.json")),
+              let report = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              report["status"] as? String == "completed",
+              let signature = report["signature"] as? [String: Any],
+              let settings = signature["settings"] as? [String: Any],
+              let ears = report["ears"] as? [String: [String: Any]],
+              settings["prepare_left"] as? Bool == scan.prepareLeft,
+              settings["prepare_right"] as? Bool == scan.prepareRight else { return false }
+        let numbers = [("rotation_degrees", scan.rotationDegrees), ("target_edge_mm", scan.targetEdgeMM),
+                       ("left_margin_mm", scan.leftMarginMM), ("right_margin_mm", scan.rightMarginMM),
+                       ("side_min_mm", scan.sideMinMM), ("side_max_mm", scan.sideMaxMM)]
+        guard numbers.allSatisfy({ (settings[$0.0] as? NSNumber)?.doubleValue == Double($0.1) }) else { return false }
+        // Copy-input projects record the portable copy. The source fingerprint still
+        // lets changes to the selected original invalidate the prepared geometry.
+        let source = URL(fileURLWithPath: scan.scanPath)
+        guard let sourceStamp = report["source_identity"] as? [String: Any],
+              matchesStamp(source, sourceStamp) else { return false }
+        for (side, selected) in [("left", scan.prepareLeft), ("right", scan.prepareRight)] where selected {
+            guard let ear = ears[side], let stamp = ear["identity"] as? [String: Any],
+                  matchesStamp(root.appendingPathComponent("\(side.capitalized).stl"), stamp) else { return false }
+        }
+        return scan.prepareLeft || scan.prepareRight
+    }
+
+    static func scanReceiptIsCurrent(_ project: ProjectRecord, stage: String) -> Bool {
+        let folder = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Prepared")
+        guard let reportData = try? Data(contentsOf: folder.appendingPathComponent("mesh_preparation.json")),
+              let report = try? JSONSerialization.jsonObject(with: reportData) as? [String: Any],
+              let generation = report["generation"] as? String,
+              let receiptData = try? Data(contentsOf: folder.appendingPathComponent("\(stage).json")),
+              let receipt = try? JSONSerialization.jsonObject(with: receiptData) as? [String: Any] else { return false }
+        return receipt["generation"] as? String == generation
+    }
+
+    static func matchesStamp(_ url: URL, _ stamp: [String: Any]) -> Bool {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attrs[.size] as? NSNumber, let date = attrs[.modificationDate] as? Date,
+              let expectedSize = stamp["size"] as? NSNumber,
+              let modified = stamp["mtime"] as? NSNumber else { return false }
+        return size.int64Value == expectedSize.int64Value && abs(date.timeIntervalSince1970 - modified.doubleValue) < 0.001
     }
 
     static func postprocessingDirectory(for project: ProjectRecord) -> URL {

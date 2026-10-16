@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+"$ROOT/.venv/bin/python" -m unittest discover -s Tests -p 'test_*.py'
+if [[ "$(uname -s)" != Darwin ]]; then exit 0; fi
+SDK_PATH="$(xcrun --sdk "${PINNA2HRTF_MACOS_SDK:-macosx26.5}" --show-sdk-path)"
+SDK_SWIFT_INTERFACE="$(find "$SDK_PATH/usr/lib/swift/Swift.swiftmodule" -name '*-apple-macos.swiftinterface' -print -quit)"
+SDK_SWIFT_VERSION="$(sed -n 's|// swift-compiler-version: Apple Swift version \([^ ]*\).*|\1|p' "$SDK_SWIFT_INTERFACE")"
+CHECK_BIN="$(mktemp /private/tmp/pinna-scan-checks.XXXXXX)"
+trap 'rm -f "$CHECK_BIN"' EXIT
+CLANG_MODULE_CACHE_PATH=/private/tmp/pinna2hrtf-clang-cache swiftc -sdk "$SDK_PATH" \
+  -Xfrontend -interface-compiler-version -Xfrontend "$SDK_SWIFT_VERSION" \
+  Sources/Pinna2HRTF/Models/PipelineModels.swift Sources/Pinna2HRTF/Support/Defaults.swift \
+  Sources/Pinna2HRTF/Services/ProjectConfigDocument.swift Sources/Pinna2HRTF/Services/ProjectValidation.swift \
+  Sources/Pinna2HRTF/Services/PipelineConfigWriter.swift Sources/Pinna2HRTF/Services/ArtifactScanner.swift \
+  Sources/Pinna2HRTF/Services/GeneratedOutputManifest.swift Tests/ScanPreparationChecks.swift -o "$CHECK_BIN"
+"$CHECK_BIN"

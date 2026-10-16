@@ -21,6 +21,54 @@ Create or import a project, select at least one ear mesh, and choose a save fold
 
 **Reset Outputs** removes generated results while keeping configured inputs and settings. Project files live in the chosen save folder; app settings and caches live in `~/Library/Application Support/Pinna2HRTF` on macOS or `%APPDATA%\Pinna2HRTF` on Windows.
 
+## Full-head scan preparation (pipeline and macOS)
+
+On macOS, enable **Prepare ears from full-head scan**, choose an edited scan in
+millimeters, enter its temporary **Crop rotation**, and select the ears to prepare.
+Run **Scan Preparation** before Mesh2PPM Inference or Preprocessing. Preview the
+prepared ears before continuing. Existing projects with separate ear inputs
+keep their current workflow. Windows controls are unchanged in this branch.
+
+This ports `EvaPPM/Scripts/_support/prepare_meshes.py`: convex ear cropping,
+cleanup and 0.75 mm isotropic remeshing (six iterations, capped at 150,000 faces),
+Screened Poisson reconstruction (depth 7, one worker), attachment-boundary
+restoration, and residual-hole closure. Each exported ear must have one connected
+surface, consistent winding, finite coordinates, positive volume, and exactly
+one simple open attachment boundary. Original scans are preserved. Only the
+validated STL files and provenance report are kept in `Prepared/`; intermediate
+geometry stays in temporary storage.
+
+The default crop polygon and margins follow EvaPPM's aligned edited scans. They
+are not an automatic anatomical locator: calibrate orientation and placement for
+other scans. EvaPPM uses temporary Z rotations of 90 or 270 degrees depending on
+the scan; no rotation is guessed from a subject name. The crop rotation is undone
+for exported meshes. Crop margins, lateral limits, and remesh edge length are
+editable in the Mac app; YAML also exposes `crop_polygon_xz`.
+
+For YAML runs, add this section (use `null` for unused `paths.left_ear` and
+`paths.right_ear`; prepared inputs are routed automatically):
+
+```yaml
+scan_preparation:
+  enabled: true
+  scan_path: /path/to/edited-head.stl
+  rotation_degrees: 90
+  prepare_left: true
+  prepare_right: true
+  target_edge_mm: 0.75
+```
+
+```sh
+uv run Pinna2HRTF scan-preparation --config pinna2hrtf.yaml
+uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage all
+```
+
+`all` runs enabled scan preparation before inference and simulation preprocessing.
+Changed scans or preparation settings require preparation again. Inference and
+simulation projects record their preparation generation so earlier geometry
+cannot silently feed a later stage. **Reset Outputs** includes generated prepared
+ears and receipts while protecting original input files.
+
 ## Install the CLI
 
 Install [Git](https://git-scm.com/install/) and [uv](https://docs.astral.sh/uv/getting-started/installation/), then:

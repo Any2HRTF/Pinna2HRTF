@@ -206,6 +206,40 @@ PLIST
 chmod +x "$MACOS/Pinna2HRTF"
 ditto --norsrc --noextattr --noqtn "$APP_DIR" "$CLEAN_APP_DIR"
 xattr -cr "$CLEAN_APP_DIR"
+# Wheels flatten Qt's versioned framework symlinks. Restore the canonical
+# framework layout before signing; duplicate Resources/Info.plist copies make
+# codesign classify a framework as an ambiguous application bundle.
+"$CLEAN_APP_DIR/Contents/Resources/.venv/bin/python" - "$CLEAN_APP_DIR/Contents/Resources/.venv" <<'PYFRAMEWORK'
+from pathlib import Path
+import shutil
+import sys
+for framework in Path(sys.argv[1]).rglob("*.framework"):
+    versions = framework / "Versions"
+    if not versions.is_dir():
+        continue
+    candidates = sorted(p for p in versions.iterdir() if p.is_dir() and p.name != "Current")
+    if len(candidates) != 1:
+        continue
+    version = candidates[0]
+    current = versions / "Current"
+    if not current.is_symlink():
+        if current.is_dir():
+            shutil.rmtree(current)
+        elif current.exists():
+            current.unlink()
+        current.symlink_to(version.name)
+    for item in version.iterdir():
+        if item.name == "_CodeSignature":
+            continue
+        target = framework / item.name
+        if target.is_symlink():
+            continue
+        if target.is_dir():
+            shutil.rmtree(target)
+        elif target.exists():
+            target.unlink()
+        target.symlink_to(Path("Versions/Current") / item.name)
+PYFRAMEWORK
 while IFS= read -r -d '' candidate; do
   if file -b "$candidate" | grep -q "Mach-O"; then
     if ! lipo -archs "$candidate" | tr ' ' '\n' | grep -qx "arm64"; then
