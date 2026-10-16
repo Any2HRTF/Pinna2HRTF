@@ -59,6 +59,9 @@ class ScanPreparationConfig(BaseModel):
     enabled: bool = False
     scan_path: Path | None = None
     rotation_degrees: float | None = None
+    require_manual_review: bool = False
+    reviewed_left: Path | None = None
+    reviewed_right: Path | None = None
     prepare_left: bool = True
     prepare_right: bool = True
     target_edge_mm: float = Field(default=0.75, gt=0)

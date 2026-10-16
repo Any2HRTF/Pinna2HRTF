@@ -449,7 +449,7 @@ def file_identity(path):
 
 def preparation_signature(settings):
     source = Path(settings.scan_path)
-    return {"settings": settings.model_dump(mode="json"), "source_sha256": sha256(source)}
+    return {"settings": settings.model_dump(mode="json", exclude={"require_manual_review", "reviewed_left", "reviewed_right"}), "source_sha256": sha256(source)}
 
 
 def prepared_paths(config):
@@ -528,7 +528,10 @@ def prepare_scan(config, logger=print):
 def record_stage(config, stage, outputs):
     folder = config.paths.output_dir / "Prepared"
     report = json.loads((folder / "mesh_preparation.json").read_text())
+    from .MeshEditing import reviewed_inputs
+    inputs = reviewed_inputs(config)
     receipt = {"generation": report["generation"],
+               "input_ears": {side: sha256(path) for side, path in zip(("left", "right"), inputs) if path is not None},
                "outputs": {str(path): sha256(path) for path in outputs}}
     if stage == "inference":
         receipt["settings"] = config.inference.model_dump(mode="json")
@@ -544,6 +547,10 @@ def validate_stage(config, stage):
     receipt = json.loads(path.read_text())
     if receipt.get("generation") != report["generation"]:
         raise ValueError(f"Run {stage} again after Scan Preparation.")
+    from .MeshEditing import reviewed_inputs
+    actual_inputs = {side: sha256(path) for side, path in zip(("left", "right"), reviewed_inputs(config)) if path is not None}
+    if receipt.get("input_ears", actual_inputs if not any((config.scan_preparation.reviewed_left, config.scan_preparation.reviewed_right)) else None) != actual_inputs:
+        raise ValueError(f"The ear edits changed; run {stage} again.")
     if stage == "inference" and receipt.get("settings") != config.inference.model_dump(mode="json"):
         raise ValueError("Inference settings changed; run inference again.")
     for output, digest in receipt["outputs"].items():

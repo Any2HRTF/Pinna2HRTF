@@ -70,7 +70,7 @@ enum ProjectConfigDocument {
         }
         let current = try parse(generated)
         let editable: [String: [String]] = [
-            "scan_preparation": ["enabled", "scan_path", "rotation_degrees", "prepare_left", "prepare_right", "target_edge_mm", "left_margin_mm", "right_margin_mm", "side_min_mm", "side_max_mm"],
+            "scan_preparation": ["enabled", "scan_path", "rotation_degrees", "prepare_left", "prepare_right", "target_edge_mm", "left_margin_mm", "right_margin_mm", "side_min_mm", "side_max_mm", "require_manual_review", "reviewed_left", "reviewed_right"],
             "paths": ["left_ear", "right_ear", "output_dir", "external_deps_dir", "numcalc_executable", "mesh_grading_executable", "evaluation_grid"],
             "inference": ["model_config_file", "model_checkpoint", "target_left_folder", "target_right_folder", "prediction_left_folder", "prediction_right_folder", "use_predictions_for_preprocessing"],
             "preprocessing": ["title", "head_radius", "min_frequency", "max_frequency", "frequency_step_count", "source_assignment_face_count", "source_position_input_left", "source_position_input_right", "mesh_min_edge_length", "mesh_max_edge_length", "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite", "skip_mesh_grading"],
@@ -116,6 +116,9 @@ enum ProjectConfigDocument {
         restoredScan.enabled = bool(scan, "enabled") ?? false
         restoredScan.scanPath = text(scan, "scan_path").map(relocated) ?? ""
         restoredScan.rotationDegrees = text(scan, "rotation_degrees") ?? ""
+        restoredScan.requireManualReview = bool(scan, "require_manual_review") ?? false
+        restoredScan.reviewedLeftPath = text(scan, "reviewed_left").map(relocated)
+        restoredScan.reviewedRightPath = text(scan, "reviewed_right").map(relocated)
         restoredScan.prepareLeft = bool(scan, "prepare_left") ?? true
         restoredScan.prepareRight = bool(scan, "prepare_right") ?? true
         let scanKeys: [(String, WritableKeyPath<ScanPreparationSettings, String>)] = [

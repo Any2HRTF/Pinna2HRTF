@@ -100,6 +100,8 @@ class ScanPreparationTests(unittest.TestCase):
             report.write_text(json.dumps(dict(generation='first')))
             output = Path(temporary) / 'prediction.stl'
             output.write_text('mesh')
+            (folder / 'Left.stl').write_text('left input')
+            (folder / 'Right.stl').write_text('right input')
             record_stage(config, 'inference', [output])
             validate_stage(config, 'inference')
             output.write_text('edited')

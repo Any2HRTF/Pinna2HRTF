@@ -23,6 +23,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published var microphonePlacementSide: EarSide?
     @Published var pendingMicrophonePosition: ManualMicrophonePosition?
     @Published var microphonePlacementError: String?
+    @Published var meshEditorRequest: MeshEditorRequest?
+    @Published var meshEditorError: String?
     @Published var artifacts: [Artifact] = []
     @Published var stageStates: [Stage: StageState] = Dictionary(uniqueKeysWithValues: Stage.allCases.map { ($0, .ready) })
     @Published var runningProcesses: [UUID: Process] = [:]
@@ -87,7 +89,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     var selectedProjectIsRunning: Bool {
         guard let selectedProject else { return false }
-        return runningProcesses[selectedProject.id] != nil || outputOperations.contains(selectedProject.id) || stoppingProjects.contains(selectedProject.id)
+        return runningProcesses[selectedProject.id] != nil || outputOperations.contains(selectedProject.id) || stoppingProjects.contains(selectedProject.id) || meshEditorRequest?.projectID == selectedProject.id
     }
 
     var selectedProjectIsManagingOutputs: Bool {
@@ -227,6 +229,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                     duplicate.rightEar = relocated(duplicate.rightEar)
                     if var scan = duplicate.settings.scanPreparation {
                         scan.scanPath = relocated(scan.scanPath)
+                        scan.originalScanPath = scan.originalScanPath.map(relocated)
+                        scan.reviewedLeftPath = scan.reviewedLeftPath.map(relocated)
+                        scan.reviewedRightPath = scan.reviewedRightPath.map(relocated)
                         duplicate.settings.scanPreparation = scan
                     }
                     if var postprocessing = duplicate.settings.postprocessing,
@@ -436,6 +441,64 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         } else {
             appendLog("Could not open \(artifact.url.lastPathComponent).")
         }
+    }
+
+    func beginScanAlignment() {
+        guard let project = selectedProject, !selectedProjectIsRunning else { return }
+        let source = project.scanPreparation.originalScanPath ?? project.scanPreparation.scanPath
+        guard !source.isEmpty, FileManager.default.fileExists(atPath: source) else {
+            meshEditorError = "Choose a full-head scan first."; return
+        }
+        guard outputLocationConflict(for: project) == nil else {
+            meshEditorError = outputLocationConflict(for: project); return
+        }
+        let url = URL(fileURLWithPath: source)
+        meshEditorRequest = MeshEditorRequest(projectID: project.id, source: url, originalSource: url,
+            destination: URL(fileURLWithPath: project.saveLocation).appendingPathComponent("MeshEdits/AlignedScan.ply"),
+            side: nil, preparedGeneration: nil, preparedReport: nil)
+    }
+
+    func beginEarEditing(_ side: EarSide) {
+        guard let project = selectedProject, !selectedProjectIsRunning else { return }
+        guard ArtifactScanner.scanPreparationIsCurrent(project) else {
+            meshEditorError = "Run Scan Preparation successfully first."; return
+        }
+        let root = URL(fileURLWithPath: project.saveLocation)
+        let reportURL = root.appendingPathComponent("Prepared/mesh_preparation.json")
+        guard let data = try? Data(contentsOf: reportURL),
+              let report = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let generation = report["generation"] as? String else {
+            meshEditorError = "The scan preparation report is missing."; return
+        }
+        let base = root.appendingPathComponent("Prepared/\(side.title).stl")
+        let reviewed = side == .left ? project.scanPreparation.reviewedLeftPath : project.scanPreparation.reviewedRightPath
+        let source = ArtifactScanner.earReviewIsCurrent(project, side: side) ? reviewed.map { URL(fileURLWithPath: $0) } ?? base : base
+        meshEditorRequest = MeshEditorRequest(projectID: project.id, source: source, originalSource: base,
+            destination: root.appendingPathComponent("MeshEdits/\(side.title).stl"), side: side,
+            preparedGeneration: generation, preparedReport: reportURL)
+    }
+
+    func finishMeshEditing(_ request: MeshEditorRequest) {
+        guard let index = projects.firstIndex(where: { $0.id == request.projectID }) else { return }
+        var scan = projects[index].scanPreparation
+        if let side = request.side {
+            if side == .left { scan.reviewedLeftPath = request.destination.path }
+            else { scan.reviewedRightPath = request.destination.path }
+        } else {
+            scan.originalScanPath = request.originalSource.path
+            scan.scanPath = request.destination.path
+            scan.rotationDegrees = "0"
+            scan.reviewedLeftPath = nil; scan.reviewedRightPath = nil
+        }
+        projects[index].settings.scanPreparation = scan
+        projects[index].settings.preprocessing.sourcePositionInputLeft = nil
+        projects[index].settings.preprocessing.sourcePositionInputRight = nil
+        let resetStages = request.isAlignment ? Stage.allCases : Stage.allCases.filter { $0 != .scanPreparation }
+        for stage in resetStages { setStageOutcome(stage, for: request.projectID, to: .ready) }
+        persist()
+        appendLog("Saved \(request.isAlignment ? "Frankfort-aligned scan" : "reviewed ear"): \(request.destination.lastPathComponent)", for: request.projectID)
+        refreshArtifacts()
+        openMesh(request.destination, resetCamera: true)
     }
 
     func resetSelectedMeshView() {
@@ -883,6 +946,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
         if let issue = ProjectValidation.issues(for: project).first { return "Fix \(issue.id.split(separator: ".").last?.replacingOccurrences(of: "_", with: " ") ?? "settings"): \(issue.message)" }
         if let conflict = outputLocationConflict(for: project) { return conflict }
+        if project.scanPreparation.enabled && stage != .scanPreparation && !ArtifactScanner.earReviewsAreCurrent(project) {
+            return "Review and save the selected prepared ears before continuing."
+        }
         switch stage {
         case .scanPreparation:
             if !project.scanPreparation.enabled { return "Enable full-head scan preparation first." }
@@ -1023,7 +1089,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 throw GeneratedOutputManifest.Failure.invalidRoot
             }
         }
-        let inputs = projects.flatMap { [$0.leftEar, $0.rightEar, $0.scanPreparation.scanPath, $0.settings.preprocessing.evaluationGrid ?? ""] }
+        let inputs = projects.flatMap { [$0.leftEar, $0.rightEar, $0.scanPreparation.scanPath, $0.scanPreparation.originalScanPath ?? "", $0.scanPreparation.reviewedLeftPath ?? "", $0.scanPreparation.reviewedRightPath ?? "", $0.settings.preprocessing.evaluationGrid ?? ""] }
             .filter { !$0.isEmpty && $0 != "Default" }.sorted()
         let key = project.saveLocation + "\n" + inputs.joined(separator: "\n")
         if let existing = outputStores[key] { return existing }

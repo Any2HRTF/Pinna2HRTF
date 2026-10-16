@@ -102,6 +102,10 @@ struct ScanPreparationSettings: Codable, Equatable {
     var enabled = false
     var scanPath = ""
     var rotationDegrees = ""
+    var originalScanPath: String?
+    var requireManualReview: Bool?
+    var reviewedLeftPath: String?
+    var reviewedRightPath: String?
     var prepareLeft = true
     var prepareRight = true
     var targetEdgeMM = "0.75"
@@ -212,10 +216,10 @@ struct ProjectRecord: Identifiable, Codable, Equatable {
 extension ProjectRecord {
     var scanPreparation: ScanPreparationSettings { settings.scanPreparation ?? ScanPreparationSettings() }
     var pipelineLeftEar: String {
-        scanPreparation.enabled ? (scanPreparation.prepareLeft ? URL(fileURLWithPath: saveLocation).appendingPathComponent("Prepared/Left.stl").path : "") : leftEar
+        scanPreparation.enabled ? (scanPreparation.prepareLeft ? (scanPreparation.reviewedLeftPath ?? URL(fileURLWithPath: saveLocation).appendingPathComponent("Prepared/Left.stl").path) : "") : leftEar
     }
     var pipelineRightEar: String {
-        scanPreparation.enabled ? (scanPreparation.prepareRight ? URL(fileURLWithPath: saveLocation).appendingPathComponent("Prepared/Right.stl").path : "") : rightEar
+        scanPreparation.enabled ? (scanPreparation.prepareRight ? (scanPreparation.reviewedRightPath ?? URL(fileURLWithPath: saveLocation).appendingPathComponent("Prepared/Right.stl").path) : "") : rightEar
     }
 }
 

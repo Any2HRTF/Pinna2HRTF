@@ -27,6 +27,7 @@ struct ScanPreparationChecks {
         project.saveLocation = temporary.path
         var scan = ScanPreparationSettings()
         scan.enabled = true
+        scan.requireManualReview = false
         scan.scanPath = source.path
         scan.rotationDegrees = "90"
         scan.prepareLeft = false
@@ -64,15 +65,34 @@ struct ScanPreparationChecks {
         try outputs.complete()
         precondition(ArtifactScanner.stageIsComplete(.scanPreparation, project: project))
         precondition(!ArtifactScanner.stageIsComplete(.preprocessing, project: project))
+        let edited = temporary.appendingPathComponent("MeshEdits/Right.stl")
+        try FileManager.default.createDirectory(at: edited.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("manual work".utf8).write(to: edited)
+        scan.requireManualReview = true
+        project.settings.scanPreparation = scan
+        precondition(!ArtifactScanner.earReviewsAreCurrent(project))
+        scan.reviewedRightPath = edited.path
+        project.settings.scanPreparation = scan
+        let review: [String: Any] = ["kind": "ear", "side": "right", "generation": "test",
+                                    "output_identity": try stamp(edited), "output_sha256": "manual"]
+        try JSONSerialization.data(withJSONObject: review).write(to: edited.deletingPathExtension().appendingPathExtension("json"))
+        precondition(project.pipelineRightEar == edited.path)
+        precondition(ArtifactScanner.earReviewsAreCurrent(project))
+        let receiptURL = prepared.appendingPathComponent("inference.json")
+        try JSONSerialization.data(withJSONObject: ["generation": "test", "input_ears": ["right": "previous"]]).write(to: receiptURL)
+        precondition(!ArtifactScanner.scanReceiptIsCurrent(project, stage: "inference"))
+        try JSONSerialization.data(withJSONObject: ["generation": "test", "input_ears": ["right": "manual"]]).write(to: receiptURL)
+        precondition(ArtifactScanner.scanReceiptIsCurrent(project, stage: "inference"))
         scan.rotationDegrees = "270"
         project.settings.scanPreparation = scan
         precondition(!ArtifactScanner.stageIsComplete(.scanPreparation, project: project))
         let unrelated = temporary.appendingPathComponent("notes.txt")
         try Data("keep me".utf8).write(to: unrelated)
         let reset = outputs.reset()
-        precondition(reset.success && reset.deleted == 2)
+        precondition(reset.success && reset.deleted == 3)
         precondition(FileManager.default.fileExists(atPath: source.path))
         precondition(FileManager.default.fileExists(atPath: unrelated.path))
+        precondition(FileManager.default.fileExists(atPath: edited.path))
         print("Mac settings, legacy decoding, YAML round-trip, output ownership and freshness checks passed.")
     }
 }

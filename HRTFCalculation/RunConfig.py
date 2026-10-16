@@ -28,9 +28,8 @@ def input_paths(config: PipelineConfig, validate: bool = False):
     if validate:
         from .ScanPreparation import validate_prepared
         validate_prepared(config)
-    folder = config.paths.output_dir / "Prepared"
-    return (folder / "Left.stl" if settings.prepare_left else None,
-            folder / "Right.stl" if settings.prepare_right else None)
+    from .MeshEditing import reviewed_inputs
+    return reviewed_inputs(config, validate=validate)
 
 
 def run_scan_preparation(config, dry_run, logger):

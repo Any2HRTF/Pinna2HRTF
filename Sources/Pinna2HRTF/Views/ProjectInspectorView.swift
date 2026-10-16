@@ -33,6 +33,21 @@ struct ProjectInspectorView: View {
             }
             Section {
                 SettingsDisclosure("Scan Preparation", systemImage: "bandage") {
+                    if let project = store.selectedProject, project.scanPreparation.enabled {
+                        HStack {
+                            ForEach(EarSide.allCases) { side in
+                                Button("Edit \(side.title) Ear…") { store.beginEarEditing(side) }
+                                    .disabled(!ArtifactScanner.scanPreparationIsCurrent(project) || (side == .left ? !project.scanPreparation.prepareLeft : !project.scanPreparation.prepareRight))
+                            }
+                        }
+                        Toggle("Require ear review before continuing", isOn: scanReviewBinding)
+                        ForEach(EarSide.allCases) { side in
+                            if side == .left ? project.scanPreparation.prepareLeft : project.scanPreparation.prepareRight {
+                                Text("\(side.title): \(ArtifactScanner.earReviewIsCurrent(project, side: side) ? "reviewed" : ((project.scanPreparation.requireManualReview ?? false) ? "review required" : "automatic mesh; review optional"))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                     LabeledTextField("Target edge (mm)", helpID: "scan.target_edge", text: scanTextBinding(\.targetEdgeMM))
                     LabeledTextField("Left crop margin (mm)", helpID: "scan.left_margin", text: scanTextBinding(\.leftMarginMM))
                     LabeledTextField("Right crop margin (mm)", helpID: "scan.right_margin", text: scanTextBinding(\.rightMarginMM))
@@ -123,6 +138,8 @@ struct ProjectInspectorView: View {
             SettingToggle(title: "Prepare ears from full-head scan", helpID: "scan.enabled", isOn: scanBoolBinding(\.enabled))
             if store.selectedProject?.scanPreparation.enabled == true {
                 PathField("Full-head scan", helpID: "scan.path", text: scanTextBinding(\.scanPath), mode: .file)
+                Button("Align to Frankfort Plane…") { store.beginScanAlignment() }
+                    .disabled(store.selectedProjectIsRunning)
                 LabeledTextField("Crop rotation (degrees)", helpID: "scan.rotation", text: scanTextBinding(\.rotationDegrees), validationError: validationMessage("scan.rotation"))
                 HStack {
                     Toggle("Prepare left", isOn: scanBoolBinding(\.prepareLeft))
@@ -147,6 +164,10 @@ struct ProjectInspectorView: View {
             store.updateSelectedProject { project in
                 var scan = project.scanPreparation
                 scan[keyPath: keyPath] = value
+                if keyPath == \.scanPath {
+                    scan.originalScanPath = nil
+                    scan.reviewedLeftPath = nil; scan.reviewedRightPath = nil
+                }
                 project.settings.scanPreparation = scan
             }
         })
@@ -157,6 +178,15 @@ struct ProjectInspectorView: View {
             store.updateSelectedProject { project in
                 var scan = project.scanPreparation
                 scan[keyPath: keyPath] = value
+                project.settings.scanPreparation = scan
+            }
+        })
+    }
+
+    var scanReviewBinding: Binding<Bool> {
+        Binding(get: { store.selectedProject?.scanPreparation.requireManualReview ?? false }, set: { value in
+            store.updateSelectedProject { project in
+                var scan = project.scanPreparation; scan.requireManualReview = value
                 project.settings.scanPreparation = scan
             }
         })

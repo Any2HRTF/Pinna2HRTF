@@ -202,7 +202,7 @@
   {
     "id": "scan.rotation",
     "title": "Crop rotation",
-    "description": "Explicit temporary rotation around Z, in degrees, for the crop coordinates. EvaPPM uses 90 or 270 depending on scan alignment. This is scan-specific; it is never guessed from a filename. Outputs restore the original orientation.",
+    "description": "Rotation around Z, in degrees, used to place the scan in the ear-crop coordinate frame. EvaPPM uses 90 or 270 depending on scan alignment. Prepared ears use that crop frame (left +Y, right -Y). Saving a Frankfort alignment sets this rotation to zero.",
     "publications": []
   },
   {

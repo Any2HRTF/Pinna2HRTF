@@ -65,6 +65,12 @@ struct ContentView: View {
         } message: {
             Text(store.registryStore.recoveryMessage ?? store.persistenceMessage ?? "The original project list will be preserved before recovery.")
         }
+        .sheet(item: $store.meshEditorRequest) { request in
+            MeshEditorView(request: request, saved: store.finishMeshEditing)
+        }
+        .alert("Cannot Edit Mesh", isPresented: Binding(get: { store.meshEditorError != nil }, set: { if !$0 { store.meshEditorError = nil } })) {
+            Button("OK") { store.meshEditorError = nil }
+        } message: { Text(store.meshEditorError ?? "") }
         .focusedSceneValue(\.pipelineCommands, commandContext)
         .onChange(of: store.selectedProjectID) { _ in
             store.persist()

@@ -38,11 +38,40 @@ one simple open attachment boundary. Original scans are preserved. Only the
 validated STL files and provenance report are kept in `Prepared/`; intermediate
 geometry stays in temporary storage.
 
+The macOS preparation workspace also supports the manual steps around this stage:
+
+1. Before preparation, choose **Align to Frankfort Plane…**. Pick left porion,
+   right porion, and left orbitale on the scan, preview the rigid alignment,
+   and save. The frame uses X anterior, Y left, and Z superior, with the porion
+   midpoint at the origin. Saving selects the aligned copy and sets crop rotation
+   to zero; scans already aligned outside the app can skip this step.
+2. Run **Scan Preparation**.
+3. Use **Edit Left Ear…** / **Edit Right Ear…** to open the canal and trim the
+   attachment area. Draw a lasso or click faces, inspect the red selection, and
+   delete. Selection affects the visible surface by default; **Select through
+   mesh** explicitly includes occluded faces. **Cutting Plane** provides axis
+   presets, an arbitrary normal, offset, a kept-side switch, and an open cut.
+4. Inspect the result, undo/redo as needed, and **Save Reviewed Ear**. Saved edits
+   feed the next pipeline stages automatically. **Require ear review before
+   continuing** is an optional pause; it is off by default.
+
+Working edits stay in a temporary workspace until Save. Originals and automatic
+prepared meshes remain intact. Saved manual geometry and provenance live in
+`MeshEdits/`; Reset Outputs preserves this user-authored work. The ear editor
+requires a connected, manifold surface with consistent winding and one simple
+attachment boundary, plus at most one canal opening. It does not fill the new
+opening. Later simulation preprocessing closes the canal and estimates its
+source landmark using the existing pipeline.
+
+Alignment uses the three-landmark Frankfort definition described in this
+[cranial-orientation study](https://pmc.ncbi.nlm.nih.gov/articles/PMC8773378/).
+Landmarks are picked by the user; the app does not infer anatomical landmarks.
+
 The default crop polygon and margins follow EvaPPM's aligned edited scans. They
 are not an automatic anatomical locator: calibrate orientation and placement for
 other scans. EvaPPM uses temporary Z rotations of 90 or 270 degrees depending on
-the scan; no rotation is guessed from a subject name. The crop rotation is undone
-for exported meshes. Crop margins, lateral limits, and remesh edge length are
+the scan; no rotation is guessed from a subject name. Prepared ears are exported in the crop frame
+(left +Y, right -Y). Crop margins, lateral limits, and remesh edge length are
 editable in the Mac app; YAML also exposes `crop_polygon_xz`.
 
 For YAML runs, add this section (use `null` for unused `paths.left_ear` and
@@ -56,6 +85,9 @@ scan_preparation:
   prepare_left: true
   prepare_right: true
   target_edge_mm: 0.75
+  require_manual_review: false
+  reviewed_left: null
+  reviewed_right: null
 ```
 
 ```sh
@@ -64,7 +96,9 @@ uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage all
 ```
 
 `all` runs enabled scan preparation before inference and simulation preprocessing.
-Changed scans or preparation settings require preparation again. Inference and
+Changed scans or preparation settings require preparation again. Saved ear edits
+are checked against that preparation generation, and changed edits invalidate
+inference and simulation receipts without forcing automatic scan preparation again. Inference and
 simulation projects record their preparation generation so earlier geometry
 cannot silently feed a later stage. **Reset Outputs** includes generated prepared
 ears and receipts while protecting original input files.
