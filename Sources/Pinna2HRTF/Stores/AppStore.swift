@@ -496,7 +496,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let resetStages = request.isAlignment ? Stage.allCases : Stage.allCases.filter { $0 != .scanPreparation }
         for stage in resetStages { setStageOutcome(stage, for: request.projectID, to: .ready) }
         persist()
-        appendLog("Saved \(request.isAlignment ? "Frankfort-aligned scan" : "reviewed ear"): \(request.destination.lastPathComponent)", for: request.projectID)
+        appendLog("Saved \(request.isAlignment ? "nose-and-ear-aligned scan" : "reviewed ear"): \(request.destination.lastPathComponent)", for: request.projectID)
         refreshArtifacts()
         openMesh(request.destination, resetCamera: true)
     }

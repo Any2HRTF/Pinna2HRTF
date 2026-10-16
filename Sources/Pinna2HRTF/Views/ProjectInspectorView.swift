@@ -138,7 +138,7 @@ struct ProjectInspectorView: View {
             SettingToggle(title: "Prepare ears from full-head scan", helpID: "scan.enabled", isOn: scanBoolBinding(\.enabled))
             if store.selectedProject?.scanPreparation.enabled == true {
                 PathField("Full-head scan", helpID: "scan.path", text: scanTextBinding(\.scanPath), mode: .file)
-                Button("Align to Frankfort Plane…") { store.beginScanAlignment() }
+                Button("Align Using Nose and Ears…") { store.beginScanAlignment() }
                     .disabled(store.selectedProjectIsRunning)
                 LabeledTextField("Crop rotation (degrees)", helpID: "scan.rotation", text: scanTextBinding(\.rotationDegrees), validationError: validationMessage("scan.rotation"))
                 HStack {

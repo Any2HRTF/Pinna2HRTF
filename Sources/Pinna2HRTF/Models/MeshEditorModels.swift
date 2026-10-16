@@ -10,5 +10,5 @@ struct MeshEditorRequest: Identifiable {
     let preparedGeneration: String?
     let preparedReport: URL?
     var isAlignment: Bool { side == nil }
-    var title: String { side.map { "Edit \($0.title) Ear" } ?? "Align Scan to Frankfort Plane" }
+    var title: String { side.map { "Edit \($0.title) Ear" } ?? "Nose and Ear Alignment" }
 }

@@ -1,7 +1,8 @@
 """Non-destructive mesh editing backend for the macOS preparation workspace.
 
-Frankfort landmarks: left porion, right porion, left orbitale. The rigid frame
-uses +X anterior, +Y left, +Z superior, with the porion midpoint at the origin.
+Alignment landmarks: nose tip, left ear-canal entrance, right ear-canal entrance.
+The rigid frame uses +X toward the nose, +Y left, +Z superior, with the ear
+midpoint at the origin. This reference plane is not the anatomical Frankfort plane.
 Face deletion and plane cuts deliberately leave open edges; no hole filling or
 reconstruction runs after a manual edit.
 """
@@ -42,17 +43,17 @@ def load(path, merge=False):
     return mesh
 
 
-def frankfort_transform(points):
+def nose_ear_transform(points):
     points = np.asarray(points, dtype=float)
     if points.shape != (3, 3) or not np.isfinite(points).all():
-        raise ValueError('Pick left porion, right porion, and left orbitale.')
-    left, right, orbitale = points
+        raise ValueError('Pick the nose tip, left ear-canal entrance, and right ear-canal entrance.')
+    nose, left, right = points
     origin = (left + right) / 2
     lateral = left - right
     if np.linalg.norm(lateral) < 1e-6:
-        raise ValueError('The two porion landmarks must be distinct.')
+        raise ValueError('The two ear-canal entrance landmarks must be distinct.')
     lateral /= np.linalg.norm(lateral)
-    anterior = orbitale - origin
+    anterior = nose - origin
     anterior -= np.dot(anterior, lateral) * lateral
     if np.linalg.norm(anterior) < 1e-6:
         raise ValueError('The three landmarks must not lie on one line.')
@@ -175,7 +176,7 @@ def execute(request):
         return report
     mesh = load(request['source'])
     if action == 'align':
-        matrix = frankfort_transform(request['points'])
+        matrix = nose_ear_transform(request['points'])
         mesh.apply_transform(matrix)
     elif action == 'delete':
         mesh = delete_faces(mesh, request['faces'])
@@ -190,6 +191,8 @@ def execute(request):
     result = frame(mesh, request['frame'])
     if action == 'align':
         result['transform'] = matrix.tolist()
+        result['alignment_method'] = 'nose_and_ear_entrances'
+        result['landmark_labels'] = ['nose_tip', 'left_ear_canal_entrance', 'right_ear_canal_entrance']
     return result
 
 

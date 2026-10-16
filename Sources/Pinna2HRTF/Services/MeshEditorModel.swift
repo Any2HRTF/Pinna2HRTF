@@ -94,7 +94,7 @@ final class MeshEditorModel: ObservableObject {
             originalSHA256 = result["source_sha256"] as? String ?? ""
             versions = [first]
             try install(result)
-            message = request.isAlignment ? "Choose Landmarks, then click left porion, right porion, and left orbitale." : "Select and delete faces to open the canal. Use a cutting plane to trim the attachment area."
+            message = request.isAlignment ? "Choose Landmarks, then click the nose tip, left ear-canal entrance, and right ear-canal entrance." : "Select and delete faces to open the canal. Use a cutting plane to trim the attachment area."
         } catch { self.error = error.localizedDescription }
     }
 
@@ -117,7 +117,9 @@ final class MeshEditorModel: ObservableObject {
             versions = Array(versions.prefix(currentVersion + 1)) + [next]
             var operation = arguments
             operation["action"] = action
-            if let transform = result["transform"] { operation["transform"] = transform }
+            for key in ["transform", "alignment_method", "landmark_labels"] {
+                if let value = result[key] { operation[key] = value }
+            }
             operations = Array(operations.prefix(currentVersion)) + [operation]
             currentVersion += 1
             selectedFaces.removeAll()

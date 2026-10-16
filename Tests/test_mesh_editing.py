@@ -8,7 +8,7 @@ import trimesh
 
 from HRTFCalculation.Config import PipelineConfig, ScanPreparationConfig
 from HRTFCalculation.MeshEditing import (cut_plane, delete_faces, digest, execute,
-    frankfort_transform, load, reviewed_inputs, topology, validate_ear)
+    nose_ear_transform, load, reviewed_inputs, topology, validate_ear)
 from HRTFCalculation.ScanPreparation import preparation_signature, record_stage, validate_stage
 
 
@@ -18,20 +18,54 @@ class MeshEditingTests(unittest.TestCase):
         mesh.apply_translation([0,70,0])
         return cut_plane(mesh, [0,1,0], [0,65,0])
 
-    def test_frankfort_alignment_is_rigid_and_right_handed(self):
-        reference = np.array([[0,70,0], [0,-70,0], [60,35,0]], dtype=float)
+    def test_nose_ear_alignment_is_rigid_and_right_handed(self):
+        reference = np.array([[60,35,0], [0,70,0], [0,-70,0]], dtype=float)
         matrix = trimesh.transformations.euler_matrix(.3,-.7,1.1)
         matrix[:3,3] = [10,-25,55]
         points = trimesh.transform_points(reference, matrix)
-        transform = frankfort_transform(points)
+        transform = nose_ear_transform(points)
         aligned = trimesh.transform_points(points, transform)
         np.testing.assert_allclose(aligned, reference, atol=1e-10)
+        np.testing.assert_allclose((aligned[1] + aligned[2]) / 2, [0,0,0], atol=1e-10)
+        np.testing.assert_allclose(aligned[:,2], 0, atol=1e-10)
+        self.assertGreater(aligned[0,0], 0)
+        self.assertGreater(aligned[1,1], aligned[2,1])
         np.testing.assert_allclose(transform[:3,:3] @ transform[:3,:3].T, np.eye(3), atol=1e-12)
         self.assertAlmostEqual(np.linalg.det(transform[:3,:3]), 1)
 
+    def test_alignment_records_nose_ear_method_and_preserves_original(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            reference = np.array([[60,35,0], [0,70,0], [0,-70,0]], dtype=float)
+            rotation = trimesh.transformations.euler_matrix(.3,-.7,1.1)
+            rotation[:3,3] = [10,-25,55]
+            points = trimesh.transform_points(reference, rotation)
+            mesh = trimesh.Trimesh(vertices=np.vstack([reference, [0,0,80]]),
+                                   faces=[[0,1,2], [0,3,1], [0,2,3], [1,3,2]], process=False)
+            mesh.apply_transform(rotation)
+            source = folder/'scan.ply'; mesh.export(source)
+            original = digest(source)
+            working = folder/'aligned.ply'
+            result = execute(dict(action='align', source=str(source), output=str(working),
+                                  frame=str(folder/'frame'), points=points.tolist()))
+            self.assertEqual(result['alignment_method'], 'nose_and_ear_entrances')
+            self.assertEqual(result['landmark_labels'],
+                             ['nose_tip', 'left_ear_canal_entrance', 'right_ear_canal_entrance'])
+            np.testing.assert_allclose(load(working).vertices[:3], reference, atol=1e-5)
+            operation = dict(action='align', points=points.tolist(), **{
+                key: result[key] for key in ('transform', 'alignment_method', 'landmark_labels')})
+            destination = folder/'MeshEdits'/'AlignedScan.ply'
+            execute(dict(action='save', kind='alignment', source=str(working),
+                         original_source=str(source), original_sha256=original,
+                         destination=str(destination), operations=[operation]))
+            receipt = json.loads(destination.with_suffix('.json').read_text())
+            self.assertEqual(receipt['operations'], [operation])
+            self.assertEqual(receipt['output_sha256'], digest(destination))
+            self.assertEqual(digest(source), original)
+
     def test_degenerate_landmarks_rejected(self):
         for points in [[[0,0,0]]*3, [[0,1,0],[0,-1,0],[0,0,0]], [[0,1,0],[0,-1,0],[float('nan'),0,0]]]:
-            with self.assertRaises(ValueError): frankfort_transform(points)
+            with self.assertRaises(ValueError): nose_ear_transform(points)
 
     def test_opening_canal_and_trimming_attachment_preserves_two_open_loops(self):
         original = self.ear()

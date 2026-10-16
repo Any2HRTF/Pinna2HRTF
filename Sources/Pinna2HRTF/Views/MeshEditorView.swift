@@ -80,10 +80,10 @@ struct MeshEditorView: View {
 
     var alignmentControls: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Frankfort landmarks").font(.subheadline.weight(.semibold))
+            Text("Nose and ear landmarks").font(.subheadline.weight(.semibold))
             Text("Click each landmark on the scan. Drag to rotate between picks. Select a row to replace a point.")
                 .font(.caption).foregroundStyle(.secondary)
-            ForEach(Array(["Left porion", "Right porion", "Left orbitale"].enumerated()), id: \.offset) { index, name in
+            ForEach(Array(["Nose tip", "Left ear-canal entrance", "Right ear-canal entrance"].enumerated()), id: \.offset) { index, name in
                 Button {
                     model.landmarkSlot = min(index, model.landmarks.count)
                 } label: {
@@ -98,7 +98,7 @@ struct MeshEditorView: View {
                 .buttonStyle(.bordered)
                 .disabled(index > model.landmarks.count)
             }
-            Text("Porion: upper margin of the ear-canal opening. Orbitale: lower orbital margin. The saved frame is X anterior, Y left, Z superior; the porion midpoint becomes the origin.")
+            Text("Pick the tip of the nose and the center of each ear-canal entrance. Their plane becomes horizontal, with the ear midpoint at the origin, X toward the nose, Y left, and Z up. Left and right refer to the person being scanned.")
                 .font(.caption).foregroundStyle(.secondary)
             Button("Preview Alignment") {
                 let points = model.landmarks.map { [Double($0.x), Double($0.y), Double($0.z)] }

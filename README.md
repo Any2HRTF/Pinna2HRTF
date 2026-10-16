@@ -40,10 +40,11 @@ geometry stays in temporary storage.
 
 The macOS preparation workspace also supports the manual steps around this stage:
 
-1. Before preparation, choose **Align to Frankfort Plane…**. Pick left porion,
-   right porion, and left orbitale on the scan, preview the rigid alignment,
-   and save. The frame uses X anterior, Y left, and Z superior, with the porion
-   midpoint at the origin. Saving selects the aligned copy and sets crop rotation
+1. Before preparation, choose **Align Using Nose and Ears…**. Pick the nose tip,
+   the center of the left ear-canal entrance, then the right entrance. Left and
+   right refer to the person being scanned. Preview the rigid alignment and save.
+   The three points become horizontal; X points toward the nose, Y left, and Z
+   superior, with the ear midpoint at the origin. Saving selects the aligned copy and sets crop rotation
    to zero; scans already aligned outside the app can skip this step.
 2. Run **Scan Preparation**.
 3. Use **Edit Left Ear…** / **Edit Right Ear…** to open the canal and trim the
@@ -63,9 +64,12 @@ attachment boundary, plus at most one canal opening. It does not fill the new
 opening. Later simulation preprocessing closes the canal and estimates its
 source landmark using the existing pipeline.
 
-Alignment uses the three-landmark Frankfort definition described in this
-[cranial-orientation study](https://pmc.ncbi.nlm.nih.gov/articles/PMC8773378/).
+This nose-and-ear reference plane differs from the anatomical Frankfort plane,
+which uses porion and orbitale landmarks (see this
+[cranial-orientation study](https://pmc.ncbi.nlm.nih.gov/articles/PMC8773378/)).
 Landmarks are picked by the user; the app does not infer anatomical landmarks.
+Saved alignment operations record the method, ordered landmark labels, picked
+coordinates, and rigid transform.
 
 The default crop polygon and margins follow EvaPPM's aligned edited scans. They
 are not an automatic anatomical locator: calibrate orientation and placement for
