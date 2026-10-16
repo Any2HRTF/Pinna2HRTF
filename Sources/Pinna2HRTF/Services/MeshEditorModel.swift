@@ -245,8 +245,19 @@ final class MeshEditorModel: ObservableObject {
         constraint.worldUp = SCNVector3(0,0,1); constraint.isGimbalLockEnabled = true
         node.constraints = [constraint]
         scene.rootNode.addChildNode(node); cameraNode = node
+        // Equal lights on the two ear sides keep either ear readable when orbiting.
+        for side: Float in [-1, 1] {
+            let sideNode = SCNNode(); let sideLight = SCNLight()
+            sideLight.type = .directional; sideLight.intensity = 700
+            sideLight.castsShadow = false; sideNode.light = sideLight
+            sideNode.simdPosition = SIMD3<Float>(0.4, side, 0.6) * Float(span)
+            let aim = SCNLookAtConstraint(target: target)
+            aim.worldUp = SCNVector3(0,0,1); aim.isGimbalLockEnabled = true
+            sideNode.constraints = [aim]
+            target.addChildNode(sideNode)
+        }
         let lightNode = SCNNode(); let light = SCNLight()
-        light.type = .omni; light.intensity = 1000; lightNode.light = light
+        light.type = .omni; light.intensity = 250; lightNode.light = light
         node.addChildNode(lightNode)
         let ambientNode = SCNNode(); let ambient = SCNLight()
         ambient.type = .ambient; ambient.intensity = 320; ambientNode.light = ambient
@@ -257,7 +268,8 @@ final class MeshEditorModel: ObservableObject {
     func resetCamera() {
         cameraRevision += 1
         targetNode?.simdPosition = center
-        cameraNode?.simdPosition = center + SIMD3<Float>(0, Float(span * 1.7), Float(span * 0.15))
+        let side: Float = request.side == .right ? -1 : 1
+        cameraNode?.simdPosition = center + SIMD3<Float>(0, side * Float(span * 1.7), Float(span * 0.15))
         revision += 1
     }
     var pointOfView: SCNNode? { cameraNode }
