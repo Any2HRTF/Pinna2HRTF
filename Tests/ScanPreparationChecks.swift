@@ -1,8 +1,48 @@
 import Foundation
+import simd
 
 @main
 struct ScanPreparationChecks {
+    static func cuttingPlanePreviewChecks() {
+        let points: [SIMD3<Float>] = [SIMD3(-10,-4,0), SIMD3(10,-4,0), SIMD3(0,4,0), SIMD3(0,0,10)]
+        let faces: [UInt32] = [0,1,2, 0,3,1, 0,2,3, 1,3,2]
+        func fit(_ points: [SIMD3<Float>], _ origin: SIMD3<Float>, _ normal: SIMD3<Float>) -> CuttingPlanePreview {
+            CuttingPlanePreview.fit(vertices: points.flatMap { [$0.x, $0.y, $0.z] }, faces: faces,
+                                    origin: origin, normal: normal)!
+        }
+        let base = fit(points, .zero, SIMD3(0,0,1))
+        let tip = fit(points, SIMD3(0,0,5), SIMD3(0,0,1))
+        precondition(abs(base.width - 21.6) < 0.0001 && abs(base.height - 8.64) < 0.0001)
+        precondition(abs(tip.width / base.width - 0.5) < 0.0001)
+        precondition(abs(tip.height / base.height - 0.5) < 0.0001)
+        precondition(abs(tip.center.z - 5) < 0.0001)
+
+        // Angled planes fit the true section rather than the overall mesh bounds.
+        let rotation = simd_quatf(angle: 0.7, axis: simd_normalize(SIMD3<Float>(1,2,3)))
+        let translation = SIMD3<Float>(43,-25,12)
+        let rotated = points.map { rotation.act($0) + translation }
+        let normal = rotation.act(SIMD3<Float>(0,0,1))
+        let obliqueBase = fit(rotated, translation, normal)
+        let origin = rotation.act(SIMD3<Float>(0,0,5)) + translation
+        let obliqueTip = fit(rotated, origin, normal)
+        precondition(abs(obliqueTip.width / obliqueBase.width - 0.5) < 0.0001)
+        precondition(abs(obliqueTip.height / obliqueBase.height - 0.5) < 0.0001)
+        precondition(abs(simd_dot(obliqueTip.center - origin, normal)) < 0.0001)
+        for point in points.prefix(3) {
+            let crossing = rotation.act((point + points[3]) / 2) + translation
+            let local = obliqueTip.orientation.inverse.act(crossing - obliqueTip.center)
+            precondition(abs(local.x) < obliqueTip.width / 2 && abs(local.y) < obliqueTip.height / 2)
+            precondition(abs(local.z) < 0.0001)
+        }
+        let outside = fit(points, SIMD3(0,0,12), SIMD3(0,0,1))
+        precondition(outside.width.isFinite && outside.height.isFinite && outside.center.z == 12)
+        let tangent = fit(points, SIMD3(0,0,10), SIMD3(0,0,1))
+        precondition(tangent.width == 0.5 && tangent.height == 0.5)
+        print("Adaptive cutting-plane preview checks passed.")
+    }
+
     static func main() throws {
+        cuttingPlanePreviewChecks()
         let root = Defaults.packageRoot()
         var project = Defaults.newProject(packageRoot: root, index: 1)
         let oldJSON = try JSONEncoder().encode(project)

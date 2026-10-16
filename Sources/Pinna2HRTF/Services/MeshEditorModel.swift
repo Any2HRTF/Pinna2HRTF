@@ -295,15 +295,19 @@ final class MeshEditorModel: ObservableObject {
                 let p = (vertex(Int(faces[face*3])) + vertex(Int(faces[face*3+1])) + vertex(Int(faces[face*3+2]))) / 3
                 return simd_dot(p - origin, normal) < 0
             })
-            let plane = SCNPlane(width: span * 1.2, height: span * 1.2)
-            plane.firstMaterial?.diffuse.contents = NSColor.systemCyan.withAlphaComponent(0.18)
-            plane.firstMaterial?.isDoubleSided = true
-            plane.firstMaterial?.writesToDepthBuffer = false
-            plane.firstMaterial?.lightingModel = .constant
-            let node = SCNNode(geometry: plane); node.categoryBitMask = 8
-            node.simdPosition = origin
-            node.simdOrientation = simd_quatf(from: SIMD3<Float>(0,0,1), to: normal)
-            scene.rootNode.addChildNode(node); planeNode = node
+            // Keep the display orientation stable when only the kept side flips.
+            let displayNormal = normal * (flipPlane ? -1 : 1)
+            if let preview = CuttingPlanePreview.fit(vertices: vertices, faces: faces, origin: origin, normal: displayNormal) {
+                let plane = SCNPlane(width: CGFloat(preview.width), height: CGFloat(preview.height))
+                plane.firstMaterial?.diffuse.contents = NSColor.systemCyan.withAlphaComponent(0.18)
+                plane.firstMaterial?.isDoubleSided = true
+                plane.firstMaterial?.writesToDepthBuffer = false
+                plane.firstMaterial?.lightingModel = .constant
+                let node = SCNNode(geometry: plane); node.categoryBitMask = 8
+                node.simdPosition = preview.center
+                node.simdOrientation = preview.orientation
+                scene.rootNode.addChildNode(node); planeNode = node
+            }
         }
         if !highlighted.isEmpty {
             let selectedIndices: [UInt32] = highlighted.sorted().flatMap { face in Array(faces[face*3..<face*3+3]) }

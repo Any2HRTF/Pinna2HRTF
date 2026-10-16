@@ -126,7 +126,7 @@ struct MeshEditorView: View {
 
     var planeControls: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Move or angle the cyan plane. Red marks the side to remove. Apply the cut to preview the open boundary before saving.")
+            Text("Move or angle the cyan plane. Its preview automatically fits the mesh at the cut. The cut extends through the mesh; red marks the side to remove. Apply to preview the open boundary before saving.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 ForEach(["X", "Y", "Z"], id: \.self) { axis in
