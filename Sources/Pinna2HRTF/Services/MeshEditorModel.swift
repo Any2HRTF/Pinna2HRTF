@@ -26,6 +26,9 @@ final class MeshEditorModel: ObservableObject {
     @Published var planeZ = "0"
     @Published var planeOffset = 0.0
     @Published var flipPlane = false
+    @Published var fitPlanePreview = true
+    @Published var planePreviewWidth = 40.0
+    @Published var planePreviewHeight = 40.0
     @Published var revision = 0
     private(set) var cameraRevision = 0
     private var versions: [URL] = []
@@ -64,6 +67,24 @@ final class MeshEditorModel: ObservableObject {
         // Flip changes the kept side, not the location of the cutting plane.
         let direction = (normal ?? SIMD3<Float>(0,1,0)) * (flipPlane ? -1 : 1)
         return center + direction * Float(planeOffset)
+    }
+
+    var fittedPlanePreview: CuttingPlanePreview? {
+        guard planeOffset.isFinite, let normal else { return nil }
+        return CuttingPlanePreview.fit(vertices: vertices, faces: faces, origin: planeOrigin,
+                                       normal: normal * (flipPlane ? -1 : 1))
+    }
+
+    var validPlanePreviewSize: Bool {
+        planePreviewWidth.isFinite && planePreviewHeight.isFinite && planePreviewWidth > 0 && planePreviewHeight > 0
+    }
+
+    func updatePlanePreviewSizing() {
+        if !fitPlanePreview, let fitted = fittedPlanePreview {
+            planePreviewWidth = Double(fitted.width)
+            planePreviewHeight = Double(fitted.height)
+        }
+        refreshOverlays()
     }
 
     static func send(_ command: [String: Any]) async throws -> [String: Any] {
@@ -295,10 +316,10 @@ final class MeshEditorModel: ObservableObject {
                 let p = (vertex(Int(faces[face*3])) + vertex(Int(faces[face*3+1])) + vertex(Int(faces[face*3+2]))) / 3
                 return simd_dot(p - origin, normal) < 0
             })
-            // Keep the display orientation stable when only the kept side flips.
-            let displayNormal = normal * (flipPlane ? -1 : 1)
-            if let preview = CuttingPlanePreview.fit(vertices: vertices, faces: faces, origin: origin, normal: displayNormal) {
-                let plane = SCNPlane(width: CGFloat(preview.width), height: CGFloat(preview.height))
+            if let preview = fittedPlanePreview {
+                let custom = !fitPlanePreview && validPlanePreviewSize
+                let plane = SCNPlane(width: custom ? CGFloat(planePreviewWidth) : CGFloat(preview.width),
+                                     height: custom ? CGFloat(planePreviewHeight) : CGFloat(preview.height))
                 plane.firstMaterial?.diffuse.contents = NSColor.systemCyan.withAlphaComponent(0.18)
                 plane.firstMaterial?.isDoubleSided = true
                 plane.firstMaterial?.writesToDepthBuffer = false

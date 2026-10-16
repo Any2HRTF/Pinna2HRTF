@@ -53,7 +53,9 @@ The macOS preparation workspace also supports the manual steps around this stage
    mesh** explicitly includes occluded faces. **Cutting Plane** provides axis
    presets, an arbitrary normal, offset, a kept-side switch, and an open cut.
    The cyan preview fits the current mesh cross-section with a small margin;
-   it resizes as the plane moves or tilts. The cut extends through the mesh.
+   it resizes as the plane moves or tilts. Turn off **Fit plane preview to mesh**
+   to set a custom width and height in millimeters. Preview size only changes the
+   cyan overlay; the cut extends through the mesh.
 4. Inspect the result, undo/redo as needed, and **Save Reviewed Ear**. Saved edits
    feed the next pipeline stages automatically. **Require ear review before
    continuing** is an optional pause; it is off by default.

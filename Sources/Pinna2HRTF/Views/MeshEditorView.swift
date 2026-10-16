@@ -126,7 +126,7 @@ struct MeshEditorView: View {
 
     var planeControls: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Move or angle the cyan plane. Its preview automatically fits the mesh at the cut. The cut extends through the mesh; red marks the side to remove. Apply to preview the open boundary before saving.")
+            Text("Move or angle the cyan plane. Choose automatic fitting or set a smaller preview size below. The cut extends through the mesh; red marks the side to remove. Apply to preview the open boundary before saving.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 ForEach(["X", "Y", "Z"], id: \.self) { axis in
@@ -151,6 +151,26 @@ struct MeshEditorView: View {
             }
             Slider(value: $model.planeOffset, in: -model.span/2...model.span/2)
                 .accessibilityLabel("Cutting plane offset")
+            Toggle("Fit plane preview to mesh", isOn: $model.fitPlanePreview)
+                .help("Resize the cyan preview automatically to fit the mesh at the cut. Turn off to set its width and height.")
+            if !model.fitPlanePreview {
+                VStack(spacing: 6) {
+                    HStack {
+                        Text("Width (mm)")
+                        TextField("Width", value: $model.planePreviewWidth, format: .number.precision(.fractionLength(2)))
+                            .accessibilityLabel("Plane preview width (mm)")
+                    }
+                    HStack {
+                        Text("Height (mm)")
+                        TextField("Height", value: $model.planePreviewHeight, format: .number.precision(.fractionLength(2)))
+                            .accessibilityLabel("Plane preview height (mm)")
+                    }
+                }.textFieldStyle(.roundedBorder)
+                if !model.validPlanePreviewSize {
+                    Text("Enter positive dimensions. Showing the fitted preview until both values are valid.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Toggle("Flip kept side", isOn: $model.flipPlane)
             Button("Apply Open Cut") {
                 guard let normal = model.normal else { return }
@@ -163,6 +183,9 @@ struct MeshEditorView: View {
         .onChange(of: model.planeZ) { _ in model.refreshOverlays() }
         .onChange(of: model.planeOffset) { _ in model.refreshOverlays() }
         .onChange(of: model.flipPlane) { _ in model.refreshOverlays() }
+        .onChange(of: model.fitPlanePreview) { _ in model.updatePlanePreviewSizing() }
+        .onChange(of: model.planePreviewWidth) { _ in model.refreshOverlays() }
+        .onChange(of: model.planePreviewHeight) { _ in model.refreshOverlays() }
     }
 }
 
