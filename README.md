@@ -23,14 +23,15 @@ Create or import a project, select at least one ear mesh, and choose a save fold
 
 ## Full-head scan preparation (pipeline and macOS)
 
-On macOS, enable **Prepare ears from full-head scan**, choose an edited scan in
+On macOS, enable **Prepare ears from a full-head scan**, choose an edited scan in
 millimeters, enter its temporary **Crop rotation**, and select the ears to prepare.
 Run **Scan Preparation** before Mesh2PPM Inference or Preprocessing. Preview the
 prepared ears before continuing. Existing projects with separate ear inputs
-keep their current workflow. Windows controls are unchanged in this branch.
+keep their current workflow. The Windows app includes corresponding scan
+alignment, preparation, and ear-editing controls.
 
-This ports `EvaPPM/Scripts/_support/prepare_meshes.py`: convex ear cropping,
-cleanup and 0.75 mm isotropic remeshing (six iterations, capped at 150,000 faces),
+The workflow uses convex ear cropping, cleanup and 0.75 mm isotropic remeshing
+(six iterations, capped at 150,000 faces),
 Screened Poisson reconstruction (depth 7, one worker), attachment-boundary
 restoration, and residual-hole closure. Each exported ear must have one connected
 surface, consistent winding, finite coordinates, positive volume, and exactly
@@ -75,12 +76,13 @@ Landmarks are picked by the user; the app does not infer anatomical landmarks.
 Saved alignment operations record the method, ordered landmark labels, picked
 coordinates, and rigid transform.
 
-The default crop polygon and margins follow EvaPPM's aligned edited scans. They
-are not an automatic anatomical locator: calibrate orientation and placement for
-other scans. EvaPPM uses temporary Z rotations of 90 or 270 degrees depending on
-the scan; no rotation is guessed from a subject name. Prepared ears are exported in the crop frame
-(left +Y, right -Y). Crop margins, lateral limits, and remesh edge length are
-editable in the Mac app; YAML also exposes `crop_polygon_xz`.
+The default crop polygon and margins are calibrated for edited, aligned scans.
+They are not an automatic anatomical locator, so check orientation and placement
+for each scan. Nose-and-ear alignment in the app sets crop rotation to zero;
+externally aligned scans may need a Z rotation of 90 or 270 degrees. The app does
+not infer rotation from a subject name. Prepared ears are exported in the crop
+frame (left +Y, right -Y). Crop margins, lateral limits, and remesh edge length
+are editable in the Mac app; YAML also exposes `crop_polygon_xz`.
 
 For YAML runs, add this section (use `null` for unused `paths.left_ear` and
 `paths.right_ear`; prepared inputs are routed automatically):

@@ -45,6 +45,7 @@ struct ScanPreparationChecks {
         cuttingPlanePreviewChecks()
         let root = Defaults.packageRoot()
         var project = Defaults.newProject(packageRoot: root, index: 1)
+        precondition(!project.settings.inference.usePredictionsForPreprocessing)
         let oldJSON = try JSONEncoder().encode(project)
         let legacy = try JSONDecoder().decode(ProjectRecord.self, from: oldJSON)
         precondition(!legacy.scanPreparation.enabled)

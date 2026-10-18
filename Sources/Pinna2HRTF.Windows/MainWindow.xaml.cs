@@ -955,12 +955,12 @@ public partial class MainWindow : Window
         AddPathSetting(settings, "Save location", "project.save_location", saveLocationBox, BrowseSaveLocationClicked);
         settings.Children.Add(new TextBlock { Text = "Choose at least one ear mesh.", Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)), Margin = new Thickness(0, 3, 0, 4) });
         AddExpander(settings, "Optional scan preparation", [
-            AddSettingPanel("Prepare a full-head scan before preprocessing", "scan_preparation.enabled", scanPreparationEnabledBox, "Prepare full-head scan"),
+            AddSettingPanel("Prepare ears from a full-head scan", "scan_preparation.enabled", scanPreparationEnabledBox, "Prepare ears from a full-head scan"),
             PathSettingPanel("Full-head scan mesh", "scan_preparation.scan_path", scanPathBox, BrowseScanClicked),
             alignScanButton,
             AddSettingPanel("Prepare left ear", "scan_preparation.prepare_left", prepareLeftEarBox, "Prepare left ear"),
             AddSettingPanel("Prepare right ear", "scan_preparation.prepare_right", prepareRightEarBox, "Prepare right ear"),
-            new TextBlock { Text = "Align the scan with the nose tip and both ear-canal entrances before preparation. Leave preparation off to use the selected ear meshes as-is. Editing prepared ears is optional; saved current edits are used automatically.", TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 4, 0, 0), Foreground = mutedTextBrush }
+            new TextBlock { Text = "Align the scan with the nose tip and both ear-canal entrances first. Preparation crops, remeshes, and repairs the selected ears. Editing prepared ears is optional; saved current edits are used automatically. Mesh2PPM inference can be enabled separately.", TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 4, 0, 0), Foreground = mutedTextBrush }
         ]);
         alignScanButton.Click += BeginScanAlignmentClicked;
         scanPathBox.TextChanged += ProjectEdited;
@@ -1222,7 +1222,7 @@ public partial class MainWindow : Window
         prepareLeftEarBox.IsChecked = project?.Settings.ScanPreparation.PrepareLeft ?? true;
         prepareRightEarBox.IsChecked = project?.Settings.ScanPreparation.PrepareRight ?? true;
         UpdatePreparedEarEditButton();
-        usePredictionsBox.IsChecked = project?.Settings.Inference.UsePredictionsForPreprocessing ?? true;
+        usePredictionsBox.IsChecked = project?.Settings.Inference.UsePredictionsForPreprocessing ?? false;
         evaluationGridBox.Text = project?.Settings.Preprocessing.EvaluationGrid ?? "";
         useHeadRadiusBox.IsChecked = project?.Settings.Preprocessing.UseCustomHeadRadius == true;
         headRadiusBox.Text = project?.Settings.Preprocessing.HeadRadius ?? "";
@@ -1850,7 +1850,8 @@ public partial class MainWindow : Window
         if (!File.Exists(path))
             return;
         var text = File.ReadAllText(path);
-        project.Settings.Inference.UsePredictionsForPreprocessing = !text.Contains("use_predictions_for_preprocessing: false", StringComparison.OrdinalIgnoreCase);
+        var usePredictionsLine = text.Split('\n').FirstOrDefault(x => x.TrimStart().StartsWith("use_predictions_for_preprocessing:", StringComparison.OrdinalIgnoreCase));
+        project.Settings.Inference.UsePredictionsForPreprocessing = usePredictionsLine != null && bool.TryParse(usePredictionsLine[(usePredictionsLine.IndexOf(':') + 1)..].Trim(), out var usePredictions) && usePredictions;
         foreach (var (key, setter) in new (string, Action<string>)[] { ("min_frequency", v => project.Settings.Preprocessing.MinFrequency = v), ("max_frequency", v => project.Settings.Preprocessing.MaxFrequency = v), ("frequency_step_count", v => project.Settings.Preprocessing.FrequencyStepCount = Math.Max(int.TryParse(v, out var n) ? n : 129, 2).ToString(CultureInfo.InvariantCulture)), ("mesh_min_edge_length", v => project.Settings.Preprocessing.MeshMinEdgeLength = v), ("mesh_max_edge_length", v => project.Settings.Preprocessing.MeshMaxEdgeLength = v), ("mesh_max_error", v => project.Settings.Preprocessing.MeshMaxError = v), ("mesh_gamma", v => project.Settings.Preprocessing.MeshGamma = v), ("mesh_gamma_opposite", v => project.Settings.Preprocessing.MeshGammaOpposite = v) })
         {
             var line = text.Split('\n').FirstOrDefault(x => x.TrimStart().StartsWith(key + ":", StringComparison.OrdinalIgnoreCase));
@@ -3768,7 +3769,7 @@ class EnvironmentConfig { public string UvExecutable { get; set; } = ""; public 
 class ProjectRecord { public Guid Id { get; set; } = Guid.NewGuid(); public string Name { get; set; } = ""; public string LeftEar { get; set; } = ""; public string RightEar { get; set; } = ""; public string SaveLocation { get; set; } = ""; public Guid? FolderId { get; set; } public InputHandling InputHandling { get; set; } = InputHandling.Copy; public ProjectSettings Settings { get; set; } = new(); [JsonIgnore] public string StatusText { get; set; } = ""; [JsonIgnore] public bool IsRunning { get; set; } }
 class ProjectSettings { public InferenceSettings Inference { get; set; } = new(); public PreprocessingSettings Preprocessing { get; set; } = new(); public NumCalcSettings NumCalc { get; set; } = new(); public PostprocessingSettings? Postprocessing { get; set; } = new(); public ScanPreparationSettings ScanPreparation { get; set; } = new(); }
 class ScanPreparationSettings { public bool Enabled { get; set; } public string ScanPath { get; set; } = ""; public string OriginalScanPath { get; set; } = ""; public bool PrepareLeft { get; set; } = true; public bool PrepareRight { get; set; } public string? ReviewedLeft { get; set; } public string? ReviewedRight { get; set; } }
-class InferenceSettings { public string ModelConfig { get; set; } = ""; public string ModelCheckpoint { get; set; } = ""; public string TargetLeftFolder { get; set; } = "Input/Left"; public string TargetRightFolder { get; set; } = "Input/Right"; public string PredictionLeftFolder { get; set; } = "Intermediates/Left"; public string PredictionRightFolder { get; set; } = "Intermediates/Right"; public bool UsePredictionsForPreprocessing { get; set; } = true; }
+class InferenceSettings { public string ModelConfig { get; set; } = ""; public string ModelCheckpoint { get; set; } = ""; public string TargetLeftFolder { get; set; } = "Input/Left"; public string TargetRightFolder { get; set; } = "Input/Right"; public string PredictionLeftFolder { get; set; } = "Intermediates/Left"; public string PredictionRightFolder { get; set; } = "Intermediates/Right"; public bool UsePredictionsForPreprocessing { get; set; } = false; }
 class PreprocessingSettings { public string MinFrequency { get; set; } = "0"; public string MaxFrequency { get; set; } = "24000"; public string FrequencyStepCount { get; set; } = "129"; public string? EvaluationGrid { get; set; } public string? HeadRadius { get; set; } public bool? UseCustomHeadRadius { get; set; } public string SourceAssignmentFaceCount { get; set; } = "6"; public string MeshMinEdgeLength { get; set; } = "0.5"; public string MeshMaxEdgeLength { get; set; } = "10.0"; public string MeshMaxError { get; set; } = "0.5"; public string MeshGamma { get; set; } = "0.2"; public string MeshGammaOpposite { get; set; } = "0.1"; public ManualMicrophonePosition? SourcePositionInputLeft { get; set; } public ManualMicrophonePosition? SourcePositionInputRight { get; set; } }
 class ManualMicrophonePosition { public double X { get; set; } public double Y { get; set; } public double Z { get; set; } public string MeshPath { get; set; } = ""; public string MeshIdentity { get; set; } = ""; }
 class PostprocessingSettings { public bool Normalize { get; set; } = true; public string LevelOffsetDB { get; set; } = "-30";  public bool ResampleHrirs { get; set; } = false; public string SamplingRate { get; set; } = "48000"; }

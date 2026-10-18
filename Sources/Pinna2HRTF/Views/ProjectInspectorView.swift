@@ -120,7 +120,7 @@ struct ProjectInspectorView: View {
     var requiredPanel: some View {
         VStack(alignment: .leading, spacing: 9) {
             LabeledTextField("Project name", helpID: "project.name", text: projectStringBinding(\.name, refresh: false))
-            SettingToggle(title: "Prepare ears from full-head scan", helpID: "scan.enabled", isOn: scanBoolBinding(\.enabled))
+            SettingToggle(title: "Prepare ears from a full-head scan", helpID: "scan.enabled", isOn: scanBoolBinding(\.enabled))
             if store.selectedProject?.scanPreparation.enabled == true {
                 PathField("Full-head scan", helpID: "scan.path", text: scanTextBinding(\.scanPath), mode: .file)
                 Button("Align Using Nose and Ears…") { store.beginScanAlignment() }

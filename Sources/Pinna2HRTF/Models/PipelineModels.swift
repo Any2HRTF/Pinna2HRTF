@@ -122,7 +122,7 @@ struct InferenceSettings: Codable, Equatable {
     var targetRightFolder = "Input/Right"
     var predictionLeftFolder = "Intermediates/Left"
     var predictionRightFolder = "Intermediates/Right"
-    var usePredictionsForPreprocessing = true
+    var usePredictionsForPreprocessing = false
 }
 
 struct PreprocessingSettings: Codable, Equatable {

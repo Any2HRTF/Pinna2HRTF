@@ -189,8 +189,8 @@
   },
   {
     "id": "scan.enabled",
-    "title": "Prepare ears from full-head scan",
-    "description": "Prepare left and/or right ears using the EvaPPM crop, remeshing, Screened Poisson, and attachment-boundary restoration workflow before optional Mesh2PPM inference.",
+    "title": "Prepare ears from a full-head scan",
+    "description": "Crop the selected ears from an aligned full-head scan, remesh each surface, close scan holes, and restore the attachment boundary. Prepared meshes are then available for ear editing and preprocessing; Mesh2PPM inference is optional.",
     "publications": []
   },
   {
@@ -202,13 +202,13 @@
   {
     "id": "scan.rotation",
     "title": "Crop rotation",
-    "description": "Rotation around Z, in degrees, used to place the scan in the ear-crop coordinate frame. EvaPPM uses 90 or 270 depending on scan alignment. Prepared ears use that crop frame (left +Y, right -Y). Saving a nose and ear alignment sets this rotation to zero.",
+    "description": "Rotation around Z, in degrees, that sets the scan orientation for cropping. Align the scan with the nose tip and both ear-canal entrances in the app to set this to zero. Prepared ears use this crop frame (left +Y, right -Y).",
     "publications": []
   },
   {
     "id": "scan.target_edge",
     "title": "Target edge",
-    "description": "Isotropic remeshing edge length in millimeters, default 0.75. Screened Poisson depth 7 and one worker follow the EvaPPM workflow.",
+    "description": "Target edge length for isotropic remeshing, in millimeters (default 0.75). Hole closing uses Screened Poisson reconstruction at depth 7 with one worker.",
     "publications": []
   },
   {

@@ -147,7 +147,7 @@ enum ProjectConfigDocument {
         }
         project.settings.inference.modelConfig = modelPath("model_config_file", fallback: project.settings.inference.modelConfig)
         project.settings.inference.modelCheckpoint = modelPath("model_checkpoint", fallback: project.settings.inference.modelCheckpoint)
-        project.settings.inference.usePredictionsForPreprocessing = bool(inference, "use_predictions_for_preprocessing") ?? bool(inference, "enabled") ?? true
+        project.settings.inference.usePredictionsForPreprocessing = bool(inference, "use_predictions_for_preprocessing") ?? bool(inference, "enabled") ?? false
         let inferenceKeys: [(String, WritableKeyPath<InferenceSettings, String>)] = [
             ("target_left_folder", \.targetLeftFolder), ("target_right_folder", \.targetRightFolder),
             ("prediction_left_folder", \.predictionLeftFolder), ("prediction_right_folder", \.predictionRightFolder)

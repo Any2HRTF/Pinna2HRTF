@@ -23,6 +23,7 @@ from HRTFCalculation.ScanPreparation import (
 class ScanPreparationTests(unittest.TestCase):
     def test_existing_projects_keep_explicit_ears(self):
         config = PipelineConfig()
+        self.assertFalse(config.inference.use_predictions_for_preprocessing)
         self.assertFalse(config.scan_preparation.enabled)
         self.assertEqual(RunConfig.input_paths(config), (config.paths.left_ear, config.paths.right_ear))
 

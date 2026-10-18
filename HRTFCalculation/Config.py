@@ -102,7 +102,7 @@ class InferenceConfig(BaseModel):
     prediction_right_folder: str = "Intermediates/Right"
     prediction_parameters_left_folder: str = "Intermediates/Left"
     prediction_parameters_right_folder: str = "Intermediates/Right"
-    use_predictions_for_preprocessing: bool = True
+    use_predictions_for_preprocessing: bool = False
 
 
 class PreprocessingConfig(BaseModel):
