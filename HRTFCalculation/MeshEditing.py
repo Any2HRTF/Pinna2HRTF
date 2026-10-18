@@ -197,31 +197,40 @@ def execute(request):
 
 
 def reviewed_inputs(config, validate=True):
-    """Route reviewed ears, enforcing their provenance without closing new holes."""
+    """Use current manual ear edits when available; otherwise use prepared meshes."""
     folder = config.paths.output_dir / 'Prepared'
     settings = config.scan_preparation
     report = None
     results = []
-    for side, selected, reviewed in (
-        ('left', settings.prepare_left, settings.reviewed_left),
-        ('right', settings.prepare_right, settings.reviewed_right),
+    for side, selected, reviewed_attr in (
+        ('left', settings.prepare_left, 'reviewed_left'),
+        ('right', settings.prepare_right, 'reviewed_right'),
     ):
         if not selected:
             results.append(None)
             continue
+        reviewed = getattr(settings, reviewed_attr)
+        base = folder / f'{side.title()}.stl'
         if reviewed is None:
-            if validate and settings.require_manual_review:
-                raise ValueError(f'Review and save the prepared {side} ear before continuing, or turn off Require Ear Review.')
-            results.append(folder / f'{side.title()}.stl')
+            results.append(base)
             continue
         path = Path(reviewed)
         if validate:
-            if report is None:
-                report = json.loads((folder / 'mesh_preparation.json').read_text())
-            receipt = json.loads(path.with_suffix('.json').read_text())
-            base = folder / f'{side.title()}.stl'
-            if receipt.get('kind') != 'ear' or receipt.get('side') != side or receipt.get('generation') != report['generation'] or receipt.get('source_sha256') != digest(base) or receipt.get('output_sha256') != digest(path):
-                raise ValueError(f'The {side} ear edits are out of date. Reopen and save the current prepared ear.')
+            try:
+                if report is None:
+                    report = json.loads((folder / 'mesh_preparation.json').read_text())
+                receipt = json.loads(path.with_suffix('.json').read_text())
+                current = (receipt.get('kind') == 'ear' and receipt.get('side') == side and
+                           receipt.get('generation') == report['generation'] and
+                           receipt.get('source_sha256') == digest(base) and
+                           receipt.get('output_sha256') == digest(path))
+            except (OSError, ValueError, KeyError, TypeError):
+                current = False
+            if not current:
+                print(f'Saved {side} ear review is out of date; using the current prepared mesh.', flush=True)
+                setattr(settings, reviewed_attr, None)
+                results.append(base)
+                continue
             validate_ear(load(path, merge=True))
         results.append(path)
     return tuple(results)

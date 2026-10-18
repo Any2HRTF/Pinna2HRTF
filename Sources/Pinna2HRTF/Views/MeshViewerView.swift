@@ -74,15 +74,26 @@ struct MeshViewerView: View {
         }
         .frame(maxHeight: .infinity)
         .overlay(alignment: .topTrailing) {
-            if store.selectedMesh != nil && store.selectedImage == nil {
-                Button(action: store.resetSelectedMeshView) {
-                    Label("Reset view", systemImage: "arrow.counterclockwise")
+            VStack(alignment: .trailing, spacing: 8) {
+                if let project = store.selectedProject,
+                   let mesh = store.selectedMesh,
+                   let side = ArtifactScanner.preparedEarSide(for: mesh, in: project) {
+                    Button("Edit \(side.title) Ear…") { store.beginEarEditing(side) }
+                        .modifier(ViewerGlassButtonStyle())
+                        .controlSize(.regular)
+                        .help("Edit the selected prepared ear")
+                        .disabled(store.selectedProjectIsRunning)
                 }
-                .modifier(ViewerGlassButtonStyle())
-                .controlSize(.regular)
-                .help("Restore the default view of this mesh")
-                .padding(16)
+                if store.selectedMesh != nil && store.selectedImage == nil {
+                    Button(action: store.resetSelectedMeshView) {
+                        Label("Reset view", systemImage: "arrow.counterclockwise")
+                    }
+                    .modifier(ViewerGlassButtonStyle())
+                    .controlSize(.regular)
+                    .help("Restore the default view of this mesh")
+                }
             }
+            .padding(16)
         }
         .overlay(alignment: .bottom) {
             if let side = store.microphonePlacementSide {

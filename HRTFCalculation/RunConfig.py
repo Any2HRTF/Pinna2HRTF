@@ -32,10 +32,19 @@ def input_paths(config: PipelineConfig, validate: bool = False):
     return reviewed_inputs(config, validate=validate)
 
 
-def run_scan_preparation(config, dry_run, logger):
+def run_scan_preparation(config, dry_run, logger, force=False):
     settings = config.scan_preparation
     if settings.scan_path is None or settings.rotation_degrees is None:
         raise ValueError("Choose a full-head scan and an explicit crop rotation.")
+    if not force:
+        try:
+            from .ScanPreparation import validate_prepared
+            validate_prepared(config)
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        else:
+            logger(f"Scan preparation is current; reusing prepared ears in {config.paths.output_dir / 'Prepared'}")
+            return
     logger(f"Preparing full-head scan {settings.scan_path} into {config.paths.output_dir / 'Prepared'}; crop rotation {settings.rotation_degrees} degrees")
     if not dry_run:
         from .ScanPreparation import prepare_scan
@@ -50,10 +59,14 @@ def run_from_config(config: PipelineConfig, stages: Iterable[str] | None = None,
     selected = list(stages or ["all"])
     config = config.resolved()
     run_all = "all" in selected
-    if "scan-preparation" in selected or (run_all and config.scan_preparation.enabled):
+    if "scan-preparation" in selected:
+        run_scan_preparation(config, dry_run, logger, force=True)
+    elif run_all and config.scan_preparation.enabled:
         run_scan_preparation(config, dry_run, logger)
     if "inference" in selected or (run_all and config.inference.enabled):
         run_inference(config, dry_run, logger)
+    if "preprocessing" in selected and config.scan_preparation.enabled and "scan-preparation" not in selected:
+        run_scan_preparation(config, dry_run, logger)
     if "preprocessing" in selected or (run_all and config.preprocessing.enabled):
         run_preprocessing(config, dry_run, logger)
     if "numcalc" in selected or (run_all and config.numcalc.enabled):

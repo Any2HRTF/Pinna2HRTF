@@ -101,7 +101,7 @@ struct EnvironmentConfig: Codable, Equatable {
 struct ScanPreparationSettings: Codable, Equatable {
     var enabled = false
     var scanPath = ""
-    var rotationDegrees = ""
+    var rotationDegrees = "0"
     var originalScanPath: String?
     var requireManualReview: Bool?
     var reviewedLeftPath: String?
@@ -216,10 +216,10 @@ struct ProjectRecord: Identifiable, Codable, Equatable {
 extension ProjectRecord {
     var scanPreparation: ScanPreparationSettings { settings.scanPreparation ?? ScanPreparationSettings() }
     var pipelineLeftEar: String {
-        scanPreparation.enabled ? (scanPreparation.prepareLeft ? (scanPreparation.reviewedLeftPath ?? URL(fileURLWithPath: saveLocation).appendingPathComponent("Prepared/Left.stl").path) : "") : leftEar
+        scanPreparation.enabled ? (scanPreparation.prepareLeft ? (ArtifactScanner.preparedEarURL(for: .left, in: self)?.path ?? URL(fileURLWithPath: saveLocation).appendingPathComponent("Prepared/Left.stl").path) : "") : leftEar
     }
     var pipelineRightEar: String {
-        scanPreparation.enabled ? (scanPreparation.prepareRight ? (scanPreparation.reviewedRightPath ?? URL(fileURLWithPath: saveLocation).appendingPathComponent("Prepared/Right.stl").path) : "") : rightEar
+        scanPreparation.enabled ? (scanPreparation.prepareRight ? (ArtifactScanner.preparedEarURL(for: .right, in: self)?.path ?? URL(fileURLWithPath: saveLocation).appendingPathComponent("Prepared/Right.stl").path) : "") : rightEar
     }
 }
 

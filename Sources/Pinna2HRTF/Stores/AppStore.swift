@@ -946,9 +946,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
         if let issue = ProjectValidation.issues(for: project).first { return "Fix \(issue.id.split(separator: ".").last?.replacingOccurrences(of: "_", with: " ") ?? "settings"): \(issue.message)" }
         if let conflict = outputLocationConflict(for: project) { return conflict }
-        if project.scanPreparation.enabled && stage != .scanPreparation && !ArtifactScanner.earReviewsAreCurrent(project) {
-            return "Review and save the selected prepared ears before continuing."
-        }
         switch stage {
         case .scanPreparation:
             if !project.scanPreparation.enabled { return "Enable full-head scan preparation first." }
@@ -1143,6 +1140,14 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                     } catch { validationError = error.localizedDescription }
                 }
                 if (stage == .scanPreparation || stage == .inference), outcome == .done { store.clearStaleMicrophonePositions(for: project.id) }
+                if stage == .scanPreparation, outcome == .done,
+                   let index = store.projects.firstIndex(where: { $0.id == project.id }) {
+                    var scan = store.projects[index].scanPreparation
+                    scan.reviewedLeftPath = nil
+                    scan.reviewedRightPath = nil
+                    store.projects[index].settings.scanPreparation = scan
+                    store.persist()
+                }
                 if stage == .preprocessing, outcome == .done { store.recordPreprocessingSignature(for: project) }
                 do {
                     try await Task.detached(priority: .userInitiated) { try outputs.complete() }.value

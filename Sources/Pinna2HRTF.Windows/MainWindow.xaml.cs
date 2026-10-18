@@ -24,6 +24,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Windows.Foundation;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage.Pickers;
 using Windows.System;
 using Windows.UI.Core;
@@ -122,6 +123,9 @@ public partial class MainWindow : Window
     ManualMicrophonePosition? pendingMicrophonePosition;
     bool closingConfirmed;
     bool shutdownCleanupDone;
+    bool scanAlignmentMode;
+    readonly List<System.Numerics.Vector3> scanAlignmentLandmarks = [];
+    readonly List<MeshGeometryModel3D> scanAlignmentMarkerVisuals = [];
     Grid? contentGrid;
     ColumnDefinition? projectsColumn;
     ColumnDefinition? settingsColumn;
@@ -172,6 +176,8 @@ public partial class MainWindow : Window
     TextBlock placementCoordinates = new();
     StackPanel placementPanel = new();
     Border placementBorder = new();
+    Border scanAlignmentBorder = new();
+    TextBlock scanAlignmentStatus = new();
     Button placeLeftButton = new();
     Button placeRightButton = new();
     Border placeLeftButtonHost = new();
@@ -183,6 +189,7 @@ public partial class MainWindow : Window
     readonly TextBox projectNameBox = new();
     readonly TextBox leftEarBox = new();
     readonly TextBox rightEarBox = new();
+    readonly TextBox scanPathBox = new();
     readonly TextBox saveLocationBox = new();
     readonly TextBox evaluationGridBox = new();
     readonly TextBox headRadiusBox = new();
@@ -200,12 +207,18 @@ public partial class MainWindow : Window
     readonly TextBox maxCpuLoadBox = new();
     readonly TextBox levelOffsetBox = new();
     readonly CheckBox usePredictionsBox = new();
+    readonly CheckBox scanPreparationEnabledBox = new();
+    readonly CheckBox prepareLeftEarBox = new() { IsChecked = true };
+    readonly CheckBox prepareRightEarBox = new() { IsChecked = true };
+    readonly Button editPreparedEarButton = new() { Content = "Edit Ear…", Visibility = Visibility.Collapsed, MinHeight = 30 };
+    readonly Button alignScanButton = new() { Content = "Align scan with nose and ears" };
+    readonly Button applyScanAlignmentButton = new() { Content = "Apply Alignment", IsEnabled = false };
     readonly CheckBox useHeadRadiusBox = new();
     readonly CheckBox adaptiveFmmLengthBox = new();
     readonly CheckBox normalizeHrtfsBox = new();
     readonly CheckBox resampleHrirsBox = new();
     readonly ComboBox modelPicker = new();
-    readonly TextBlock[] stageStatus = [new(), new(), new(), new()];
+    readonly TextBlock[] stageStatus = [new(), new(), new(), new(), new()];
 
     public MainWindow()
     {
@@ -361,8 +374,8 @@ public partial class MainWindow : Window
         }
         RefreshModelOptions();
         RefreshProjectList();
-        if (selectedProject != null)
-            projectList.SelectedIndex = projects.IndexOf(selectedProject);
+        if (selectedProject != null && projectRows.TryGetValue(selectedProject.Id, out var selectedRow))
+            projectList.SelectedItem = selectedRow.Root;
         LoadSelectedProject();
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => RefreshArtifacts());
         UpdateViewerAppearance();
@@ -608,6 +621,7 @@ public partial class MainWindow : Window
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
         projectsActions = buttons;
         buttons.Children.Add(ProjectButton("\uE710", "New project", CreateProjectClicked));
+        buttons.Children.Add(ProjectButton("\uE8B7", "New project folder", CreateProjectFolderClicked));
         buttons.Children.Add(ProjectButton("\uE896", "Import project", ImportProjectClicked));
         buttons.Children.Add(ProjectButton("\uE8C8", "Duplicate selected project", DuplicateProjectClicked));
         buttons.Children.Add(ProjectButton("\uE74D", "Delete selected project", RemoveProjectClicked));
@@ -671,6 +685,12 @@ public partial class MainWindow : Window
         placeRightButton.Click += (_, _) => BeginPlacement("right");
         pickerPanel.Children.Add(placeLeftButtonHost);
         pickerPanel.Children.Add(placeRightButtonHost);
+        pickerPanel.Children.Add(editPreparedEarButton);
+        editPreparedEarButton.Click += async (_, _) =>
+        {
+            if (selectedProject != null && selectedArtifactPath != null && PreparedEarSideForPath(selectedProject, selectedArtifactPath) is string side)
+                await EditPreparedEarAsync(side);
+        };
         artifactPicker.Width = 230;
         artifactPicker.MinHeight = 30;
         artifactPicker.ItemsSource = artifacts;
@@ -778,6 +798,20 @@ public partial class MainWindow : Window
         placementPanel.Children.Add(donePositionButton);
         placementBorder.Child = placementPanel;
         viewerGrid.Children.Add(placementBorder);
+        scanAlignmentBorder = new Border { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(10, 12, 10, 0), Visibility = Visibility.Collapsed, Background = viewerHintBackgroundBrush, CornerRadius = new CornerRadius(5), Padding = new Thickness(10, 7, 10, 7) };
+        var alignmentPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        scanAlignmentStatus = new TextBlock { Text = "Click nose tip, then left and right ear-canal entrances", VerticalAlignment = VerticalAlignment.Center };
+        applyScanAlignmentButton.Click += async (_, _) => await ApplyScanAlignmentAsync();
+        var cancelAlignment = new Button { Content = "Cancel" };
+        cancelAlignment.Click += (_, _) => EndScanAlignment();
+        var restartAlignment = new Button { Content = "Restart picks" };
+        restartAlignment.Click += (_, _) => ResetScanAlignmentPicks();
+        alignmentPanel.Children.Add(scanAlignmentStatus);
+        alignmentPanel.Children.Add(restartAlignment);
+        alignmentPanel.Children.Add(applyScanAlignmentButton);
+        alignmentPanel.Children.Add(cancelAlignment);
+        scanAlignmentBorder.Child = alignmentPanel;
+        viewerGrid.Children.Add(scanAlignmentBorder);
         previewGrid.Children.Add(meshViewerBackground);
         Grid.SetRow(viewerGrid, 1);
         previewGrid.Children.Add(viewerGrid);
@@ -920,6 +954,16 @@ public partial class MainWindow : Window
         AddPathSetting(settings, "Right ear (optional)", "project.right_ear", rightEarBox, BrowseRightEarClicked);
         AddPathSetting(settings, "Save location", "project.save_location", saveLocationBox, BrowseSaveLocationClicked);
         settings.Children.Add(new TextBlock { Text = "Choose at least one ear mesh.", Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)), Margin = new Thickness(0, 3, 0, 4) });
+        AddExpander(settings, "Optional scan preparation", [
+            AddSettingPanel("Prepare a full-head scan before preprocessing", "scan_preparation.enabled", scanPreparationEnabledBox, "Prepare full-head scan"),
+            PathSettingPanel("Full-head scan mesh", "scan_preparation.scan_path", scanPathBox, BrowseScanClicked),
+            alignScanButton,
+            AddSettingPanel("Prepare left ear", "scan_preparation.prepare_left", prepareLeftEarBox, "Prepare left ear"),
+            AddSettingPanel("Prepare right ear", "scan_preparation.prepare_right", prepareRightEarBox, "Prepare right ear"),
+            new TextBlock { Text = "Align the scan with the nose tip and both ear-canal entrances before preparation. Leave preparation off to use the selected ear meshes as-is. Editing prepared ears is optional; saved current edits are used automatically.", TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 4, 0, 0), Foreground = mutedTextBrush }
+        ]);
+        alignScanButton.Click += BeginScanAlignmentClicked;
+        scanPathBox.TextChanged += ProjectEdited;
         AddSetting(settings, "Use Mesh2PPM", "project.use_bezierppm", usePredictionsBox, "Use Mesh2PPM");
         AddExpander(settings, "Mesh2PPM", [AddSettingPanel("Model", "inference.model", modelPicker)]);
         AddExpander(settings, "Mesh2HRTF", [PathSettingPanel("Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked), AddSettingPanel("Use custom head radius", "mesh2hrtf.use_head_radius", useHeadRadiusBox, "Use custom head radius"), AddSettingPanel("Head radius", "mesh2hrtf.head_radius", headRadiusBox), AddSettingPanel("Min frequency", "mesh2hrtf.min_frequency", minFrequencyBox), AddSettingPanel("Max frequency", "mesh2hrtf.max_frequency", maxFrequencyBox), AddSettingPanel("Frequency steps (minimum 2)", "mesh2hrtf.frequency_steps", frequencyStepsBox), AddSettingPanel("Microphone faces", "mesh2hrtf.microphone_faces", microphoneFacesBox)]);
@@ -1065,6 +1109,33 @@ public partial class MainWindow : Window
         parent.Children.Add(expander);
     }
 
+    void UpdatePreparedEarEditButton()
+    {
+        var project = selectedProject;
+        var side = project != null && selectedArtifactPath != null ? PreparedEarSideForPath(project, selectedArtifactPath) : null;
+        editPreparedEarButton.Visibility = side == null ? Visibility.Collapsed : Visibility.Visible;
+        editPreparedEarButton.IsEnabled = side != null && project != null && ScanPreparationOutputsCurrent(project) && !runningProcesses.ContainsKey(project.Id);
+        ToolTipService.SetToolTip(editPreparedEarButton, side == null ? null : EarReviewIsCurrent(project!, side) ? "Edit the reviewed prepared ear" : "Review this prepared ear before continuing");
+    }
+
+    string? PreparedEarSideForPath(ProjectRecord project, string path)
+    {
+        var settings = project.Settings.ScanPreparation;
+        if (!settings.Enabled || string.IsNullOrWhiteSpace(project.SaveLocation)) return null;
+        foreach (var (side, selected, reviewed) in new[]
+        {
+            ("left", settings.PrepareLeft, settings.ReviewedLeft),
+            ("right", settings.PrepareRight, settings.ReviewedRight)
+        })
+        {
+            if (!selected) continue;
+            var prepared = Path.Combine(project.SaveLocation, "Prepared", side == "left" ? "Left.stl" : "Right.stl");
+            if (SamePath(path, prepared)) return side;
+            if (EarReviewIsCurrent(project, side) && !string.IsNullOrWhiteSpace(reviewed) && SamePath(path, reviewed)) return side;
+        }
+        return null;
+    }
+
     Border BuildStagesPane()
     {
         var border = new Border { BorderBrush = borderBrush, BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(14, 8, 14, 12) };
@@ -1119,11 +1190,11 @@ public partial class MainWindow : Window
 
     void ProjectSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (projectList.SelectedIndex >= 0 && projectList.SelectedIndex < projects.Count && !ReferenceEquals(selectedProject, projects[projectList.SelectedIndex]))
+        if (projectList.SelectedItem is Grid { Tag: ProjectRecord project } && !ReferenceEquals(selectedProject, project))
         {
             SaveMeshCamera();
             ResetViewer();
-            selectedProject = projects[projectList.SelectedIndex];
+            selectedProject = project;
             LoadSelectedProject();
             RefreshArtifacts();
         }
@@ -1131,10 +1202,9 @@ public partial class MainWindow : Window
 
     void SelectProjectFromContext(ProjectRecord project)
     {
-        var index = projects.IndexOf(project);
-        if (index < 0) return;
+        if (!projects.Contains(project)) return;
         selectedProject = project;
-        if (projectList.SelectedIndex != index) projectList.SelectedIndex = index;
+        if (projectRows.TryGetValue(project.Id, out var row) && !ReferenceEquals(projectList.SelectedItem, row.Root)) projectList.SelectedItem = row.Root;
         else { LoadSelectedProject(); RefreshArtifacts(); RefreshPipelineStatus(); }
     }
 
@@ -1147,6 +1217,11 @@ public partial class MainWindow : Window
         leftEarBox.Text = project?.LeftEar ?? "";
         rightEarBox.Text = project?.RightEar ?? "";
         saveLocationBox.Text = project?.SaveLocation ?? "";
+        scanPreparationEnabledBox.IsChecked = project?.Settings.ScanPreparation.Enabled ?? false;
+        scanPathBox.Text = project?.Settings.ScanPreparation.ScanPath ?? "";
+        prepareLeftEarBox.IsChecked = project?.Settings.ScanPreparation.PrepareLeft ?? true;
+        prepareRightEarBox.IsChecked = project?.Settings.ScanPreparation.PrepareRight ?? true;
+        UpdatePreparedEarEditButton();
         usePredictionsBox.IsChecked = project?.Settings.Inference.UsePredictionsForPreprocessing ?? true;
         evaluationGridBox.Text = project?.Settings.Preprocessing.EvaluationGrid ?? "";
         useHeadRadiusBox.IsChecked = project?.Settings.Preprocessing.UseCustomHeadRadius == true;
@@ -1234,7 +1309,8 @@ public partial class MainWindow : Window
         _ => ""
     };
 
-    static GeneratedOutputManifest.OutputStage OutputStageFor(Stage stage) => stage == Stage.Inference
+    static GeneratedOutputManifest.OutputStage OutputStageFor(Stage stage) => stage == Stage.ScanPreparation
+        ? GeneratedOutputManifest.OutputStage.Preprocessing : stage == Stage.Inference
         ? GeneratedOutputManifest.OutputStage.Inference : stage == Stage.Preprocessing
         ? GeneratedOutputManifest.OutputStage.Preprocessing : stage == Stage.Numcalc
         ? GeneratedOutputManifest.OutputStage.Numcalc : GeneratedOutputManifest.OutputStage.Postprocessing;
@@ -1370,6 +1446,7 @@ public partial class MainWindow : Window
         var project = selectedProject;
         var previousLeftEar = project.LeftEar;
         var previousRightEar = project.RightEar;
+        var previousScanPath = project.Settings.ScanPreparation.ScanPath;
         project.Name = projectNameBox.Text.Trim();
         project.LeftEar = leftEarBox.Text.Trim();
         project.RightEar = rightEarBox.Text.Trim();
@@ -1378,6 +1455,16 @@ public partial class MainWindow : Window
         UpdatePlacementButtons();
         if (placementSide != null && (project.Settings.Inference.UsePredictionsForPreprocessing || !PlacementIsCurrent())) EndPlacement();
         project.Settings.Preprocessing.EvaluationGrid = evaluationGridBox.Text.Trim();
+        project.Settings.ScanPreparation.Enabled = scanPreparationEnabledBox.IsChecked == true;
+        project.Settings.ScanPreparation.ScanPath = scanPathBox.Text.Trim();
+        project.Settings.ScanPreparation.PrepareLeft = prepareLeftEarBox.IsChecked == true;
+        project.Settings.ScanPreparation.PrepareRight = prepareRightEarBox.IsChecked == true;
+        if (!SamePath(previousScanPath, project.Settings.ScanPreparation.ScanPath) && !string.IsNullOrWhiteSpace(project.Settings.ScanPreparation.ScanPath))
+        {
+            project.Settings.ScanPreparation.OriginalScanPath = project.Settings.ScanPreparation.ScanPath;
+            project.Settings.ScanPreparation.ReviewedLeft = null;
+            project.Settings.ScanPreparation.ReviewedRight = null;
+        }
         project.Settings.Preprocessing.UseCustomHeadRadius = useHeadRadiusBox.IsChecked == true;
         project.Settings.Preprocessing.HeadRadius = headRadiusBox.Text.Trim();
         project.Settings.Preprocessing.MinFrequency = minFrequencyBox.Text.Trim();
@@ -1424,18 +1511,14 @@ public partial class MainWindow : Window
 
     void RefreshProjectList()
     {
-        var index = selectedProject == null ? -1 : projects.IndexOf(selectedProject);
-        var matching = projectList.Items.Count == projects.Count && projects.Select((project, i) => projectList.Items[i] is Grid row && ReferenceEquals(row.Tag, project)).All(x => x);
-        if (!matching)
+        projectRows.Clear();
+        projectList.Items.Clear();
+        foreach (var project in projects.Where(p => p.FolderId == null)) AddProjectListRow(project);
+        foreach (var folder in registry.Folders)
         {
-            projectRows.Clear();
-            projectList.Items.Clear();
-            foreach (var project in projects)
-            {
-                var ui = new ProjectRowUi(project, SelectProjectFromContext, DuplicateProject, RemoveProject);
-                projectRows[project.Id] = ui;
-                projectList.Items.Add(ui.Root);
-            }
+            projectList.Items.Add(BuildProjectFolderRow(folder));
+            if (folder.IsExpanded)
+                foreach (var project in projects.Where(p => p.FolderId == folder.Id)) AddProjectListRow(project);
         }
         foreach (var project in projects)
         {
@@ -1451,8 +1534,50 @@ public partial class MainWindow : Window
                 ui.Spinner.Visibility = project.IsRunning ? Visibility.Visible : Visibility.Collapsed;
             }
         }
-        if (index >= 0 && index < projectList.Items.Count && projectList.SelectedIndex != index)
-            projectList.SelectedIndex = index;
+        if (selectedProject != null && projectRows.TryGetValue(selectedProject.Id, out var selectedRow))
+            projectList.SelectedItem = selectedRow.Root;
+    }
+
+    void AddProjectListRow(ProjectRecord project)
+    {
+        var ui = new ProjectRowUi(project, SelectProjectFromContext, DuplicateProject, RemoveProject, MoveProjectToFolder, registry.Folders, project.FolderId != null);
+        ui.Root.CanDrag = true;
+        ui.Root.AllowDrop = true;
+        ui.Root.DragStarting += ProjectDragStarting;
+        ui.Root.DragOver += ProjectFolderDragOver;
+        ui.Root.Drop += async (_, args) =>
+        {
+            if (!args.DataView.Contains(StandardDataFormats.Text)) return;
+            var text = await args.DataView.GetTextAsync();
+            if (Guid.TryParse(text, out var id) && id != project.Id && projects.FirstOrDefault(item => item.Id == id) is ProjectRecord moving)
+                MoveProjectToFolder(moving, project.FolderId);
+        };
+        projectRows[project.Id] = ui;
+        projectList.Items.Add(ui.Root);
+    }
+
+    Grid BuildProjectFolderRow(ProjectFolder folder)
+    {
+        var row = new Grid { Height = 34, Margin = new Thickness(2, 5, 2, 1), Tag = folder, Background = new SolidColorBrush(ColorHelper.FromArgb(25, 120, 130, 140)), AllowDrop = true };
+        row.DragOver += ProjectFolderDragOver;
+        row.Drop += ProjectFolderDrop;
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var toggle = new Button { Content = folder.IsExpanded ? "⌄" : "›", Width = 24, Height = 24, MinWidth = 0, MinHeight = 0, Padding = new Thickness(0), Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), Tag = folder };
+        toggle.Click += (_, _) => { folder.IsExpanded = !folder.IsExpanded; Persist(); RefreshProjectList(); };
+        row.Children.Add(toggle);
+        var title = new TextBlock { Text = folder.Name, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(5, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis };
+        Grid.SetColumn(title, 1);
+        row.Children.Add(title);
+        var menu = new MenuFlyout();
+        var rename = new MenuFlyoutItem { Text = "Rename Folder" };
+        rename.Click += async (_, _) => await EditProjectFolderAsync(folder);
+        var remove = new MenuFlyoutItem { Text = "Remove Folder" };
+        remove.Click += (_, _) => RemoveProjectFolder(folder);
+        menu.Items.Add(rename);
+        menu.Items.Add(remove);
+        row.ContextFlyout = menu;
+        return row;
     }
 
     void LoadSelectedProjectLog()
@@ -1489,10 +1614,205 @@ public partial class MainWindow : Window
     }
 
     void CreateProjectClicked(object sender, RoutedEventArgs e) => CreateProject();
+    async void CreateProjectFolderClicked(object sender, RoutedEventArgs e) => await EditProjectFolderAsync();
     void ImportProjectClicked(object sender, RoutedEventArgs e) => _ = ImportProjectAsync();
     void DuplicateProjectClicked(object sender, RoutedEventArgs e) => DuplicateProject();
     void RemoveProjectClicked(object sender, RoutedEventArgs e) => RemoveProject();
     void StageButtonClicked(object sender, RoutedEventArgs e) { if (sender is Button button && button.Tag is Stage stage) RunOrStop(stage); }
+
+    async Task EditProjectFolderAsync(ProjectFolder? folder = null)
+    {
+        var nameBox = new TextBox { Text = folder?.Name ?? "", PlaceholderText = "Folder name", MinWidth = 280 };
+        var dialog = new ContentDialog
+        {
+            Title = folder == null ? "New Project Folder" : "Rename Project Folder",
+            Content = nameBox,
+            PrimaryButtonText = "Save",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = Root.XamlRoot
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        var name = nameBox.Text.Trim();
+        if (name.Length == 0) return;
+        if (folder == null)
+            registry.Folders.Add(new ProjectFolder { Name = name });
+        else
+            folder.Name = name;
+        Persist();
+        RefreshProjectList();
+    }
+
+    void RemoveProjectFolder(ProjectFolder folder)
+    {
+        foreach (var project in projects.Where(p => p.FolderId == folder.Id)) project.FolderId = null;
+        registry.Folders.RemoveAll(f => f.Id == folder.Id);
+        Persist();
+        RefreshProjectList();
+    }
+
+    void MoveProjectToFolder(ProjectRecord project, Guid? folderId)
+    {
+        if (folderId != null && registry.Folders.All(folder => folder.Id != folderId)) return;
+        project.FolderId = folderId;
+        if (folderId is Guid id)
+        {
+            var folder = registry.Folders.FirstOrDefault(item => item.Id == id);
+            if (folder != null) folder.IsExpanded = true;
+        }
+        selectedProject = project;
+        Persist();
+        RefreshProjectList();
+        if (projectRows.TryGetValue(project.Id, out var row)) projectList.SelectedItem = row.Root;
+    }
+
+    void ProjectDragStarting(UIElement sender, DragStartingEventArgs args)
+    {
+        if (sender is FrameworkElement { Tag: ProjectRecord project })
+        {
+            args.Data.SetText(project.Id.ToString());
+            args.AllowedOperations = DataPackageOperation.Move;
+        }
+    }
+
+    void ProjectFolderDragOver(object sender, DragEventArgs args) => args.AcceptedOperation = DataPackageOperation.Move;
+
+    async void ProjectFolderDrop(object sender, DragEventArgs args)
+    {
+        if (sender is not FrameworkElement { Tag: ProjectFolder folder } || !args.DataView.Contains(StandardDataFormats.Text)) return;
+        var text = await args.DataView.GetTextAsync();
+        if (Guid.TryParse(text, out var id) && projects.FirstOrDefault(project => project.Id == id) is ProjectRecord project)
+            MoveProjectToFolder(project, folder.Id);
+    }
+
+    void BeginScanAlignmentClicked(object sender, RoutedEventArgs e)
+    {
+        var project = selectedProject;
+        if (project == null) return;
+        if (runningProcesses.ContainsKey(project.Id))
+        {
+            AppendLog("Wait for the running project stage to finish before aligning its scan.", project.Id);
+            return;
+        }
+        var source = !string.IsNullOrWhiteSpace(project.Settings.ScanPreparation.OriginalScanPath)
+            ? project.Settings.ScanPreparation.OriginalScanPath : project.Settings.ScanPreparation.ScanPath;
+        if (string.IsNullOrWhiteSpace(source) || !File.Exists(source))
+        {
+            AppendLog("Choose a full-head scan before aligning it.", project.Id);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(project.SaveLocation))
+        {
+            AppendLog("Choose a project folder before saving the aligned scan.", project.Id);
+            return;
+        }
+        ResetScanAlignmentPicks();
+        if (placementSide != null) EndPlacement();
+        scanAlignmentMode = true;
+        alignScanButton.IsEnabled = false;
+        scanAlignmentStatus.Text = "Click nose tip, then left and right ear-canal entrances";
+        scanAlignmentBorder.Visibility = Visibility.Visible;
+        OpenArtifact(new Artifact("Full-head scan alignment", source));
+    }
+
+    void EndScanAlignment()
+    {
+        scanAlignmentMode = false;
+        ResetScanAlignmentPicks();
+        scanAlignmentBorder.Visibility = Visibility.Collapsed;
+        alignScanButton.IsEnabled = true;
+    }
+
+    void ResetScanAlignmentPicks()
+    {
+        if (meshViewport.Items != null)
+            foreach (var marker in scanAlignmentMarkerVisuals) meshViewport.Items.Remove(marker);
+        foreach (var marker in scanAlignmentMarkerVisuals) meshVisuals.Remove(marker);
+        scanAlignmentMarkerVisuals.Clear();
+        scanAlignmentLandmarks.Clear();
+        applyScanAlignmentButton.IsEnabled = false;
+        scanAlignmentStatus.Text = "Click nose tip, then left and right ear-canal entrances";
+    }
+
+    async Task ApplyScanAlignmentAsync()
+    {
+        var project = selectedProject;
+        if (!scanAlignmentMode || project == null || scanAlignmentLandmarks.Count != 3) return;
+        var source = !string.IsNullOrWhiteSpace(project.Settings.ScanPreparation.OriginalScanPath)
+            ? project.Settings.ScanPreparation.OriginalScanPath : project.Settings.ScanPreparation.ScanPath;
+        if (string.IsNullOrWhiteSpace(source) || !File.Exists(source)) return;
+        scanAlignmentStatus.Text = "Aligning scan…";
+        applyScanAlignmentButton.IsEnabled = false;
+        alignScanButton.IsEnabled = false;
+        var workspace = Path.Combine(Path.GetTempPath(), "pinna-scan-align-" + Guid.NewGuid().ToString("N"));
+        var destination = Path.Combine(project.SaveLocation, "MeshEdits", "AlignedScan.ply");
+        try
+        {
+            Directory.CreateDirectory(workspace);
+            var request = new Dictionary<string, object>
+            {
+                ["source"] = source,
+                ["workspace"] = workspace,
+                ["destination"] = destination,
+                ["points"] = scanAlignmentLandmarks.Select(point => new[] { (double)point.X, point.Y, point.Z }).ToArray()
+            };
+            var executable = BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
+            if (!File.Exists(executable)) throw new FileNotFoundException("The app's Python runtime is missing.", executable);
+            var script = """
+                import json, sys
+                from pathlib import Path
+                from HRTFCalculation.MeshEditing import execute
+                r=json.load(sys.stdin); w=Path(r['workspace']); w.mkdir(parents=True, exist_ok=True)
+                src=r['source']; opened=w/'source.ply'; aligned=w/'aligned.ply'; frame=w/'frame'
+                first=execute({'action':'open','source':src,'original_source':src,'output':str(opened),'frame':str(frame)})
+                result=execute({'action':'align','source':str(opened),'output':str(aligned),'frame':str(frame),'points':r['points']})
+                labels=['nose_tip','left_ear_canal_entrance','right_ear_canal_entrance']
+                operation={'action':'align','points':r['points'],'transform':result['transform'],'alignment_method':result['alignment_method'],'landmark_labels':labels}
+                saved=execute({'action':'save','kind':'alignment','source':str(aligned),'original_source':src,'original_sha256':first['source_sha256'],'destination':r['destination'],'operations':[operation]})
+                print(json.dumps(saved, allow_nan=False))
+                """;
+            var start = new ProcessStartInfo(executable) { WorkingDirectory = packageRoot, UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            start.ArgumentList.Add("-c"); start.ArgumentList.Add(script);
+            ApplyProcessEnvironment(start);
+            using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start the mesh alignment tool.");
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            await process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(request, jsonOptions));
+            process.StandardInput.Close();
+            await process.WaitForExitAsync();
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
+            if (process.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "The scan alignment failed." : stderr.Trim());
+            using (JsonDocument.Parse(stdout)) { }
+            project.Settings.ScanPreparation.OriginalScanPath = source;
+            project.Settings.ScanPreparation.ReviewedLeft = null;
+            project.Settings.ScanPreparation.ReviewedRight = null;
+            project.Settings.ScanPreparation.ScanPath = destination;
+            project.Settings.ScanPreparation.Enabled = true;
+            project.Settings.Preprocessing.SourcePositionInputLeft = null;
+            project.Settings.Preprocessing.SourcePositionInputRight = null;
+            loading = true;
+            scanPreparationEnabledBox.IsChecked = true;
+            scanPathBox.Text = destination;
+            loading = false;
+            EndScanAlignment();
+            Persist();
+            AppendLog("Aligned full-head scan using the nose tip and both ear-canal entrances.", project.Id);
+            RefreshArtifacts();
+            OpenArtifact(new Artifact("Aligned full-head scan", destination));
+        }
+        catch (Exception error)
+        {
+            scanAlignmentStatus.Text = error.Message;
+            applyScanAlignmentButton.IsEnabled = scanAlignmentLandmarks.Count == 3;
+            AppendLog("Could not align scan: " + error.Message, project.Id);
+        }
+        finally
+        {
+            alignScanButton.IsEnabled = true;
+            try { if (Directory.Exists(workspace)) Directory.Delete(workspace, true); } catch { }
+        }
+    }
 
     async Task ImportProjectAsync()
     {
@@ -1672,6 +1992,7 @@ public partial class MainWindow : Window
 
     async void BrowseLeftEarClicked(object sender, RoutedEventArgs e) { var path = await PickFileAsync(leftEarBox.Text); if (path != null) leftEarBox.Text = path; }
     async void BrowseRightEarClicked(object sender, RoutedEventArgs e) { var path = await PickFileAsync(rightEarBox.Text); if (path != null) rightEarBox.Text = path; }
+    async void BrowseScanClicked(object sender, RoutedEventArgs e) { var path = await PickFileAsync(scanPathBox.Text); if (path != null) scanPathBox.Text = path; }
     async void BrowseSaveLocationClicked(object sender, RoutedEventArgs e) { var path = await PickFolderAsync(saveLocationBox.Text); if (path != null) saveLocationBox.Text = path; }
     async void BrowseEvaluationGridClicked(object sender, RoutedEventArgs e) { var path = await PickFolderAsync(evaluationGridBox.Text); if (path != null) evaluationGridBox.Text = path; }
 
@@ -1755,6 +2076,20 @@ public partial class MainWindow : Window
     {
         var list = new List<Artifact>();
         var hrtf = Path.Combine(project.SaveLocation, "HRTF");
+        if (project.Settings.ScanPreparation.Enabled && ScanPreparationOutputsCurrent(project))
+        {
+            foreach (var (side, selected, reviewed) in new[]
+            {
+                ("left", project.Settings.ScanPreparation.PrepareLeft, project.Settings.ScanPreparation.ReviewedLeft),
+                ("right", project.Settings.ScanPreparation.PrepareRight, project.Settings.ScanPreparation.ReviewedRight)
+            })
+            {
+                if (!selected) continue;
+                var prepared = Path.Combine(project.SaveLocation, "Prepared", side == "left" ? "Left.stl" : "Right.stl");
+                var useReviewed = EarReviewIsCurrent(project, side) && !string.IsNullOrWhiteSpace(reviewed);
+                list.Add(new Artifact(useReviewed ? $"Reviewed {side} ear" : $"Prepared {side} ear", useReviewed ? reviewed! : prepared, side));
+            }
+        }
         if (!string.IsNullOrWhiteSpace(project.LeftEar))
         {
             list.Add(new Artifact("Input left ear", project.LeftEar, "left"));
@@ -1774,7 +2109,7 @@ public partial class MainWindow : Window
                 .OrderBy(x => PlotOrder(x))
                 .ThenBy(x => x, StringComparer.OrdinalIgnoreCase))
                 list.Add(new Artifact(PlotTitle(file), file));
-        return list;
+        return list.DistinctBy(x => Path.GetFullPath(x.Path), StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     static int PlotOrder(string path)
@@ -1809,6 +2144,7 @@ public partial class MainWindow : Window
         selectedArtifactSide = ArtifactSide(artifact);
         RememberSelectedArtifact(artifact.Path);
         selectedArtifactText.Text = Path.GetFileName(artifact.Path);
+        UpdatePreparedEarEditButton();
         UpdatePlacementButtons();
         if (artifact.IsImage)
         {
@@ -1980,6 +2316,32 @@ public partial class MainWindow : Window
             }
             else
                 AppendLog("Could not hit the active mesh at the selected position. Try clicking directly on the mesh surface.", selectedProject?.Id);
+        }
+        else if (scanAlignmentMode && mode == MeshPointerMode.Rotate && wasClick && currentMesh != null && meshVisual != null)
+        {
+            var hit = meshViewport.FindHits(point.Position).FirstOrDefault(x => ReferenceEquals(x.ModelHit, meshVisual));
+            if (hit != null && scanAlignmentLandmarks.Count < 3)
+            {
+                var landmark = currentMesh.ToRaw(hit.PointHit);
+                scanAlignmentLandmarks.Add(landmark);
+                var markerColors = new[] { new Color4(1f, 0.2f, 0.2f, 1f), new Color4(0.2f, 0.45f, 1f, 1f), new Color4(0.2f, 0.9f, 0.35f, 1f) };
+                var marker = new MeshGeometryModel3D
+                {
+                    Geometry = MeshLoader.CreateSphere(currentMesh.ToDisplay(landmark), currentMesh.MaximumDimension * 0.006),
+                    Material = new PhongMaterial { DiffuseColor = markerColors[scanAlignmentLandmarks.Count - 1], EmissiveColor = markerColors[scanAlignmentLandmarks.Count - 1] },
+                    IsHitTestVisible = false
+                };
+                meshViewport.Items.Add(marker);
+                meshVisuals.Add(marker);
+                scanAlignmentMarkerVisuals.Add(marker);
+                var names = new[] { "nose tip", "left ear-canal entrance", "right ear-canal entrance" };
+                scanAlignmentStatus.Text = scanAlignmentLandmarks.Count == 3
+                    ? "Three landmarks picked. Apply the alignment or cancel."
+                    : $"Picked {scanAlignmentLandmarks.Count}/3. Next: {names[scanAlignmentLandmarks.Count]}";
+                applyScanAlignmentButton.IsEnabled = scanAlignmentLandmarks.Count == 3;
+            }
+            else if (hit == null)
+                AppendLog("Click directly on the scan surface to place each landmark.", selectedProject?.Id);
         }
     }
 
@@ -2509,6 +2871,8 @@ public partial class MainWindow : Window
         {
             if (!string.IsNullOrWhiteSpace(project.LeftEar)) prepared.LeftEar = CopyInput(project.LeftEar, Path.Combine(project.SaveLocation, "Input", "Left"));
             if (!string.IsNullOrWhiteSpace(project.RightEar)) prepared.RightEar = CopyInput(project.RightEar, Path.Combine(project.SaveLocation, "Input", "Right"));
+            if (prepared.Settings.ScanPreparation.Enabled && !string.IsNullOrWhiteSpace(project.Settings.ScanPreparation.ScanPath))
+                prepared.Settings.ScanPreparation.ScanPath = CopyInput(project.Settings.ScanPreparation.ScanPath, Path.Combine(project.SaveLocation, "Input", "Scan"));
             RebaseManualPosition(prepared.Settings.Preprocessing.SourcePositionInputLeft, project.LeftEar, prepared.LeftEar);
             RebaseManualPosition(prepared.Settings.Preprocessing.SourcePositionInputRight, project.RightEar, prepared.RightEar);
         }
@@ -2537,6 +2901,7 @@ public partial class MainWindow : Window
         var preprocessing = project.Settings.Preprocessing;
         var numcalc = project.Settings.NumCalc;
         var post = project.Settings.Postprocessing ?? new PostprocessingSettings();
+        var scan = project.Settings.ScanPreparation;
         var grid = string.IsNullOrWhiteSpace(preprocessing.EvaluationGrid) ? "Default" : preprocessing.EvaluationGrid;
         var steps = Math.Max(int.TryParse(preprocessing.FrequencyStepCount, out var n) ? n : 129, 2);
         var leftPosition = ValidManualPosition(project, "left") ? $"\n  source_position_input_left: [{preprocessing.SourcePositionInputLeft!.X.ToString(CultureInfo.InvariantCulture)}, {preprocessing.SourcePositionInputLeft.Y.ToString(CultureInfo.InvariantCulture)}, {preprocessing.SourcePositionInputLeft.Z.ToString(CultureInfo.InvariantCulture)}]" : "";
@@ -2549,6 +2914,14 @@ public partial class MainWindow : Window
   numcalc_executable: {YamlScalar(environment.NumCalcExecutable)}
   mesh_grading_executable: {YamlScalar(environment.MeshGradingExecutable)}
   evaluation_grid: {YamlScalar(grid)}
+scan_preparation:
+  enabled: {Bool(scan.Enabled)}
+  scan_path: {YamlPath(scan.ScanPath)}
+  rotation_degrees: 0
+  reviewed_left: {YamlPath(scan.ReviewedLeft)}
+  reviewed_right: {YamlPath(scan.ReviewedRight)}
+  prepare_left: {Bool(scan.PrepareLeft)}
+  prepare_right: {Bool(scan.PrepareRight)}
 inference:
   enabled: true
   model_config_file: {YamlScalar(inference.ModelConfig)}
@@ -2852,13 +3225,14 @@ ui:
         pipelineHintText.Text = hint ?? "";
         pipelineHintText.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
         UpdatePlacementButtons();
+        UpdatePreparedEarEditButton();
         RefreshProjectList();
         RefreshNumCalcStatus();
     }
 
     bool InferenceIsAutomatic(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing &&
         (!string.IsNullOrWhiteSpace(project.LeftEar) || !string.IsNullOrWhiteSpace(project.RightEar));
-    bool HasGeneratedPipelineOutputs(ProjectRecord project) => (!string.IsNullOrWhiteSpace(project.LeftEar) || !string.IsNullOrWhiteSpace(project.RightEar)) && !string.IsNullOrWhiteSpace(project.SaveLocation) && ((InferenceIsAutomatic(project) && StageIsComplete(Stage.Inference, project)) || StageIsComplete(Stage.Preprocessing, project) || StageIsComplete(Stage.Numcalc, project) || StageIsComplete(Stage.Postprocessing, project));
+    bool HasGeneratedPipelineOutputs(ProjectRecord project) => (project.Settings.ScanPreparation.Enabled || !string.IsNullOrWhiteSpace(project.LeftEar) || !string.IsNullOrWhiteSpace(project.RightEar)) && !string.IsNullOrWhiteSpace(project.SaveLocation) && ((InferenceIsAutomatic(project) && StageIsComplete(Stage.Inference, project)) || StageIsComplete(Stage.Preprocessing, project) || StageIsComplete(Stage.Numcalc, project) || StageIsComplete(Stage.Postprocessing, project));
     bool PreprocessingBlocked(ProjectRecord project) => InferenceIsAutomatic(project) && !StageIsComplete(Stage.Inference, project);
     bool StageCanRun(Stage stage, ProjectRecord? project) => StageUnavailableReason(stage, project) == null;
 
@@ -2869,7 +3243,15 @@ ui:
         if (runningProcesses.ContainsKey(project.Id)) return "Wait for the running stage to finish.";
         if (placementProjectId == project.Id) return "Finish microphone placement with Done or Cancel.";
         if (string.IsNullOrWhiteSpace(project.SaveLocation)) return "Choose a project folder first.";
-        if (string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar)) return "Select at least one input ear.";
+        if (string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar) && !project.Settings.ScanPreparation.Enabled) return "Select at least one input ear.";
+        if (stage == Stage.ScanPreparation)
+        {
+            if (!project.Settings.ScanPreparation.Enabled) return "Enable optional scan preparation first.";
+            if (!File.Exists(project.Settings.ScanPreparation.ScanPath)) return "Choose an existing full-head scan.";
+            if (string.IsNullOrWhiteSpace(project.Settings.ScanPreparation.OriginalScanPath) || SamePath(project.Settings.ScanPreparation.ScanPath, project.Settings.ScanPreparation.OriginalScanPath))
+                return "Align the full-head scan with its nose tip and ear-canal entrances first.";
+            return null;
+        }
         if ((!string.IsNullOrWhiteSpace(project.LeftEar) && !File.Exists(project.LeftEar)) || (!string.IsNullOrWhiteSpace(project.RightEar) && !File.Exists(project.RightEar))) return "An input ear file is missing. Select it again.";
         if (stage == Stage.Inference)
         {
@@ -2889,7 +3271,9 @@ ui:
         return stage == Stage.Postprocessing && StageIsComplete(Stage.Numcalc, project) ? null : "Run NumCalc first.";
     }
 
-    Stage[] AutomaticStages(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing ? Stage.GetValues() : [Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing];
+    Stage[] AutomaticStages(ProjectRecord project) => project.Settings.ScanPreparation.Enabled
+        ? [Stage.ScanPreparation, .. (project.Settings.Inference.UsePredictionsForPreprocessing && (!string.IsNullOrWhiteSpace(project.LeftEar) || !string.IsNullOrWhiteSpace(project.RightEar)) ? [Stage.Inference, Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing] : [Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing])]
+        : project.Settings.Inference.UsePredictionsForPreprocessing ? Stage.GetValues().Where(x => x != Stage.ScanPreparation).ToArray() : [Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing];
     bool StageIsComplete(Stage stage, ProjectRecord project)
     {
         var output = project.SaveLocation;
@@ -2897,18 +3281,66 @@ ui:
         {
             if (!project.Settings.Inference.UsePredictionsForPreprocessing) return true;
             if (!InferenceIsAutomatic(project)) return false;
+            if (project.Settings.ScanPreparation.Enabled && !ScanReviewStageReceiptCurrent(project, "inference")) return false;
             var leftDone = string.IsNullOrWhiteSpace(project.LeftEar) || PredictionMesh(project, "left") != null;
             var rightDone = string.IsNullOrWhiteSpace(project.RightEar) || PredictionMesh(project, "right") != null;
             return leftDone && rightDone;
         }
-        if (string.IsNullOrWhiteSpace(output) || string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar)) return false;
-        if (stage == Stage.Preprocessing) return (string.IsNullOrWhiteSpace(project.LeftEar) || (File.Exists(Path.Combine(output, "Projects", "Left", "parameters.json")) && File.Exists(Path.Combine(output, "Intermediates", "Left", "graded_head.ply")))) && (string.IsNullOrWhiteSpace(project.RightEar) || (File.Exists(Path.Combine(output, "Projects", "Right", "parameters.json")) && File.Exists(Path.Combine(output, "Intermediates", "Right", "graded_head.ply"))));
-        if (stage == Stage.Numcalc) return NumCalcIsComplete(project);
-        return stage == Stage.Postprocessing && Directory.Exists(Path.Combine(output, "HRTF")) && Directory.GetFiles(Path.Combine(output, "HRTF"), "*.sofa").Any();
+        if (stage == Stage.ScanPreparation)
+        {
+            if (!project.Settings.ScanPreparation.Enabled || string.IsNullOrWhiteSpace(output) || string.IsNullOrWhiteSpace(project.Settings.ScanPreparation.OriginalScanPath) || SamePath(project.Settings.ScanPreparation.ScanPath, project.Settings.ScanPreparation.OriginalScanPath)) return false;
+            var prepared = Path.Combine(output, "Prepared");
+            var leftReady = project.Settings.ScanPreparation.PrepareLeft && File.Exists(Path.Combine(prepared, "Left.stl"));
+            var rightReady = project.Settings.ScanPreparation.PrepareRight && File.Exists(Path.Combine(prepared, "Right.stl"));
+            return ScanPreparationOutputsCurrent(project) && (leftReady || rightReady);
+        }
+        if (string.IsNullOrWhiteSpace(output) || (string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar) && !project.Settings.ScanPreparation.Enabled)) return false;
+        if (stage == Stage.Preprocessing)
+        {
+            var scan = project.Settings.ScanPreparation;
+            var leftInput = scan.Enabled ? (scan.PrepareLeft ? (EarReviewIsCurrent(project, "left") ? scan.ReviewedLeft : null) ?? Path.Combine(output, "Prepared", "Left.stl") : "") : project.LeftEar;
+            var rightInput = scan.Enabled ? (scan.PrepareRight ? (EarReviewIsCurrent(project, "right") ? scan.ReviewedRight : null) ?? Path.Combine(output, "Prepared", "Right.stl") : "") : project.RightEar;
+            return (!project.Settings.ScanPreparation.Enabled || ScanReviewStageReceiptCurrent(project, "preprocessing")) &&
+                (string.IsNullOrWhiteSpace(leftInput) || !File.Exists(leftInput) || (File.Exists(Path.Combine(output, "Projects", "Left", "parameters.json")) && File.Exists(Path.Combine(output, "Intermediates", "Left", "graded_head.ply")))) &&
+                (string.IsNullOrWhiteSpace(rightInput) || !File.Exists(rightInput) || (File.Exists(Path.Combine(output, "Projects", "Right", "parameters.json")) && File.Exists(Path.Combine(output, "Intermediates", "Right", "graded_head.ply"))));
+        }
+        if (stage == Stage.Numcalc) return StageIsComplete(Stage.Preprocessing, project) && NumCalcIsComplete(project);
+        return stage == Stage.Postprocessing && StageIsComplete(Stage.Numcalc, project) && Directory.Exists(Path.Combine(output, "HRTF")) && Directory.GetFiles(Path.Combine(output, "HRTF"), "*.sofa").Any();
+    }
+
+    bool ScanPreparationOutputsCurrent(ProjectRecord project)
+    {
+        try
+        {
+            var reportPath = Path.Combine(project.SaveLocation, "Prepared", "mesh_preparation.json");
+            var scanPath = project.Settings.ScanPreparation.ScanPath;
+            var info = new FileInfo(scanPath);
+            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            var root = document.RootElement;
+            if (root.GetProperty("status").GetString() != "completed") return false;
+            var settings = root.GetProperty("signature").GetProperty("settings");
+            if (settings.GetProperty("enabled").GetBoolean() != project.Settings.ScanPreparation.Enabled ||
+                !SamePath(settings.GetProperty("scan_path").GetString() ?? "", scanPath) ||
+                settings.GetProperty("prepare_left").GetBoolean() != project.Settings.ScanPreparation.PrepareLeft ||
+                settings.GetProperty("prepare_right").GetBoolean() != project.Settings.ScanPreparation.PrepareRight ||
+                settings.GetProperty("rotation_degrees").GetDouble() != 0) return false;
+            var identity = document.RootElement.GetProperty("source_identity");
+            var recordedSize = identity.GetProperty("size").GetInt64();
+            var recordedTime = identity.GetProperty("mtime").GetDouble();
+            var currentTime = new DateTimeOffset(info.LastWriteTimeUtc).ToUnixTimeMilliseconds() / 1000.0;
+            return info.Exists && recordedSize == info.Length && Math.Abs(recordedTime - currentTime) < 0.01;
+        }
+        catch { return false; }
     }
 
     string NextStageSummary(ProjectRecord project) { if (runningStages.TryGetValue(project.Id, out var active)) return active.Title + ": Running"; var next = AutomaticStages(project).FirstOrDefault(x => !StageIsComplete(x, project)); return next == null ? "Complete" : next.Title + (StageCanRun(next, project) ? ": Ready" : ": Blocked"); }
-    string NumCalcStatus(ProjectRecord project) => "NumCalc: " + string.Join(" · ", new[] { project.LeftEar, project.RightEar }.Select((x, i) => string.IsNullOrWhiteSpace(x) ? "" : (i == 0 ? "Left" : "Right") + " " + NumCalcCompleted(project, i == 0 ? "Left" : "Right") + "/" + NumCalcTotal(project, i == 0 ? "Left" : "Right")).Where(x => x.Length > 0));
+    string NumCalcStatus(ProjectRecord project)
+    {
+        var sides = project.Settings.ScanPreparation.Enabled
+            ? new[] { project.Settings.ScanPreparation.PrepareLeft, project.Settings.ScanPreparation.PrepareRight }
+            : new[] { !string.IsNullOrWhiteSpace(project.LeftEar), !string.IsNullOrWhiteSpace(project.RightEar) };
+        return "NumCalc: " + string.Join(" · ", sides.Select((selected, i) => !selected ? "" : (i == 0 ? "Left" : "Right") + " " + NumCalcCompleted(project, i == 0 ? "Left" : "Right") + "/" + NumCalcTotal(project, i == 0 ? "Left" : "Right")).Where(x => x.Length > 0));
+    }
     int NumCalcCompleted(ProjectRecord project, string side)
     {
         var source = Path.Combine(project.SaveLocation, "Projects", side, "NumCalc", "source_1");
@@ -2922,8 +3354,10 @@ ui:
     bool NumCalcIsComplete(ProjectRecord project)
     {
         if (string.IsNullOrWhiteSpace(project.SaveLocation)) return false;
-        var sides = new[] { ("Left", project.LeftEar), ("Right", project.RightEar) };
-        var selected = sides.Where(x => !string.IsNullOrWhiteSpace(x.Item2)).ToArray();
+        var sides = project.Settings.ScanPreparation.Enabled
+            ? new[] { ("Left", project.Settings.ScanPreparation.PrepareLeft), ("Right", project.Settings.ScanPreparation.PrepareRight) }
+            : new[] { ("Left", !string.IsNullOrWhiteSpace(project.LeftEar)), ("Right", !string.IsNullOrWhiteSpace(project.RightEar)) };
+        var selected = sides.Where(x => x.Item2).ToArray();
         if (selected.Length == 0) return false;
         return selected.All(x => NumCalcSideIsComplete(project, x.Item1));
     }
@@ -3117,8 +3551,12 @@ ui:
     void LoadRegistry()
     {
         if (File.Exists(registryPath)) try { registry = JsonSerializer.Deserialize<ProjectRegistry>(File.ReadAllText(registryPath), jsonOptions) ?? new ProjectRegistry(); } catch { registry = new ProjectRegistry(); }
+        registry.Folders ??= [];
         projects.Clear();
         foreach (var project in registry.Projects) projects.Add(project);
+        var folderIds = registry.Folders.Select(folder => folder.Id).ToHashSet();
+        foreach (var project in projects)
+            if (project.FolderId is Guid id && !folderIds.Contains(id)) project.FolderId = null;
         if (projects.Count == 0) { var project = NewProject(1); projects.Add(project); }
         registryNeedsPersist = false;
         foreach (var project in projects) registryNeedsPersist |= NormalizeInferenceModelPaths(project);
@@ -3168,7 +3606,7 @@ ui:
 
     void Persist()
     {
-        registry = new ProjectRegistry { Projects = projects.ToList(), SelectedProjectID = selectedProject?.Id, Environment = environment };
+        registry = new ProjectRegistry { Projects = projects.ToList(), SelectedProjectID = selectedProject?.Id, Environment = environment, Folders = registry.Folders };
         if (!string.IsNullOrWhiteSpace(registryPath)) File.WriteAllText(registryPath, JsonSerializer.Serialize(registry, jsonOptions));
     }
 
@@ -3198,7 +3636,9 @@ ui:
 
     string? PredictionMesh(ProjectRecord project, string side)
     {
-        var raw = side == "left" ? project.LeftEar : project.RightEar;
+        var raw = project.Settings.ScanPreparation.Enabled
+            ? Path.Combine(project.SaveLocation, "Prepared", side == "left" ? "Left.stl" : "Right.stl")
+            : side == "left" ? project.LeftEar : project.RightEar;
         if (string.IsNullOrWhiteSpace(raw) || string.IsNullOrWhiteSpace(project.SaveLocation)) return null;
         var folder = Path.Combine(project.SaveLocation, side == "left" ? project.Settings.Inference.PredictionLeftFolder : project.Settings.Inference.PredictionRightFolder);
         if (!Directory.Exists(folder)) return null;
@@ -3261,9 +3701,9 @@ ui:
         public TextBlock Status { get; }
         public ProgressRing Spinner { get; }
 
-        public ProjectRowUi(ProjectRecord project, Action<ProjectRecord> select, Action duplicate, Action remove)
+        public ProjectRowUi(ProjectRecord project, Action<ProjectRecord> select, Action duplicate, Action remove, Action<ProjectRecord, Guid?> move, IReadOnlyList<ProjectFolder> folders, bool nested)
         {
-            Root = new Grid { Margin = new Thickness(8, 7, 8, 7), Tag = project, HorizontalAlignment = HorizontalAlignment.Stretch };
+            Root = new Grid { Margin = new Thickness(nested ? 25 : 8, 7, 8, 7), Tag = project, HorizontalAlignment = HorizontalAlignment.Stretch };
             Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             Root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var text = new StackPanel { HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -3280,7 +3720,18 @@ ui:
             duplicateItem.Click += (_, _) => { select(project); duplicate(); };
             var removeItem = new MenuFlyoutItem { Text = "Remove Project" };
             removeItem.Click += (_, _) => { select(project); remove(); };
+            var moveItem = new MenuFlyoutSubItem { Text = "Move to Folder" };
+            var unfiled = new MenuFlyoutItem { Text = "No Folder" };
+            unfiled.Click += (_, _) => move(project, null);
+            moveItem.Items.Add(unfiled);
+            foreach (var folder in folders)
+            {
+                var folderItem = new MenuFlyoutItem { Text = folder.Name, Tag = folder.Id };
+                folderItem.Click += (_, _) => move(project, folder.Id);
+                moveItem.Items.Add(folderItem);
+            }
             menu.Items.Add(duplicateItem);
+            menu.Items.Add(moveItem);
             menu.Items.Add(removeItem);
             Root.ContextFlyout = menu;
         }
@@ -3297,23 +3748,26 @@ record Artifact(string Title, string Path, string? Side = null)
 
 record Stage(string Value, string Title)
 {
+    public static readonly Stage ScanPreparation = new("scan-preparation", "Scan Preparation");
     public static readonly Stage Inference = new("inference", "Mesh2PPM Inference");
     public static readonly Stage Preprocessing = new("preprocessing", "Preprocessing");
     public static readonly Stage Numcalc = new("numcalc", "NumCalc");
     public static readonly Stage Postprocessing = new("postprocessing", "Postprocess");
-    public static Stage[] GetValues() => [Inference, Preprocessing, Numcalc, Postprocessing];
+    public static Stage[] GetValues() => [ScanPreparation, Inference, Preprocessing, Numcalc, Postprocessing];
 }
 
 enum InputHandling { Copy, Reference }
-class ProjectRegistry { public List<ProjectRecord> Projects { get; set; } = []; public Guid? SelectedProjectID { get; set; } public EnvironmentConfig Environment { get; set; } = new(); }
+class ProjectRegistry { public List<ProjectRecord> Projects { get; set; } = []; public Guid? SelectedProjectID { get; set; } public EnvironmentConfig Environment { get; set; } = new(); public List<ProjectFolder> Folders { get; set; } = []; }
+class ProjectFolder { public Guid Id { get; set; } = Guid.NewGuid(); public string Name { get; set; } = ""; public bool IsExpanded { get; set; } = true; }
 class WindowUiState { public double ProjectsWidth { get; set; } = 280; public double LiveLogHeight { get; set; } = 170; public double SettingsWidth { get; set; } = 390; }
 class ProjectViewerState { public string? SelectedArtifactPath { get; set; } public Dictionary<string, MeshCameraState> CameraByArtifact { get; set; } = []; }
 class MeshCameraState { public double Yaw { get; set; } public double Pitch { get; set; } public double Distance { get; set; } }
 class SettingHelpEntry { public string Id { get; set; } = ""; public string Title { get; set; } = ""; public string Description { get; set; } = ""; public List<SettingHelpPublication> Publications { get; set; } = []; }
 class SettingHelpPublication { public string Title { get; set; } = ""; public string Url { get; set; } = ""; }
 class EnvironmentConfig { public string UvExecutable { get; set; } = ""; public string NumCalcExecutable { get; set; } = ""; public string MeshGradingExecutable { get; set; } = ""; public string ExternalDir { get; set; } = ""; [JsonIgnore] public bool IsEmpty => string.IsNullOrWhiteSpace(NumCalcExecutable) && string.IsNullOrWhiteSpace(MeshGradingExecutable) && string.IsNullOrWhiteSpace(ExternalDir); }
-class ProjectRecord { public Guid Id { get; set; } = Guid.NewGuid(); public string Name { get; set; } = ""; public string LeftEar { get; set; } = ""; public string RightEar { get; set; } = ""; public string SaveLocation { get; set; } = ""; public InputHandling InputHandling { get; set; } = InputHandling.Copy; public ProjectSettings Settings { get; set; } = new(); [JsonIgnore] public string StatusText { get; set; } = ""; [JsonIgnore] public bool IsRunning { get; set; } }
-class ProjectSettings { public InferenceSettings Inference { get; set; } = new(); public PreprocessingSettings Preprocessing { get; set; } = new(); public NumCalcSettings NumCalc { get; set; } = new(); public PostprocessingSettings? Postprocessing { get; set; } = new(); }
+class ProjectRecord { public Guid Id { get; set; } = Guid.NewGuid(); public string Name { get; set; } = ""; public string LeftEar { get; set; } = ""; public string RightEar { get; set; } = ""; public string SaveLocation { get; set; } = ""; public Guid? FolderId { get; set; } public InputHandling InputHandling { get; set; } = InputHandling.Copy; public ProjectSettings Settings { get; set; } = new(); [JsonIgnore] public string StatusText { get; set; } = ""; [JsonIgnore] public bool IsRunning { get; set; } }
+class ProjectSettings { public InferenceSettings Inference { get; set; } = new(); public PreprocessingSettings Preprocessing { get; set; } = new(); public NumCalcSettings NumCalc { get; set; } = new(); public PostprocessingSettings? Postprocessing { get; set; } = new(); public ScanPreparationSettings ScanPreparation { get; set; } = new(); }
+class ScanPreparationSettings { public bool Enabled { get; set; } public string ScanPath { get; set; } = ""; public string OriginalScanPath { get; set; } = ""; public bool PrepareLeft { get; set; } = true; public bool PrepareRight { get; set; } public string? ReviewedLeft { get; set; } public string? ReviewedRight { get; set; } }
 class InferenceSettings { public string ModelConfig { get; set; } = ""; public string ModelCheckpoint { get; set; } = ""; public string TargetLeftFolder { get; set; } = "Input/Left"; public string TargetRightFolder { get; set; } = "Input/Right"; public string PredictionLeftFolder { get; set; } = "Intermediates/Left"; public string PredictionRightFolder { get; set; } = "Intermediates/Right"; public bool UsePredictionsForPreprocessing { get; set; } = true; }
 class PreprocessingSettings { public string MinFrequency { get; set; } = "0"; public string MaxFrequency { get; set; } = "24000"; public string FrequencyStepCount { get; set; } = "129"; public string? EvaluationGrid { get; set; } public string? HeadRadius { get; set; } public bool? UseCustomHeadRadius { get; set; } public string SourceAssignmentFaceCount { get; set; } = "6"; public string MeshMinEdgeLength { get; set; } = "0.5"; public string MeshMaxEdgeLength { get; set; } = "10.0"; public string MeshMaxError { get; set; } = "0.5"; public string MeshGamma { get; set; } = "0.2"; public string MeshGammaOpposite { get; set; } = "0.1"; public ManualMicrophonePosition? SourcePositionInputLeft { get; set; } public ManualMicrophonePosition? SourcePositionInputRight { get; set; } }
 class ManualMicrophonePosition { public double X { get; set; } public double Y { get; set; } public double Z { get; set; } public string MeshPath { get; set; } = ""; public string MeshIdentity { get; set; } = ""; }

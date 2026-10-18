@@ -8,6 +8,14 @@ enum ArtifactScanner {
         if project.scanPreparation.enabled && !project.scanPreparation.scanPath.isEmpty {
             next.append(Artifact(title: "Full-head scan", url: URL(fileURLWithPath: project.scanPreparation.scanPath)))
         }
+        if project.scanPreparation.enabled && scanPreparationIsCurrent(project) {
+            for side in EarSide.allCases {
+                guard side == .left ? project.scanPreparation.prepareLeft : project.scanPreparation.prepareRight,
+                      let mesh = preparedEarURL(for: side, in: project),
+                      FileManager.default.fileExists(atPath: mesh.path) else { continue }
+                next.append(Artifact(title: earReviewIsCurrent(project, side: side) ? "Reviewed \(side.rawValue) ear" : "Prepared \(side.rawValue) ear", url: mesh))
+            }
+        }
         if !project.pipelineLeftEar.isEmpty {
             next.append(Artifact(title: "Input left ear", url: URL(fileURLWithPath: project.pipelineLeftEar)))
             next.append(Artifact(title: "Left simulation mesh", url: output.appendingPathComponent("Intermediates/Left/graded_head.ply")))
@@ -26,7 +34,10 @@ enum ArtifactScanner {
             let title = name.contains("horizontal") ? "Horizontal HRTF plot" : name.contains("median") ? "Median HRTF plot" : plot.deletingPathExtension().lastPathComponent
             next.append(Artifact(title: title, url: plot))
         }
-        return next
+        var seenPaths = Set<String>()
+        return next.filter { artifact in
+            seenPaths.insert(artifact.url.standardizedFileURL.path).inserted
+        }
     }
 
     static func predictionArtifacts(title: String, folder: URL) -> [Artifact] {
@@ -114,7 +125,7 @@ enum ArtifactScanner {
         let settings = project.settings.inference
         if stage == .inference && !settings.usePredictionsForPreprocessing { return true }
         if project.scanPreparation.enabled && stage != .scanPreparation {
-            guard scanPreparationIsCurrent(project), earReviewsAreCurrent(project) else { return false }
+            guard scanPreparationIsCurrent(project) else { return false }
             if stage == .inference && settings.usePredictionsForPreprocessing && !scanReceiptIsCurrent(project, stage: "inference") { return false }
             if [.preprocessing, .numcalc, .postprocessing].contains(stage) && !scanReceiptIsCurrent(project, stage: "preprocessing") { return false }
         }
@@ -187,25 +198,37 @@ enum ArtifactScanner {
         let scan = project.scanPreparation
         guard let path = side == .left ? scan.reviewedLeftPath : scan.reviewedRightPath else { return false }
         let folder = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Prepared")
+        let baseEar = folder.appendingPathComponent("\(side.title).stl")
         guard let reportData = try? Data(contentsOf: folder.appendingPathComponent("mesh_preparation.json")),
               let report = try? JSONSerialization.jsonObject(with: reportData) as? [String: Any],
               let generation = report["generation"] as? String,
+              let ears = report["ears"] as? [String: [String: Any]],
+              let baseDigest = ears[side.rawValue]?["sha256"] as? String,
               let receiptData = try? Data(contentsOf: URL(fileURLWithPath: path).deletingPathExtension().appendingPathExtension("json")),
               let receipt = try? JSONSerialization.jsonObject(with: receiptData) as? [String: Any],
               receipt["kind"] as? String == "ear", receipt["side"] as? String == side.rawValue,
-              receipt["generation"] as? String == generation,
+              receipt["generation"] as? String == generation, receipt["source_sha256"] as? String == baseDigest,
+              receipt["source_identity"] as? [String: Any] != nil,
               let stamp = receipt["output_identity"] as? [String: Any] else { return false }
-        return matchesStamp(URL(fileURLWithPath: path), stamp)
+        return matchesStamp(baseEar, receipt["source_identity"] as? [String: Any] ?? [:]) &&
+            matchesStamp(URL(fileURLWithPath: path), stamp)
     }
 
-    static func earReviewsAreCurrent(_ project: ProjectRecord) -> Bool {
+    static func preparedEarURL(for side: EarSide, in project: ProjectRecord) -> URL? {
         let scan = project.scanPreparation
-        for (side, selected, path) in [(EarSide.left, scan.prepareLeft, scan.reviewedLeftPath), (.right, scan.prepareRight, scan.reviewedRightPath)] where selected {
-            if (scan.requireManualReview ?? false) || path != nil {
-                if !earReviewIsCurrent(project, side: side) { return false }
-            }
+        guard scan.enabled, side == .left ? scan.prepareLeft : scan.prepareRight else { return nil }
+        if earReviewIsCurrent(project, side: side),
+           let reviewed = side == .left ? scan.reviewedLeftPath : scan.reviewedRightPath {
+            return URL(fileURLWithPath: reviewed)
         }
-        return true
+        return URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Prepared/\(side.title).stl")
+    }
+
+    static func preparedEarSide(for mesh: URL, in project: ProjectRecord) -> EarSide? {
+        for side in EarSide.allCases where preparedEarURL(for: side, in: project)?.standardizedFileURL.path == mesh.standardizedFileURL.path {
+            return side
+        }
+        return nil
     }
 
     static func scanReceiptIsCurrent(_ project: ProjectRecord, stage: String) -> Bool {
@@ -220,11 +243,11 @@ enum ArtifactScanner {
             let baseEars = report["ears"] as? [String: [String: Any]] ?? [:]
             for (side, selected, path) in [(EarSide.left, project.scanPreparation.prepareLeft, project.scanPreparation.reviewedLeftPath), (.right, project.scanPreparation.prepareRight, project.scanPreparation.reviewedRightPath)] where selected {
                 var digest = baseEars[side.rawValue]?["sha256"] as? String
-                if let path, let data = try? Data(contentsOf: URL(fileURLWithPath: path).deletingPathExtension().appendingPathExtension("json")),
+                if let path, earReviewIsCurrent(project, side: side), let data = try? Data(contentsOf: URL(fileURLWithPath: path).deletingPathExtension().appendingPathExtension("json")),
                    let review = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { digest = review["output_sha256"] as? String }
                 guard expected[side.rawValue] == digest else { return false }
             }
-        } else if project.scanPreparation.reviewedLeftPath != nil || project.scanPreparation.reviewedRightPath != nil { return false }
+        } else if EarSide.allCases.contains(where: { earReviewIsCurrent(project, side: $0) }) { return false }
         return true
     }
 

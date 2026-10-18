@@ -100,24 +100,30 @@ struct ScanPreparationChecks {
         try Data("validated ear".utf8).write(to: ear)
         let report: [String: Any] = ["status": "completed", "generation": "test",
             "source_identity": try stamp(source), "signature": ["settings": parsed["scan_preparation"]!],
-            "ears": ["right": ["identity": try stamp(ear)]]]
+            "ears": ["right": ["identity": try stamp(ear), "sha256": "base"]]]
         try JSONSerialization.data(withJSONObject: report).write(to: prepared.appendingPathComponent("mesh_preparation.json"))
         try outputs.complete()
         precondition(ArtifactScanner.stageIsComplete(.scanPreparation, project: project))
+        let preparedRightArtifacts = ArtifactScanner.artifacts(for: project).filter {
+            $0.url.standardizedFileURL.path == ear.standardizedFileURL.path
+        }
+        precondition(preparedRightArtifacts.count == 1)
+        precondition(preparedRightArtifacts.first?.title == "Prepared right ear")
         precondition(!ArtifactScanner.stageIsComplete(.preprocessing, project: project))
         let edited = temporary.appendingPathComponent("MeshEdits/Right.stl")
         try FileManager.default.createDirectory(at: edited.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("manual work".utf8).write(to: edited)
         scan.requireManualReview = true
         project.settings.scanPreparation = scan
-        precondition(!ArtifactScanner.earReviewsAreCurrent(project))
+        precondition(!ArtifactScanner.earReviewIsCurrent(project, side: .right))
         scan.reviewedRightPath = edited.path
         project.settings.scanPreparation = scan
         let review: [String: Any] = ["kind": "ear", "side": "right", "generation": "test",
+                                    "source_sha256": "base", "source_identity": try stamp(ear),
                                     "output_identity": try stamp(edited), "output_sha256": "manual"]
         try JSONSerialization.data(withJSONObject: review).write(to: edited.deletingPathExtension().appendingPathExtension("json"))
         precondition(project.pipelineRightEar == edited.path)
-        precondition(ArtifactScanner.earReviewsAreCurrent(project))
+        precondition(ArtifactScanner.earReviewIsCurrent(project, side: .right))
         let receiptURL = prepared.appendingPathComponent("inference.json")
         try JSONSerialization.data(withJSONObject: ["generation": "test", "input_ears": ["right": "previous"]]).write(to: receiptURL)
         precondition(!ArtifactScanner.scanReceiptIsCurrent(project, stage: "inference"))

@@ -80,7 +80,7 @@ enum PipelineConfigWriter {
           enabled: \(scan.enabled ? "true" : "false")
           scan_path: \(scan.scanPath.isEmpty ? "null" : yamlString(scan.scanPath))
           rotation_degrees: \(yamlNumber(scan.rotationDegrees) ?? "null")
-          require_manual_review: \((scan.requireManualReview ?? false) ? "true" : "false")
+          require_manual_review: false
           reviewed_left: \(scan.reviewedLeftPath.map(yamlString) ?? "null")
           reviewed_right: \(scan.reviewedRightPath.map(yamlString) ?? "null")
           prepare_left: \(scan.prepareLeft ? "true" : "false")

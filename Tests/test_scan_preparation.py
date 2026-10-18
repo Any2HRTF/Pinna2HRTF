@@ -61,6 +61,15 @@ class ScanPreparationTests(unittest.TestCase):
             RunConfig.run_from_config(config)
         self.assertEqual(events, ['scan', 'inference', 'preprocessing'])
 
+    def test_preprocessing_reuses_current_scan_preparation(self):
+        config = PipelineConfig(scan_preparation=ScanPreparationConfig(
+            enabled=True, scan_path=Path('/tmp/aligned-scan.ply'), rotation_degrees=0))
+        with patch('HRTFCalculation.ScanPreparation.validate_prepared', return_value={}), \
+             patch('HRTFCalculation.ScanPreparation.prepare_scan') as prepare, \
+             patch.object(RunConfig, 'run_preprocessing'):
+            RunConfig.run_from_config(config, stages=['preprocessing'])
+        prepare.assert_not_called()
+
     def test_inference_dry_run_resolves_prepared_inputs_without_loading_geometry(self):
         config = PipelineConfig(scan_preparation=ScanPreparationConfig(enabled=True, prepare_right=False))
         messages = []

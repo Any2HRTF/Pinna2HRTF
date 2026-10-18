@@ -24,14 +24,6 @@ struct RunPanelView: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if project.scanPreparation.enabled && ArtifactScanner.scanPreparationIsCurrent(project) {
-                    HStack {
-                        ForEach(EarSide.allCases) { side in
-                            Button("Edit \(side.title) Ear…") { store.beginEarEditing(side) }
-                                .disabled(store.selectedProjectIsRunning || (side == .left ? !project.scanPreparation.prepareLeft : !project.scanPreparation.prepareRight))
-                        }
-                    }
-                }
                 if store.preprocessingNeedsRerun(for: project) {
                     Text("Settings changed · rerun preprocessing before NumCalc")
                         .font(.caption)

@@ -12,7 +12,7 @@ final class MeshEditorModel: ObservableObject {
     let request: MeshEditorRequest
     let scene = SCNScene()
     let workspace = URL(fileURLWithPath: "/private/tmp/pinna-mesh-editor-\(UUID().uuidString)")
-    @Published var tool: Tool = .navigate
+    @Published var tool: Tool
     @Published var busy = false
     @Published var message = "Loading mesh…"
     @Published var error: String?
@@ -33,6 +33,7 @@ final class MeshEditorModel: ObservableObject {
     private(set) var cameraRevision = 0
     private var versions: [URL] = []
     private var operations: [[String: Any]] = []
+    private var toolBeforeNavigation: Tool = .selection
     private var currentVersion = 0
     private var versionCounter = 0
     private var originalSHA256 = ""
@@ -41,16 +42,20 @@ final class MeshEditorModel: ObservableObject {
     private var vertexData = Data(), normalData = Data()
     private var boundsMin = SIMD3<Float>(repeating: -1), boundsMax = SIMD3<Float>(repeating: 1)
     private var meshNode: SCNNode?
+    private var meshEdgesNode: SCNNode?
     private var selectionNode: SCNNode?
     private var planeNode: SCNNode?
     private var cameraNode: SCNNode?
     private var targetNode: SCNNode?
     private var markerNodes: [SCNNode] = []
 
-    init(request: MeshEditorRequest) { self.request = request }
+    init(request: MeshEditorRequest) {
+        self.request = request
+        self.tool = request.isAlignment ? .landmarks : .selection
+    }
     deinit { try? FileManager.default.removeItem(at: workspace) }
 
-    var tools: [Tool] { request.isAlignment ? [.navigate, .landmarks] : [.navigate, .selection, .plane] }
+    var tools: [Tool] { request.isAlignment ? [.landmarks] : [.selection, .plane] }
     var canUndo: Bool { !busy && currentVersion > 0 }
     var canRedo: Bool { !busy && currentVersion + 1 < versions.count }
     var hasAlignment: Bool { operations.prefix(currentVersion).contains { $0["action"] as? String == "align" } }
@@ -77,6 +82,17 @@ final class MeshEditorModel: ObservableObject {
 
     var validPlanePreviewSize: Bool {
         planePreviewWidth.isFinite && planePreviewHeight.isFinite && planePreviewWidth > 0 && planePreviewHeight > 0
+    }
+
+    func setNavigationMode(_ active: Bool) {
+        guard !request.isAlignment else { return }
+        if active {
+            guard tool != .navigate else { return }
+            toolBeforeNavigation = tool
+            tool = .navigate
+        } else if tool == .navigate {
+            tool = toolBeforeNavigation
+        }
     }
 
     func updatePlanePreviewSizing() {
@@ -144,8 +160,8 @@ final class MeshEditorModel: ObservableObject {
             operations = Array(operations.prefix(currentVersion)) + [operation]
             currentVersion += 1
             selectedFaces.removeAll()
-            if action == "align" { landmarks.removeAll(); refreshMarkers(); tool = .navigate; resetCamera() }
-            if action == "cut" { tool = .navigate; planeOffset = 0 }
+            if action == "align" { landmarks.removeAll(); refreshMarkers(); tool = .landmarks; resetCamera() }
+            if action == "cut" { toolBeforeNavigation = .plane; tool = .navigate; planeOffset = 0 }
             refreshOverlays()
             message = "\(faces.count / 3) faces · Edit applied. Undo is available."
             revision += 1
@@ -166,7 +182,7 @@ final class MeshEditorModel: ObservableObject {
             selectedFaces.removeAll()
             landmarks.removeAll()
             refreshMarkers()
-            tool = .navigate
+            tool = request.isAlignment ? .landmarks : .navigate
             refreshOverlays()
             revision += 1
             message = "\(faces.count / 3) faces · \(offset < 0 ? "Undone" : "Redone")"
@@ -210,6 +226,7 @@ final class MeshEditorModel: ObservableObject {
         boundsMin = SIMD3<Float>(Float(bounds[0][0]), Float(bounds[0][1]), Float(bounds[0][2]))
         boundsMax = SIMD3<Float>(Float(bounds[1][0]), Float(bounds[1][1]), Float(bounds[1][2]))
         meshNode?.removeFromParentNode()
+        meshEdgesNode?.removeFromParentNode()
         let geometry = geometry(indices: newFaces)
         let material = SCNMaterial()
         material.diffuse.contents = NSColor(calibratedRed: 0.81, green: 0.77, blue: 0.72, alpha: 1)
@@ -220,6 +237,24 @@ final class MeshEditorModel: ObservableObject {
         node.categoryBitMask = 1
         scene.rootNode.addChildNode(node)
         meshNode = node
+        if !request.isAlignment {
+            let edges = self.geometry(indices: newFaces)
+            let edgeMaterial = SCNMaterial()
+            edgeMaterial.diffuse.contents = NSColor(calibratedRed: 0.015, green: 0.025, blue: 0.04, alpha: 1)
+            edgeMaterial.lightingModel = .constant
+            edgeMaterial.fillMode = .lines
+            edgeMaterial.cullMode = .back
+            edgeMaterial.isDoubleSided = false
+            edgeMaterial.readsFromDepthBuffer = false
+            edgeMaterial.writesToDepthBuffer = false
+            edges.materials = [edgeMaterial]
+            let edgeNode = SCNNode(geometry: edges)
+            edgeNode.renderingOrder = 20
+            edgeNode.categoryBitMask = 0
+            edgeNode.castsShadow = false
+            scene.rootNode.addChildNode(edgeNode)
+            meshEdgesNode = edgeNode
+        }
         if cameraNode == nil { configureCamera() }
         selectedFaces.removeAll()
         refreshOverlays()

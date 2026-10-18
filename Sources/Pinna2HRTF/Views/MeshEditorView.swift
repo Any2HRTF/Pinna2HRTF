@@ -24,22 +24,38 @@ struct MeshEditorView: View {
             }.padding(16)
             Divider()
             HStack(spacing: 0) {
-                EditorSceneView(model: model)
-                    .frame(minWidth: 520, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
+                ZStack(alignment: .topLeading) {
+                    EditorSceneView(model: model)
+                    if !model.request.isAlignment && (model.tool == .selection || model.tool == .navigate) {
+                        Toggle("Navigate", isOn: Binding(
+                            get: { model.tool == .navigate },
+                            set: { model.setNavigationMode($0) }
+                        ))
+                            .toggleStyle(.button)
+                            .buttonStyle(.bordered)
+                            .keyboardShortcut(.space, modifiers: [])
+                            .help("Toggle camera navigation (Space).")
+                            .padding(12)
+                    }
+                }
+                .frame(minWidth: 520, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
                 Divider()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        Picker("Tool", selection: $model.tool) {
-                            ForEach(model.tools) { tool in Text(tool.rawValue).tag(tool) }
+                        if model.request.isAlignment {
+                            alignmentControls
+                        } else if model.tool == .navigate {
+                            navigationControls
+                        } else {
+                            Picker("Tool", selection: $model.tool) {
+                                ForEach(model.tools) { tool in Text(tool.rawValue).tag(tool) }
+                            }
+                            .pickerStyle(.segmented)
+                            .onChange(of: model.tool) { _ in model.refreshOverlays() }
                         }
-                        .onChange(of: model.tool) { _ in model.refreshOverlays() }
-                        if model.tool == .landmarks { alignmentControls }
+                        if !model.request.isAlignment && model.tool == .landmarks { alignmentControls }
                         if model.tool == .selection { selectionControls }
                         if model.tool == .plane { planeControls }
-                        if model.tool == .navigate {
-                            Text("Drag to rotate. Scroll to zoom. Choose a tool to mark landmarks or edit geometry.")
-                                .font(.callout).foregroundStyle(.secondary)
-                        }
                         Divider()
                         HStack {
                             Button("Undo") { Task { await model.moveHistory(-1) } }.disabled(!model.canUndo)
@@ -112,6 +128,8 @@ struct MeshEditorView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Draw a closed lasso around the faces to remove. A click toggles one face. Red faces are selected.")
                 .font(.caption).foregroundStyle(.secondary)
+            Text("Triangle edges stay visible to make face selection easier.")
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("Select through mesh", isOn: $model.throughSelection)
                 .help("Include occluded and back-facing faces. With this off, select only the visible front surface.")
             Toggle("Add to current selection", isOn: $model.addToSelection)
@@ -121,6 +139,13 @@ struct MeshEditorView: View {
             }.disabled(model.selectedFaces.isEmpty)
             Button("Clear Selection") { model.selectedFaces.removeAll(); model.refreshOverlays() }
                 .disabled(model.selectedFaces.isEmpty)
+        }
+    }
+
+    var navigationControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Drag to rotate and scroll to zoom. Press Space or click Navigate to return to the selected tool.")
+                .font(.callout).foregroundStyle(.secondary)
         }
     }
 

@@ -122,7 +122,8 @@ class MeshEditingTests(unittest.TestCase):
             execute(dict(action='save',kind='ear',source=str(working),original_source=str(source),original_sha256=digest(source),destination=str(destination),side='left',prepared_report=str(report),prepared_generation='g1'))
             with self.assertRaisesRegex(ValueError,'ear edits changed'): validate_stage(config,'inference')
             report.write_text(json.dumps(dict(generation='g2')))
-            with self.assertRaisesRegex(ValueError,'out of date'): reviewed_inputs(config)
+            self.assertEqual(reviewed_inputs(config),(source,None))
+            self.assertIsNone(config.scan_preparation.reviewed_left)
 
     def test_optional_review_does_not_change_preparation_signature(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -135,7 +136,7 @@ class MeshEditingTests(unittest.TestCase):
             config.paths.output_dir=Path(temporary)
             self.assertEqual(reviewed_inputs(config),(Path(temporary)/'Prepared/Left.stl',None))
             config.scan_preparation.require_manual_review=True
-            with self.assertRaisesRegex(ValueError,'Review and save'): reviewed_inputs(config)
+            self.assertEqual(reviewed_inputs(config),(Path(temporary)/'Prepared/Left.stl',None))
 
     def test_save_rejects_changed_source_and_preserves_prior_saved_ear(self):
         with tempfile.TemporaryDirectory() as temporary:

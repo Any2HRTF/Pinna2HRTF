@@ -115,7 +115,7 @@ enum ProjectConfigDocument {
         var restoredScan = ScanPreparationSettings()
         restoredScan.enabled = bool(scan, "enabled") ?? false
         restoredScan.scanPath = text(scan, "scan_path").map(relocated) ?? ""
-        restoredScan.rotationDegrees = text(scan, "rotation_degrees") ?? ""
+        restoredScan.rotationDegrees = text(scan, "rotation_degrees") ?? "0"
         restoredScan.requireManualReview = bool(scan, "require_manual_review") ?? false
         restoredScan.reviewedLeftPath = text(scan, "reviewed_left").map(relocated)
         restoredScan.reviewedRightPath = text(scan, "reviewed_right").map(relocated)
