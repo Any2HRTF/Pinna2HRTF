@@ -46,6 +46,13 @@ a:focus-visible, button:focus-visible { outline: 3px solid #2563eb; outline-offs
   -webkit-tap-highlight-color: transparent;
 }
 .draggable-sticker img { display: block; width: 100%; height: auto; pointer-events: none; user-select: none; -webkit-user-drag: none; }
+.emoji-sticker {
+  display: grid; aspect-ratio: 1; place-items: center; overflow: visible; padding: 4px;
+  border: 4px solid #fff; border-radius: 46% 54% 60% 40% / 52% 42% 58% 48%;
+  background: radial-gradient(circle at 34% 28%, #fffdf4, #ffeaa0 82%);
+  box-shadow: 0 0 0 1px rgba(64, 56, 25, .24), inset 0 -3px 0 rgba(198, 160, 31, .2);
+}
+.emoji-sticker span { display: block; font-size: clamp(44px, 5vw, 62px); line-height: 1; }
 .draggable-sticker:hover { transform: translateY(-5px) rotate(calc(var(--sticker-rotation, 0deg) + 4deg)) scale(1.06); filter: drop-shadow(0 9px 8px rgba(23, 23, 23, .22)); }
 .draggable-sticker:focus-visible { outline: 3px solid #2563eb; outline-offset: 4px; }
 .draggable-sticker.is-dragging { z-index: 10; cursor: grabbing; transform: translateY(-12px) rotate(calc(var(--sticker-rotation, 0deg) + 7deg)) scale(1.12); filter: drop-shadow(0 18px 12px rgba(23, 23, 23, .28)); transition-duration: 140ms; }
@@ -71,7 +78,7 @@ a:focus-visible, button:focus-visible { outline: 3px solid #2563eb; outline-offs
   align-items: center; gap: clamp(28px, 6vw, 64px); padding-top: 36px; padding-bottom: 36px;
 }
 .section-kicker { display: flex; align-items: center; gap: 8px; margin: 0 0 13px; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .12em; }
-.section-emoji { flex: 0 0 16px; font-size: 14px; line-height: 1; letter-spacing: 0; }
+.accent-dot { width: 7px; height: 7px; flex: 0 0 7px; border: 1px solid var(--ink); border-radius: 50%; background: var(--accent); }
 .slash { color: var(--quiet); }
 h1, h2, h3, p { margin-top: 0; }
 h1 { max-width: 630px; margin-bottom: 13px; font-size: clamp(35px, 5vw, 52px); font-weight: 700; letter-spacing: -.055em; line-height: 1.04; }
@@ -101,7 +108,7 @@ h2 { margin-bottom: 0; font-size: 23px; font-weight: 700; letter-spacing: -.035e
 .workflow-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
 .workflow-step { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 8px; padding: 13px 14px 13px 0; }
 .workflow-step + .workflow-step { padding-left: 14px; border-left: 1px solid var(--rule); }
-.step-icon { width: 28px; color: var(--ink); font-size: 18px; line-height: 1.2; }
+.step-number { color: var(--muted); font-family: var(--mono); font-size: 11px; }
 .workflow-step h3 { margin: 0 0 4px; font-size: 13px; font-weight: 700; }
 .workflow-step p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .downloads { padding-top: 26px; padding-bottom: 152px; }
