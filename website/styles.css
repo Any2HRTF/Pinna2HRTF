@@ -71,7 +71,7 @@ a:focus-visible, button:focus-visible { outline: 3px solid #2563eb; outline-offs
   align-items: center; gap: clamp(28px, 6vw, 64px); padding-top: 36px; padding-bottom: 36px;
 }
 .section-kicker { display: flex; align-items: center; gap: 8px; margin: 0 0 13px; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .12em; }
-.accent-dot { width: 7px; height: 7px; flex: 0 0 7px; border: 1px solid var(--ink); border-radius: 50%; background: var(--accent); }
+.section-emoji { flex: 0 0 16px; font-size: 14px; line-height: 1; letter-spacing: 0; }
 .slash { color: var(--quiet); }
 h1, h2, h3, p { margin-top: 0; }
 h1 { max-width: 630px; margin-bottom: 13px; font-size: clamp(35px, 5vw, 52px); font-weight: 700; letter-spacing: -.055em; line-height: 1.04; }
@@ -101,7 +101,7 @@ h2 { margin-bottom: 0; font-size: 23px; font-weight: 700; letter-spacing: -.035e
 .workflow-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
 .workflow-step { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 8px; padding: 13px 14px 13px 0; }
 .workflow-step + .workflow-step { padding-left: 14px; border-left: 1px solid var(--rule); }
-.step-number { color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.step-icon { width: 28px; color: var(--ink); font-size: 18px; line-height: 1.2; }
 .workflow-step h3 { margin: 0 0 4px; font-size: 13px; font-weight: 700; }
 .workflow-step p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .downloads { padding-top: 26px; padding-bottom: 152px; }

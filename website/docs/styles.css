@@ -36,7 +36,7 @@ a:focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }
 .sidebar-links a[aria-current="page"] { border-left-color: #b88a00; color: var(--ink); background: #fff8db; font-weight: 700; }
 .docs-content { min-width: 0; padding: clamp(24px, 5vw, 56px); }
 .kicker { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.dot { width: 7px; height: 7px; border: 1px solid var(--ink); border-radius: 50%; background: var(--accent); }
+.kicker-emoji { flex: 0 0 17px; font-size: 14px; line-height: 1; letter-spacing: 0; }
 h1, h2, h3 { line-height: 1.2; letter-spacing: -.035em; }
 h1 { max-width: 780px; margin: 0 0 14px; font-size: clamp(34px, 5vw, 48px); letter-spacing: -.055em; }
 h2 { margin: 44px 0 12px; padding-top: 18px; border-top: 1px solid var(--rule-soft); font-size: clamp(22px, 3vw, 29px); }
