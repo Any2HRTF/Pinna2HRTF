@@ -11,6 +11,11 @@ private struct ActivityLogEntry {
     var key: String?
 }
 
+private struct PipelineRun {
+    let process: Process
+    let stage: Stage
+}
+
 final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     @Published var folders: [ProjectFolder]
     @Published var projects: [ProjectRecord]
@@ -37,8 +42,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published var ppmFittingError: String?
     @Published var artifacts: [Artifact] = []
     @Published var stageStates: [Stage: StageState] = Dictionary(uniqueKeysWithValues: Stage.allCases.map { ($0, .ready) })
-    @Published var runningProcesses: [UUID: Process] = [:]
-    @Published var runningStages: [UUID: Stage] = [:]
+    @Published private var runs: [UUID: PipelineRun] = [:]
+    var runningProcesses: [UUID: Process] { runs.mapValues(\.process) }
+    var runningStages: [UUID: Stage] { runs.mapValues(\.stage) }
     @Published private(set) var liveLogStatusByProject: [UUID: String] = [:]
     @Published private var outputOperations = Set<UUID>()
     @Published private var projectsBeingRemoved = Set<UUID>()
@@ -46,9 +52,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published var environmentProcess: Process?
     @Published var failedStagesByProject: [UUID: Set<Stage>] = [:]
     private var logEntriesByProject: [UUID: [ActivityLogEntry]] = [:]
-    private var pipelineLogCaptures: [UUID: PipelineLogCapture] = [:]
-    private var environmentLogCapture: PipelineLogCapture?
-    private var stageStartedAtByProject: [UUID: Date] = [:]
     private var viewerStateByProject: [UUID: ProjectViewerState] = [:]
     private var selectedCameraCenter = SCNVector3Zero
     private var selectedCameraScale: Double = 1
@@ -455,11 +458,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     private func finishRemovingProject(_ id: UUID) {
-        runningProcesses[id] = nil
-        runningStages[id] = nil
+        runs[id] = nil
         failedStagesByProject[id] = nil
         logEntriesByProject[id] = nil
-        pipelineLogCaptures[id] = nil
         liveLogStatusByProject[id] = nil
         technicalLogURLs[id] = nil
         viewerStateByProject[id] = nil
@@ -540,8 +541,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             return
         }
         recordInitialPreprocessingSignature(for: selectedProject)
-        artifacts = ArtifactScanner.artifacts(for: selectedProject)
-        var states = ArtifactScanner.stageStates(for: selectedProject, runningStage: runningStages[selectedProject.id], failedStages: failedStagesByProject[selectedProject.id] ?? [])
+        let inspection = ArtifactScanner.Inspection()
+        artifacts = ArtifactScanner.artifacts(for: selectedProject, inspection: inspection)
+        var states = ArtifactScanner.stageStates(for: selectedProject, runningStage: runningStages[selectedProject.id], failedStages: failedStagesByProject[selectedProject.id] ?? [], inspection: inspection)
         if preprocessingNeedsRerun(for: selectedProject), states[.preprocessing] == .done {
             states[.preprocessing] = .ready
         }
@@ -1318,9 +1320,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         process.currentDirectoryURL = executionPackageURL
         process.environment = processEnvironment()
         process.environment?["PINNA2HRTF_LIVE_EVENTS"] = "1"
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
         let runID = UUID()
         let startedAt = Date()
         let logURL = Self.technicalLogURL(project: project, stage: stage, runID: runID, date: startedAt)
@@ -1346,39 +1345,21 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 }
             })
             technicalLogURLs[project.id] = logURL
-            pipelineLogCaptures[project.id] = capture
         } catch {
             capture = nil
             appendLog("Could not create a technical log: \(error.localizedDescription)", for: project.id)
         }
-        runningProcesses[project.id] = process
-        runningStages[project.id] = stage
+        runs[project.id] = PipelineRun(process: process, stage: stage)
         liveLogStatusByProject[project.id] = "Running · \(stage.title)"
-        stageStartedAtByProject[project.id] = startedAt
         setStageOutcome(stage, for: project.id, to: .running)
         refreshArtifacts()
         let details = stageStartDetails(stage: stage, project: project)
         appendLog("\(stage.title) started\(details.isEmpty ? "" : " · \(details)")", for: project.id)
-        let readLock = NSLock()
-        pipe.fileHandleForReading.readabilityHandler = { handle in
-            readLock.lock()
-            let data = handle.availableData
-            if !data.isEmpty { capture?.append(data) }
-            readLock.unlock()
-        }
-        process.terminationHandler = { [weak self] process in
-            pipe.fileHandleForReading.readabilityHandler = nil
-            readLock.lock()
-            let remaining = pipe.fileHandleForReading.readDataToEndOfFile()
-            capture?.append(remaining)
-            capture?.finish()
-            readLock.unlock()
+        let onExit: @Sendable (Process) -> Void = { [weak self] process in
             guard let store = self else { return }
             Task { @MainActor in
                 store.outputOperations.insert(project.id)
-                store.runningProcesses[project.id] = nil
-                store.runningStages[project.id] = nil
-                store.pipelineLogCaptures[project.id] = nil
+                store.runs[project.id] = nil
                 store.liveLogStatusByProject[project.id] = "Checking outputs · \(stage.title)"
                 let stopped = store.stoppingProjects.contains(project.id) || store.projects.first(where: { $0.id == project.id })?.stageOutcomes?[stage.rawValue] == .stopped
                 var outcome: StageState = stopped ? .stopped : .failed
@@ -1405,7 +1386,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                     store.appendLog("Output tracking is pending; it will be retried before reset.", for: project.id)
                 }
                 store.setStageOutcome(stage, for: project.id, to: outcome)
-                let elapsed = store.elapsedDescription(since: store.stageStartedAtByProject.removeValue(forKey: project.id) ?? startedAt)
+                let elapsed = store.elapsedDescription(since: startedAt)
                 if outcome == .done {
                     store.liveLogStatusByProject[project.id] = "Completed · \(stage.title)"
                     store.notifyStageCompletion(stage, project: project)
@@ -1426,15 +1407,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             }
         }
         do {
-            try process.run()
+            try process.run(capturing: capture, onExit: onExit)
         } catch {
-            pipe.fileHandleForReading.readabilityHandler = nil
-            capture?.finish()
-            pipelineLogCaptures[project.id] = nil
-            stageStartedAtByProject[project.id] = nil
             setStageOutcome(stage, for: project.id, to: .failed)
-            runningProcesses[project.id] = nil
-            runningStages[project.id] = nil
+            runs[project.id] = nil
             liveLogStatusByProject[project.id] = "Could not start · \(stage.title)"
             refreshArtifacts()
             appendLog("Could not start \(stage.title): \(error.localizedDescription)", for: project.id)
@@ -1544,9 +1520,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         process.currentDirectoryURL = executionPackageURL
         process.environment = processEnvironment()
         process.environment?["PINNA2HRTF_LIVE_EVENTS"] = "1"
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
         environmentProcess = process
         let runID = UUID()
         let projectForLog = logProjectID.flatMap { id in projects.first { $0.id == id } }
@@ -1562,30 +1535,15 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             })
             environmentTechnicalLogURL = logURL
             if let logProjectID { technicalLogURLs[logProjectID] = logURL }
-            environmentLogCapture = capture
         } catch {
             capture = nil
             appendLog("Could not create an environment setup log: \(error.localizedDescription)", for: logProjectID)
         }
         appendLog("Environment setup started.", for: logProjectID)
         if let logProjectID { liveLogStatusByProject[logProjectID] = "Setting up environment" }
-        let readLock = NSLock()
-        pipe.fileHandleForReading.readabilityHandler = { handle in
-            readLock.lock()
-            let data = handle.availableData
-            if !data.isEmpty { capture?.append(data) }
-            readLock.unlock()
-        }
-        process.terminationHandler = { [weak self] process in
-            pipe.fileHandleForReading.readabilityHandler = nil
-            readLock.lock()
-            let remaining = pipe.fileHandleForReading.readDataToEndOfFile()
-            capture?.append(remaining)
-            capture?.finish()
-            readLock.unlock()
+        let onExit: @Sendable (Process) -> Void = { [weak self] process in
             guard let store = self else { return }
             Task { @MainActor in
-                store.environmentLogCapture = nil
                 let result = process.terminationStatus == 0 ? "Environment setup finished." : "Environment setup failed (status \(process.terminationStatus)). Technical output: \(logURL.lastPathComponent)."
                 store.appendLog(result, for: logProjectID)
                 if let logProjectID {
@@ -1596,11 +1554,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             }
         }
         do {
-            try process.run()
+            try process.run(capturing: capture, onExit: onExit)
         } catch {
-            pipe.fileHandleForReading.readabilityHandler = nil
-            capture?.finish()
-            environmentLogCapture = nil
             environmentProcess = nil
             if let logProjectID { liveLogStatusByProject[logProjectID] = "Could not start environment setup" }
             appendLog("Could not start environment setup: \(error.localizedDescription)")

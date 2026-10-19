@@ -279,11 +279,12 @@ struct ProjectRecord: Identifiable, Codable, Equatable {
 
 extension ProjectRecord {
     var scanPreparation: ScanPreparationSettings { settings.scanPreparation ?? ScanPreparationSettings() }
-    var pipelineLeftEar: String {
-        scanPreparation.enabled ? (scanPreparation.prepareLeft ? (ArtifactScanner.preparedEarURL(for: .left, in: self)?.path ?? URL(fileURLWithPath: saveLocation).appendingPathComponent("Prepared/Left.stl").path) : "") : leftEar
-    }
-    var pipelineRightEar: String {
-        scanPreparation.enabled ? (scanPreparation.prepareRight ? (ArtifactScanner.preparedEarURL(for: .right, in: self)?.path ?? URL(fileURLWithPath: saveLocation).appendingPathComponent("Prepared/Right.stl").path) : "") : rightEar
+    var pipelineLeftEar: String { pipelineEar(for: .left) }
+    var pipelineRightEar: String { pipelineEar(for: .right) }
+
+    func pipelineEar(for side: EarSide, inspection: ArtifactScanner.Inspection = .init()) -> String {
+        guard scanPreparation.enabled else { return side == .left ? leftEar : rightEar }
+        return ArtifactScanner.preparedEarURL(for: side, in: self, inspection: inspection)?.path ?? ""
     }
 }
 

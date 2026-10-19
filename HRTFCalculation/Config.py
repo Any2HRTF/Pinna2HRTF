@@ -238,8 +238,6 @@ class PipelineConfig(BaseModel):
             for name, value in section:
                 if isinstance(value, Path):
                     setattr(section, name, resolve_path(value, base))
-                elif value is not None and name.endswith(("_file", "_checkpoint", "_dir", "_project", "_config")) and isinstance(value, Path):
-                    setattr(section, name, resolve_path(value, base))
         inference_folder_replacements = {
             "Intermediates/Prediction STL Left": "Intermediates/Left",
             "Intermediates/Prediction STL Right": "Intermediates/Right",

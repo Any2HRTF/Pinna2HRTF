@@ -287,6 +287,27 @@ def slurm_worker_text(config: PipelineConfig) -> str:
     ])
 
 
+def prepare_sofa_output(output_dir: Path, overwrite: bool) -> None:
+    if output_dir.exists() and overwrite:
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+
+def collect_sofa_files(projects: list[Path], output_dir: Path) -> None:
+    import mesh2hrtf as m2h
+    if len(projects) == 2:
+        m2h.merge_sofa_files([str(project) for project in projects], savedir=str(output_dir))
+    else:
+        for source in (projects[0] / "Output2HRTF").glob("*.sofa"):
+            shutil.copy2(source, output_dir / source.name)
+
+
+def inspect_sofa_files(output_dir: Path) -> None:
+    import mesh2hrtf as m2h
+    for plane in ["horizontal", "median"]:
+        m2h.inspect_sofa_files(str(output_dir), pattern="HRIR", plot="3D", plane=plane)
+
+
 def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
     emit_live_event("Converting simulation results to SOFA")
     logger(f"Running postprocessing into {config.postprocessing.output_sofa_dir}")
@@ -294,9 +315,7 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
         return
     import mesh2hrtf as m2h
     output_dir = config.postprocessing.output_sofa_dir
-    if output_dir.exists() and config.postprocessing.overwrite:
-        shutil.rmtree(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    prepare_sofa_output(output_dir, config.postprocessing.overwrite)
     projects = project_dirs(config)
     for project in projects:
         emit_live_event(f"Converting {project.name} results")
@@ -313,15 +332,10 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
             normalize_sofa_files(project / "Output2HRTF", config.postprocessing.level_offset_db)
     if len(projects) == 2:
         emit_live_event("Combining left and right results")
-        m2h.merge_sofa_files([str(project) for project in projects], savedir=str(output_dir))
-    else:
-        source_dir = projects[0] / "Output2HRTF"
-        for source in source_dir.glob("*.sofa"):
-            shutil.copy2(source, output_dir / source.name)
+    collect_sofa_files(projects, output_dir)
     try:
         emit_live_event("Creating SOFA inspection plots")
-        for plane in ["horizontal", "median"]:
-            m2h.inspect_sofa_files(str(output_dir), pattern="HRIR", plot="3D", plane=plane)
+        inspect_sofa_files(output_dir)
         logger(f"Wrote SOFA visualizations into {output_dir}")
     except Exception as error:
         logger(f"Could not write SOFA visualizations: {error}")
@@ -382,21 +396,14 @@ def sofa_cli() -> None:
     args = parse_sofa_args()
     import mesh2hrtf as m2h
     output_dir = Path(args.output_dir)
-    if output_dir.exists() and args.overwrite:
-        shutil.rmtree(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    projects = [project for project in (args.left_project, args.right_project) if project]
+    prepare_sofa_output(output_dir, args.overwrite)
+    projects = [Path(project) for project in (args.left_project, args.right_project) if project]
     if not projects:
         raise SystemExit("At least one project is required")
     for project in projects:
-        m2h.output2hrtf(project)
-    if len(projects) == 2:
-        m2h.merge_sofa_files(projects, savedir=str(output_dir))
-    else:
-        for source in Path(projects[0]).joinpath("Output2HRTF").glob("*.sofa"):
-            shutil.copy2(source, output_dir / source.name)
-    for plane in ["horizontal", "median"]:
-        m2h.inspect_sofa_files(str(output_dir), pattern="HRIR", plot="3D", plane=plane)
+        m2h.output2hrtf(str(project))
+    collect_sofa_files(projects, output_dir)
+    inspect_sofa_files(output_dir)
 
 
 def cli() -> None:

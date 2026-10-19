@@ -57,8 +57,11 @@ public partial class MainWindow : Window
     const double MicrophoneMarkerRadiusMeshUnits = 0.5;
     readonly ObservableCollection<ProjectRecord> projects = [];
     readonly ObservableCollection<Artifact> artifacts = [];
-    readonly Dictionary<Guid, Process> runningProcesses = [];
-    readonly Dictionary<Guid, Stage> runningStages = [];
+    sealed record PipelineRun(Process Process, Stage Stage, PipelineLogCapture? Capture)
+    {
+        public GeneratedOutputManifest? Outputs { get; set; }
+    }
+    readonly Dictionary<Guid, PipelineRun> runs = [];
     readonly Dictionary<Guid, Queue<Stage>> queuedStages = [];
     readonly Dictionary<Guid, HashSet<Stage>> failedStages = [];
     readonly Dictionary<string, GeneratedOutputManifest> outputStores = new(StringComparer.OrdinalIgnoreCase);
@@ -66,11 +69,9 @@ public partial class MainWindow : Window
     readonly HashSet<Guid> outputOperations = [];
     readonly HashSet<Guid> outputScans = [];
     readonly Dictionary<Guid, DateTime> lastOutputScan = [];
-    readonly Dictionary<Process, GeneratedOutputManifest> processOutputStores = [];
     readonly Dictionary<Guid, string> projectLogs = [];
     readonly Dictionary<Guid, string> legacyProjectLogs = [];
     readonly Dictionary<Guid, string> technicalLogPaths = [];
-    readonly Dictionary<Process, PipelineLogCapture> pipelineLogCaptures = [];
     readonly Dictionary<Guid, Dictionary<string, int>> projectLogKeyIndices = [];
     readonly HashSet<Guid> projectsBeingRemoved = [];
     readonly Dictionary<Guid, ProjectRowUi> projectRows = [];
@@ -79,6 +80,7 @@ public partial class MainWindow : Window
     readonly JsonSerializerOptions jsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true, Converters = { new JsonStringEnumConverter() } };
     readonly Microsoft.UI.Dispatching.DispatcherQueueTimer statusTimer;
     readonly Dictionary<string, Control> settingControls = [];
+    readonly Dictionary<string, TextSetting> textSettings;
     readonly List<Button> stageButtons = [];
     readonly List<TextBlock> stageStatusLabels = [];
     readonly List<Expander> settingSections = [];
@@ -229,11 +231,12 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        textSettings = CreateTextSettings();
         Root.Loaded += WindowLoaded;
         Root.ActualThemeChanged += (_, _) => UpdateViewerAppearance();
         statusTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
         statusTimer.Interval = TimeSpan.FromSeconds(2);
-        statusTimer.Tick += (_, _) => { RefreshNumCalcStatus(); RefreshPipelineStatus(); };
+        statusTimer.Tick += (_, _) => RefreshPipelineStatus();
         ExtendsContentIntoTitleBar = true;
         Activated += (_, _) => UpdateViewerAppearance();
         var hwnd = WindowNative.GetWindowHandle(this);
@@ -1120,13 +1123,14 @@ public partial class MainWindow : Window
         parent.Children.Add(expander);
     }
 
-    void UpdatePreparedEarEditButton()
+    void UpdatePreparedEarEditButton(ArtifactInspection? inspection = null)
     {
+        inspection ??= new ArtifactInspection();
         var project = selectedProject;
         var side = project != null && selectedArtifactPath != null ? PreparedEarSideForPath(project, selectedArtifactPath) : null;
         editPreparedEarButton.Visibility = side == null ? Visibility.Collapsed : Visibility.Visible;
-        editPreparedEarButton.IsEnabled = side != null && project != null && ScanPreparationOutputsCurrent(project) && !runningProcesses.ContainsKey(project.Id);
-        ToolTipService.SetToolTip(editPreparedEarButton, side == null ? null : EarReviewIsCurrent(project!, side) ? "Edit the reviewed prepared ear" : "Review this prepared ear before continuing");
+        editPreparedEarButton.IsEnabled = side != null && project != null && ScanPreparationOutputsCurrent(project, inspection) && !runs.ContainsKey(project.Id);
+        ToolTipService.SetToolTip(editPreparedEarButton, side == null ? null : EarReviewIsCurrent(project!, side, inspection) ? "Edit the reviewed prepared ear" : "Review this prepared ear before continuing");
     }
 
     string? PreparedEarSideForPath(ProjectRecord project, string path)
@@ -1234,25 +1238,12 @@ public partial class MainWindow : Window
         prepareRightEarBox.IsChecked = project?.Settings.ScanPreparation.PrepareRight ?? true;
         UpdatePreparedEarEditButton();
         usePredictionsBox.IsChecked = project?.Settings.Inference.UsePredictionsForPreprocessing ?? false;
-        evaluationGridBox.Text = project?.Settings.Preprocessing.EvaluationGrid ?? "";
         useHeadRadiusBox.IsChecked = project?.Settings.Preprocessing.UseCustomHeadRadius == true;
-        headRadiusBox.Text = project?.Settings.Preprocessing.HeadRadius ?? "";
-        minFrequencyBox.Text = project?.Settings.Preprocessing.MinFrequency ?? "0";
-        maxFrequencyBox.Text = project?.Settings.Preprocessing.MaxFrequency ?? "24000";
-        frequencyStepsBox.Text = project?.Settings.Preprocessing.FrequencyStepCount ?? "129";
-        microphoneFacesBox.Text = project?.Settings.Preprocessing.SourceAssignmentFaceCount ?? "6";
-        meshMinEdgeBox.Text = project?.Settings.Preprocessing.MeshMinEdgeLength ?? "0.5";
-        meshMaxEdgeBox.Text = project?.Settings.Preprocessing.MeshMaxEdgeLength ?? "10.0";
-        meshMaxErrorBox.Text = project?.Settings.Preprocessing.MeshMaxError ?? "0.5";
-        meshGammaBox.Text = project?.Settings.Preprocessing.MeshGamma ?? "0.2";
-        meshGammaOppositeBox.Text = project?.Settings.Preprocessing.MeshGammaOpposite ?? "0.1";
-        maxInstancesBox.Text = project?.Settings.NumCalc.MaxInstances ?? "1";
-        maxCpuLoadBox.Text = project?.Settings.NumCalc.MaxCpuLoad ?? "90";
         adaptiveFmmLengthBox.IsChecked = project?.Settings.NumCalc.AdaptiveFmmLength ?? true;
         normalizeHrtfsBox.IsChecked = project?.Settings.Postprocessing?.Normalize ?? true;
-        levelOffsetBox.Text = project?.Settings.Postprocessing?.LevelOffsetDB ?? "-30";
         resampleHrirsBox.IsChecked = project?.Settings.Postprocessing?.ResampleHrirs ?? false;
-        samplingRateBox.Text = project?.Settings.Postprocessing?.SamplingRate ?? "48000";
+        foreach (var binding in textSettings.Values)
+            binding.Control.Text = project == null ? binding.DefaultValue : binding.Read(project) ?? binding.DefaultValue;
         SelectModel(project);
         LoadSelectedProjectLog();
         loading = false;
@@ -1268,55 +1259,62 @@ public partial class MainWindow : Window
         return null;
     }
 
-    string CurrentSettingValue(string id) => id switch
+    sealed record TextSetting(TextBox Control, Func<ProjectRecord, string?> Read,
+        Action<ProjectRecord, string> Write, string DefaultValue);
+
+    Dictionary<string, TextSetting> CreateTextSettings() => new()
+    {
+        ["mesh2hrtf.evaluation_grid"] = new(evaluationGridBox, p => p.Settings.Preprocessing.EvaluationGrid,
+            (p, value) => p.Settings.Preprocessing.EvaluationGrid = value.Trim(), ""),
+        ["mesh2hrtf.head_radius"] = new(headRadiusBox, p => p.Settings.Preprocessing.HeadRadius,
+            (p, value) => p.Settings.Preprocessing.HeadRadius = value.Trim(), ""),
+        ["mesh2hrtf.min_frequency"] = new(minFrequencyBox, p => p.Settings.Preprocessing.MinFrequency,
+            (p, value) => p.Settings.Preprocessing.MinFrequency = value.Trim(), "0"),
+        ["mesh2hrtf.max_frequency"] = new(maxFrequencyBox, p => p.Settings.Preprocessing.MaxFrequency,
+            (p, value) => p.Settings.Preprocessing.MaxFrequency = value.Trim(), "24000"),
+        ["mesh2hrtf.frequency_steps"] = new(frequencyStepsBox, p => p.Settings.Preprocessing.FrequencyStepCount,
+            (p, value) => p.Settings.Preprocessing.FrequencyStepCount = Math.Max(int.TryParse(value, out var steps) ? steps : 129, 2).ToString(CultureInfo.InvariantCulture), "129"),
+        ["mesh2hrtf.microphone_faces"] = new(microphoneFacesBox, p => p.Settings.Preprocessing.SourceAssignmentFaceCount,
+            (p, value) => p.Settings.Preprocessing.SourceAssignmentFaceCount = value.Trim(), "6"),
+        ["mesh_grading.min_edge_length"] = new(meshMinEdgeBox, p => p.Settings.Preprocessing.MeshMinEdgeLength,
+            (p, value) => p.Settings.Preprocessing.MeshMinEdgeLength = value.Trim(), "0.5"),
+        ["mesh_grading.max_edge_length"] = new(meshMaxEdgeBox, p => p.Settings.Preprocessing.MeshMaxEdgeLength,
+            (p, value) => p.Settings.Preprocessing.MeshMaxEdgeLength = value.Trim(), "10.0"),
+        ["mesh_grading.max_error"] = new(meshMaxErrorBox, p => p.Settings.Preprocessing.MeshMaxError,
+            (p, value) => p.Settings.Preprocessing.MeshMaxError = value.Trim(), "0.5"),
+        ["mesh_grading.gamma"] = new(meshGammaBox, p => p.Settings.Preprocessing.MeshGamma,
+            (p, value) => p.Settings.Preprocessing.MeshGamma = value.Trim(), "0.2"),
+        ["mesh_grading.gamma_opposite"] = new(meshGammaOppositeBox, p => p.Settings.Preprocessing.MeshGammaOpposite,
+            (p, value) => p.Settings.Preprocessing.MeshGammaOpposite = value.Trim(), "0.1"),
+        ["numcalc.parallel_instances"] = new(maxInstancesBox, p => p.Settings.NumCalc.MaxInstances,
+            (p, value) => p.Settings.NumCalc.MaxInstances = value.Trim(), "1"),
+        ["numcalc.cpu_limit"] = new(maxCpuLoadBox, p => p.Settings.NumCalc.MaxCpuLoad,
+            (p, value) => p.Settings.NumCalc.MaxCpuLoad = value.Trim(), "90"),
+        ["postprocessing.level_offset"] = new(levelOffsetBox, p => p.Settings.Postprocessing?.LevelOffsetDB,
+            (p, value) => p.Settings.Postprocessing!.LevelOffsetDB = value.Trim(), "-30"),
+        ["postprocessing.sampling_rate"] = new(samplingRateBox, p => p.Settings.Postprocessing?.SamplingRate ?? "48000",
+            (p, value) => p.Settings.Postprocessing!.SamplingRate = NormalizeSamplingRate(value), "48000"),
+    };
+
+    string CurrentSettingValue(string id) => textSettings.TryGetValue(id, out var binding) ? binding.Control.Text : id switch
     {
         "project.use_bezierppm" => (usePredictionsBox.IsChecked == true).ToString(),
         "inference.model" => modelPicker.SelectedItem?.ToString() ?? "",
-        "mesh2hrtf.evaluation_grid" => evaluationGridBox.Text,
         "mesh2hrtf.use_head_radius" => (useHeadRadiusBox.IsChecked == true).ToString(),
-        "mesh2hrtf.head_radius" => headRadiusBox.Text,
-        "mesh2hrtf.min_frequency" => minFrequencyBox.Text,
-        "mesh2hrtf.max_frequency" => maxFrequencyBox.Text,
-        "mesh2hrtf.frequency_steps" => frequencyStepsBox.Text,
-        "mesh2hrtf.microphone_faces" => microphoneFacesBox.Text,
-        "mesh_grading.min_edge_length" => meshMinEdgeBox.Text,
-        "mesh_grading.max_edge_length" => meshMaxEdgeBox.Text,
-        "mesh_grading.max_error" => meshMaxErrorBox.Text,
-        "mesh_grading.gamma" => meshGammaBox.Text,
-        "mesh_grading.gamma_opposite" => meshGammaOppositeBox.Text,
-        "numcalc.parallel_instances" => maxInstancesBox.Text,
-        "numcalc.cpu_limit" => maxCpuLoadBox.Text,
         "numcalc.adaptive_fmm" => (adaptiveFmmLengthBox.IsChecked == true).ToString(),
         "postprocessing.normalize" => (normalizeHrtfsBox.IsChecked == true).ToString(),
-        "postprocessing.level_offset" => levelOffsetBox.Text,
         "postprocessing.resample_hrirs" => (resampleHrirsBox.IsChecked == true).ToString(),
-        "postprocessing.sampling_rate" => samplingRateBox.Text,
         _ => ""
     };
 
-    string StoredSettingValue(ProjectRecord project, string id) => id switch
+    string StoredSettingValue(ProjectRecord project, string id) => textSettings.TryGetValue(id, out var binding) ? binding.Read(project) ?? "" : id switch
     {
         "project.use_bezierppm" => project.Settings.Inference.UsePredictionsForPreprocessing.ToString(),
         "inference.model" => ModelName(project.Settings.Inference.ModelConfig),
-        "mesh2hrtf.evaluation_grid" => project.Settings.Preprocessing.EvaluationGrid ?? "",
         "mesh2hrtf.use_head_radius" => (project.Settings.Preprocessing.UseCustomHeadRadius == true).ToString(),
-        "mesh2hrtf.head_radius" => project.Settings.Preprocessing.HeadRadius ?? "",
-        "mesh2hrtf.min_frequency" => project.Settings.Preprocessing.MinFrequency ?? "",
-        "mesh2hrtf.max_frequency" => project.Settings.Preprocessing.MaxFrequency ?? "",
-        "mesh2hrtf.frequency_steps" => project.Settings.Preprocessing.FrequencyStepCount ?? "",
-        "mesh2hrtf.microphone_faces" => project.Settings.Preprocessing.SourceAssignmentFaceCount ?? "",
-        "mesh_grading.min_edge_length" => project.Settings.Preprocessing.MeshMinEdgeLength ?? "",
-        "mesh_grading.max_edge_length" => project.Settings.Preprocessing.MeshMaxEdgeLength ?? "",
-        "mesh_grading.max_error" => project.Settings.Preprocessing.MeshMaxError ?? "",
-        "mesh_grading.gamma" => project.Settings.Preprocessing.MeshGamma ?? "",
-        "mesh_grading.gamma_opposite" => project.Settings.Preprocessing.MeshGammaOpposite ?? "",
-        "numcalc.parallel_instances" => project.Settings.NumCalc.MaxInstances ?? "",
-        "numcalc.cpu_limit" => project.Settings.NumCalc.MaxCpuLoad ?? "",
         "numcalc.adaptive_fmm" => project.Settings.NumCalc.AdaptiveFmmLength.ToString(),
         "postprocessing.normalize" => (project.Settings.Postprocessing?.Normalize ?? true).ToString(),
-        "postprocessing.level_offset" => project.Settings.Postprocessing?.LevelOffsetDB ?? "",
         "postprocessing.resample_hrirs" => (project.Settings.Postprocessing?.ResampleHrirs ?? false).ToString(),
-        "postprocessing.sampling_rate" => project.Settings.Postprocessing?.SamplingRate ?? "48000",
         _ => ""
     };
 
@@ -1343,7 +1341,7 @@ public partial class MainWindow : Window
     async Task ReconcileOutputsAsync(ProjectRecord project, bool required = false)
     {
         if (shutdownCleanupDone || string.IsNullOrWhiteSpace(project.SaveLocation) || !Directory.Exists(project.SaveLocation) ||
-            runningProcesses.ContainsKey(project.Id) || outputOperations.Contains(project.Id)) return;
+            runs.ContainsKey(project.Id) || outputOperations.Contains(project.Id)) return;
         if (!required && (outputScans.Contains(project.Id) || lastOutputScan.TryGetValue(project.Id, out var previous) && DateTime.UtcNow - previous < TimeSpan.FromSeconds(10))) return;
         var root = project.SaveLocation;
         outputScans.Add(project.Id);
@@ -1378,7 +1376,7 @@ public partial class MainWindow : Window
         var project = selectedProject;
         var desired = CurrentSettingValue(id);
         if (desired == StoredSettingValue(project, id)) return;
-        if (runningProcesses.ContainsKey(project.Id) || outputOperations.Contains(project.Id)) { LoadSelectedProject(); return; }
+        if (runs.ContainsKey(project.Id) || outputOperations.Contains(project.Id)) { LoadSelectedProject(); return; }
         var resetStage = SettingResetStage(id);
         if (resetStage != null)
         {
@@ -1424,29 +1422,15 @@ public partial class MainWindow : Window
 
     void SetSettingControlValue(string id, string value)
     {
+        if (textSettings.TryGetValue(id, out var binding)) { binding.Control.Text = value; return; }
         switch (id)
         {
             case "project.use_bezierppm": usePredictionsBox.IsChecked = bool.TryParse(value, out var use) && use; break;
             case "inference.model": modelPicker.SelectedItem = value; break;
-            case "mesh2hrtf.evaluation_grid": evaluationGridBox.Text = value; break;
             case "mesh2hrtf.use_head_radius": useHeadRadiusBox.IsChecked = bool.TryParse(value, out var radius) && radius; break;
-            case "mesh2hrtf.head_radius": headRadiusBox.Text = value; break;
-            case "mesh2hrtf.min_frequency": minFrequencyBox.Text = value; break;
-            case "mesh2hrtf.max_frequency": maxFrequencyBox.Text = value; break;
-            case "mesh2hrtf.frequency_steps": frequencyStepsBox.Text = value; break;
-            case "mesh2hrtf.microphone_faces": microphoneFacesBox.Text = value; break;
-            case "mesh_grading.min_edge_length": meshMinEdgeBox.Text = value; break;
-            case "mesh_grading.max_edge_length": meshMaxEdgeBox.Text = value; break;
-            case "mesh_grading.max_error": meshMaxErrorBox.Text = value; break;
-            case "mesh_grading.gamma": meshGammaBox.Text = value; break;
-            case "mesh_grading.gamma_opposite": meshGammaOppositeBox.Text = value; break;
-            case "numcalc.parallel_instances": maxInstancesBox.Text = value; break;
-            case "numcalc.cpu_limit": maxCpuLoadBox.Text = value; break;
             case "numcalc.adaptive_fmm": adaptiveFmmLengthBox.IsChecked = bool.TryParse(value, out var adaptive) && adaptive; break;
             case "postprocessing.normalize": normalizeHrtfsBox.IsChecked = bool.TryParse(value, out var normalize) && normalize; break;
-            case "postprocessing.level_offset": levelOffsetBox.Text = value; break;
             case "postprocessing.resample_hrirs": resampleHrirsBox.IsChecked = bool.TryParse(value, out var resample) && resample; UpdatePostprocessingControls(); break;
-            case "postprocessing.sampling_rate": samplingRateBox.Text = value; break;
         }
     }
 
@@ -1465,7 +1449,6 @@ public partial class MainWindow : Window
         project.Settings.Inference.UsePredictionsForPreprocessing = usePredictionsBox.IsChecked == true;
         UpdatePlacementButtons();
         if (placementSide != null && (project.Settings.Inference.UsePredictionsForPreprocessing || !PlacementIsCurrent())) EndPlacement();
-        project.Settings.Preprocessing.EvaluationGrid = evaluationGridBox.Text.Trim();
         project.Settings.ScanPreparation.Enabled = scanPreparationEnabledBox.IsChecked == true;
         project.Settings.ScanPreparation.ScanPath = scanPathBox.Text.Trim();
         project.Settings.ScanPreparation.PrepareLeft = prepareLeftEarBox.IsChecked == true;
@@ -1477,24 +1460,11 @@ public partial class MainWindow : Window
             project.Settings.ScanPreparation.ReviewedRight = null;
         }
         project.Settings.Preprocessing.UseCustomHeadRadius = useHeadRadiusBox.IsChecked == true;
-        project.Settings.Preprocessing.HeadRadius = headRadiusBox.Text.Trim();
-        project.Settings.Preprocessing.MinFrequency = minFrequencyBox.Text.Trim();
-        project.Settings.Preprocessing.MaxFrequency = maxFrequencyBox.Text.Trim();
-        project.Settings.Preprocessing.FrequencyStepCount = Math.Max(int.TryParse(frequencyStepsBox.Text, out var steps) ? steps : 129, 2).ToString(CultureInfo.InvariantCulture);
-        project.Settings.Preprocessing.SourceAssignmentFaceCount = microphoneFacesBox.Text.Trim();
-        project.Settings.Preprocessing.MeshMinEdgeLength = meshMinEdgeBox.Text.Trim();
-        project.Settings.Preprocessing.MeshMaxEdgeLength = meshMaxEdgeBox.Text.Trim();
-        project.Settings.Preprocessing.MeshMaxError = meshMaxErrorBox.Text.Trim();
-        project.Settings.Preprocessing.MeshGamma = meshGammaBox.Text.Trim();
-        project.Settings.Preprocessing.MeshGammaOpposite = meshGammaOppositeBox.Text.Trim();
-        project.Settings.NumCalc.MaxInstances = maxInstancesBox.Text.Trim();
-        project.Settings.NumCalc.MaxCpuLoad = maxCpuLoadBox.Text.Trim();
         project.Settings.NumCalc.AdaptiveFmmLength = adaptiveFmmLengthBox.IsChecked == true;
         project.Settings.Postprocessing ??= new PostprocessingSettings();
         project.Settings.Postprocessing.Normalize = normalizeHrtfsBox.IsChecked == true;
-        project.Settings.Postprocessing.LevelOffsetDB = levelOffsetBox.Text.Trim();
         project.Settings.Postprocessing.ResampleHrirs = resampleHrirsBox.IsChecked == true;
-        project.Settings.Postprocessing.SamplingRate = NormalizeSamplingRate(samplingRateBox.Text);
+        foreach (var binding in textSettings.Values) binding.Write(project, binding.Control.Text);
         samplingRateBox.Text = project.Settings.Postprocessing.SamplingRate;
         UpdatePostprocessingControls();
         InvalidateManualPositions(project);
@@ -1520,8 +1490,9 @@ public partial class MainWindow : Window
 
     async void BezierPPMSettingChanged(object sender, RoutedEventArgs e) => await HandleSettingChangeAsync("project.use_bezierppm");
 
-    void RefreshProjectList()
+    void RefreshProjectList(ArtifactInspection? inspection = null)
     {
+        inspection ??= new ArtifactInspection();
         projectRows.Clear();
         projectList.Items.Clear();
         foreach (var project in projects.Where(p => p.FolderId == null)) AddProjectListRow(project);
@@ -1533,8 +1504,8 @@ public partial class MainWindow : Window
         }
         foreach (var project in projects)
         {
-            project.IsRunning = runningProcesses.ContainsKey(project.Id);
-            project.StatusText = NextStageSummary(project);
+            project.IsRunning = runs.ContainsKey(project.Id);
+            project.StatusText = NextStageSummary(project, inspection);
             if (projectRows.TryGetValue(project.Id, out var ui))
             {
                 ui.Name.Text = project.Name;
@@ -1718,7 +1689,7 @@ public partial class MainWindow : Window
     {
         var project = selectedProject;
         if (project == null) return;
-        if (runningProcesses.ContainsKey(project.Id))
+        if (runs.ContainsKey(project.Id))
         {
             AppendLog("Wait for the running project stage to finish before aligning its scan.", project.Id);
             return;
@@ -2005,7 +1976,7 @@ public partial class MainWindow : Window
         if (selectedProject is not { } project || !projectsBeingRemoved.Add(project.Id)) return;
         try
         {
-            if (runningProcesses.ContainsKey(project.Id) || outputOperations.Contains(project.Id) || outputScans.Contains(project.Id))
+            if (runs.ContainsKey(project.Id) || outputOperations.Contains(project.Id) || outputScans.Contains(project.Id))
             {
                 await ShowProjectRemovalErrorAsync("Wait for the project task and output checks to finish before removing this project.");
                 return;
@@ -2022,7 +1993,7 @@ public partial class MainWindow : Window
             };
             if (await confirmation.ShowAsync() != ContentDialogResult.Primary) return;
             if (!projects.Contains(project)) return;
-            if (runningProcesses.ContainsKey(project.Id) || outputOperations.Contains(project.Id) || outputScans.Contains(project.Id))
+            if (runs.ContainsKey(project.Id) || outputOperations.Contains(project.Id) || outputScans.Contains(project.Id))
             {
                 await ShowProjectRemovalErrorAsync("The project started a task while the confirmation was open. Wait for it to finish, then remove the project again.");
                 return;
@@ -2217,10 +2188,11 @@ public partial class MainWindow : Window
             ResetViewer();
             return;
         }
+        var inspection = new ArtifactInspection();
         var selectedPath = viewerStates.TryGetValue(selectedProject.Id, out var state) ? state.SelectedArtifactPath : null;
         refreshingArtifacts = true;
         artifacts.Clear();
-        foreach (var artifact in ArtifactsFor(selectedProject).Where(x => x.Exists))
+        foreach (var artifact in ArtifactsFor(selectedProject, inspection).Where(x => x.Exists))
             artifacts.Add(artifact);
         artifactPicker.SelectedItem = artifacts.FirstOrDefault(x => x.Path == selectedPath) ?? artifacts.FirstOrDefault();
         refreshingArtifacts = false;
@@ -2228,14 +2200,15 @@ public partial class MainWindow : Window
             OpenArtifact(selected);
         else
             ResetViewer();
-        RefreshProjectList();
+        RefreshProjectList(inspection);
     }
 
-    List<Artifact> ArtifactsFor(ProjectRecord project)
+    List<Artifact> ArtifactsFor(ProjectRecord project, ArtifactInspection? inspection = null)
     {
+        inspection ??= new ArtifactInspection();
         var list = new List<Artifact>();
         var hrtf = Path.Combine(project.SaveLocation, "HRTF");
-        if (project.Settings.ScanPreparation.Enabled && ScanPreparationOutputsCurrent(project))
+        if (project.Settings.ScanPreparation.Enabled && ScanPreparationOutputsCurrent(project, inspection))
         {
             foreach (var (side, selected, reviewed) in new[]
             {
@@ -2245,7 +2218,7 @@ public partial class MainWindow : Window
             {
                 if (!selected) continue;
                 var prepared = Path.Combine(project.SaveLocation, "Prepared", side == "left" ? "Left.stl" : "Right.stl");
-                var useReviewed = EarReviewIsCurrent(project, side) && !string.IsNullOrWhiteSpace(reviewed);
+                var useReviewed = EarReviewIsCurrent(project, side, inspection) && !string.IsNullOrWhiteSpace(reviewed);
                 list.Add(new Artifact(useReviewed ? $"Reviewed {side} ear" : $"Prepared {side} ear", useReviewed ? reviewed! : prepared, side));
             }
         }
@@ -2548,7 +2521,7 @@ public partial class MainWindow : Window
         foreach (var (side, button, host) in new[] { ("left", placeLeftButton, placeLeftButtonHost), ("right", placeRightButton, placeRightButtonHost) })
         {
             var available = selectedProject != null && PreprocessingMesh(selectedProject, side) != null;
-            button.IsEnabled = !mesh2PpmEnabled && placementSide == null && available && selectedProject != null && !runningProcesses.ContainsKey(selectedProject.Id);
+            button.IsEnabled = !mesh2PpmEnabled && placementSide == null && available && selectedProject != null && !runs.ContainsKey(selectedProject.Id);
             var tooltipText = mesh2PpmEnabled ? "Automatic microphone placement is used for Mesh2PPM-inferred meshes." : available ? $"Place the {side} microphone on the mesh used for preprocessing." :
                 selectedProject != null && InferenceIsAutomatic(selectedProject) ? $"Run Mesh2PPM Inference to create the predicted {side} ear first." : $"Select an input {side} ear first.";
             if (ToolTipService.GetToolTip(host) is ToolTip tooltip && !string.Equals(tooltip.Content as string, tooltipText, StringComparison.Ordinal))
@@ -2566,7 +2539,7 @@ public partial class MainWindow : Window
     async Task BeginPlacementAsync(string side)
     {
         var project = selectedProject;
-        if (project == null || placementSide != null || runningProcesses.ContainsKey(project.Id)) return;
+        if (project == null || placementSide != null || runs.ContainsKey(project.Id)) return;
         if (InferenceIsAutomatic(project))
         {
             AppendLog("Automatic microphone placement is used for Mesh2PPM-inferred meshes.", project.Id);
@@ -2806,7 +2779,7 @@ public partial class MainWindow : Window
     void RunPreprocessingClicked(object sender, RoutedEventArgs e) => RunOrStop(Stage.Preprocessing);
     void RunNumCalcClicked(object sender, RoutedEventArgs e) => RunOrStop(Stage.Numcalc);
     void RunPostprocessingClicked(object sender, RoutedEventArgs e) => RunOrStop(Stage.Postprocessing);
-    void RunOrStop(Stage stage) { if (selectedProject != null && runningStages.TryGetValue(selectedProject.Id, out var active) && active == stage) StopProject(selectedProject); else RunStage(stage); }
+    void RunOrStop(Stage stage) { if (selectedProject != null && runs.TryGetValue(selectedProject.Id, out var active) && active.Stage == stage) StopProject(selectedProject); else RunStage(stage); }
 
     void RunNextClicked(object sender, RoutedEventArgs e)
     {
@@ -2876,10 +2849,7 @@ public partial class MainWindow : Window
                 capture?.Dispose();
                 DispatcherQueue.TryEnqueue(() => ProcessFinished(process, project, stage));
             };
-            runningProcesses[project.Id] = process;
-            runningStages[project.Id] = stage;
-            processOutputStores[process] = outputStore;
-            if (capture != null) pipelineLogCaptures[process] = capture;
+            runs[project.Id] = new PipelineRun(process, stage, capture) { Outputs = outputStore };
             FailedStages(project.Id).Remove(stage);
             if (!process.Start())
                 throw new InvalidOperationException("Process.Start returned false.");
@@ -2892,14 +2862,11 @@ public partial class MainWindow : Window
         }
         catch (Exception error)
         {
-            if (runningProcesses.TryGetValue(project.Id, out var failedProcess))
+            if (runs.Remove(project.Id, out var failedRun))
             {
-                runningProcesses.Remove(project.Id);
-                runningStages.Remove(project.Id);
-                TryTerminate(failedProcess);
-                processOutputStores.Remove(failedProcess);
-                if (pipelineLogCaptures.Remove(failedProcess, out var capture)) capture.Dispose();
-                try { failedProcess.Dispose(); } catch { }
+                TryTerminate(failedRun.Process);
+                failedRun.Capture?.Dispose();
+                try { failedRun.Process.Dispose(); } catch { }
             }
             FailedStages(project.Id).Add(stage);
             AppendLog("Could not start " + stage.Title + ": " + error, project.Id);
@@ -2908,7 +2875,7 @@ public partial class MainWindow : Window
         finally
         {
             outputOperations.Remove(project.Id);
-            if (!runningProcesses.ContainsKey(project.Id) && outputStore != null)
+            if (!runs.ContainsKey(project.Id) && outputStore != null)
             {
                 try { await Task.Run(outputStore.Complete); }
                 catch { AppendLog("Output tracking is pending; it will be retried before reset.", project.Id); }
@@ -2925,20 +2892,20 @@ public partial class MainWindow : Window
             return;
         }
         // StopProject may already have handled and disposed this process.
-        if (!runningProcesses.TryGetValue(project.Id, out var current) || !ReferenceEquals(current, process)) return;
+        if (!runs.TryGetValue(project.Id, out var run) || !ReferenceEquals(run.Process, process)) return;
         var code = process.ExitCode;
         if (code != 0) FailedStages(project.Id).Add(stage);
         outputOperations.Add(project.Id);
         var captured = true;
-        if (processOutputStores.Remove(process, out var store))
+        var store = run.Outputs;
+        run.Outputs = null;
+        if (store != null)
         {
             try { await Task.Run(store.Complete); }
             catch { captured = false; AppendLog("Output tracking is pending; it will be retried before reset.", project.Id); }
         }
-        runningProcesses.Remove(project.Id);
-        runningStages.Remove(project.Id);
+        runs.Remove(project.Id);
         outputOperations.Remove(project.Id);
-        pipelineLogCaptures.Remove(process);
         var technicalOutput = technicalLogPaths.TryGetValue(project.Id, out var logPath) ? $" Technical output: {Path.GetFileName(logPath)}." : "";
         AppendLog(code == 0 ? stage.Title + " finished." : stage.Title + " failed (status " + code + ")." + technicalOutput, project.Id);
         process.Dispose();
@@ -3080,119 +3047,89 @@ public partial class MainWindow : Window
 
     string Yaml(ProjectRecord project)
     {
-        var output = project.SaveLocation;
         var inference = project.Settings.Inference;
-        var preprocessing = project.Settings.Preprocessing;
-        var numcalc = project.Settings.NumCalc;
+        var pre = project.Settings.Preprocessing;
+        var num = project.Settings.NumCalc;
         var post = project.Settings.Postprocessing ?? new PostprocessingSettings();
         var scan = project.Settings.ScanPreparation;
-        var grid = string.IsNullOrWhiteSpace(preprocessing.EvaluationGrid) ? "Default" : preprocessing.EvaluationGrid;
-        var steps = Math.Max(int.TryParse(preprocessing.FrequencyStepCount, out var n) ? n : 129, 2);
-        var leftPosition = ValidManualPosition(project, "left") ? $"\n  source_position_input_left: [{preprocessing.SourcePositionInputLeft!.X.ToString(CultureInfo.InvariantCulture)}, {preprocessing.SourcePositionInputLeft.Y.ToString(CultureInfo.InvariantCulture)}, {preprocessing.SourcePositionInputLeft.Z.ToString(CultureInfo.InvariantCulture)}]" : "";
-        var rightPosition = ValidManualPosition(project, "right") ? $"\n  source_position_input_right: [{preprocessing.SourcePositionInputRight!.X.ToString(CultureInfo.InvariantCulture)}, {preprocessing.SourcePositionInputRight.Y.ToString(CultureInfo.InvariantCulture)}, {preprocessing.SourcePositionInputRight.Z.ToString(CultureInfo.InvariantCulture)}]" : "";
-        return $@"paths:
-  left_ear: {YamlPath(project.LeftEar)}
-  right_ear: {YamlPath(project.RightEar)}
-  output_dir: {YamlScalar(output)}
-  external_deps_dir: {YamlScalar(environment.ExternalDir)}
-  numcalc_executable: {YamlScalar(environment.NumCalcExecutable)}
-  mesh_grading_executable: {YamlScalar(environment.MeshGradingExecutable)}
-  evaluation_grid: {YamlScalar(grid)}
-scan_preparation:
-  enabled: {Bool(scan.Enabled)}
-  scan_path: {YamlPath(scan.ScanPath)}
-  rotation_degrees: 0
-  reviewed_left: {YamlPath(scan.ReviewedLeft)}
-  reviewed_right: {YamlPath(scan.ReviewedRight)}
-  prepare_left: {Bool(scan.PrepareLeft)}
-  prepare_right: {Bool(scan.PrepareRight)}
-inference:
-  enabled: true
-  model_config_file: {YamlScalar(inference.ModelConfig)}
-  model_checkpoint: {YamlScalar(inference.ModelCheckpoint)}
-  target_left_folder: {YamlScalar(inference.TargetLeftFolder)}
-  target_right_folder: {YamlScalar(inference.TargetRightFolder)}
-  prediction_left_folder: {YamlScalar(inference.PredictionLeftFolder)}
-  prediction_right_folder: {YamlScalar(inference.PredictionRightFolder)}
-  prediction_parameters_left_folder: Intermediates/Left
-  prediction_parameters_right_folder: Intermediates/Right
-  use_predictions_for_preprocessing: {Bool(inference.UsePredictionsForPreprocessing)}
-preprocessing:
-  enabled: true
-  write_intermediates: true
-  head_radius_scale: 1.01
-  head_width_scale: 1.5
-  head_height_scale: 1.5
-  head_adaptive_ovalness: true
-  head_ovalness_strength: 0.08
-  head_min_width_scale: 1.48
-  head_max_height_scale: 1.53
-  head_y_deformation: 0.0
-  ear_cut_clearance_scale: 1.3
-  ear_cut_mode: ellipse
-  projected_cut_margin: 10.0
-  seam_smoothing_iterations: 5
-  seam_smoothing_factor: 0.35
-  mesh_min_edge_length: {preprocessing.MeshMinEdgeLength}
-  mesh_max_edge_length: {preprocessing.MeshMaxEdgeLength}
-  mesh_max_error: {preprocessing.MeshMaxError}
-  mesh_gamma: {preprocessing.MeshGamma}
-  mesh_gamma_opposite: {preprocessing.MeshGammaOpposite}
-  skip_mesh_grading: false
-  source_type_left: Left ear
-  source_type_right: Right ear
-  title: {YamlScalar(project.Name)}
-  method: ML-FMM BEM
-  min_frequency: {preprocessing.MinFrequency}
-  max_frequency: {preprocessing.MaxFrequency}
-  frequency_vector_type: Num steps
-  frequency_step_count: {steps}
-  compute_hrirs: true
-  pictures: false
-  reference: true
-  unit: mm
-  speed_of_sound: ""346.18""
-  air_density: ""1.1839""
-  material_search_paths: None
-  source_assignment_tolerance: 2.0
-  source_assignment_face_count: {preprocessing.SourceAssignmentFaceCount}{leftPosition}{rightPosition}
-numcalc:
-  enabled: false
-  mode: local
-  max_instances: {numcalc.MaxInstances}
-  max_cpu_load: {numcalc.MaxCpuLoad}
-  adaptive_fmm_length: {Bool(numcalc.AdaptiveFmmLength)}
-postprocessing:
-  enabled: false
-  output_sofa_dir: {YamlScalar(Path.Combine(output, "HRTF"))}
-  overwrite: true
-  normalize: {Bool(post.Normalize)}
-  level_offset_db: {post.LevelOffsetDB}
-  resample_hrirs: {Bool(post.ResampleHrirs)}
-  sampling_rate: {NormalizeSamplingRate(post.SamplingRate)}
-ui:
-  mesh_background: white
-  show_axes: true
-";
+        var preprocessing = new Dictionary<string, object?>
+        {
+            ["title"] = project.Name,
+            ["min_frequency"] = ConfigNumber(pre.MinFrequency),
+            ["max_frequency"] = ConfigNumber(pre.MaxFrequency),
+            ["frequency_step_count"] = Math.Max(int.TryParse(pre.FrequencyStepCount, out var steps) ? steps : 129, 2),
+            ["source_assignment_face_count"] = ConfigNumber(pre.SourceAssignmentFaceCount),
+            ["mesh_min_edge_length"] = ConfigNumber(pre.MeshMinEdgeLength),
+            ["mesh_max_edge_length"] = ConfigNumber(pre.MeshMaxEdgeLength),
+            ["mesh_max_error"] = ConfigNumber(pre.MeshMaxError),
+            ["mesh_gamma"] = ConfigNumber(pre.MeshGamma),
+            ["mesh_gamma_opposite"] = ConfigNumber(pre.MeshGammaOpposite),
+            ["skip_mesh_grading"] = false
+        };
+        foreach (var side in new[] { "left", "right" })
+            if (ValidManualPosition(project, side) && ManualPosition(project, side) is { } position)
+                preprocessing["source_position_input_" + side] = new[] { position.X, position.Y, position.Z };
+        var sections = new Dictionary<string, Dictionary<string, object?>>
+        {
+            ["paths"] = new()
+            {
+                ["left_ear"] = ConfigPath(project.LeftEar), ["right_ear"] = ConfigPath(project.RightEar),
+                ["output_dir"] = project.SaveLocation, ["external_deps_dir"] = environment.ExternalDir,
+                ["numcalc_executable"] = environment.NumCalcExecutable, ["mesh_grading_executable"] = environment.MeshGradingExecutable,
+                ["evaluation_grid"] = string.IsNullOrWhiteSpace(pre.EvaluationGrid) ? "Default" : pre.EvaluationGrid
+            },
+            ["scan_preparation"] = new()
+            {
+                ["enabled"] = scan.Enabled, ["scan_path"] = ConfigPath(scan.ScanPath), ["rotation_degrees"] = 0,
+                ["reviewed_left"] = ConfigPath(scan.ReviewedLeft), ["reviewed_right"] = ConfigPath(scan.ReviewedRight),
+                ["prepare_left"] = scan.PrepareLeft, ["prepare_right"] = scan.PrepareRight
+            },
+            ["inference"] = new()
+            {
+                ["enabled"] = true, ["model_config_file"] = inference.ModelConfig, ["model_checkpoint"] = inference.ModelCheckpoint,
+                ["target_left_folder"] = inference.TargetLeftFolder, ["target_right_folder"] = inference.TargetRightFolder,
+                ["prediction_left_folder"] = inference.PredictionLeftFolder, ["prediction_right_folder"] = inference.PredictionRightFolder,
+                ["use_predictions_for_preprocessing"] = inference.UsePredictionsForPreprocessing
+            },
+            ["preprocessing"] = preprocessing,
+            ["numcalc"] = new()
+            {
+                ["enabled"] = false, ["mode"] = "local", ["max_instances"] = ConfigNumber(num.MaxInstances),
+                ["max_cpu_load"] = ConfigNumber(num.MaxCpuLoad), ["adaptive_fmm_length"] = num.AdaptiveFmmLength
+            },
+            ["postprocessing"] = new()
+            {
+                ["enabled"] = false, ["output_sofa_dir"] = Path.Combine(project.SaveLocation, "HRTF"), ["overwrite"] = true,
+                ["normalize"] = post.Normalize, ["level_offset_db"] = ConfigNumber(post.LevelOffsetDB),
+                ["resample_hrirs"] = post.ResampleHrirs, ["sampling_rate"] = int.Parse(NormalizeSamplingRate(post.SamplingRate), CultureInfo.InvariantCulture)
+            }
+        };
+        // JSON scalars and arrays are valid YAML values. Keep the section layout for legacy imports.
+        return string.Join("\n", sections.Select(section => section.Key + ":\n" +
+            string.Join("\n", section.Value.Select(field => "  " + field.Key + ": " + JsonSerializer.Serialize(field.Value))))) + "\n";
     }
 
-    string YamlScalar(string value) => "'" + value.Replace("'", "''") + "'";
-    string YamlPath(string value) => string.IsNullOrWhiteSpace(value) ? "null" : YamlScalar(value);
-    string Bool(bool value) => value ? "true" : "false";
+    static string? ConfigPath(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+    static object? ConfigNumber(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integer)) return integer;
+        return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && double.IsFinite(number) ? number : value;
+    }
+
     string QuoteArgument(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
 
     void StopClicked(object sender, RoutedEventArgs e) { if (selectedProject != null) StopProject(selectedProject); }
     void StopProject(ProjectRecord project)
     {
         queuedStages.Remove(project.Id);
-        if (runningProcesses.TryGetValue(project.Id, out var process))
+        if (runs.TryGetValue(project.Id, out var run))
         {
-            StopTrackedProcess(process, 1500);
-            runningProcesses.Remove(project.Id);
-            runningStages.Remove(project.Id);
-            if (pipelineLogCaptures.Remove(process, out var capture)) capture.Dispose();
-            if (processOutputStores.Remove(process, out var store)) store.ReleaseForRecovery();
-            try { process.Dispose(); } catch { }
+            StopTrackedProcess(run.Process, 1500);
+            runs.Remove(project.Id);
+            run.Capture?.Dispose();
+            run.Outputs?.ReleaseForRecovery();
+            try { run.Process.Dispose(); } catch { }
             AppendLog("Stopping task.", project.Id);
         }
         RefreshPipelineStatus();
@@ -3227,7 +3164,7 @@ ui:
     }
     async void ResetOutputsClicked(object sender, RoutedEventArgs e)
     {
-        if (selectedProject is not { } project || runningProcesses.ContainsKey(project.Id) || outputOperations.Contains(project.Id)) return;
+        if (selectedProject is not { } project || runs.ContainsKey(project.Id) || outputOperations.Contains(project.Id)) return;
         var dialog = new ContentDialog
         {
             Title = "Reset pipeline outputs?",
@@ -3240,7 +3177,7 @@ ui:
 
     async Task<bool> ResetProjectOutputsAsync(ProjectRecord project, Stage? fromStage = null)
     {
-        if (shutdownCleanupDone || runningProcesses.ContainsKey(project.Id) || !outputOperations.Add(project.Id)) return false;
+        if (shutdownCleanupDone || runs.ContainsKey(project.Id) || !outputOperations.Add(project.Id)) return false;
         if (placementProjectId == project.Id) EndPlacement();
         queuedStages.Remove(project.Id);
         RefreshPipelineStatus();
@@ -3448,52 +3385,81 @@ ui:
         return description.Length == 0 ? "" : "Inputs: " + description;
     }
 
-    void RefreshNumCalcStatus() { numCalcStatusText.Text = selectedProject == null ? "No project selected" : NumCalcStatus(selectedProject); }
-    void RefreshPipelineStatus()
+    // An inspection lives only for one synchronous refresh, including its dependent status queries.
+    sealed class ArtifactInspection
     {
+        public readonly Dictionary<(Guid, Stage), bool> Stages = [];
+        public readonly Dictionary<(string, int), bool> Steps = [];
+        readonly Dictionary<string, JsonElement> documents = new(StringComparer.OrdinalIgnoreCase);
+        readonly Dictionary<string, string> digests = new(StringComparer.OrdinalIgnoreCase);
+
+        public JsonElement Document(string path)
+        {
+            if (!documents.TryGetValue(path, out var value))
+            {
+                using var document = JsonDocument.Parse(File.ReadAllText(path));
+                documents[path] = value = document.RootElement.Clone();
+            }
+            return value;
+        }
+
+        public string Digest(string path)
+        {
+            if (!digests.TryGetValue(path, out var value)) digests[path] = value = FileDigest(path);
+            return value;
+        }
+    }
+
+    void RefreshNumCalcStatus(ArtifactInspection? inspection = null) =>
+        numCalcStatusText.Text = selectedProject == null ? "No project selected" : NumCalcStatus(selectedProject, inspection);
+    void RefreshPipelineStatus(ArtifactInspection? inspection = null)
+    {
+        inspection ??= new ArtifactInspection();
         if (selectedProject != null) _ = ReconcileOutputsAsync(selectedProject);
-        if (selectedProject == null) return;
+        if (selectedProject == null) { RefreshNumCalcStatus(inspection); return; }
         var stages = Stage.GetValues();
         for (var i = 0; i < stages.Length; i++)
         {
             var stage = stages[i];
             var skipped = stage == Stage.Inference && !selectedProject.Settings.Inference.UsePredictionsForPreprocessing;
-            var running = runningStages.TryGetValue(selectedProject.Id, out var active) && active == stage;
+            var running = runs.TryGetValue(selectedProject.Id, out var active) && active.Stage == stage;
             var failed = FailedStages(selectedProject.Id).Contains(stage);
-            var reason = StageUnavailableReason(stage, selectedProject);
-            stageStatus[i].Text = skipped ? "Skipped" : running ? "Running…" : failed ? "Failed" : StageIsComplete(stage, selectedProject) ? "Done" : reason != null ? "Blocked" : "Ready";
-            stageStatus[i].Foreground = new SolidColorBrush(skipped ? ColorHelper.FromArgb(255, 130, 130, 130) : running ? Colors.DarkOrange : failed ? Colors.Firebrick : StageIsComplete(stage, selectedProject) ? Colors.ForestGreen : Colors.Gray);
+            var reason = StageUnavailableReason(stage, selectedProject, inspection);
+            var complete = StageIsComplete(stage, selectedProject, inspection);
+            stageStatus[i].Text = skipped ? "Skipped" : running ? "Running…" : failed ? "Failed" : complete ? "Done" : reason != null ? "Blocked" : "Ready";
+            stageStatus[i].Foreground = new SolidColorBrush(skipped ? ColorHelper.FromArgb(255, 130, 130, 130) : running ? Colors.DarkOrange : failed ? Colors.Firebrick : complete ? Colors.ForestGreen : Colors.Gray);
             stageButtons[i].Content = running ? "Stop" : "Run";
-            stageButtons[i].IsEnabled = placementSide == null && (running || StageCanRun(stage, selectedProject));
+            stageButtons[i].IsEnabled = placementSide == null && (running || reason == null);
             ToolTipService.SetToolTip(stageStatus[i], reason ?? $"{stage.Title} is ready.");
             ToolTipService.SetToolTip(stageButtons[i], running ? "Stop this stage" : reason ?? $"Run {stage.Title}");
         }
-        var pending = AutomaticStages(selectedProject).Where(x => !StageIsComplete(x, selectedProject)).ToList();
-        runAllButton.IsEnabled = placementSide == null && pending.Count > 0 && StageCanRun(pending[0], selectedProject);
-        var preprocessingReason = StageUnavailableReason(Stage.Preprocessing, selectedProject);
+        var pending = AutomaticStages(selectedProject).Where(x => !StageIsComplete(x, selectedProject, inspection)).ToList();
+        runAllButton.IsEnabled = placementSide == null && pending.Count > 0 && StageCanRun(pending[0], selectedProject, inspection);
+        var preprocessingReason = StageUnavailableReason(Stage.Preprocessing, selectedProject, inspection);
         var hint = placementSide != null ? "Finish microphone placement with Done or Cancel." :
-            runningProcesses.ContainsKey(selectedProject.Id) ? null :
+            runs.ContainsKey(selectedProject.Id) ? null :
             preprocessingReason != null ? "Preprocessing: " + preprocessingReason :
-            pending.Count > 0 ? StageUnavailableReason(pending[0], selectedProject) : null;
+            pending.Count > 0 ? StageUnavailableReason(pending[0], selectedProject, inspection) : null;
         pipelineHintText.Text = hint ?? "";
         pipelineHintText.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
         UpdatePlacementButtons();
-        UpdatePreparedEarEditButton();
-        RefreshProjectList();
-        RefreshNumCalcStatus();
+        UpdatePreparedEarEditButton(inspection);
+        RefreshProjectList(inspection);
+        RefreshNumCalcStatus(inspection);
     }
 
     bool InferenceIsAutomatic(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing &&
         (!string.IsNullOrWhiteSpace(project.LeftEar) || !string.IsNullOrWhiteSpace(project.RightEar));
     bool HasGeneratedPipelineOutputs(ProjectRecord project) => (project.Settings.ScanPreparation.Enabled || !string.IsNullOrWhiteSpace(project.LeftEar) || !string.IsNullOrWhiteSpace(project.RightEar)) && !string.IsNullOrWhiteSpace(project.SaveLocation) && ((InferenceIsAutomatic(project) && StageIsComplete(Stage.Inference, project)) || StageIsComplete(Stage.Preprocessing, project) || StageIsComplete(Stage.Numcalc, project) || StageIsComplete(Stage.Postprocessing, project));
-    bool PreprocessingBlocked(ProjectRecord project) => InferenceIsAutomatic(project) && !StageIsComplete(Stage.Inference, project);
-    bool StageCanRun(Stage stage, ProjectRecord? project) => StageUnavailableReason(stage, project) == null;
+    bool PreprocessingBlocked(ProjectRecord project, ArtifactInspection? inspection = null) => InferenceIsAutomatic(project) && !StageIsComplete(Stage.Inference, project, inspection);
+    bool StageCanRun(Stage stage, ProjectRecord? project, ArtifactInspection? inspection = null) => StageUnavailableReason(stage, project, inspection) == null;
 
-    string? StageUnavailableReason(Stage stage, ProjectRecord? project)
+    string? StageUnavailableReason(Stage stage, ProjectRecord? project, ArtifactInspection? inspection = null)
     {
+        inspection ??= new ArtifactInspection();
         if (project == null) return "Select a project first.";
         if (outputOperations.Contains(project.Id)) return "Wait for project outputs to finish updating.";
-        if (runningProcesses.ContainsKey(project.Id)) return "Wait for the running stage to finish.";
+        if (runs.ContainsKey(project.Id)) return "Wait for the running stage to finish.";
         if (placementProjectId == project.Id) return "Finish microphone placement with Done or Cancel.";
         if (string.IsNullOrWhiteSpace(project.SaveLocation)) return "Choose a project folder first.";
         if (string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar) && !project.Settings.ScanPreparation.Enabled) return "Select at least one input ear.";
@@ -3513,28 +3479,37 @@ ui:
         }
         if (stage == Stage.Preprocessing)
         {
-            if (PreprocessingBlocked(project)) return "Run Mesh2PPM Inference to create the predicted input ear(s) first.";
+            if (PreprocessingBlocked(project, inspection)) return "Run Mesh2PPM Inference to create the predicted input ear(s) first.";
             if (!File.Exists(environment.MeshGradingExecutable)) return "The Windows mesh-grading tool is missing. Rebuild the app with its external tools.";
             var bin = Path.Combine(environment.ExternalDir, "bin");
             if (new[] { "libpmp.dll", "libpmp_vis.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll" }.Any(name => !File.Exists(Path.Combine(bin, name))))
                 return "The Windows mesh-grading runtime is incomplete. Rebuild the app with its external tools.";
             return File.Exists(Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf", "Mesh2Input", "mesh2input.py")) ? null : "The Mesh2HRTF export tools are missing.";
         }
-        if (stage == Stage.Numcalc) return !StageIsComplete(Stage.Preprocessing, project) ? "Run Preprocessing first." : File.Exists(environment.NumCalcExecutable) ? null : "The NumCalc executable is missing.";
-        return stage == Stage.Postprocessing && StageIsComplete(Stage.Numcalc, project) ? null : "Run NumCalc first.";
+        if (stage == Stage.Numcalc) return !StageIsComplete(Stage.Preprocessing, project, inspection) ? "Run Preprocessing first." : File.Exists(environment.NumCalcExecutable) ? null : "The NumCalc executable is missing.";
+        return stage == Stage.Postprocessing && StageIsComplete(Stage.Numcalc, project, inspection) ? null : "Run NumCalc first.";
     }
 
     Stage[] AutomaticStages(ProjectRecord project) => project.Settings.ScanPreparation.Enabled
         ? [Stage.ScanPreparation, .. (project.Settings.Inference.UsePredictionsForPreprocessing && (!string.IsNullOrWhiteSpace(project.LeftEar) || !string.IsNullOrWhiteSpace(project.RightEar)) ? [Stage.Inference, Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing] : [Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing])]
         : project.Settings.Inference.UsePredictionsForPreprocessing ? Stage.GetValues().Where(x => x != Stage.ScanPreparation).ToArray() : [Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing];
-    bool StageIsComplete(Stage stage, ProjectRecord project)
+    bool StageIsComplete(Stage stage, ProjectRecord project, ArtifactInspection? inspection = null)
+    {
+        inspection ??= new ArtifactInspection();
+        var key = (project.Id, stage);
+        if (!inspection.Stages.TryGetValue(key, out var complete))
+            inspection.Stages[key] = complete = InspectStage(stage, project, inspection);
+        return complete;
+    }
+
+    bool InspectStage(Stage stage, ProjectRecord project, ArtifactInspection inspection)
     {
         var output = project.SaveLocation;
         if (stage == Stage.Inference)
         {
             if (!project.Settings.Inference.UsePredictionsForPreprocessing) return true;
             if (!InferenceIsAutomatic(project)) return false;
-            if (project.Settings.ScanPreparation.Enabled && !ScanReviewStageReceiptCurrent(project, "inference")) return false;
+            if (project.Settings.ScanPreparation.Enabled && !ScanReviewStageReceiptCurrent(project, "inference", inspection)) return false;
             var leftDone = string.IsNullOrWhiteSpace(project.LeftEar) || PredictionMesh(project, "left") != null;
             var rightDone = string.IsNullOrWhiteSpace(project.RightEar) || PredictionMesh(project, "right") != null;
             return leftDone && rightDone;
@@ -3545,31 +3520,31 @@ ui:
             var prepared = Path.Combine(output, "Prepared");
             var leftReady = project.Settings.ScanPreparation.PrepareLeft && File.Exists(Path.Combine(prepared, "Left.stl"));
             var rightReady = project.Settings.ScanPreparation.PrepareRight && File.Exists(Path.Combine(prepared, "Right.stl"));
-            return ScanPreparationOutputsCurrent(project) && (leftReady || rightReady);
+            return ScanPreparationOutputsCurrent(project, inspection) && (leftReady || rightReady);
         }
         if (string.IsNullOrWhiteSpace(output) || (string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar) && !project.Settings.ScanPreparation.Enabled)) return false;
         if (stage == Stage.Preprocessing)
         {
             var scan = project.Settings.ScanPreparation;
-            var leftInput = scan.Enabled ? (scan.PrepareLeft ? (EarReviewIsCurrent(project, "left") ? scan.ReviewedLeft : null) ?? Path.Combine(output, "Prepared", "Left.stl") : "") : project.LeftEar;
-            var rightInput = scan.Enabled ? (scan.PrepareRight ? (EarReviewIsCurrent(project, "right") ? scan.ReviewedRight : null) ?? Path.Combine(output, "Prepared", "Right.stl") : "") : project.RightEar;
-            return (!project.Settings.ScanPreparation.Enabled || ScanReviewStageReceiptCurrent(project, "preprocessing")) &&
+            var leftInput = scan.Enabled ? (scan.PrepareLeft ? (EarReviewIsCurrent(project, "left", inspection) ? scan.ReviewedLeft : null) ?? Path.Combine(output, "Prepared", "Left.stl") : "") : project.LeftEar;
+            var rightInput = scan.Enabled ? (scan.PrepareRight ? (EarReviewIsCurrent(project, "right", inspection) ? scan.ReviewedRight : null) ?? Path.Combine(output, "Prepared", "Right.stl") : "") : project.RightEar;
+            return (!project.Settings.ScanPreparation.Enabled || ScanReviewStageReceiptCurrent(project, "preprocessing", inspection)) &&
                 (string.IsNullOrWhiteSpace(leftInput) || !File.Exists(leftInput) || (File.Exists(Path.Combine(output, "Projects", "Left", "parameters.json")) && File.Exists(Path.Combine(output, "Intermediates", "Left", "graded_head.ply")))) &&
                 (string.IsNullOrWhiteSpace(rightInput) || !File.Exists(rightInput) || (File.Exists(Path.Combine(output, "Projects", "Right", "parameters.json")) && File.Exists(Path.Combine(output, "Intermediates", "Right", "graded_head.ply"))));
         }
-        if (stage == Stage.Numcalc) return StageIsComplete(Stage.Preprocessing, project) && NumCalcIsComplete(project);
-        return stage == Stage.Postprocessing && StageIsComplete(Stage.Numcalc, project) && Directory.Exists(Path.Combine(output, "HRTF")) && Directory.GetFiles(Path.Combine(output, "HRTF"), "*.sofa").Any();
+        if (stage == Stage.Numcalc) return StageIsComplete(Stage.Preprocessing, project, inspection) && NumCalcIsComplete(project, inspection);
+        return stage == Stage.Postprocessing && StageIsComplete(Stage.Numcalc, project, inspection) && Directory.Exists(Path.Combine(output, "HRTF")) && Directory.GetFiles(Path.Combine(output, "HRTF"), "*.sofa").Any();
     }
 
-    bool ScanPreparationOutputsCurrent(ProjectRecord project)
+    bool ScanPreparationOutputsCurrent(ProjectRecord project, ArtifactInspection? inspection = null)
     {
+        inspection ??= new ArtifactInspection();
         try
         {
             var reportPath = Path.Combine(project.SaveLocation, "Prepared", "mesh_preparation.json");
             var scanPath = project.Settings.ScanPreparation.ScanPath;
             var info = new FileInfo(scanPath);
-            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
-            var root = document.RootElement;
+            var root = inspection.Document(reportPath);
             if (root.GetProperty("status").GetString() != "completed") return false;
             var settings = root.GetProperty("signature").GetProperty("settings");
             if (settings.GetProperty("enabled").GetBoolean() != project.Settings.ScanPreparation.Enabled ||
@@ -3577,7 +3552,7 @@ ui:
                 settings.GetProperty("prepare_left").GetBoolean() != project.Settings.ScanPreparation.PrepareLeft ||
                 settings.GetProperty("prepare_right").GetBoolean() != project.Settings.ScanPreparation.PrepareRight ||
                 settings.GetProperty("rotation_degrees").GetDouble() != 0) return false;
-            var identity = document.RootElement.GetProperty("source_identity");
+            var identity = root.GetProperty("source_identity");
             var recordedSize = identity.GetProperty("size").GetInt64();
             var recordedTime = identity.GetProperty("mtime").GetDouble();
             var currentTime = new DateTimeOffset(info.LastWriteTimeUtc).ToUnixTimeMilliseconds() / 1000.0;
@@ -3586,48 +3561,76 @@ ui:
         catch { return false; }
     }
 
-    string NextStageSummary(ProjectRecord project) { if (runningStages.TryGetValue(project.Id, out var active)) return active.Title + ": Running"; var next = AutomaticStages(project).FirstOrDefault(x => !StageIsComplete(x, project)); return next == null ? "Complete" : next.Title + (StageCanRun(next, project) ? ": Ready" : ": Blocked"); }
-    string NumCalcStatus(ProjectRecord project)
+    string NextStageSummary(ProjectRecord project, ArtifactInspection? inspection = null)
     {
+        inspection ??= new ArtifactInspection();
+        if (runs.TryGetValue(project.Id, out var active)) return active.Stage.Title + ": Running";
+        var next = AutomaticStages(project).FirstOrDefault(x => !StageIsComplete(x, project, inspection));
+        return next == null ? "Complete" : next.Title + (StageCanRun(next, project, inspection) ? ": Ready" : ": Blocked");
+    }
+    string NumCalcStatus(ProjectRecord project, ArtifactInspection? inspection = null)
+    {
+        inspection ??= new ArtifactInspection();
         var sides = project.Settings.ScanPreparation.Enabled
             ? new[] { project.Settings.ScanPreparation.PrepareLeft, project.Settings.ScanPreparation.PrepareRight }
             : new[] { !string.IsNullOrWhiteSpace(project.LeftEar), !string.IsNullOrWhiteSpace(project.RightEar) };
-        return "NumCalc: " + string.Join(" · ", sides.Select((selected, i) => !selected ? "" : (i == 0 ? "Left" : "Right") + " " + NumCalcCompleted(project, i == 0 ? "Left" : "Right") + "/" + NumCalcTotal(project, i == 0 ? "Left" : "Right")).Where(x => x.Length > 0));
+        return "NumCalc: " + string.Join(" · ", sides.Select((selected, i) => !selected ? "" : (i == 0 ? "Left" : "Right") + " " + NumCalcCompleted(project, i == 0 ? "Left" : "Right", inspection) + "/" + NumCalcTotal(project, i == 0 ? "Left" : "Right", inspection)).Where(x => x.Length > 0));
     }
-    int NumCalcCompleted(ProjectRecord project, string side)
+    int NumCalcCompleted(ProjectRecord project, string side, ArtifactInspection? inspection = null)
     {
+        inspection ??= new ArtifactInspection();
         var source = Path.Combine(project.SaveLocation, "Projects", side, "NumCalc", "source_1");
         var output = Path.Combine(source, "be.out");
         if (!Directory.Exists(output)) return 0;
         return Directory.GetDirectories(output, "be.*")
-            .Select(path => int.TryParse(Path.GetFileName(path).AsSpan(3), out var step) && FrequencyStepComplete(source, step) ? 1 : 0)
+            .Select(path => int.TryParse(Path.GetFileName(path).AsSpan(3), out var step) && FrequencyStepComplete(source, step, inspection) ? 1 : 0)
             .Sum();
     }
-    int NumCalcTotal(ProjectRecord project, string side) { try { using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(project.SaveLocation, "Projects", side, "parameters.json"))); return document.RootElement.TryGetProperty("numFrequencies", out var value) ? value.GetInt32() : 0; } catch { return 0; } }
-    bool NumCalcIsComplete(ProjectRecord project)
+    int NumCalcTotal(ProjectRecord project, string side, ArtifactInspection? inspection = null)
     {
+        inspection ??= new ArtifactInspection();
+        try
+        {
+            var document = inspection.Document(Path.Combine(project.SaveLocation, "Projects", side, "parameters.json"));
+            return document.TryGetProperty("numFrequencies", out var value) ? value.GetInt32() : 0;
+        }
+        catch { return 0; }
+    }
+    bool NumCalcIsComplete(ProjectRecord project, ArtifactInspection? inspection = null)
+    {
+        inspection ??= new ArtifactInspection();
         if (string.IsNullOrWhiteSpace(project.SaveLocation)) return false;
         var sides = project.Settings.ScanPreparation.Enabled
             ? new[] { ("Left", project.Settings.ScanPreparation.PrepareLeft), ("Right", project.Settings.ScanPreparation.PrepareRight) }
             : new[] { ("Left", !string.IsNullOrWhiteSpace(project.LeftEar)), ("Right", !string.IsNullOrWhiteSpace(project.RightEar)) };
         var selected = sides.Where(x => x.Item2).ToArray();
         if (selected.Length == 0) return false;
-        return selected.All(x => NumCalcSideIsComplete(project, x.Item1));
+        return selected.All(x => NumCalcSideIsComplete(project, x.Item1, inspection));
     }
 
-    bool NumCalcSideIsComplete(ProjectRecord project, string side)
+    bool NumCalcSideIsComplete(ProjectRecord project, string side, ArtifactInspection? inspection = null)
     {
+        inspection ??= new ArtifactInspection();
         var sideRoot = Path.Combine(project.SaveLocation, "Projects", side);
         if (ContainsOutput2HRTF(Path.Combine(sideRoot, "Output2HRTF"))) return true;
-        var total = NumCalcTotal(project, side);
+        var total = NumCalcTotal(project, side, inspection);
         if (total <= 0) return false;
         var sources = Directory.Exists(Path.Combine(sideRoot, "NumCalc"))
             ? Directory.GetDirectories(Path.Combine(sideRoot, "NumCalc"), "source_*")
             : Array.Empty<string>();
-        return sources.Length > 0 && sources.All(source => Enumerable.Range(1, total).All(step => FrequencyStepComplete(source, step)));
+        return sources.Length > 0 && sources.All(source => Enumerable.Range(1, total).All(step => FrequencyStepComplete(source, step, inspection)));
     }
 
-    bool FrequencyStepComplete(string source, int step)
+    bool FrequencyStepComplete(string source, int step, ArtifactInspection? inspection = null)
+    {
+        inspection ??= new ArtifactInspection();
+        var key = (source, step);
+        if (!inspection.Steps.TryGetValue(key, out var complete))
+            inspection.Steps[key] = complete = InspectFrequencyStep(source, step);
+        return complete;
+    }
+
+    bool InspectFrequencyStep(string source, int step)
     {
         var output = Path.Combine(source, "be.out", $"be.{step}");
         var required = new[] { "pBoundary", "pEvalGrid", "vBoundary", "vEvalGrid" };
@@ -3745,7 +3748,7 @@ ui:
         }
         catch { }
 
-        var processes = runningProcesses.Values.Distinct().ToList();
+        var processes = runs.Values.Select(run => run.Process).Distinct().ToList();
         foreach (var process in processes)
         {
             try { StopTrackedProcess(process, 1500); } catch { }
@@ -3769,12 +3772,9 @@ ui:
             WaitForExitSafe(process, 1000);
             try { process.Dispose(); } catch { }
         }
-        foreach (var capture in pipelineLogCaptures.Values) capture.Dispose();
-        pipelineLogCaptures.Clear();
-        runningProcesses.Clear();
-        foreach (var store in processOutputStores.Values.Distinct()) store.ReleaseForRecovery();
-        processOutputStores.Clear();
-        runningStages.Clear();
+        foreach (var run in runs.Values) run.Capture?.Dispose();
+        foreach (var store in runs.Values.Select(run => run.Outputs).Distinct()) store?.ReleaseForRecovery();
+        runs.Clear();
         queuedStages.Clear();
         if (pipelineJob != IntPtr.Zero)
         {
@@ -3789,7 +3789,7 @@ ui:
 
     void AppWindowClosing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
     {
-        if (closingConfirmed || runningProcesses.Count == 0) { ShutdownForAppClose(); return; }
+        if (closingConfirmed || runs.Count == 0) { ShutdownForAppClose(); return; }
         args.Cancel = true;
         _ = ConfirmQuitAsync(sender);
     }
@@ -4018,7 +4018,6 @@ ui:
     ManualMicrophonePosition? ManualPosition(ProjectRecord project, string side) => side == "left" ? project.Settings.Preprocessing.SourcePositionInputLeft : project.Settings.Preprocessing.SourcePositionInputRight;
     bool ValidManualPosition(ProjectRecord project, string side) => PositionMatchesMesh(ManualPosition(project, side), PreprocessingMesh(project, side));
     void InvalidateManualPositions(ProjectRecord project) { if (!ValidManualPosition(project, "left")) project.Settings.Preprocessing.SourcePositionInputLeft = null; if (!ValidManualPosition(project, "right")) project.Settings.Preprocessing.SourcePositionInputRight = null; }
-    void RebaseManualPositionIfNeeded(ProjectRecord project) { InvalidateManualPositions(project); }
     string MeshIdentity(string path) { try { var file = new FileInfo(path); return Path.GetFullPath(path).ToLowerInvariant() + ":" + file.Length + ":" + file.LastWriteTimeUtc.Ticks; } catch { return ""; } }
 
     System.Numerics.Vector3? MicrophonePosition(string meshPath)

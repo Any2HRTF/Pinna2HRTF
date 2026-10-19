@@ -79,3 +79,36 @@ final class PipelineLogCapture: @unchecked Sendable {
         onFailure(error.localizedDescription)
     }
 }
+
+// Both pipeline runs and environment setup must drain their final bytes before completing.
+extension Process {
+    func run(capturing capture: PipelineLogCapture?, onExit: @escaping @Sendable (Process) -> Void) throws {
+        let pipe = Pipe()
+        let readLock = NSLock()
+        standardOutput = pipe
+        standardError = pipe
+        pipe.fileHandleForReading.readabilityHandler = { handle in
+            readLock.lock()
+            defer { readLock.unlock() }
+            let data = handle.availableData
+            capture?.append(data)
+        }
+        terminationHandler = { process in
+            pipe.fileHandleForReading.readabilityHandler = nil
+            readLock.lock()
+            let remaining = pipe.fileHandleForReading.readDataToEndOfFile()
+            capture?.append(remaining)
+            capture?.finish()
+            readLock.unlock()
+            onExit(process)
+        }
+        do {
+            try run()
+        } catch {
+            pipe.fileHandleForReading.readabilityHandler = nil
+            terminationHandler = nil
+            capture?.finish()
+            throw error
+        }
+    }
+}

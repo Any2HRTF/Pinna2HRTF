@@ -5,7 +5,7 @@ Crop rotations are explicit per project; there is no subject-name calibration.
 """
 from pathlib import Path
 from .LiveEvents import emit_live_event
-import hashlib
+from .FileIdentity import sha256, file_identity
 import json
 import shutil
 import tempfile
@@ -26,14 +26,6 @@ def load_mesh(path, process=False):
     mesh.merge_vertices()
     mesh.remove_unreferenced_vertices()
     return mesh
-
-
-def sha256(path):
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def mesh_metrics(mesh):
@@ -440,12 +432,6 @@ def restore_attachment_boundary(poisson, planes, rotation_degrees, output, targe
     if not attachment_boundary_is_simple(verified):
         raise ValueError("Final Pinna2HRTF attachment boundary is self-touching")
     return verified, crop_offset_mm
-
-
-
-def file_identity(path):
-    stat = Path(path).stat()
-    return {"size": stat.st_size, "mtime": stat.st_mtime}
 
 
 def preparation_signature(settings):

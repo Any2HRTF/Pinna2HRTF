@@ -64,11 +64,10 @@ enum ProjectConfigDocument {
         return yaml
     }
 
-    static func mergedYAML(generated: String, preservedJSON: String) throws -> String {
+    static func merged(generated current: [String: Any], preservedJSON: String) throws -> [String: Any] {
         guard var saved = try JSONSerialization.jsonObject(with: Data(preservedJSON.utf8)) as? [String: Any] else {
             throw ProjectValidation.Failure(message: "The imported settings snapshot is unreadable.")
         }
-        let current = try parse(generated)
         let editable: [String: [String]] = [
             "scan_preparation": ["enabled", "scan_path", "rotation_degrees", "prepare_left", "prepare_right", "target_edge_mm", "left_margin_mm", "right_margin_mm", "side_min_mm", "side_max_mm", "require_manual_review", "reviewed_left", "reviewed_right"],
             "paths": ["left_ear", "right_ear", "output_dir", "external_deps_dir", "numcalc_executable", "mesh_grading_executable", "evaluation_grid"],
@@ -86,7 +85,7 @@ enum ProjectConfigDocument {
             }
             saved[section] = values
         }
-        return try encode(saved)
+        return saved
     }
 
     static func restore(_ config: [String: Any], into original: ProjectRecord, folder: URL, packageRoot: URL) throws -> ProjectRecord {

@@ -1,27 +1,50 @@
 import Foundation
 
 enum ArtifactScanner {
-    static func artifacts(for project: ProjectRecord) -> [Artifact] {
+    /// One refresh owns one inspection; subsequent refreshes always read fresh files.
+    final class Inspection {
+        private var documents: [URL: [String: Any]?] = [:]
+        private var metadata: [URL: [FileAttributeKey: Any]?] = [:]
+        fileprivate var completedSteps: [URL: Bool] = [:]
+
+        func document(_ url: URL) -> [String: Any]? {
+            if let cached = documents[url] { return cached }
+            let result = (try? Data(contentsOf: url)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            documents.updateValue(result, forKey: url)
+            return result
+        }
+
+        func attributes(_ url: URL) -> [FileAttributeKey: Any]? {
+            if let cached = metadata[url] { return cached }
+            let result = try? FileManager.default.attributesOfItem(atPath: url.path)
+            metadata.updateValue(result, forKey: url)
+            return result
+        }
+    }
+
+    static func artifacts(for project: ProjectRecord, inspection: Inspection = Inspection()) -> [Artifact] {
+        let leftEar = project.pipelineEar(for: .left, inspection: inspection)
+        let rightEar = project.pipelineEar(for: .right, inspection: inspection)
         let output = URL(fileURLWithPath: project.saveLocation)
         let settings = project.settings.inference
         var next: [Artifact] = []
         if project.scanPreparation.enabled && !project.scanPreparation.scanPath.isEmpty {
             next.append(Artifact(title: "Full-head scan", url: URL(fileURLWithPath: project.scanPreparation.scanPath)))
         }
-        if project.scanPreparation.enabled && scanPreparationIsCurrent(project) {
+        if project.scanPreparation.enabled && scanPreparationIsCurrent(project, inspection: inspection) {
             for side in EarSide.allCases {
                 guard side == .left ? project.scanPreparation.prepareLeft : project.scanPreparation.prepareRight,
-                      let mesh = preparedEarURL(for: side, in: project),
+                      let mesh = preparedEarURL(for: side, in: project, inspection: inspection),
                       FileManager.default.fileExists(atPath: mesh.path) else { continue }
-                next.append(Artifact(title: earReviewIsCurrent(project, side: side) ? "Reviewed \(side.rawValue) ear" : "Prepared \(side.rawValue) ear", url: mesh))
+                next.append(Artifact(title: earReviewIsCurrent(project, side: side, inspection: inspection) ? "Reviewed \(side.rawValue) ear" : "Prepared \(side.rawValue) ear", url: mesh))
             }
         }
-        if !project.pipelineLeftEar.isEmpty {
-            next.append(Artifact(title: "Input left ear", url: URL(fileURLWithPath: project.pipelineLeftEar)))
+        if !leftEar.isEmpty {
+            next.append(Artifact(title: "Input left ear", url: URL(fileURLWithPath: leftEar)))
             next.append(Artifact(title: "Left simulation mesh", url: output.appendingPathComponent("Intermediates/Left/graded_head.ply")))
         }
-        if !project.pipelineRightEar.isEmpty {
-            next.append(Artifact(title: "Input right ear", url: URL(fileURLWithPath: project.pipelineRightEar)))
+        if !rightEar.isEmpty {
+            next.append(Artifact(title: "Input right ear", url: URL(fileURLWithPath: rightEar)))
             next.append(Artifact(title: "Right simulation mesh", url: output.appendingPathComponent("Intermediates/Right/graded_head.ply")))
         }
         for side in EarSide.allCases {
@@ -30,7 +53,7 @@ enum ArtifactScanner {
                 next.append(Artifact(title: "Manual \(side.rawValue) PPM fit", url: URL(fileURLWithPath: path)))
             }
         }
-        for pair in [("Predicted left ear", output.appendingPathComponent(settings.predictionLeftFolder), project.pipelineLeftEar), ("Predicted right ear", output.appendingPathComponent(settings.predictionRightFolder), project.pipelineRightEar)] where !pair.2.isEmpty {
+        for pair in [("Predicted left ear", output.appendingPathComponent(settings.predictionLeftFolder), leftEar), ("Predicted right ear", output.appendingPathComponent(settings.predictionRightFolder), rightEar)] where !pair.2.isEmpty {
             next.append(contentsOf: predictionArtifacts(title: pair.0, folder: pair.1))
         }
         let hrtfFolder = postprocessingDirectory(for: project)
@@ -55,12 +78,12 @@ enum ArtifactScanner {
         return meshes.map { Artifact(title: "\(title) - \($0.deletingPathExtension().lastPathComponent)", url: $0) }
     }
 
-    static func preprocessingMesh(for project: ProjectRecord, side: EarSide) -> URL? {
+    static func preprocessingMesh(for project: ProjectRecord, side: EarSide, inspection: Inspection = Inspection()) -> URL? {
         if project.settings.manualPPMFitting.useForPreprocessing,
            project.settings.manualPPMFitting.meshPath(for: side) != nil {
-            return validManualPPMFittingMesh(for: project, side: side)
+            return validManualPPMFittingMesh(for: project, side: side, inspection: inspection)
         }
-        let sourcePath = side == .left ? project.pipelineLeftEar : project.pipelineRightEar
+        let sourcePath = side == .left ? project.pipelineEar(for: .left, inspection: inspection) : project.pipelineEar(for: .right, inspection: inspection)
         guard !sourcePath.isEmpty else { return nil }
         let source = URL(fileURLWithPath: sourcePath)
         guard project.settings.inference.usePredictionsForPreprocessing else {
@@ -77,35 +100,30 @@ enum ArtifactScanner {
         return meshes.count == 1 ? meshes[0] : nil
     }
 
-    static func sourceEar(for project: ProjectRecord, side: EarSide) -> URL? {
+    static func sourceEar(for project: ProjectRecord, side: EarSide, inspection: Inspection = Inspection()) -> URL? {
         if project.scanPreparation.enabled {
-            guard side == .left ? project.scanPreparation.prepareLeft : project.scanPreparation.prepareRight else { return nil }
-            if earReviewIsCurrent(project, side: side),
-               let reviewed = side == .left ? project.scanPreparation.reviewedLeftPath : project.scanPreparation.reviewedRightPath {
-                return URL(fileURLWithPath: reviewed)
-            }
-            return preparedEarURL(for: side, in: project)
+            return preparedEarURL(for: side, in: project, inspection: inspection)
         }
         let path = side == .left ? project.leftEar : project.rightEar
         return path.isEmpty ? nil : URL(fileURLWithPath: path)
     }
 
-    static func validManualPPMFittingMesh(for project: ProjectRecord, side: EarSide) -> URL? {
+    static func validManualPPMFittingMesh(for project: ProjectRecord, side: EarSide, inspection: Inspection = Inspection()) -> URL? {
         let settings = project.settings.manualPPMFitting
         guard let path = settings.meshPath(for: side),
               let sourcePath = settings.sourcePath(for: side),
               let sourceIdentity = settings.sourceIdentity(for: side),
-              let source = sourceEar(for: project, side: side),
+              let source = sourceEar(for: project, side: side, inspection: inspection),
               source.standardizedFileURL.path == URL(fileURLWithPath: sourcePath).standardizedFileURL.path,
-              meshIdentity(source) == sourceIdentity,
+              meshIdentity(source, inspection: inspection) == sourceIdentity,
               FileManager.default.fileExists(atPath: path),
               let parameters = settings.parametersPath(for: side),
               FileManager.default.fileExists(atPath: parameters) else { return nil }
         return URL(fileURLWithPath: path)
     }
 
-    static func meshIdentity(_ url: URL) -> String? {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
+    static func meshIdentity(_ url: URL, inspection: Inspection = Inspection()) -> String? {
+        guard let attributes = inspection.attributes(url) else { return nil }
         let size = (attributes[.size] as? NSNumber)?.int64Value ?? -1
         let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
         return "\(url.standardizedFileURL.path)|\(size)|\(modified)"
@@ -115,111 +133,108 @@ enum ArtifactScanner {
         side == .left ? project.settings.preprocessing.sourcePositionInputLeft : project.settings.preprocessing.sourcePositionInputRight
     }
 
-    static func validManualMicrophonePosition(for project: ProjectRecord, side: EarSide) -> ManualMicrophonePosition? {
-        guard let placement = manualMicrophonePosition(for: project, side: side), let mesh = preprocessingMesh(for: project, side: side), placement.meshPath == mesh.standardizedFileURL.path, placement.meshIdentity == meshIdentity(mesh) else { return nil }
+    static func validManualMicrophonePosition(for project: ProjectRecord, side: EarSide, inspection: Inspection = Inspection()) -> ManualMicrophonePosition? {
+        guard let placement = manualMicrophonePosition(for: project, side: side), let mesh = preprocessingMesh(for: project, side: side, inspection: inspection), placement.meshPath == mesh.standardizedFileURL.path, placement.meshIdentity == meshIdentity(mesh, inspection: inspection) else { return nil }
         return placement
     }
 
-    static func stageStates(for project: ProjectRecord, runningStage: Stage?, failedStages: Set<Stage>) -> [Stage: StageState] {
+    static func stageStates(for project: ProjectRecord, runningStage: Stage?, failedStages: Set<Stage>, inspection: Inspection = Inspection()) -> [Stage: StageState] {
         Dictionary(uniqueKeysWithValues: Stage.allCases.map { stage in
             if runningStage == stage {
                 return (stage, .running)
             }
             if stage == .scanPreparation && !project.scanPreparation.enabled { return (stage, .skipped) }
-            let complete = stageIsComplete(stage, project: project)
+            let complete = stageIsComplete(stage, project: project, inspection: inspection)
             if failedStages.contains(stage) || project.stageOutcomes?[stage.rawValue] == .failed {
                 return (stage, .failed)
             }
             if project.stageOutcomes?[stage.rawValue] == .stopped { return (stage, .stopped) }
-            if stage == .inference, !project.settings.inference.usePredictionsForPreprocessing || (project.pipelineLeftEar.isEmpty && project.pipelineRightEar.isEmpty) {
+            if stage == .inference, !project.settings.inference.usePredictionsForPreprocessing || (project.pipelineEar(for: .left, inspection: inspection).isEmpty && project.pipelineEar(for: .right, inspection: inspection).isEmpty) {
                 return (stage, .skipped)
             }
             return (stage, complete ? .done : .ready)
         })
     }
 
-    static func summary(for project: ProjectRecord) -> String {
+    static func summary(for project: ProjectRecord, inspection: Inspection = Inspection()) -> String {
         if project.stageOutcomes?.values.contains(.failed) == true { return "Latest run failed · previous results may remain" }
         if project.stageOutcomes?.values.contains(.stopped) == true { return "Task stopped · previous results may remain" }
-        if project.pipelineLeftEar.isEmpty && project.pipelineRightEar.isEmpty { return "Not configured" }
-        if stageIsComplete(.postprocessing, project: project) { return "Postprocessed" }
-        if stageIsComplete(.numcalc, project: project) { return "Solved" }
-        if stageIsComplete(.preprocessing, project: project) { return "Projects ready" }
-        if project.settings.inference.usePredictionsForPreprocessing && stageIsComplete(.inference, project: project) { return "Mesh2PPM Inference ready" }
+        if project.pipelineEar(for: .left, inspection: inspection).isEmpty && project.pipelineEar(for: .right, inspection: inspection).isEmpty { return "Not configured" }
+        if stageIsComplete(.postprocessing, project: project, inspection: inspection) { return "Postprocessed" }
+        if stageIsComplete(.numcalc, project: project, inspection: inspection) { return "Solved" }
+        if stageIsComplete(.preprocessing, project: project, inspection: inspection) { return "Projects ready" }
+        if project.settings.inference.usePredictionsForPreprocessing && stageIsComplete(.inference, project: project, inspection: inspection) { return "Mesh2PPM Inference ready" }
         return URL(fileURLWithPath: project.saveLocation).lastPathComponent
     }
 
-    static func numcalcStatus(for project: ProjectRecord) -> String {
+    static func numcalcStatus(for project: ProjectRecord, inspection: Inspection = Inspection()) -> String {
         let output = URL(fileURLWithPath: project.saveLocation)
-        let sides = [("Left", project.pipelineLeftEar), ("Right", project.pipelineRightEar)].compactMap { side, ear in
-            ear.isEmpty ? nil : "\(side) \(numcalcCompleted(output.appendingPathComponent("Projects/\(side)")))/\(numcalcTotal(output.appendingPathComponent("Projects/\(side)")))"
+        let sides = [("Left", project.pipelineEar(for: .left, inspection: inspection)), ("Right", project.pipelineEar(for: .right, inspection: inspection))].compactMap { side, ear in
+            ear.isEmpty ? nil : "\(side) \(numcalcCompleted(output.appendingPathComponent("Projects/\(side)"), inspection: inspection))/\(numcalcTotal(output.appendingPathComponent("Projects/\(side)"), inspection: inspection))"
         }
         return sides.isEmpty ? "NumCalc: no ear selected" : "NumCalc: " + sides.joined(separator: " · ")
     }
 
-    static func stageIsComplete(_ stage: Stage, project: ProjectRecord) -> Bool {
+    static func stageIsComplete(_ stage: Stage, project: ProjectRecord, inspection: Inspection = Inspection()) -> Bool {
         let output = URL(fileURLWithPath: project.saveLocation)
         let settings = project.settings.inference
         if stage == .inference && !settings.usePredictionsForPreprocessing { return true }
         if project.scanPreparation.enabled && stage != .scanPreparation {
-            guard scanPreparationIsCurrent(project) else { return false }
-            if stage == .inference && settings.usePredictionsForPreprocessing && !scanReceiptIsCurrent(project, stage: "inference") { return false }
-            if [.preprocessing, .numcalc, .postprocessing].contains(stage) && !scanReceiptIsCurrent(project, stage: "preprocessing") { return false }
+            guard scanPreparationIsCurrent(project, inspection: inspection) else { return false }
+            if stage == .inference && settings.usePredictionsForPreprocessing && !scanReceiptIsCurrent(project, stage: "inference", inspection: inspection) { return false }
+            if [.preprocessing, .numcalc, .postprocessing].contains(stage) && !scanReceiptIsCurrent(project, stage: "preprocessing", inspection: inspection) { return false }
         }
+        let sides = EarSide.allCases.filter { !project.pipelineEar(for: $0, inspection: inspection).isEmpty }
         switch stage {
         case .scanPreparation:
-            if !project.scanPreparation.enabled { return true }
-            return scanPreparationIsCurrent(project)
+            return !project.scanPreparation.enabled || scanPreparationIsCurrent(project, inspection: inspection)
         case .inference:
-            if !settings.usePredictionsForPreprocessing { return true }
-            if project.pipelineLeftEar.isEmpty && project.pipelineRightEar.isEmpty { return false }
-            let leftDone = project.pipelineLeftEar.isEmpty || containsMesh(output.appendingPathComponent(settings.predictionLeftFolder))
-            let rightDone = project.pipelineRightEar.isEmpty || containsMesh(output.appendingPathComponent(settings.predictionRightFolder))
-            return leftDone && rightDone
-        case .preprocessing:
-            if project.pipelineLeftEar.isEmpty && project.pipelineRightEar.isEmpty { return false }
-            if project.settings.manualPPMFitting.useForPreprocessing {
-                for side in EarSide.allCases where !(side == .left ? project.pipelineLeftEar : project.pipelineRightEar).isEmpty {
-                    if let savedMesh = project.settings.manualPPMFitting.meshPath(for: side),
-                       !savedMesh.isEmpty,
-                       validManualPPMFittingMesh(for: project, side: side) == nil { return false }
-                }
+            return !sides.isEmpty && sides.allSatisfy { side in
+                let folder = side == .left ? settings.predictionLeftFolder : settings.predictionRightFolder
+                return containsMesh(output.appendingPathComponent(folder), inspection: inspection)
             }
-            let leftDone = project.pipelineLeftEar.isEmpty || (fileHasData(output.appendingPathComponent("Projects/Left/parameters.json")) && fileHasData(output.appendingPathComponent("Intermediates/Left/graded_head.ply")))
-            let rightDone = project.pipelineRightEar.isEmpty || (fileHasData(output.appendingPathComponent("Projects/Right/parameters.json")) && fileHasData(output.appendingPathComponent("Intermediates/Right/graded_head.ply")))
-            return leftDone && rightDone
+        case .preprocessing:
+            return !sides.isEmpty && sides.allSatisfy { side in
+                if project.settings.manualPPMFitting.useForPreprocessing,
+                   let savedMesh = project.settings.manualPPMFitting.meshPath(for: side), !savedMesh.isEmpty,
+                   validManualPPMFittingMesh(for: project, side: side, inspection: inspection) == nil { return false }
+                return fileHasData(output.appendingPathComponent("Projects/\(side.title)/parameters.json"), inspection: inspection)
+                    && fileHasData(output.appendingPathComponent("Intermediates/\(side.title)/graded_head.ply"), inspection: inspection)
+            }
         case .numcalc:
-            if project.pipelineLeftEar.isEmpty && project.pipelineRightEar.isEmpty { return false }
-            let leftDone = project.pipelineLeftEar.isEmpty || numcalcIsComplete(output.appendingPathComponent("Projects/Left")) || containsSOFA(output.appendingPathComponent("Projects/Left/Output2HRTF"))
-            let rightDone = project.pipelineRightEar.isEmpty || numcalcIsComplete(output.appendingPathComponent("Projects/Right")) || containsSOFA(output.appendingPathComponent("Projects/Right/Output2HRTF"))
-            return leftDone && rightDone
+            return !sides.isEmpty && sides.allSatisfy { side in
+                let folder = output.appendingPathComponent("Projects/\(side.title)")
+                return numcalcIsComplete(folder, inspection: inspection)
+                    || containsSOFA(folder.appendingPathComponent("Output2HRTF"), inspection: inspection)
+            }
         case .postprocessing:
-            return containsSOFA(postprocessingDirectory(for: project))
+            return containsSOFA(postprocessingDirectory(for: project), inspection: inspection)
         }
     }
 
-    static func preprocessingSignature(for project: ProjectRecord) -> String {
+    static func preprocessingSignature(for project: ProjectRecord, inspection: Inspection = Inspection()) -> String {
+        let leftEar = project.pipelineEar(for: .left, inspection: inspection)
+        let rightEar = project.pipelineEar(for: .right, inspection: inspection)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let inference = (try? encoder.encode(project.settings.inference)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
         let preprocessing = (try? encoder.encode(project.settings.preprocessing)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
         let manualPPMFitting = project.settings.manualPPMFitting.useForPreprocessing
             ? ((try? encoder.encode(project.settings.manualPPMFitting)).flatMap { String(data: $0, encoding: .utf8) } ?? "") : ""
-        let leftIdentity = project.pipelineLeftEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: project.pipelineLeftEar)) ?? "")
-        let rightIdentity = project.pipelineRightEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: project.pipelineRightEar)) ?? "")
-        let fittedLeftIdentity = project.settings.manualPPMFitting.useForPreprocessing ? project.settings.manualPPMFitting.leftMeshPath.flatMap { meshIdentity(URL(fileURLWithPath: $0)) } ?? "" : ""
-        let fittedRightIdentity = project.settings.manualPPMFitting.useForPreprocessing ? project.settings.manualPPMFitting.rightMeshPath.flatMap { meshIdentity(URL(fileURLWithPath: $0)) } ?? "" : ""
-        let original = [project.pipelineLeftEar, project.pipelineRightEar, project.inputHandling.rawValue, leftIdentity, rightIdentity, inference, preprocessing, manualPPMFitting, fittedLeftIdentity, fittedRightIdentity].joined(separator: "\n")
+        let leftIdentity = leftEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: leftEar), inspection: inspection) ?? "")
+        let rightIdentity = rightEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: rightEar), inspection: inspection) ?? "")
+        let fittedLeftIdentity = project.settings.manualPPMFitting.useForPreprocessing ? project.settings.manualPPMFitting.leftMeshPath.flatMap { meshIdentity(URL(fileURLWithPath: $0), inspection: inspection) } ?? "" : ""
+        let fittedRightIdentity = project.settings.manualPPMFitting.useForPreprocessing ? project.settings.manualPPMFitting.rightMeshPath.flatMap { meshIdentity(URL(fileURLWithPath: $0), inspection: inspection) } ?? "" : ""
+        let original = [leftEar, rightEar, project.inputHandling.rawValue, leftIdentity, rightIdentity, inference, preprocessing, manualPPMFitting, fittedLeftIdentity, fittedRightIdentity].joined(separator: "\n")
         guard project.scanPreparation.enabled else { return original }
         let scan = (try? encoder.encode(project.scanPreparation)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
         return original + "\n" + scan
     }
 
-    static func scanPreparationIsCurrent(_ project: ProjectRecord) -> Bool {
+    static func scanPreparationIsCurrent(_ project: ProjectRecord, inspection: Inspection = Inspection()) -> Bool {
         let scan = project.scanPreparation
         let root = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Prepared")
-        guard let data = try? Data(contentsOf: root.appendingPathComponent("mesh_preparation.json")),
-              let report = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard let report = inspection.document(root.appendingPathComponent("mesh_preparation.json")),
               report["status"] as? String == "completed",
               let signature = report["signature"] as? [String: Any],
               let settings = signature["settings"] as? [String: Any],
@@ -234,73 +249,68 @@ enum ArtifactScanner {
         // lets changes to the selected original invalidate the prepared geometry.
         let source = URL(fileURLWithPath: scan.scanPath)
         guard let sourceStamp = report["source_identity"] as? [String: Any],
-              matchesStamp(source, sourceStamp) else { return false }
+              matchesStamp(source, sourceStamp, inspection: inspection) else { return false }
         for (side, selected) in [("left", scan.prepareLeft), ("right", scan.prepareRight)] where selected {
             guard let ear = ears[side], let stamp = ear["identity"] as? [String: Any],
-                  matchesStamp(root.appendingPathComponent("\(side.capitalized).stl"), stamp) else { return false }
+                  matchesStamp(root.appendingPathComponent("\(side.capitalized).stl"), stamp, inspection: inspection) else { return false }
         }
         return scan.prepareLeft || scan.prepareRight
     }
 
-    static func earReviewIsCurrent(_ project: ProjectRecord, side: EarSide) -> Bool {
+    static func earReviewIsCurrent(_ project: ProjectRecord, side: EarSide, inspection: Inspection = Inspection()) -> Bool {
         let scan = project.scanPreparation
         guard let path = side == .left ? scan.reviewedLeftPath : scan.reviewedRightPath else { return false }
         let folder = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Prepared")
         let baseEar = folder.appendingPathComponent("\(side.title).stl")
-        guard let reportData = try? Data(contentsOf: folder.appendingPathComponent("mesh_preparation.json")),
-              let report = try? JSONSerialization.jsonObject(with: reportData) as? [String: Any],
+        guard let report = inspection.document(folder.appendingPathComponent("mesh_preparation.json")),
               let generation = report["generation"] as? String,
               let ears = report["ears"] as? [String: [String: Any]],
               let baseDigest = ears[side.rawValue]?["sha256"] as? String,
-              let receiptData = try? Data(contentsOf: URL(fileURLWithPath: path).deletingPathExtension().appendingPathExtension("json")),
-              let receipt = try? JSONSerialization.jsonObject(with: receiptData) as? [String: Any],
+              let receipt = inspection.document(URL(fileURLWithPath: path).deletingPathExtension().appendingPathExtension("json")),
               receipt["kind"] as? String == "ear", receipt["side"] as? String == side.rawValue,
               receipt["generation"] as? String == generation, receipt["source_sha256"] as? String == baseDigest,
               receipt["source_identity"] as? [String: Any] != nil,
               let stamp = receipt["output_identity"] as? [String: Any] else { return false }
-        return matchesStamp(baseEar, receipt["source_identity"] as? [String: Any] ?? [:]) &&
-            matchesStamp(URL(fileURLWithPath: path), stamp)
+        return matchesStamp(baseEar, receipt["source_identity"] as? [String: Any] ?? [:], inspection: inspection) &&
+            matchesStamp(URL(fileURLWithPath: path), stamp, inspection: inspection)
     }
 
-    static func preparedEarURL(for side: EarSide, in project: ProjectRecord) -> URL? {
+    static func preparedEarURL(for side: EarSide, in project: ProjectRecord, inspection: Inspection = Inspection()) -> URL? {
         let scan = project.scanPreparation
         guard scan.enabled, side == .left ? scan.prepareLeft : scan.prepareRight else { return nil }
-        if earReviewIsCurrent(project, side: side),
+        if earReviewIsCurrent(project, side: side, inspection: inspection),
            let reviewed = side == .left ? scan.reviewedLeftPath : scan.reviewedRightPath {
             return URL(fileURLWithPath: reviewed)
         }
         return URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Prepared/\(side.title).stl")
     }
 
-    static func preparedEarSide(for mesh: URL, in project: ProjectRecord) -> EarSide? {
-        for side in EarSide.allCases where preparedEarURL(for: side, in: project)?.standardizedFileURL.path == mesh.standardizedFileURL.path {
+    static func preparedEarSide(for mesh: URL, in project: ProjectRecord, inspection: Inspection = Inspection()) -> EarSide? {
+        for side in EarSide.allCases where preparedEarURL(for: side, in: project, inspection: inspection)?.standardizedFileURL.path == mesh.standardizedFileURL.path {
             return side
         }
         return nil
     }
 
-    static func scanReceiptIsCurrent(_ project: ProjectRecord, stage: String) -> Bool {
+    static func scanReceiptIsCurrent(_ project: ProjectRecord, stage: String, inspection: Inspection = Inspection()) -> Bool {
         let folder = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Prepared")
-        guard let reportData = try? Data(contentsOf: folder.appendingPathComponent("mesh_preparation.json")),
-              let report = try? JSONSerialization.jsonObject(with: reportData) as? [String: Any],
+        guard let report = inspection.document(folder.appendingPathComponent("mesh_preparation.json")),
               let generation = report["generation"] as? String,
-              let receiptData = try? Data(contentsOf: folder.appendingPathComponent("\(stage).json")),
-              let receipt = try? JSONSerialization.jsonObject(with: receiptData) as? [String: Any] else { return false }
+              let receipt = inspection.document(folder.appendingPathComponent("\(stage).json")) else { return false }
         guard receipt["generation"] as? String == generation else { return false }
         if let expected = receipt["input_ears"] as? [String: String] {
             let baseEars = report["ears"] as? [String: [String: Any]] ?? [:]
             for (side, selected, path) in [(EarSide.left, project.scanPreparation.prepareLeft, project.scanPreparation.reviewedLeftPath), (.right, project.scanPreparation.prepareRight, project.scanPreparation.reviewedRightPath)] where selected {
                 var digest = baseEars[side.rawValue]?["sha256"] as? String
-                if let path, earReviewIsCurrent(project, side: side), let data = try? Data(contentsOf: URL(fileURLWithPath: path).deletingPathExtension().appendingPathExtension("json")),
-                   let review = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { digest = review["output_sha256"] as? String }
+                if let path, earReviewIsCurrent(project, side: side, inspection: inspection), let review = inspection.document(URL(fileURLWithPath: path).deletingPathExtension().appendingPathExtension("json")) { digest = review["output_sha256"] as? String }
                 guard expected[side.rawValue] == digest else { return false }
             }
-        } else if EarSide.allCases.contains(where: { earReviewIsCurrent(project, side: $0) }) { return false }
+        } else if EarSide.allCases.contains(where: { earReviewIsCurrent(project, side: $0, inspection: inspection) }) { return false }
         return true
     }
 
-    static func matchesStamp(_ url: URL, _ stamp: [String: Any]) -> Bool {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+    static func matchesStamp(_ url: URL, _ stamp: [String: Any], inspection: Inspection = Inspection()) -> Bool {
+        guard let attrs = inspection.attributes(url),
               let size = attrs[.size] as? NSNumber, let date = attrs[.modificationDate] as? Date,
               let expectedSize = stamp["size"] as? NSNumber,
               let modified = stamp["mtime"] as? NSNumber else { return false }
@@ -312,64 +322,62 @@ enum ArtifactScanner {
         return URL(fileURLWithPath: project.saveLocation).appendingPathComponent("HRTF")
     }
 
-    static func fileHasData(_ url: URL) -> Bool {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+    static func fileHasData(_ url: URL, inspection: Inspection = Inspection()) -> Bool {
+        guard let attributes = inspection.attributes(url),
               attributes[.type] as? FileAttributeType == .typeRegular else { return false }
         return (attributes[.size] as? NSNumber)?.int64Value ?? 0 > 0
     }
 
-    static func isSOFAContainer(_ url: URL) -> Bool {
-        guard fileHasData(url), let handle = try? FileHandle(forReadingFrom: url) else { return false }
+    static func isSOFAContainer(_ url: URL, inspection: Inspection = Inspection()) -> Bool {
+        guard fileHasData(url, inspection: inspection), let handle = try? FileHandle(forReadingFrom: url) else { return false }
         defer { try? handle.close() }
         guard let data = try? handle.read(upToCount: 8), data.count == 8 else { return false }
         return data == Data([0x89, 0x48, 0x44, 0x46, 0x0d, 0x0a, 0x1a, 0x0a])
             || (data.prefix(3) == Data("CDF".utf8) && [1, 2, 5].contains(data[3]))
     }
 
-    static func fileExists(_ url: URL) -> Bool {
-        FileManager.default.fileExists(atPath: url.path)
-    }
-
-    static func containsMesh(_ url: URL) -> Bool {
+    static func containsMesh(_ url: URL, inspection: Inspection = Inspection()) -> Bool {
         guard let files = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else { return false }
         let meshes = files.filter { ["stl", "ply"].contains($0.pathExtension.lowercased()) && $0.deletingPathExtension().lastPathComponent.caseInsensitiveCompare("graded_head") != .orderedSame }
-        let validMeshes = meshes.filter { fileHasData($0) }
+        let validMeshes = meshes.filter { fileHasData($0, inspection: inspection) }
         return validMeshes.contains { $0.deletingPathExtension().lastPathComponent.hasPrefix("Prediction_") } || validMeshes.count == 1
     }
 
-    static func containsSOFA(_ url: URL) -> Bool {
+    static func containsSOFA(_ url: URL, inspection: Inspection = Inspection()) -> Bool {
         guard let files = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else { return false }
-        return files.contains { $0.pathExtension.lowercased() == "sofa" && isSOFAContainer($0) }
+        return files.contains { $0.pathExtension.lowercased() == "sofa" && isSOFAContainer($0, inspection: inspection) }
     }
 
-    static func numcalcCompleted(_ project: URL) -> Int {
+    static func numcalcCompleted(_ project: URL, inspection: Inspection = Inspection()) -> Int {
         let source = project.appendingPathComponent("NumCalc/source_1")
         let files = (try? FileManager.default.contentsOfDirectory(at: source.appendingPathComponent("be.out"), includingPropertiesForKeys: nil)) ?? []
         let completed = files.filter { path in
             guard path.lastPathComponent.hasPrefix("be."), let step = Int(path.lastPathComponent.dropFirst(3)) else { return false }
-            return frequencyStepComplete(source: source, step: step)
+            return frequencyStepComplete(source: source, step: step, inspection: inspection)
         }.count
-        return completed > 0 ? completed : containsSOFA(project.appendingPathComponent("Output2HRTF")) ? numcalcTotal(project) : 0
+        return completed > 0 ? completed : containsSOFA(project.appendingPathComponent("Output2HRTF"), inspection: inspection) ? numcalcTotal(project, inspection: inspection) : 0
     }
 
-    static func numcalcIsComplete(_ project: URL) -> Bool {
-        let total = numcalcTotal(project)
+    static func numcalcIsComplete(_ project: URL, inspection: Inspection = Inspection()) -> Bool {
+        let total = numcalcTotal(project, inspection: inspection)
         guard total > 0 else { return false }
         let source = project.appendingPathComponent("NumCalc/source_1")
-        return (1...total).allSatisfy { frequencyStepComplete(source: source, step: $0) }
+        return (1...total).allSatisfy { frequencyStepComplete(source: source, step: $0, inspection: inspection) }
     }
 
-    static func frequencyStepComplete(source: URL, step: Int) -> Bool {
+    static func frequencyStepComplete(source: URL, step: Int, inspection: Inspection = Inspection()) -> Bool {
+        let log = source.appendingPathComponent("NC\(step)-\(step)_log.txt")
+        if let complete = inspection.completedSteps[log] { return complete }
         let output = source.appendingPathComponent("be.out/be.\(step)")
         let required = ["pBoundary", "pEvalGrid", "vBoundary", "vEvalGrid"]
-        guard required.allSatisfy({ fileHasData(output.appendingPathComponent($0)) }) else { return false }
-        let log = source.appendingPathComponent("NC\(step)-\(step)_log.txt")
-        guard let text = try? String(contentsOf: log, encoding: .utf8) else { return false }
-        return text.contains("---------- NumCalc ended:")
+        let complete = required.allSatisfy { fileHasData(output.appendingPathComponent($0), inspection: inspection) }
+            && ((try? String(contentsOf: log, encoding: .utf8))?.contains("---------- NumCalc ended:") == true)
+        inspection.completedSteps[log] = complete
+        return complete
     }
 
-    static func numcalcTotal(_ project: URL) -> Int {
-        guard let data = try? Data(contentsOf: project.appendingPathComponent("parameters.json")), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let total = object["numFrequencies"] as? Int else { return 0 }
+    static func numcalcTotal(_ project: URL, inspection: Inspection = Inspection()) -> Int {
+        guard let object = inspection.document(project.appendingPathComponent("parameters.json")), let total = object["numFrequencies"] as? Int else { return 0 }
         return total
     }
 }
