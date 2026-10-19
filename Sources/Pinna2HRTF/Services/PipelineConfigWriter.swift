@@ -47,6 +47,7 @@ enum PipelineConfigWriter {
         let output = URL(fileURLWithPath: project.saveLocation)
         let scan = project.scanPreparation
         let inference = project.settings.inference
+        let manualPPMFitting = project.settings.manualPPMFitting
         let preprocessing = project.settings.preprocessing
         let numcalc = project.settings.numcalc
         let postprocessing = project.settings.postprocessing ?? PostprocessingSettings()
@@ -67,6 +68,17 @@ enum PipelineConfigWriter {
             return "  source_position_input_\(side.rawValue): [\(position.x), \(position.y), \(position.z)]"
         }.joined(separator: "\n")
         let sourcePositionBlock = sourcePositions.isEmpty ? "" : "\(sourcePositions)\n"
+        let manualPPMLeft = manualPPMFitting.leftMeshPath.map(yamlString) ?? "null"
+        let manualPPMRight = manualPPMFitting.rightMeshPath.map(yamlString) ?? "null"
+        let manualPPMLeftParameters = manualPPMFitting.leftParametersPath.map(yamlString) ?? "null"
+        let manualPPMRightParameters = manualPPMFitting.rightParametersPath.map(yamlString) ?? "null"
+        let manualPPMLeftBlend = manualPPMFitting.leftBlendPath.map(yamlString) ?? "null"
+        let manualPPMRightBlend = manualPPMFitting.rightBlendPath.map(yamlString) ?? "null"
+        let manualPPMLeftSource = manualPPMFitting.leftSourcePath.map(yamlString) ?? "null"
+        let manualPPMRightSource = manualPPMFitting.rightSourcePath.map(yamlString) ?? "null"
+        let manualPPMLeftIdentity = manualPPMFitting.leftSourceIdentity.map(yamlString) ?? "null"
+        let manualPPMRightIdentity = manualPPMFitting.rightSourceIdentity.map(yamlString) ?? "null"
+        let manualPPMTemplate = manualPPMFitting.templateBlendPath.map(yamlString) ?? "null"
         return """
         paths:
           left_ear: \(leftEar)
@@ -101,6 +113,19 @@ enum PipelineConfigWriter {
           prediction_parameters_left_folder: Intermediates/Left
           prediction_parameters_right_folder: Intermediates/Right
           use_predictions_for_preprocessing: \(inference.usePredictionsForPreprocessing ? "true" : "false")
+        manual_ppm:
+          enabled: \(manualPPMFitting.useForPreprocessing ? "true" : "false")
+          left_mesh: \(manualPPMLeft)
+          right_mesh: \(manualPPMRight)
+          left_parameters: \(manualPPMLeftParameters)
+          right_parameters: \(manualPPMRightParameters)
+          left_blend: \(manualPPMLeftBlend)
+          right_blend: \(manualPPMRightBlend)
+          left_source: \(manualPPMLeftSource)
+          right_source: \(manualPPMRightSource)
+          left_source_identity: \(manualPPMLeftIdentity)
+          right_source_identity: \(manualPPMRightIdentity)
+          template_blend: \(manualPPMTemplate)
         preprocessing:
           enabled: true
           write_intermediates: true

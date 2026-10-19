@@ -160,19 +160,24 @@ def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
 
 def preprocessing_input_paths(config: PipelineConfig, logger: Logger) -> tuple[Path | None, Path | None]:
     left, right = input_paths(config, validate=True)
-    if config.scan_preparation.enabled and config.inference.use_predictions_for_preprocessing:
+    if config.scan_preparation.enabled and config.inference.use_predictions_for_preprocessing and not config.manual_ppm.enabled:
         from .ScanPreparation import validate_stage
         validate_stage(config, "inference")
     inputs = []
-    for side, source, folder_name in [
-        ("left", left, config.inference.prediction_left_folder),
-        ("right", right, config.inference.prediction_right_folder),
+    for side, source, folder_name, manual_path in [
+        ("left", left, config.inference.prediction_left_folder, config.manual_ppm.left_mesh),
+        ("right", right, config.inference.prediction_right_folder, config.manual_ppm.right_mesh),
     ]:
         if source is None:
             inputs.append(None)
             continue
         selected = source
-        if config.inference.use_predictions_for_preprocessing:
+        if config.manual_ppm.enabled and manual_path is not None:
+            if not manual_path.is_file():
+                raise FileNotFoundError(f"Saved manual {side} PPM fit is missing: {manual_path}")
+            selected = manual_path
+            logger(f"Using manually fitted {side} PPM for preprocessing: {manual_path}")
+        elif config.inference.use_predictions_for_preprocessing:
             predicted = predicted_stl(config.paths.output_dir / folder_name, source.stem)
             if predicted is not None:
                 selected = predicted

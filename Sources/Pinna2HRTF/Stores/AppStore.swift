@@ -33,6 +33,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published var microphonePlacementError: String?
     @Published var meshEditorRequest: MeshEditorRequest?
     @Published var meshEditorError: String?
+    @Published var ppmFittingRequest: PPMFittingRequest?
+    @Published var ppmFittingError: String?
     @Published var artifacts: [Artifact] = []
     @Published var stageStates: [Stage: StageState] = Dictionary(uniqueKeysWithValues: Stage.allCases.map { ($0, .ready) })
     @Published var runningProcesses: [UUID: Process] = [:]
@@ -112,6 +114,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             || outputOperations.contains(selectedProject.id)
             || stoppingProjects.contains(selectedProject.id)
             || meshEditorRequest?.projectID == selectedProject.id
+            || ppmFittingRequest?.projectID == selectedProject.id
             || projectsBeingRemoved.contains(selectedProject.id)
     }
 
@@ -255,6 +258,21 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                     }
                     duplicate.leftEar = relocated(duplicate.leftEar)
                     duplicate.rightEar = relocated(duplicate.rightEar)
+                    var manualPPMFitting = duplicate.settings.manualPPMFitting
+                    manualPPMFitting.templateBlendPath = manualPPMFitting.templateBlendPath.map(relocated)
+                    manualPPMFitting.leftMeshPath = manualPPMFitting.leftMeshPath.map(relocated)
+                    manualPPMFitting.rightMeshPath = manualPPMFitting.rightMeshPath.map(relocated)
+                    manualPPMFitting.leftParametersPath = manualPPMFitting.leftParametersPath.map(relocated)
+                    manualPPMFitting.rightParametersPath = manualPPMFitting.rightParametersPath.map(relocated)
+                    manualPPMFitting.leftSourcePath = manualPPMFitting.leftSourcePath.map(relocated)
+                    manualPPMFitting.rightSourcePath = manualPPMFitting.rightSourcePath.map(relocated)
+                    func relocatedIdentity(_ identity: String?) -> String? {
+                        guard let identity, let separator = identity.firstIndex(of: "|") else { return identity }
+                        return relocated(String(identity[..<separator])) + String(identity[separator...])
+                    }
+                    manualPPMFitting.leftSourceIdentity = relocatedIdentity(manualPPMFitting.leftSourceIdentity)
+                    manualPPMFitting.rightSourceIdentity = relocatedIdentity(manualPPMFitting.rightSourceIdentity)
+                    duplicate.settings.manualPPMFitting = manualPPMFitting
                     if var scan = duplicate.settings.scanPreparation {
                         scan.scanPath = relocated(scan.scanPath)
                         scan.originalScanPath = scan.originalScanPath.map(relocated)
@@ -471,7 +489,17 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func setBezierPPM(_ enabled: Bool) {
-        updateSelectedProject { $0.settings.inference.usePredictionsForPreprocessing = enabled }
+        updateSelectedProject {
+            $0.settings.inference.usePredictionsForPreprocessing = enabled
+            if enabled { $0.settings.manualPPMFitting.useForPreprocessing = false }
+        }
+    }
+
+    func setManualPPMFitting(_ enabled: Bool) {
+        updateSelectedProject {
+            $0.settings.manualPPMFitting.useForPreprocessing = enabled
+            if enabled { $0.settings.inference.usePredictionsForPreprocessing = false }
+        }
     }
 
     func updateEnvironment(_ update: (inout EnvironmentConfig) -> Void) {
@@ -581,6 +609,67 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         meshEditorRequest = MeshEditorRequest(projectID: project.id, source: source, originalSource: base,
             destination: root.appendingPathComponent("MeshEdits/\(side.title).stl"), side: side,
             preparedGeneration: generation, preparedReport: reportURL)
+    }
+
+    func beginManualPPMFitting(_ side: EarSide) {
+        guard let project = selectedProject, !selectedProjectIsRunning else { return }
+        guard !project.saveLocation.isEmpty else {
+            ppmFittingError = "Choose a project save location first."; return
+        }
+        if project.scanPreparation.enabled && !ArtifactScanner.scanPreparationIsCurrent(project) {
+            ppmFittingError = "Run Scan Preparation successfully with the current scan settings first."; return
+        }
+        guard let target = ArtifactScanner.sourceEar(for: project, side: side),
+              FileManager.default.fileExists(atPath: target.path),
+              let identity = ArtifactScanner.meshIdentity(target) else {
+            ppmFittingError = "Choose or prepare a valid \(side.rawValue) ear mesh first."; return
+        }
+        guard ["stl", "ply"].contains(target.pathExtension.lowercased()) else {
+            ppmFittingError = "Manual PPM fitting requires an STL or PLY ear mesh."; return
+        }
+        if let conflict = outputLocationConflict(for: project) {
+            ppmFittingError = conflict; return
+        }
+        let folder = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Manual PPM", isDirectory: true)
+        let desktopBlend = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop/PPM.blend")
+        let current = project.settings.manualPPMFitting
+        let savedParameters = current.parametersPath(for: side).map { URL(fileURLWithPath: $0) }
+        let template = current.templateBlendPath.map { URL(fileURLWithPath: $0) }
+        let initialTemplate = template.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+            ?? (FileManager.default.fileExists(atPath: desktopBlend.path) ? desktopBlend : nil)
+        ppmFittingRequest = PPMFittingRequest(
+            projectID: project.id,
+            side: side,
+            targetMesh: target,
+            sourceIdentity: identity,
+            destinationMesh: folder.appendingPathComponent("\(side.title).stl"),
+            destinationParameters: folder.appendingPathComponent("\(side.title).json"),
+            destinationBlend: folder.appendingPathComponent("\(side.title).blend"),
+            savedParameters: savedParameters.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil },
+            initialTemplateBlend: initialTemplate
+        )
+    }
+
+    func finishManualPPMFitting(_ request: PPMFittingRequest, templateBlendPath: String) {
+        guard let index = projects.firstIndex(where: { $0.id == request.projectID }) else { return }
+        guard let source = ArtifactScanner.sourceEar(for: projects[index], side: request.side),
+              ArtifactScanner.meshIdentity(source) == request.sourceIdentity else {
+            ppmFittingError = "The source ear changed before the fit could be saved. Reopen the fitting workspace for the current mesh."; return
+        }
+        var fitting = projects[index].settings.manualPPMFitting
+        fitting.setFit(meshPath: request.destinationMesh.path,
+                       parametersPath: request.destinationParameters.path,
+                       blendPath: request.destinationBlend.path,
+                       sourcePath: request.targetMesh.path,
+                       sourceIdentity: request.sourceIdentity,
+                       for: request.side)
+        if !templateBlendPath.isEmpty { fitting.templateBlendPath = templateBlendPath }
+        fitting.useForPreprocessing = true
+        projects[index].settings.manualPPMFitting = fitting
+        projects[index].settings.inference.usePredictionsForPreprocessing = false
+        persist()
+        appendLog("Saved the manual \(request.side.rawValue) PPM fit. Preprocessing will use it until the source ear changes.", for: request.projectID)
+        refreshArtifacts()
     }
 
     func finishMeshEditing(_ request: MeshEditorRequest) {
@@ -1057,6 +1146,14 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             if !FileManager.default.fileExists(atPath: project.settings.inference.modelConfig) || !FileManager.default.fileExists(atPath: project.settings.inference.modelCheckpoint) { return "The selected model or checkpoint is missing." }
         case .preprocessing:
             if project.settings.inference.usePredictionsForPreprocessing && (!ArtifactScanner.stageIsComplete(.inference, project: project) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.inference.rawValue] ?? .ready)) { return "Run Mesh2PPM Inference successfully first." }
+            if project.settings.manualPPMFitting.useForPreprocessing {
+                for side in EarSide.allCases where !(side == .left ? project.pipelineLeftEar : project.pipelineRightEar).isEmpty {
+                    if let path = project.settings.manualPPMFitting.meshPath(for: side), !path.isEmpty,
+                       ArtifactScanner.validManualPPMFittingMesh(for: project, side: side) == nil {
+                        return "The saved manual \(side.rawValue) PPM fit is missing or its source ear has changed. Refit that ear before preprocessing."
+                    }
+                }
+            }
             if isPlacingMicrophone { return "Finish microphone placement first." }
             if !FileManager.default.isExecutableFile(atPath: environment.meshGradingExecutable) { return "The mesh-grading tool is unavailable." }
             if !FileManager.default.fileExists(atPath: environment.externalDir + "/src/Mesh2HRTF/mesh2hrtf") { return "Mesh2HRTF dependencies are unavailable." }
@@ -1189,8 +1286,16 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 throw GeneratedOutputManifest.Failure.invalidRoot
             }
         }
-        let inputs = projects.flatMap { [$0.leftEar, $0.rightEar, $0.scanPreparation.scanPath, $0.scanPreparation.originalScanPath ?? "", $0.scanPreparation.reviewedLeftPath ?? "", $0.scanPreparation.reviewedRightPath ?? "", $0.settings.preprocessing.evaluationGrid ?? ""] }
-            .filter { !$0.isEmpty && $0 != "Default" }.sorted()
+        let inputs = projects.reduce(into: [String]()) { values, project in
+            values.append(contentsOf: [project.leftEar, project.rightEar, project.scanPreparation.scanPath,
+                project.scanPreparation.originalScanPath ?? "", project.scanPreparation.reviewedLeftPath ?? "",
+                project.scanPreparation.reviewedRightPath ?? "", project.settings.preprocessing.evaluationGrid ?? ""])
+            values.append(contentsOf: [project.settings.manualPPMFitting.leftMeshPath ?? "",
+                project.settings.manualPPMFitting.rightMeshPath ?? "", project.settings.manualPPMFitting.leftParametersPath ?? "",
+                project.settings.manualPPMFitting.rightParametersPath ?? ""])
+        }
+        .filter { !$0.isEmpty && $0 != "Default" }
+        .sorted()
         let key = project.saveLocation + "\n" + inputs.joined(separator: "\n")
         if let existing = outputStores[key] { return existing }
         let outputs = try GeneratedOutputManifest(projectRoot: project.saveLocation, inputs: inputs)

@@ -68,9 +68,17 @@ struct ContentView: View {
         .sheet(item: $store.meshEditorRequest) { request in
             MeshEditorView(request: request, saved: store.finishMeshEditing)
         }
+        .sheet(item: $store.ppmFittingRequest) { request in
+            PPMFittingView(request: request) { request, templateBlendPath in
+                store.finishManualPPMFitting(request, templateBlendPath: templateBlendPath)
+            }
+        }
         .alert("Cannot Edit Mesh", isPresented: Binding(get: { store.meshEditorError != nil }, set: { if !$0 { store.meshEditorError = nil } })) {
             Button("OK") { store.meshEditorError = nil }
         } message: { Text(store.meshEditorError ?? "") }
+        .alert("Cannot Open Manual PPM Fitting", isPresented: Binding(get: { store.ppmFittingError != nil }, set: { if !$0 { store.ppmFittingError = nil } })) {
+            Button("OK") { store.ppmFittingError = nil }
+        } message: { Text(store.ppmFittingError ?? "") }
         .focusedSceneValue(\.pipelineCommands, commandContext)
         .onChange(of: store.selectedProjectID) { _ in
             store.persist()

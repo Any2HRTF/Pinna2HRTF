@@ -32,6 +32,11 @@ struct ProjectInspectorView: View {
                 requiredPanel
             }
             Section {
+                manualPPMPanel
+            } header: {
+                Text("Manual PPM Fit")
+            }
+            Section {
                 SettingsDisclosure("Scan Preparation", systemImage: "bandage") {
                     LabeledTextField("Target edge (mm)", helpID: "scan.target_edge", text: scanTextBinding(\.targetEdgeMM))
                     LabeledTextField("Left crop margin (mm)", helpID: "scan.left_margin", text: scanTextBinding(\.leftMarginMM))
@@ -141,6 +146,56 @@ struct ProjectInspectorView: View {
                 .padding(.top, 6)
                 .disabled(store.selectedProjectIsRunning)
         }
+    }
+
+    var manualPPMPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Fit the Bezier PPM against each target ear. The editor overlays the target and the model, then lets you adjust global alignment, convex regions, and concave details.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(EarSide.allCases) { side in
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(side.title) ear")
+                        Text(manualPPMStatus(for: side))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Fit…") { store.beginManualPPMFitting(side) }
+                        .disabled(!canFitManually(side))
+                }
+            }
+            Toggle("Use saved manual fits for preprocessing", isOn: manualPPMBinding)
+                .help("Use the saved manual PPM mesh for each fitted side. Unfitted sides keep their current preprocessing source.")
+            if let project = store.selectedProject,
+               let issue = ProjectValidation.issues(for: project).first(where: { $0.id.hasPrefix("manual_ppm") }) {
+                Text(issue.message)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    func canFitManually(_ side: EarSide) -> Bool {
+        guard let project = store.selectedProject,
+              !project.scanPreparation.enabled || ArtifactScanner.scanPreparationIsCurrent(project),
+              let target = ArtifactScanner.sourceEar(for: project, side: side),
+              ["stl", "ply"].contains(target.pathExtension.lowercased()) else { return false }
+        return FileManager.default.fileExists(atPath: target.path) && !store.selectedProjectIsRunning
+    }
+
+    func manualPPMStatus(for side: EarSide) -> String {
+        guard let project = store.selectedProject,
+              project.settings.manualPPMFitting.meshPath(for: side) != nil else { return "Not fitted" }
+        return ArtifactScanner.validManualPPMFittingMesh(for: project, side: side) == nil ? "Source changed; refit required" : "Saved fit available"
+    }
+
+    var manualPPMBinding: Binding<Bool> {
+        Binding(
+            get: { store.selectedProject?.settings.manualPPMFitting.useForPreprocessing ?? false },
+            set: { store.setManualPPMFitting($0) }
+        )
     }
 
     func scanTextBinding(_ keyPath: WritableKeyPath<ScanPreparationSettings, String>) -> Binding<String> {

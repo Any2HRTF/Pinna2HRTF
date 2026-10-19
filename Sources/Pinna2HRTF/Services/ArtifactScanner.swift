@@ -24,6 +24,12 @@ enum ArtifactScanner {
             next.append(Artifact(title: "Input right ear", url: URL(fileURLWithPath: project.pipelineRightEar)))
             next.append(Artifact(title: "Right simulation mesh", url: output.appendingPathComponent("Intermediates/Right/graded_head.ply")))
         }
+        for side in EarSide.allCases {
+            if let path = project.settings.manualPPMFitting.meshPath(for: side),
+               FileManager.default.fileExists(atPath: path) {
+                next.append(Artifact(title: "Manual \(side.rawValue) PPM fit", url: URL(fileURLWithPath: path)))
+            }
+        }
         for pair in [("Predicted left ear", output.appendingPathComponent(settings.predictionLeftFolder), project.pipelineLeftEar), ("Predicted right ear", output.appendingPathComponent(settings.predictionRightFolder), project.pipelineRightEar)] where !pair.2.isEmpty {
             next.append(contentsOf: predictionArtifacts(title: pair.0, folder: pair.1))
         }
@@ -50,6 +56,10 @@ enum ArtifactScanner {
     }
 
     static func preprocessingMesh(for project: ProjectRecord, side: EarSide) -> URL? {
+        if project.settings.manualPPMFitting.useForPreprocessing,
+           project.settings.manualPPMFitting.meshPath(for: side) != nil {
+            return validManualPPMFittingMesh(for: project, side: side)
+        }
         let sourcePath = side == .left ? project.pipelineLeftEar : project.pipelineRightEar
         guard !sourcePath.isEmpty else { return nil }
         let source = URL(fileURLWithPath: sourcePath)
@@ -65,6 +75,33 @@ enum ArtifactScanner {
         guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return nil }
         let meshes = files.filter { $0.pathExtension.lowercased() == "stl" }
         return meshes.count == 1 ? meshes[0] : nil
+    }
+
+    static func sourceEar(for project: ProjectRecord, side: EarSide) -> URL? {
+        if project.scanPreparation.enabled {
+            guard side == .left ? project.scanPreparation.prepareLeft : project.scanPreparation.prepareRight else { return nil }
+            if earReviewIsCurrent(project, side: side),
+               let reviewed = side == .left ? project.scanPreparation.reviewedLeftPath : project.scanPreparation.reviewedRightPath {
+                return URL(fileURLWithPath: reviewed)
+            }
+            return preparedEarURL(for: side, in: project)
+        }
+        let path = side == .left ? project.leftEar : project.rightEar
+        return path.isEmpty ? nil : URL(fileURLWithPath: path)
+    }
+
+    static func validManualPPMFittingMesh(for project: ProjectRecord, side: EarSide) -> URL? {
+        let settings = project.settings.manualPPMFitting
+        guard let path = settings.meshPath(for: side),
+              let sourcePath = settings.sourcePath(for: side),
+              let sourceIdentity = settings.sourceIdentity(for: side),
+              let source = sourceEar(for: project, side: side),
+              source.standardizedFileURL.path == URL(fileURLWithPath: sourcePath).standardizedFileURL.path,
+              meshIdentity(source) == sourceIdentity,
+              FileManager.default.fileExists(atPath: path),
+              let parameters = settings.parametersPath(for: side),
+              FileManager.default.fileExists(atPath: parameters) else { return nil }
+        return URL(fileURLWithPath: path)
     }
 
     static func meshIdentity(_ url: URL) -> String? {
@@ -141,6 +178,13 @@ enum ArtifactScanner {
             return leftDone && rightDone
         case .preprocessing:
             if project.pipelineLeftEar.isEmpty && project.pipelineRightEar.isEmpty { return false }
+            if project.settings.manualPPMFitting.useForPreprocessing {
+                for side in EarSide.allCases where !(side == .left ? project.pipelineLeftEar : project.pipelineRightEar).isEmpty {
+                    if let savedMesh = project.settings.manualPPMFitting.meshPath(for: side),
+                       !savedMesh.isEmpty,
+                       validManualPPMFittingMesh(for: project, side: side) == nil { return false }
+                }
+            }
             let leftDone = project.pipelineLeftEar.isEmpty || (fileHasData(output.appendingPathComponent("Projects/Left/parameters.json")) && fileHasData(output.appendingPathComponent("Intermediates/Left/graded_head.ply")))
             let rightDone = project.pipelineRightEar.isEmpty || (fileHasData(output.appendingPathComponent("Projects/Right/parameters.json")) && fileHasData(output.appendingPathComponent("Intermediates/Right/graded_head.ply")))
             return leftDone && rightDone
@@ -159,9 +203,13 @@ enum ArtifactScanner {
         encoder.outputFormatting = [.sortedKeys]
         let inference = (try? encoder.encode(project.settings.inference)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
         let preprocessing = (try? encoder.encode(project.settings.preprocessing)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let manualPPMFitting = project.settings.manualPPMFitting.useForPreprocessing
+            ? ((try? encoder.encode(project.settings.manualPPMFitting)).flatMap { String(data: $0, encoding: .utf8) } ?? "") : ""
         let leftIdentity = project.pipelineLeftEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: project.pipelineLeftEar)) ?? "")
         let rightIdentity = project.pipelineRightEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: project.pipelineRightEar)) ?? "")
-        let original = [project.pipelineLeftEar, project.pipelineRightEar, project.inputHandling.rawValue, leftIdentity, rightIdentity, inference, preprocessing].joined(separator: "\n")
+        let fittedLeftIdentity = project.settings.manualPPMFitting.useForPreprocessing ? project.settings.manualPPMFitting.leftMeshPath.flatMap { meshIdentity(URL(fileURLWithPath: $0)) } ?? "" : ""
+        let fittedRightIdentity = project.settings.manualPPMFitting.useForPreprocessing ? project.settings.manualPPMFitting.rightMeshPath.flatMap { meshIdentity(URL(fileURLWithPath: $0)) } ?? "" : ""
+        let original = [project.pipelineLeftEar, project.pipelineRightEar, project.inputHandling.rawValue, leftIdentity, rightIdentity, inference, preprocessing, manualPPMFitting, fittedLeftIdentity, fittedRightIdentity].joined(separator: "\n")
         guard project.scanPreparation.enabled else { return original }
         let scan = (try? encoder.encode(project.scanPreparation)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
         return original + "\n" + scan

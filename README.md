@@ -17,7 +17,28 @@ The pipeline runs optional Mesh2PPM inference, prepares the meshes, solves the a
 
 Packaged apps include Python, the models, and the simulation tools. They work offline without a separate Blender or `uv` installation.
 
-Create or import a project, select at least one ear mesh, and choose a save folder. Enable **Use Mesh2PPM** for inference; disable it to use the original meshes. Run the stages in order. **Preview** shows meshes and plots; **Live Log** shows progress. **Place Left/Right Mic** lets you click a microphone position and confirm with **Done**. Drag to rotate; Escape cancels.
+Create or import a project, select at least one ear mesh, and choose a save folder. Enable **Use Mesh2PPM** for inference, or use the macOS **Manual PPM Fit** editor to fit a Bezier PPM by hand. Run the stages in order. **Preview** shows meshes and plots; **Live Log** shows progress. **Place Left/Right Mic** lets you click a microphone position and confirm with **Done**. Drag to rotate; Escape cancels.
+
+### Manual PPM fitting (macOS)
+
+Choose **Fit…** for an ear in the **Manual PPM Fit** project settings. The editor
+overlays the target mesh and BezierPPM so you can adjust the global transform,
+the local bendy-bone controls for convex regions, and shape keys for concave
+details. The 3D preview updates directly from the evaluated mesh as you move a
+control, without exporting an STL for each change. A live nearest-vertex distance
+summary reports mean, median, maximum, and minimum PPM-to-target distances, plus
+the signed change from the fit shown when the editor opened. The editor uses
+`~/Desktop/PPM.blend` when available and otherwise uses the built-in BezierPPM
+defaults. The template source is preserved, and a copy plus the parameter
+values are saved with the project.
+Saving a fit selects manual preprocessing and turns off Mesh2PPM; an unfitted
+side keeps its current input mesh. The right-side preview and export mirror the
+template across Y. Reset Outputs preserves these saved fits.
+
+The fitting sequence follows the manual registration procedure in
+[Perfler et al. (2025)](https://doi.org/10.1016/j.compbiomed.2025.109817):
+align the whole model, adjust convex features, tune concave shape keys, then
+iterate as needed.
 
 **Reset Outputs** removes generated results while keeping configured inputs and settings. Project files live in the chosen save folder; app settings and caches live in `~/Library/Application Support/Pinna2HRTF` on macOS or `%APPDATA%\Pinna2HRTF` on Windows.
 

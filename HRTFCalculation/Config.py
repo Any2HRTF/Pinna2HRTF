@@ -105,6 +105,23 @@ class InferenceConfig(BaseModel):
     use_predictions_for_preprocessing: bool = False
 
 
+class ManualPPMConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    left_mesh: Path | None = None
+    right_mesh: Path | None = None
+    left_parameters: Path | None = None
+    right_parameters: Path | None = None
+    left_blend: Path | None = None
+    right_blend: Path | None = None
+    left_source: Path | None = None
+    right_source: Path | None = None
+    left_source_identity: str | None = None
+    right_source_identity: str | None = None
+    template_blend: Path | None = None
+
+
 class PreprocessingConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -207,6 +224,7 @@ class PipelineConfig(BaseModel):
     paths: PathsConfig = Field(default_factory=PathsConfig)
     scan_preparation: ScanPreparationConfig = Field(default_factory=ScanPreparationConfig)
     inference: InferenceConfig = Field(default_factory=InferenceConfig)
+    manual_ppm: ManualPPMConfig = Field(default_factory=ManualPPMConfig)
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
     numcalc: NumCalcConfig = Field(default_factory=NumCalcConfig)
     postprocessing: PostprocessingConfig = Field(default_factory=PostprocessingConfig)
@@ -215,7 +233,7 @@ class PipelineConfig(BaseModel):
     def resolved(self, base_dir: Path | None = None) -> "PipelineConfig":
         clone = self.model_copy(deep=True)
         base = Path(base_dir or Path.cwd()).resolve()
-        for section_name in ("paths", "scan_preparation", "inference", "postprocessing", "ui"):
+        for section_name in ("paths", "scan_preparation", "inference", "manual_ppm", "postprocessing", "ui"):
             section = getattr(clone, section_name)
             for name, value in section:
                 if isinstance(value, Path):
