@@ -26,16 +26,9 @@ a:focus-visible, button:focus-visible { outline: 3px solid #2563eb; outline-offs
   display: flex; align-items: center; justify-content: space-between; gap: 24px;
   min-height: 64px; padding: 10px 18px; border-bottom: 1px solid var(--rule);
 }
-.brand { display: inline-flex; align-items: center; gap: 12px; min-width: 0; text-decoration: none; }
+.brand { display: inline-flex; align-items: center; gap: 9px; min-width: 0; text-decoration: none; }
+.brand-icon { display: block; width: 28px; height: 28px; flex: 0 0 auto; border-radius: 5px; object-fit: cover; }
 .brand-name { font-size: 15px; font-weight: 750; letter-spacing: -.025em; white-space: nowrap; }
-.brand-spectrum { display: inline-flex; width: 82px; height: 8px; overflow: hidden; }
-.brand-spectrum i { flex: 1; background: #e94e3b; }
-.brand-spectrum i:nth-child(2) { background: #ef8a36; }
-.brand-spectrum i:nth-child(3) { background: #f2c948; }
-.brand-spectrum i:nth-child(4) { background: #63aa72; }
-.brand-spectrum i:nth-child(5) { background: #4a9bbf; }
-.brand-spectrum i:nth-child(6) { background: #526ab4; }
-.brand-spectrum i:nth-child(7) { background: #a657a5; }
 .main-nav { display: flex; align-items: center; gap: 8px; }
 .main-nav a {
   display: inline-flex; min-height: 31px; align-items: center; justify-content: center;
@@ -93,12 +86,8 @@ h2 { margin-bottom: 0; font-size: 23px; font-weight: 700; letter-spacing: -.035e
   align-items: center; gap: 18px; min-height: 92px; padding: 12px 0;
 }
 .download-entry + .download-entry { border-top: 1px solid var(--rule-soft); }
-.platform-name { display: flex; align-items: center; gap: 10px; }
-.platform-name h3, .windows-name h3 { margin: 0; font-size: 15px; font-weight: 700; }
-.platform-name p, .windows-name p { margin: 1px 0 0; color: var(--muted); font-size: 11px; }
-.app-icon { display: block; width: 42px; height: 42px; object-fit: contain; }
-.windows-mark { display: grid; width: 42px; height: 42px; flex: 0 0 42px; grid-template-columns: repeat(2, 12px); grid-template-rows: repeat(2, 12px); align-content: center; justify-content: center; gap: 2px; border: 1px solid var(--rule-soft); }
-.windows-mark i { background: #333; }
+.platform-name h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.platform-name p { margin: 1px 0 0; color: var(--muted); font-size: 11px; }
 .download-requirements { margin: 0; font-size: 12px; font-weight: 650; }
 .download-requirements span { color: var(--muted); font-size: 11px; font-weight: 400; }
 .download-actions { display: flex; flex-direction: column; align-items: stretch; gap: 5px; }
@@ -151,9 +140,7 @@ h2 { margin-bottom: 0; font-size: 23px; font-weight: 700; letter-spacing: -.035e
   .title-with-meta { align-items: flex-start; flex-direction: column; gap: 7px; }
   .release-version { margin-bottom: 0; }
   .download-entry { grid-template-columns: minmax(0, 1fr) auto; gap: 9px 12px; padding: 13px 0; }
-  .platform-name, .windows-name { grid-column: 1; grid-row: 1; }
-  .windows-mark { grid-column: 1; grid-row: 1; justify-self: start; }
-  .windows-name { margin-left: 52px; }
+  .platform-name { grid-column: 1; grid-row: 1; }
   .download-requirements { grid-column: 1 / -1; }
   .download-actions { grid-column: 1 / -1; }
   .download-actions { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; }
@@ -170,9 +157,7 @@ h2 { margin-bottom: 0; font-size: 23px; font-weight: 700; letter-spacing: -.035e
   h1 { font-size: 34px; }
   .hero-actions { display: grid; grid-template-columns: 1fr; }
   .download-entry { grid-template-columns: 1fr; }
-  .platform-name, .windows-mark, .windows-name, .download-requirements, .download-actions { grid-column: 1; }
-  .windows-mark { grid-row: 1; }
-  .windows-name { grid-row: 1; }
+  .platform-name, .download-requirements, .download-actions { grid-column: 1; }
   .download-actions { align-items: stretch; flex-direction: column; }
   .checksum-link { align-self: center; }
   .button-download { width: 100%; }
