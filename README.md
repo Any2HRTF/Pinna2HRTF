@@ -17,7 +17,16 @@ The pipeline runs optional Mesh2PPM inference, prepares the meshes, solves the a
 
 Packaged apps include Python, the models, and the simulation tools. They work offline without a separate Blender or `uv` installation.
 
-Create or import a project, select at least one ear mesh, and choose a save folder. Enable **Use Mesh2PPM** for inference, or use the macOS **Manual PPM Fit** editor to fit a Bezier PPM by hand. Run the stages in order. **Preview** shows meshes and plots; **Live Log** shows progress. **Place Left/Right Mic** lets you click a microphone position and confirm with **Done**. Drag to rotate; Escape cancels.
+Create or import a project, select at least one ear mesh, and choose a save folder. Enable **Use Mesh2PPM** for inference, or use the macOS **Manual PPM Fit** editor to fit a Bezier PPM by hand. Run the stages in order. **Preview** shows meshes and plots; **Live Log** shows progress. **Place Left/Right Mic** lets you click a microphone position and confirm with **Done**. Escape cancels microphone placement. All macOS 3D viewers share these controls:
+
+| Action | Trackpad | Mouse |
+| --- | --- | --- |
+| Rotate | Two-finger scroll | Right-drag |
+| Pan | Shift–two-finger scroll | Middle-drag or Shift–right-drag |
+| Zoom | Pinch or Command-scroll | Scroll wheel or Command-scroll |
+
+In the ear editor, left-click toggles a face and left-drag draws a lasso while
+**Select Faces** stays active. Camera gestures preserve the current selection.
 
 ### Pressure fields (macOS)
 
@@ -47,8 +56,8 @@ all keys allow −1 to 1 except Crus helicis–Upper dent and Crus helicis–Low
 which allow 0 to 1. The PPM is color-mapped by each vertex's nearest
 target-vertex distance on a fixed 0–3+ mm scale, and the colors update with the
 preview. The metric panel stays above the scrolling controls, with Undo and Redo
-for parameter edits. A PPM opacity slider makes the fitted surface easier to
-compare with the translucent target. The editor uses
+for parameter edits. The Target opacity slider fades the scanned ear over the opaque PPM error map
+so the distance colors stay readable. The editor uses
 `~/Desktop/PPM.blend` when available and otherwise uses the built-in BezierPPM
 defaults. The template source is preserved, and a copy plus the parameter
 values are saved with the project.

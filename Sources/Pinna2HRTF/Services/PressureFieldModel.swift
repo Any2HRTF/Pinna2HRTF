@@ -185,6 +185,7 @@ final class PressureFieldModel: ObservableObject {
         cameraTarget?.removeFromParentNode()
         camera?.removeFromParentNode()
         let target = SCNNode()
+        target.name = "cameraTarget"
         target.simdPosition = (lower + upper) / 2
         let node = SCNNode()
         let lens = SCNCamera()
@@ -208,6 +209,7 @@ final class PressureFieldModel: ObservableObject {
         guard let camera, let cameraTarget else { return }
         let side: Float = source.path.contains("/Right/") ? -1 : 1
         camera.simdPosition = cameraTarget.simdPosition + SIMD3(0, side * cameraDistance, cameraDistance * 0.08)
+        camera.look(at: cameraTarget.worldPosition, up: SCNVector3(0,0,1), localFront: SCNVector3(0,0,-1))
         cameraRevision += 1
     }
 }

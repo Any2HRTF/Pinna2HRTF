@@ -59,7 +59,6 @@ struct MeshEditorView: View {
                             .pickerStyle(.segmented)
                             .onChange(of: model.tool) { _ in model.refreshOverlays() }
                         }
-                        if model.tool == .navigate { navigationControls }
                         if !model.request.isAlignment && model.tool == .landmarks { alignmentControls }
                         if model.tool == .selection { selectionControls }
                         if model.tool == .plane { planeControls }
@@ -144,6 +143,8 @@ struct MeshEditorView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Draw a closed lasso around the faces to remove. A click toggles one face. Red faces are selected.")
                 .font(.caption).foregroundStyle(.secondary)
+            Text(NavigableSCNView.navigationHelp)
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("Select through mesh", isOn: $model.throughSelection)
                 .help("Include occluded and back-facing faces. With this off, select only the visible front surface.")
             Toggle("Add to current selection", isOn: $model.addToSelection)
@@ -157,13 +158,6 @@ struct MeshEditorView: View {
             Button("Clear Selection") { model.selectedFaces.removeAll(); model.refreshOverlays() }
                 .disabled(model.selectedFaces.isEmpty)
             }
-        }
-    }
-
-    var navigationControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Drag to rotate and scroll to zoom. Choose Select Faces or Cutting Plane to edit.")
-                .font(.callout).foregroundStyle(.secondary)
         }
     }
 
@@ -246,78 +240,10 @@ private struct EditorSceneView: NSViewRepresentable {
     func updateNSView(_ view: EditorSCNView, context: Context) {
         view.model = model
         if view.lastCameraRevision != model.cameraRevision || view.pointOfView == nil {
-            view.pointOfView = model.pointOfView
+            view.configureNavigation(camera: model.pointOfView, target: SCNVector3(model.center), span: model.span)
             view.lastCameraRevision = model.cameraRevision
         }
-        view.allowsCameraControl = model.tool != .selection && !model.busy
+        view.allowsCameraControl = !model.busy
         view.needsDisplay = true
-    }
-}
-
-private final class EditorSCNView: SCNView {
-    weak var model: MeshEditorModel?
-    var lastCameraRevision = -1
-    private var start: CGPoint = .zero
-    private var points: [CGPoint] = []
-    private let lasso = CAShapeLayer()
-
-    override init(frame: NSRect = .zero, options: [String: Any]? = nil) {
-        super.init(frame: frame, options: options)
-        wantsLayer = true
-        lasso.strokeColor = NSColor.systemRed.cgColor
-        lasso.fillColor = NSColor.systemRed.withAlphaComponent(0.12).cgColor
-        lasso.lineWidth = 2
-        lasso.zPosition = 100
-        layer?.addSublayer(lasso)
-    }
-    required init?(coder: NSCoder) { fatalError("Use init(frame:options:)") }
-
-    override func mouseDown(with event: NSEvent) {
-        guard let model, !model.busy else { return }
-        start = convert(event.locationInWindow, from: nil)
-        if model.tool == .selection {
-            points = [start]
-            return
-        }
-        super.mouseDown(with: event)
-    }
-    override func mouseDragged(with event: NSEvent) {
-        guard let model, !model.busy else { return }
-        if model.tool == .selection {
-            let point = convert(event.locationInWindow, from: nil)
-            if let last = points.last, hypot(last.x-point.x, last.y-point.y) < 3 { return }
-            points.append(point)
-            let path = CGMutablePath(); path.addLines(between: points); path.closeSubpath()
-            lasso.path = path
-            return
-        }
-        super.mouseDragged(with: event)
-    }
-    override func mouseUp(with event: NSEvent) {
-        guard let model, !model.busy else { return }
-        let point = convert(event.locationInWindow, from: nil)
-        if model.tool == .selection {
-            if points.count >= 3 && hypot(start.x-point.x, start.y-point.y) > 3 {
-                // Closed lassos commonly end near their starting point; point
-                // count, rather than endpoint distance, determines a region.
-                model.selectPolygon(points, in: self)
-            } else if points.count >= 3 {
-                model.selectPolygon(points, in: self)
-            } else {
-                let hits = hitTest(point, options: [.categoryBitMask: 1, .searchMode: SCNHitTestSearchMode.closest.rawValue, .backFaceCulling: false])
-                if let face = hits.first?.faceIndex {
-                    if model.selectedFaces.contains(face) { model.selectedFaces.remove(face) }
-                    else { model.selectedFaces.insert(face) }
-                    model.refreshOverlays()
-                }
-            }
-            points.removeAll(); lasso.path = nil
-            return
-        }
-        if model.tool == .landmarks && hypot(start.x-point.x, start.y-point.y) < 4 {
-            let hits = hitTest(point, options: [.categoryBitMask: 1, .searchMode: SCNHitTestSearchMode.closest.rawValue, .backFaceCulling: false])
-            if let hit = hits.first { model.pickLandmark(hit.worldCoordinates) }
-        }
-        super.mouseUp(with: event)
     }
 }

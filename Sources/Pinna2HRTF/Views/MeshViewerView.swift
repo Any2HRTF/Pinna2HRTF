@@ -262,7 +262,7 @@ struct PersistentSceneView: NSViewRepresentable {
         let viewport = MeshSceneViewport(frame: .zero)
         let view = viewport.sceneView
         view.scene = scene
-        view.pointOfView = scene.rootNode.childNodes.first { $0.camera != nil }
+        view.configureNavigation(camera: scene.rootNode.childNodes.first { $0.camera != nil })
         view.allowsCameraControl = true
         view.autoenablesDefaultLighting = false
         view.backgroundColor = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
@@ -285,7 +285,7 @@ struct PersistentSceneView: NSViewRepresentable {
         context.coordinator.surfaceSelected = surfaceSelected
         if view.scene !== scene {
             view.scene = scene
-            view.pointOfView = scene.rootNode.childNodes.first { $0.camera != nil }
+            view.configureNavigation(camera: scene.rootNode.childNodes.first { $0.camera != nil })
             context.coordinator.lastPosition = nil
         }
         let background = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)

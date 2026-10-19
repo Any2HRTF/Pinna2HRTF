@@ -24,5 +24,5 @@ CLANG_MODULE_CACHE_PATH=/private/tmp/pinna2hrtf-clang-cache swiftc -sdk "$SDK_PA
   Sources/Pinna2HRTF/Services/ProjectConfigDocument.swift Sources/Pinna2HRTF/Services/ProjectValidation.swift \
   Sources/Pinna2HRTF/Services/PipelineConfigWriter.swift Sources/Pinna2HRTF/Services/ArtifactScanner.swift \
   Sources/Pinna2HRTF/Services/GeneratedOutputManifest.swift Sources/Pinna2HRTF/Services/MeshEditorModel.swift \
-  Sources/Pinna2HRTF/Services/PressureFieldModel.swift Tests/PressureFieldChecks.swift Tests/MeshEditorChecks.swift -o "$CHECK_BIN"
+  Sources/Pinna2HRTF/Services/PressureFieldModel.swift Sources/Pinna2HRTF/Views/NavigableSCNView.swift Sources/Pinna2HRTF/Views/EditorSCNView.swift Tests/PressureFieldChecks.swift Tests/MeshEditorChecks.swift -o "$CHECK_BIN"
 "$CHECK_BIN"

@@ -142,7 +142,7 @@ struct PPMFittingView: View {
             .padding(14)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    ppmOpacityControl.disabled(!model.showPPM)
+                    targetOpacityControl.disabled(!model.showTarget)
                     Divider()
                     if selectedSection == "Global" {
                         ForEach(["Location", "Rotation", "Scale"], id: \.self) { kind in
@@ -175,18 +175,18 @@ struct PPMFittingView: View {
         }
     }
 
-    private var ppmOpacityControl: some View {
+    private var targetOpacityControl: some View {
         HStack(spacing: 8) {
-            Label("PPM opacity", systemImage: "circle.lefthalf.filled")
+            Label("Target opacity", systemImage: "circle.lefthalf.filled")
                 .font(.caption.weight(.medium))
                 .frame(width: 112, alignment: .leading)
-            Slider(value: $model.ppmOpacity, in: 0.15...1)
-                .accessibilityLabel("Fitted PPM opacity")
-            Text(model.ppmOpacity, format: .percent.precision(.fractionLength(0)))
+            Slider(value: $model.targetOpacity, in: 0...1)
+                .accessibilityLabel("Target ear opacity")
+            Text(model.targetOpacity, format: .percent.precision(.fractionLength(0)))
                 .font(.caption.monospacedDigit())
                 .frame(width: 38, alignment: .trailing)
         }
-        .help("Lower the PPM opacity to compare the distance colors with the target through the overlay.")
+        .help("Fade the target ear to reveal the fitted PPM and its distance colors underneath.")
     }
 
     private var meshMetrics: some View {
@@ -321,20 +321,20 @@ private struct PPMFittingSceneViewport: NSViewRepresentable {
     let scene: SCNScene
     let darkMode: Bool
 
-    func makeNSView(context: Context) -> SCNView {
-        let view = SCNView(frame: .zero)
+    func makeNSView(context: Context) -> NavigableSCNView {
+        let view = NavigableSCNView(frame: .zero)
         view.scene = scene
-        view.pointOfView = scene.rootNode.childNodes.first { $0.camera != nil }
+        view.configureNavigation(camera: scene.rootNode.childNodes.first { $0.camera != nil })
         view.allowsCameraControl = true
         view.autoenablesDefaultLighting = false
         view.backgroundColor = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
         return view
     }
 
-    func updateNSView(_ view: SCNView, context: Context) {
+    func updateNSView(_ view: NavigableSCNView, context: Context) {
         if view.scene !== scene { view.scene = scene }
         let camera = scene.rootNode.childNodes.first { $0.camera != nil }
-        if view.pointOfView !== camera { view.pointOfView = camera }
+        if view.pointOfView !== camera { view.configureNavigation(camera: camera) }
         view.backgroundColor = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
     }
 }

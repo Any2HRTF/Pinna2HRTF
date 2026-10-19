@@ -754,6 +754,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             }
             let distance = max(maximumDimension * 1.7, 1)
             let targetNode = SCNNode()
+            targetNode.name = "cameraTarget"
             targetNode.position = center
             scene.rootNode.addChildNode(targetNode)
             let camera = SCNCamera()

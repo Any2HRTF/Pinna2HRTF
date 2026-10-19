@@ -21,7 +21,7 @@ final class PPMFittingModel: ObservableObject {
     @Published var templateBlendPath = ""
     @Published var showTarget = true { didSet { targetNode?.isHidden = !showTarget } }
     @Published var showPPM = true { didSet { ppmNode?.isHidden = !showPPM } }
-    @Published var ppmOpacity = 0.58 { didSet { updatePPMOpacity() } }
+    @Published var targetOpacity = 0.32 { didSet { updateTargetOpacity() } }
     @Published private(set) var isUpdatingPreview = false
 
     private var parameters: [String: Double] = [:]
@@ -365,7 +365,6 @@ final class PPMFittingModel: ObservableObject {
             let node = SCNNode(mdlObject: asset.object(at: index))
             let material = SCNMaterial()
             material.diffuse.contents = NSColor(calibratedWhite: 0.62, alpha: 1)
-            material.transparency = 0.32
             material.isDoubleSided = true
             material.lightingModel = .physicallyBased
             node.geometry?.materials = [material]
@@ -373,6 +372,8 @@ final class PPMFittingModel: ObservableObject {
         }
         scene.rootNode.addChildNode(root)
         targetNode = root
+        root.isHidden = !showTarget
+        updateTargetOpacity()
         configureCameraIfNeeded()
     }
 
@@ -393,7 +394,6 @@ final class PPMFittingModel: ObservableObject {
             let material = SCNMaterial()
             material.diffuse.contents = NSColor(calibratedRed: 0.92, green: 0.34, blue: 0.16, alpha: 1)
             material.roughness.contents = 0.48
-            material.transparency = CGFloat(ppmOpacity)
             material.isDoubleSided = true
             node.geometry?.materials = [material]
             root.addChildNode(node)
@@ -409,7 +409,6 @@ final class PPMFittingModel: ObservableObject {
         let material = SCNMaterial()
         material.diffuse.contents = NSColor(calibratedRed: 0.92, green: 0.34, blue: 0.16, alpha: 1)
         material.roughness.contents = 0.48
-        material.transparency = CGFloat(ppmOpacity)
         material.isDoubleSided = true
         geometry.materials = [material]
 
@@ -538,11 +537,15 @@ final class PPMFittingModel: ObservableObject {
         return lower.1 + (upper.1 - lower.1) * fraction
     }
 
-    private func updatePPMOpacity() {
-        ppmNode?.enumerateChildNodes { node, _ in
+    private func updateTargetOpacity() {
+        targetNode?.enumerateChildNodes { node, _ in
             for material in node.geometry?.materials ?? [] {
-                material.transparency = CGFloat(ppmOpacity)
+                material.transparency = CGFloat(targetOpacity)
+                // Draw the translucent scan over the opaque error map without
+                // hiding PPM faces behind the target's depth buffer.
+                material.writesToDepthBuffer = false
             }
+            node.renderingOrder = 10
         }
     }
 
@@ -556,6 +559,7 @@ final class PPMFittingModel: ObservableObject {
         let extent = max(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z)
         let distance = max(extent * 1.8, 1)
         let target = SCNNode()
+        target.name = "cameraTarget"
         target.position = targetCenter
         scene.rootNode.addChildNode(target)
         let camera = SCNCamera()

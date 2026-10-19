@@ -3,7 +3,7 @@ import SceneKit
 
 // Keep SceneKit's drawable size out of SwiftUI's split-view sizing calculations.
 final class MeshSceneViewport: NSView {
-    let sceneView = SCNView()
+    let sceneView = NavigableSCNView()
     private var resizeEndWork: DispatchWorkItem?
 
     override var intrinsicContentSize: NSSize {

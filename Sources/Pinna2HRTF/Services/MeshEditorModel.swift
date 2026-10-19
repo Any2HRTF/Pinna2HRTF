@@ -6,7 +6,7 @@ import simd
 @MainActor
 final class MeshEditorModel: ObservableObject {
     enum Tool: String, CaseIterable, Identifiable {
-        case navigate = "Navigate", landmarks = "Landmarks", selection = "Select Faces", plane = "Cutting Plane"
+        case landmarks = "Landmarks", selection = "Select Faces", plane = "Cutting Plane"
         var id: String { rawValue }
     }
     let request: MeshEditorRequest
@@ -33,7 +33,6 @@ final class MeshEditorModel: ObservableObject {
     private(set) var cameraRevision = 0
     private var versions: [URL] = []
     private var operations: [[String: Any]] = []
-    private var toolBeforeNavigation: Tool = .selection
     private var currentVersion = 0
     private var versionCounter = 0
     private var originalSHA256 = ""
@@ -55,7 +54,7 @@ final class MeshEditorModel: ObservableObject {
     }
     deinit { try? FileManager.default.removeItem(at: workspace) }
 
-    var tools: [Tool] { request.isAlignment ? [.landmarks] : [.navigate, .selection, .plane] }
+    var tools: [Tool] { request.isAlignment ? [.landmarks] : [.selection, .plane] }
     var canUndo: Bool { !busy && currentVersion > 0 }
     var canRedo: Bool { !busy && currentVersion + 1 < versions.count }
     var hasAlignment: Bool { operations.prefix(currentVersion).contains { $0["action"] as? String == "align" } }
@@ -88,17 +87,6 @@ final class MeshEditorModel: ObservableObject {
         guard !busy else { return }
         selectedFaces = Set(0..<(faces.count / 3)).subtracting(selectedFaces)
         refreshOverlays()
-    }
-
-    func setNavigationMode(_ active: Bool) {
-        guard !request.isAlignment else { return }
-        if active {
-            guard tool != .navigate else { return }
-            toolBeforeNavigation = tool
-            tool = .navigate
-        } else if tool == .navigate {
-            tool = toolBeforeNavigation
-        }
     }
 
     func updatePlanePreviewSizing() {
@@ -167,7 +155,7 @@ final class MeshEditorModel: ObservableObject {
             currentVersion += 1
             selectedFaces.removeAll()
             if action == "align" { landmarks.removeAll(); refreshMarkers(); tool = .landmarks; resetCamera() }
-            if action == "cut" { toolBeforeNavigation = .plane; tool = .navigate; planeOffset = 0 }
+            if action == "cut" { tool = .selection; planeOffset = 0 }
             refreshOverlays()
             message = "\(faces.count / 3) faces · Edit applied. Undo is available."
             revision += 1
@@ -188,7 +176,7 @@ final class MeshEditorModel: ObservableObject {
             selectedFaces.removeAll()
             landmarks.removeAll()
             refreshMarkers()
-            tool = request.isAlignment ? .landmarks : .navigate
+            tool = request.isAlignment ? .landmarks : .selection
             refreshOverlays()
             revision += 1
             message = "\(faces.count / 3) faces · \(offset < 0 ? "Undone" : "Redone")"
@@ -282,9 +270,6 @@ final class MeshEditorModel: ObservableObject {
         let node = SCNNode(); let camera = SCNCamera()
         camera.zNear = 0.05; camera.zFar = max(span * 30, 10000); camera.fieldOfView = 38
         node.camera = camera
-        let constraint = SCNLookAtConstraint(target: target)
-        constraint.worldUp = SCNVector3(0,0,1); constraint.isGimbalLockEnabled = true
-        node.constraints = [constraint]
         scene.rootNode.addChildNode(node); cameraNode = node
         // Equal lights on the two ear sides keep either ear readable when orbiting.
         for side: Float in [-1, 1] {
@@ -315,6 +300,7 @@ final class MeshEditorModel: ObservableObject {
         targetNode?.simdPosition = center
         let offset: SIMD3<Float> = direction == "Front" ? SIMD3(1, 0, 0.08) : SIMD3(0, direction == "Right" ? -1 : 1, 0.08)
         cameraNode?.simdPosition = center + offset * Float(span * 1.4)
+        cameraNode?.look(at: SCNVector3(center), up: SCNVector3(0,0,1), localFront: SCNVector3(0,0,-1))
         revision += 1
     }
     var pointOfView: SCNNode? { cameraNode }
