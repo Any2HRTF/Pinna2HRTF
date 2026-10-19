@@ -52,7 +52,7 @@ a:focus-visible, button:focus-visible { outline: 3px solid #2563eb; outline-offs
 .draggable-sticker.is-released { animation: sticker-release 760ms cubic-bezier(.2, .9, .3, 1) both; }
 .sticker-girl { --sticker-rotation: 5deg; top: 39%; left: 48%; width: clamp(112px, 13vw, 148px); }
 .sticker-headphones { --sticker-rotation: -8deg; top: 18px; right: 4%; width: 92px; }
-.sticker-ear { --sticker-rotation: -5deg; bottom: 13%; left: 46%; width: 84px; }
+.sticker-hrtf { --sticker-rotation: -5deg; top: 16px; right: 160px; width: 88px; }
 .sticker-mesh { --sticker-rotation: -6deg; right: 290px; bottom: 20px; width: 120px; }
 .sticker-wave { --sticker-rotation: 4deg; right: 160px; bottom: 20px; width: 116px; }
 .sticker-sofa { --sticker-rotation: 5deg; right: 20px; bottom: 15px; width: 132px; }
@@ -161,7 +161,7 @@ h2 { margin-bottom: 0; font-size: 23px; font-weight: 700; letter-spacing: -.035e
   .hero { grid-template-columns: 1fr; gap: 20px; padding-top: 25px; padding-bottom: 22px; }
   .sticker-girl { top: 27%; right: 15px; left: auto; width: 104px; }
   .sticker-headphones { top: 14px; right: 7px; width: 70px; }
-  .sticker-ear { top: 45%; right: 21%; bottom: auto; left: auto; width: 70px; }
+  .sticker-hrtf { top: 12px; right: 84px; width: 64px; }
   .downloads { padding-bottom: 128px; }
   .sticker-mesh { right: 226px; bottom: 12px; width: 88px; }
   .sticker-wave { right: 134px; bottom: 12px; width: 90px; }
@@ -193,7 +193,7 @@ h2 { margin-bottom: 0; font-size: 23px; font-weight: 700; letter-spacing: -.035e
   .content-section { padding-inline: 12px; }
   .sticker-girl { right: 8px; width: 92px; }
   .sticker-headphones { right: 4px; width: 64px; }
-  .sticker-ear { right: 15%; width: 64px; }
+  .sticker-hrtf { top: 10px; right: 74px; width: 54px; }
   .sticker-mesh { right: 190px; width: 74px; }
   .sticker-wave { right: 100px; width: 78px; }
   .sticker-sofa { right: 4px; width: 84px; }
