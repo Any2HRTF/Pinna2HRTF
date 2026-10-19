@@ -56,6 +56,20 @@ enum ArtifactScanner {
         for pair in [("Predicted left ear", output.appendingPathComponent(settings.predictionLeftFolder), leftEar), ("Predicted right ear", output.appendingPathComponent(settings.predictionRightFolder), rightEar)] where !pair.2.isEmpty {
             next.append(contentsOf: predictionArtifacts(title: pair.0, folder: pair.1))
         }
+        for side in EarSide.allCases {
+            let solver = output.appendingPathComponent("Projects/\(side.title)/NumCalc")
+            let sources = (try? FileManager.default.contentsOfDirectory(at: solver, includingPropertiesForKeys: nil)) ?? []
+            for source in sources.filter({ $0.lastPathComponent.hasPrefix("source_") }).sorted(by: { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }) {
+                let input = source.appendingPathComponent("NC.inp")
+                let steps = (try? FileManager.default.contentsOfDirectory(at: source.appendingPathComponent("be.out"), includingPropertiesForKeys: nil)) ?? []
+                if FileManager.default.fileExists(atPath: input.path), steps.contains(where: {
+                    FileManager.default.fileExists(atPath: $0.appendingPathComponent("pBoundary").path) || FileManager.default.fileExists(atPath: $0.appendingPathComponent("pEvalGrid").path)
+                }) {
+                    let name = source.lastPathComponent.replacingOccurrences(of: "source_", with: "Source ")
+                    next.append(Artifact(title: "\(side.title) pressure · \(name)", url: input))
+                }
+            }
+        }
         let hrtfFolder = postprocessingDirectory(for: project)
         let plots = (try? FileManager.default.contentsOfDirectory(at: hrtfFolder, includingPropertiesForKeys: nil)) ?? []
         for plot in plots.filter({ ["jpeg", "jpg", "png"].contains($0.pathExtension.lowercased()) }).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {

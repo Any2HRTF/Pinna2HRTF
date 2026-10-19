@@ -28,6 +28,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published var projectRevealToken = UUID()
     @Published private var stoppingProjects = Set<UUID>()
     @Published var logText = ""
+    @Published var selectedPressure: URL?
     @Published var selectedMesh: URL?
     @Published var selectedImage: NSImage?
     @Published var selectedScene = SCNScene()
@@ -560,6 +561,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func resetViewer() {
+        meshLoadID = UUID()
+        selectedPressure = nil
         selectedMesh = nil
         selectedImage = nil
         selectedScene = SCNScene()
@@ -569,7 +572,13 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func openArtifact(_ artifact: Artifact) {
-        if artifact.isMesh {
+        if artifact.isPressure {
+            clearMicrophonePlacementSession()
+            resetViewer()
+            selectedPressure = artifact.url
+            selectedMesh = artifact.url
+            rememberSelectedArtifact(artifact.url)
+        } else if artifact.isMesh {
             openMesh(artifact.url)
         } else if artifact.isImage {
             openImage(artifact.url)
@@ -705,6 +714,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func openMesh(_ url: URL, resetCamera: Bool = false) {
+        selectedPressure = nil
         guard FileManager.default.fileExists(atPath: url.path), ["stl", "ply"].contains(url.pathExtension.lowercased()) else {
             appendLog("Could not open \(url.lastPathComponent).")
             return
@@ -1060,6 +1070,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func openImage(_ url: URL) {
+        meshLoadID = UUID()
+        selectedPressure = nil
         guard FileManager.default.fileExists(atPath: url.path), let image = NSImage(contentsOf: url) else {
             appendLog("Could not open \(url.lastPathComponent).")
             return

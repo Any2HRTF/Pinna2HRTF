@@ -45,7 +45,9 @@ struct MeshViewerView: View {
         ZStack {
             Rectangle()
                 .fill(colorScheme == .dark ? Color(nsColor: NSColor(calibratedWhite: 0.12, alpha: 1)) : Color(nsColor: NSColor(calibratedWhite: 0.93, alpha: 1)))
-            if let image = store.selectedImage {
+            if let source = store.selectedPressure {
+                PressureFieldView(source: source).id(source)
+            } else if let image = store.selectedImage {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
@@ -84,7 +86,7 @@ struct MeshViewerView: View {
                         .help("Edit the selected prepared ear")
                         .disabled(store.selectedProjectIsRunning)
                 }
-                if store.selectedMesh != nil && store.selectedImage == nil {
+                if store.selectedMesh != nil && store.selectedImage == nil && store.selectedPressure == nil {
                     Button(action: store.resetSelectedMeshView) {
                         Label("Reset view", systemImage: "arrow.counterclockwise")
                     }

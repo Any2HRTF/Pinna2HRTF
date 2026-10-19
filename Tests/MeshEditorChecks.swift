@@ -3,6 +3,8 @@ import Foundation
 @main
 struct MeshEditorChecks {
     @MainActor static func main() async throws {
+        pressureQuantityChecks()
+        try await pressureFrameChecks()
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("pinna-selection-check-\(UUID())")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }

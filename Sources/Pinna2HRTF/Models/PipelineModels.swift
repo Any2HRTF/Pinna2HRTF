@@ -75,9 +75,10 @@ struct Artifact: Identifiable, Hashable {
 
     var id: String { url.path }
     var exists: Bool { FileManager.default.fileExists(atPath: url.path) }
+    var isPressure: Bool { url.lastPathComponent == "NC.inp" }
     var isMesh: Bool { ["stl", "ply"].contains(url.pathExtension.lowercased()) }
     var isImage: Bool { ["jpeg", "jpg", "pdf", "png"].contains(url.pathExtension.lowercased()) }
-    var systemImage: String { isImage ? "photo" : "cube" }
+    var systemImage: String { isPressure ? "waveform.path" : isImage ? "photo" : "cube" }
 }
 
 struct ViewerCameraState: Codable, Equatable {

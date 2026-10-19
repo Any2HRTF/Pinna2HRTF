@@ -19,6 +19,21 @@ Packaged apps include Python, the models, and the simulation tools. They work of
 
 Create or import a project, select at least one ear mesh, and choose a save folder. Enable **Use Mesh2PPM** for inference, or use the macOS **Manual PPM Fit** editor to fit a Bezier PPM by hand. Run the stages in order. **Preview** shows meshes and plots; **Live Log** shows progress. **Place Left/Right Mic** lets you click a microphone position and confirm with **Done**. Drag to rotate; Escape cancels.
 
+### Pressure fields (macOS)
+
+After NumCalc produces pressure results, choose **Left/Right pressure · Source N**
+from **Preview**. Select a calculated frequency and either **Boundary** (pressure
+on mesh faces) or **Evaluation Grid** (pressure at grid nodes). Magnitude, real,
+and imaginary components are in Pa; level is `20 log10(|p| / 20 µPa)` and phase
+is in radians. These are raw solver results, before SOFA normalization.
+
+The legend normally rescales for each frequency. Enable **Lock color scale** to
+compare frequencies using the same range. Zero pressure uses a −160 dB display
+floor; its phase is undefined and shown in gray. **Refresh** reloads results after
+additional frequency steps finish. Incomplete or inconsistent files display an
+error instead of filling missing values. This viewer reads `NC.inp`, its geometry
+files, and `pBoundary`/`pEvalGrid` directly; MATLAB and VTK export are not required.
+
 ### Manual PPM fitting (macOS)
 
 Choose **Fit…** for an ear in the **Manual PPM Fit** project settings. The editor
