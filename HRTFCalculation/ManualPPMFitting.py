@@ -20,6 +20,28 @@ from trimesh.transformations import reflection_matrix
 _blender_scene_ready = False
 _reference_tree: cKDTree | None = None
 
+# Weight bounds from Perfler et al. (2025), Table 1. Only the two Crus
+# helicis dent keys are restricted to nonnegative weights.
+_SHAPE_KEY_RANGES = {
+    "Antitragus-Crease": (-1.0, 1.0),
+    "Cavum conchae-Depth": (-1.0, 1.0),
+    "Cymba conchae-Depth": (-1.0, 1.0),
+    "Crus helicis-Prominence": (-1.0, 1.0),
+    "Upper helix-Depth": (-1.0, 1.0),
+    "Middle helix-Depth": (-1.0, 1.0),
+    "Lower helix-Depth": (-1.0, 1.0),
+    "Scapha-Depth": (-1.0, 1.0),
+    "Fossa triangularis-Depth": (-1.0, 1.0),
+    "Crus inferius anthelicis-Lower crease": (-1.0, 1.0),
+    "Crus inferius anthelicis-Upper crease": (-1.0, 1.0),
+    "Crus superius anthelicis-Lower crease": (-1.0, 1.0),
+    "Crus superius anthelicis-Upper crease": (-1.0, 1.0),
+    "Tragus-Upper dent": (-1.0, 1.0),
+    "Crus helicis-Upper dent": (0.0, 1.0),
+    "Crus helicis-Lower dent": (0.0, 1.0),
+    "Ear canal-Diameter": (-1.0, 1.0),
+}
+
 
 def _read_parameters(path: str | None) -> tuple[dict[str, float] | None, str | None]:
     if not path:
@@ -41,8 +63,10 @@ def _range(value: float, lower: float, upper: float) -> tuple[float, float]:
 
 
 def _control(identifier: str, section: str, group: str, label: str, value: float,
-             lower: float, upper: float, unit: str = "") -> dict:
-    lower, upper = _range(value, lower, upper)
+             lower: float, upper: float, unit: str = "",
+             expand_range_to_value: bool = True) -> dict:
+    if expand_range_to_value:
+        lower, upper = _range(value, lower, upper)
     return {"id": identifier, "section": section, "group": group, "label": label,
             "value": value, "minimum": lower, "maximum": upper, "unit": unit}
 
@@ -71,8 +95,11 @@ def _controls_from_parameters(parameters: dict[str, float]) -> list[dict]:
         if key.startswith("Shape-") and key.endswith("-Weight"):
             shape = key[len("Shape-"):-len("-Weight")]
             title = shape.replace("-", " · ")
+            if shape not in _SHAPE_KEY_RANGES:
+                raise ValueError(f"No published fitting range is defined for shape key '{shape}'.")
+            lower, upper = _SHAPE_KEY_RANGES[shape]
             controls.append(_control(f"Shape|{shape}", "concave", "Concave details", title,
-                                     value, 0.0, 1.0, ""))
+                                     value, lower, upper, "", expand_range_to_value=False))
             continue
 
         try:
@@ -212,7 +239,9 @@ def _load_reference_tree(path: str) -> None:
 
 
 def _metric_report(current: dict[str, float]) -> dict[str, dict[str, float]]:
-    return {name: {"value": current[name]} for name in ("mean", "median", "max", "min")}
+    names = ("ppm_to_target_rmse", "target_to_ppm_rmse", "symmetric_rmse",
+             "mean", "median", "max", "min")
+    return {name: {"value": current[name]} for name in names}
 
 
 def _write_preview_mesh(parameters: dict[str, float], path: str, mirror_y: bool = False) -> dict[str, float]:
@@ -238,8 +267,16 @@ def _write_preview_mesh(parameters: dict[str, float], path: str, mirror_y: bool 
     if mirror_y:
         metric_vertices[:, 1] *= -1
     distances, _ = _reference_tree.query(metric_vertices, k=1, workers=-1)
+    target_points = np.asarray(_reference_tree.data, dtype=np.float64)
+    reverse_distances, _ = cKDTree(metric_vertices).query(target_points, k=1, workers=-1)
+    ppm_to_target_rmse = float(np.sqrt(np.mean(np.square(distances))))
+    target_to_ppm_rmse = float(np.sqrt(np.mean(np.square(reverse_distances))))
+    symmetric_rmse = float(np.sqrt((ppm_to_target_rmse ** 2 + target_to_ppm_rmse ** 2) / 2))
     metrics = {"mean": float(np.mean(distances)), "median": float(np.median(distances)),
-               "max": float(np.max(distances)), "min": float(np.min(distances))}
+               "max": float(np.max(distances)), "min": float(np.min(distances)),
+               "ppm_to_target_rmse": ppm_to_target_rmse,
+               "target_to_ppm_rmse": target_to_ppm_rmse,
+               "symmetric_rmse": symmetric_rmse}
 
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -248,6 +285,9 @@ def _write_preview_mesh(parameters: dict[str, float], path: str, mirror_y: bool 
         stream.write(struct.pack("<II", len(vertices), len(triangles)))
         stream.write(vertices.tobytes())
         stream.write(triangles.tobytes())
+        # Keep the per-vertex PPM -> target distances beside the preview geometry
+        # so the app can color the surface without another distance pass.
+        stream.write(np.asarray(distances, dtype="<f4").tobytes())
     temporary.replace(destination)
     return metrics
 

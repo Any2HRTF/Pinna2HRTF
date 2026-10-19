@@ -14,14 +14,22 @@ final class PPMFittingModel: ObservableObject {
     @Published var controls: [PPMFittingControl] = []
     @Published private(set) var metrics: [PPMFittingMetric] = []
     @Published var busy = false
+    @Published private(set) var canUndo = false
+    @Published private(set) var canRedo = false
     @Published var message = "Preparing the PPM fit…"
     @Published var error: String?
     @Published var templateBlendPath = ""
     @Published var showTarget = true { didSet { targetNode?.isHidden = !showTarget } }
     @Published var showPPM = true { didSet { ppmNode?.isHidden = !showPPM } }
+    @Published var ppmOpacity = 0.58 { didSet { updatePPMOpacity() } }
     @Published private(set) var isUpdatingPreview = false
 
     private var parameters: [String: Double] = [:]
+    private var undoHistory: [[String: Double]] = []
+    private var redoHistory: [[String: Double]] = []
+    private var activeEditSnapshot: [String: Double]?
+    private var activeEditWasRecorded = false
+    private let maximumHistoryCount = 100
     private var previewGeneration = 0
     private var previewWorkerTask: Task<Void, Never>?
     private var pythonWorker: PPMFittingPythonWorker?
@@ -71,7 +79,75 @@ final class PPMFittingModel: ObservableObject {
         guard let index = controls.firstIndex(where: { $0.id == control.id }), value.isFinite else { return }
         let updatedValue = min(max(value, control.minimum), control.maximum)
         guard controls[index].value != updatedValue else { return }
+        recordHistoryBeforeControlChange()
         controls[index].value = updatedValue
+        requestPreviewUpdate()
+    }
+
+    func beginControlEditing() {
+        guard activeEditSnapshot == nil else { return }
+        activeEditSnapshot = controlValues
+        activeEditWasRecorded = false
+    }
+
+    func endControlEditing() {
+        activeEditSnapshot = nil
+        activeEditWasRecorded = false
+    }
+
+    func undo() {
+        guard !busy else { return }
+        endControlEditing()
+        guard let snapshot = undoHistory.popLast() else { return }
+        appendHistory(controlValues, to: &redoHistory)
+        restoreControlValues(snapshot)
+        updateHistoryAvailability()
+        requestPreviewUpdate()
+    }
+
+    func redo() {
+        guard !busy else { return }
+        endControlEditing()
+        guard let snapshot = redoHistory.popLast() else { return }
+        appendHistory(controlValues, to: &undoHistory)
+        restoreControlValues(snapshot)
+        updateHistoryAvailability()
+        requestPreviewUpdate()
+    }
+
+    private func restoreControlValues(_ values: [String: Double]) {
+        controls = controls.map { control in
+            var restored = control
+            if let value = values[control.id] { restored.value = value }
+            return restored
+        }
+    }
+
+    private func recordHistoryBeforeControlChange() {
+        if let activeEditSnapshot {
+            guard !activeEditWasRecorded else { return }
+            appendHistory(activeEditSnapshot, to: &undoHistory)
+            activeEditWasRecorded = true
+        } else {
+            appendHistory(controlValues, to: &undoHistory)
+        }
+        redoHistory.removeAll(keepingCapacity: true)
+        updateHistoryAvailability()
+    }
+
+    private func appendHistory(_ snapshot: [String: Double], to history: inout [[String: Double]]) {
+        history.append(snapshot)
+        if history.count > maximumHistoryCount {
+            history.removeFirst(history.count - maximumHistoryCount)
+        }
+    }
+
+    private func updateHistoryAvailability() {
+        canUndo = !undoHistory.isEmpty
+        canRedo = !redoHistory.isEmpty
+    }
+
+    private func requestPreviewUpdate() {
         if error != nil { error = nil }
         if !isUpdatingPreview {
             isUpdatingPreview = true
@@ -82,11 +158,17 @@ final class PPMFittingModel: ObservableObject {
 
     func resetControls() async {
         guard !busy, !isUpdatingPreview else { return }
+        let previousValues = controlValues
         busy = true
         error = nil
         defer { busy = false }
         do {
             try await initialize(usingSavedParameters: nil)
+            if previousValues != controlValues {
+                appendHistory(previousValues, to: &undoHistory)
+                redoHistory.removeAll(keepingCapacity: true)
+                updateHistoryAvailability()
+            }
             message = "Restored the starting PPM parameters."
         } catch { self.error = error.localizedDescription }
     }
@@ -252,11 +334,21 @@ final class PPMFittingModel: ObservableObject {
             templateBlendPath = template
         }
         if let resultMetrics = result["metrics"] as? [String: [String: Any]] {
-            let order = ["mean", "median", "max", "min"]
+            let order = ["ppm_to_target_rmse", "target_to_ppm_rmse", "symmetric_rmse",
+                         "mean", "median", "max", "min"]
+            let labels = [
+                "ppm_to_target_rmse": "PPM → target RMSE",
+                "target_to_ppm_rmse": "Target → PPM RMSE",
+                "symmetric_rmse": "Symmetric RMSE",
+                "mean": "Mean · PPM → target",
+                "median": "Median · PPM → target",
+                "max": "Max · PPM → target",
+                "min": "Min · PPM → target"
+            ]
             metrics = order.compactMap { name in
                 guard let item = resultMetrics[name],
                       let value = (item["value"] as? NSNumber)?.doubleValue else { return nil }
-                return PPMFittingMetric(id: name, value: value)
+                return PPMFittingMetric(id: name, label: labels[name] ?? name, value: value)
             }
         }
     }
@@ -301,6 +393,7 @@ final class PPMFittingModel: ObservableObject {
             let material = SCNMaterial()
             material.diffuse.contents = NSColor(calibratedRed: 0.92, green: 0.34, blue: 0.16, alpha: 1)
             material.roughness.contents = 0.48
+            material.transparency = CGFloat(ppmOpacity)
             material.isDoubleSided = true
             node.geometry?.materials = [material]
             root.addChildNode(node)
@@ -316,6 +409,7 @@ final class PPMFittingModel: ObservableObject {
         let material = SCNMaterial()
         material.diffuse.contents = NSColor(calibratedRed: 0.92, green: 0.34, blue: 0.16, alpha: 1)
         material.roughness.contents = 0.48
+        material.transparency = CGFloat(ppmOpacity)
         material.isDoubleSided = true
         geometry.materials = [material]
 
@@ -350,9 +444,10 @@ final class PPMFittingModel: ObservableObject {
         let (vertexCount, triangleCount) = counts
         let vertexBytes = vertexCount.multipliedReportingOverflow(by: 12)
         let indexBytes = triangleCount.multipliedReportingOverflow(by: 12)
+        let distanceBytes = vertexCount.multipliedReportingOverflow(by: 4)
         guard vertexCount > 0, triangleCount > 0,
-              !vertexBytes.overflow, !indexBytes.overflow,
-              8 + vertexBytes.partialValue + indexBytes.partialValue == data.count else {
+              !vertexBytes.overflow, !indexBytes.overflow, !distanceBytes.overflow,
+              8 + vertexBytes.partialValue + indexBytes.partialValue + distanceBytes.partialValue == data.count else {
             throw ProjectValidation.Failure(message: "The PPM preview mesh data is malformed.")
         }
 
@@ -360,6 +455,8 @@ final class PPMFittingModel: ObservableObject {
         positions.reserveCapacity(vertexCount)
         var indices = [UInt32]()
         indices.reserveCapacity(triangleCount * 3)
+        var distanceColors = [Float]()
+        distanceColors.reserveCapacity(vertexCount * 3)
         data.withUnsafeBytes { raw in
             for index in 0..<vertexCount {
                 let offset = 8 + index * 12
@@ -372,6 +469,15 @@ final class PPMFittingModel: ObservableObject {
             for index in 0..<(triangleCount * 3) {
                 let offset = indexOffset + index * 4
                 indices.append(UInt32(littleEndian: raw.loadUnaligned(fromByteOffset: offset, as: UInt32.self)))
+            }
+            let distanceOffset = indexOffset + indexBytes.partialValue
+            for index in 0..<vertexCount {
+                let offset = distanceOffset + index * 4
+                let distance = Float(bitPattern: UInt32(littleEndian: raw.loadUnaligned(fromByteOffset: offset, as: UInt32.self)))
+                let color = Self.distanceErrorColor(distance)
+                distanceColors.append(color.x)
+                distanceColors.append(color.y)
+                distanceColors.append(color.z)
             }
         }
         guard indices.allSatisfy({ Int($0) < vertexCount }) else {
@@ -403,11 +509,41 @@ final class PPMFittingModel: ObservableObject {
             return SCNVector3(unit.x, unit.y, unit.z)
         }
         let indexData = indices.withUnsafeBufferPointer { Data(buffer: $0) }
+        let colorData = distanceColors.withUnsafeBufferPointer { Data(buffer: $0) }
         let element = SCNGeometryElement(data: indexData, primitiveType: .triangles,
                                          primitiveCount: triangleCount, bytesPerIndex: 4)
+        let colors = SCNGeometrySource(data: colorData, semantic: .color, vectorCount: vertexCount,
+                                       usesFloatComponents: true, componentsPerVector: 3,
+                                       bytesPerComponent: 4, dataOffset: 0, dataStride: 12)
         return SCNGeometry(sources: [SCNGeometrySource(vertices: vertices),
-                                     SCNGeometrySource(normals: vertexNormals)],
+                                     SCNGeometrySource(normals: vertexNormals), colors],
                            elements: [element])
+    }
+
+    private static func distanceErrorColor(_ distance: Float) -> SIMD3<Float> {
+        let stops: [(Float, SIMD3<Float>)] = [
+            (0.0, SIMD3(0.10, 0.32, 0.72)),
+            (0.5, SIMD3(0.16, 0.72, 0.76)),
+            (1.0, SIMD3(0.94, 0.88, 0.25)),
+            (1.75, SIMD3(0.94, 0.43, 0.12)),
+            (3.0, SIMD3(0.72, 0.12, 0.16))
+        ]
+        let value = min(max(distance.isFinite ? distance : 3, 0), 3)
+        guard let upperIndex = stops.firstIndex(where: { $0.0 >= value }), upperIndex > 0 else {
+            return stops[0].1
+        }
+        let lower = stops[upperIndex - 1]
+        let upper = stops[upperIndex]
+        let fraction = (value - lower.0) / (upper.0 - lower.0)
+        return lower.1 + (upper.1 - lower.1) * fraction
+    }
+
+    private func updatePPMOpacity() {
+        ppmNode?.enumerateChildNodes { node, _ in
+            for material in node.geometry?.materials ?? [] {
+                material.transparency = CGFloat(ppmOpacity)
+            }
+        }
     }
 
     private func configureCameraIfNeeded() {

@@ -26,5 +26,6 @@ struct PPMFittingControl: Identifiable, Equatable {
 
 struct PPMFittingMetric: Identifiable, Equatable {
     let id: String
+    let label: String
     let value: Double
 }

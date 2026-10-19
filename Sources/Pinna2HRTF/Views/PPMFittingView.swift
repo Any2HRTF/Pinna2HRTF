@@ -23,8 +23,28 @@ struct PPMFittingView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Label("Target ear", systemImage: "circle.fill")
                             .foregroundStyle(Color(red: 0.22, green: 0.48, blue: 0.74))
-                        Label("BezierPPM", systemImage: "circle.fill")
-                            .foregroundStyle(Color(red: 0.92, green: 0.34, blue: 0.16))
+                        Label("PPM · distance error", systemImage: "circle.fill")
+                            .foregroundStyle(.primary)
+                        HStack(spacing: 6) {
+                            Text("0")
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.10, green: 0.32, blue: 0.72),
+                                    Color(red: 0.16, green: 0.72, blue: 0.76),
+                                    Color(red: 0.94, green: 0.88, blue: 0.25),
+                                    Color(red: 0.94, green: 0.43, blue: 0.12),
+                                    Color(red: 0.72, green: 0.12, blue: 0.16)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .frame(width: 105, height: 9)
+                            .clipShape(Capsule())
+                            Text("3+ mm")
+                        }
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 1)
                         Text("Drag to rotate · Scroll to zoom")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -76,66 +96,89 @@ struct PPMFittingView: View {
     }
 
     var controlsPanel: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Fit in three passes")
-                    .font(.subheadline.weight(.semibold))
-                Text("Edits update the PPM preview as you move a control. Fit the whole model first, then convex regions, then concave details; iterate as needed.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Link("Manual fitting workflow · Perfler et al. (2025)",
-                     destination: URL(string: "https://doi.org/10.1016/j.compbiomed.2025.109817")!)
-                    .font(.caption)
-                meshMetrics
-                if model.request.side == .right {
-                    Text("The right-side model is mirrored across Y; control axes follow the template.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                GroupBox("1 · Global fit") {
-                    VStack(spacing: 8) {
-                        ForEach(model.globalControls) { control in
-                            PPMFittingParameterRow(control: control, model: model)
-                        }
-                    }
-                    .padding(.top, 6)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("2 · Convex regions")
+        VStack(spacing: 0) {
+            ppmOpacityControl
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+            meshMetrics
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Fit in three passes")
                         .font(.subheadline.weight(.semibold))
-                    ForEach(model.convexGroups, id: \.self) { group in
-                        DisclosureGroup(group) {
-                            VStack(spacing: 8) {
-                                ForEach(model.controls.filter { $0.section == "convex" && $0.group == group }) { control in
-                                    PPMFittingParameterRow(control: control, model: model)
-                                }
-                            }
-                            .padding(.top, 7)
-                        }
-                        .font(.callout.weight(.medium))
+                    Text("Edits update the PPM preview as you move a control. Fit the whole model first, then convex regions, then concave details; iterate as needed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Link("Manual fitting workflow · Perfler et al. (2025)",
+                         destination: URL(string: "https://doi.org/10.1016/j.compbiomed.2025.109817")!)
+                        .font(.caption)
+                    if model.request.side == .right {
+                        Text("The right-side model is mirrored across Y; control axes follow the template.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
-                }
 
-                GroupBox("3 · Concave details") {
-                    VStack(spacing: 8) {
-                        ForEach(model.concaveControls) { control in
-                            PPMFittingParameterRow(control: control, model: model)
+                    GroupBox("1 · Global fit") {
+                        VStack(spacing: 8) {
+                            ForEach(model.globalControls) { control in
+                                PPMFittingParameterRow(control: control, model: model)
+                            }
+                        }
+                        .padding(.top, 6)
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("2 · Convex regions")
+                            .font(.subheadline.weight(.semibold))
+                        ForEach(model.convexGroups, id: \.self) { group in
+                            DisclosureGroup(group) {
+                                VStack(spacing: 8) {
+                                    ForEach(model.controls.filter { $0.section == "convex" && $0.group == group }) { control in
+                                        PPMFittingParameterRow(control: control, model: model)
+                                    }
+                                }
+                                .padding(.top, 7)
+                            }
+                            .font(.callout.weight(.medium))
                         }
                     }
-                    .padding(.top, 6)
+
+                    GroupBox("3 · Concave details") {
+                        VStack(spacing: 8) {
+                            ForEach(model.concaveControls) { control in
+                                PPMFittingParameterRow(control: control, model: model)
+                            }
+                        }
+                        .padding(.top, 6)
+                    }
                 }
+                .padding(14)
             }
-            .padding(14)
+            .disabled(model.busy)
         }
-        .disabled(model.busy)
+    }
+
+    private var ppmOpacityControl: some View {
+        HStack(spacing: 8) {
+            Label("PPM opacity", systemImage: "circle.lefthalf.filled")
+                .font(.caption.weight(.medium))
+                .frame(width: 112, alignment: .leading)
+            Slider(value: $model.ppmOpacity, in: 0.15...1)
+                .accessibilityLabel("Fitted PPM opacity")
+            Text(model.ppmOpacity, format: .percent.precision(.fractionLength(0)))
+                .font(.caption.monospacedDigit())
+                .frame(width: 38, alignment: .trailing)
+        }
+        .help("Lower the PPM opacity to compare the distance colors with the target through the overlay.")
     }
 
     private var meshMetrics: some View {
-        GroupBox("Mesh distance (mm)") {
+        GroupBox {
             VStack(alignment: .leading, spacing: 7) {
-                Text("BezierPPM → target · nearest target vertex")
+                Text("Nearest-vertex RMSE both ways; summary statistics use PPM → target")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 HStack {
@@ -145,7 +188,7 @@ struct PPMFittingView: View {
                 .font(.caption.weight(.medium))
                 ForEach(model.metrics) { metric in
                     HStack {
-                        Text(metric.id.capitalized).frame(maxWidth: .infinity, alignment: .leading)
+                        Text(metric.label).frame(maxWidth: .infinity, alignment: .leading)
                         Text(String(format: "%.3f mm", metric.value))
                             .frame(width: 100, alignment: .trailing)
                             .monospacedDigit()
@@ -159,6 +202,27 @@ struct PPMFittingView: View {
                 }
             }
             .padding(.top, 5)
+        } label: {
+            HStack(spacing: 6) {
+                Text("Mesh distance (mm)")
+                Spacer(minLength: 4)
+                Button("Undo", systemImage: "arrow.uturn.backward") {
+                    model.undo()
+                }
+                .labelStyle(.titleAndIcon)
+                .controlSize(.small)
+                .disabled(!model.canUndo || model.busy)
+                .help("Undo the last parameter change")
+                .accessibilityLabel("Undo parameter change")
+                Button("Redo", systemImage: "arrow.uturn.forward") {
+                    model.redo()
+                }
+                .labelStyle(.titleAndIcon)
+                .controlSize(.small)
+                .disabled(!model.canRedo || model.busy)
+                .help("Redo the last undone parameter change")
+                .accessibilityLabel("Redo parameter change")
+            }
         }
     }
 
@@ -235,7 +299,13 @@ private struct PPMFittingParameterRow: View {
                 }
             }
             HStack(spacing: 8) {
-                Slider(value: value, in: control.minimum...control.maximum)
+                Slider(value: value, in: control.minimum...control.maximum) { editing in
+                    if editing {
+                        model.beginControlEditing()
+                    } else {
+                        model.endControlEditing()
+                    }
+                }
                     .accessibilityLabel("\(control.group) \(control.label)")
                 Stepper(value: value, in: control.minimum...control.maximum, step: step) {
                     Text(control.label)

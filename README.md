@@ -25,9 +25,15 @@ Choose **Fit…** for an ear in the **Manual PPM Fit** project settings. The edi
 overlays the target mesh and BezierPPM so you can adjust the global transform,
 the local bendy-bone controls for convex regions, and shape keys for concave
 details. The 3D preview updates directly from the evaluated mesh as you move a
-control, without exporting an STL for each change. A live nearest-vertex distance
-summary reports mean, median, maximum, and minimum PPM-to-target distances, plus
-the signed change from the fit shown when the editor opened. The editor uses
+control, without exporting an STL for each change. Nearest-vertex RMSE is reported
+in both directions and as a symmetric RMSE; mean, median, maximum, and minimum
+report PPM-to-target distances. Shape-key weights follow the published ranges:
+all keys allow −1 to 1 except Crus helicis–Upper dent and Crus helicis–Lower dent,
+which allow 0 to 1. The PPM is color-mapped by each vertex's nearest
+target-vertex distance on a fixed 0–3+ mm scale, and the colors update with the
+preview. The metric panel stays above the scrolling controls, with Undo and Redo
+for parameter edits. A PPM opacity slider makes the fitted surface easier to
+compare with the translucent target. The editor uses
 `~/Desktop/PPM.blend` when available and otherwise uses the built-in BezierPPM
 defaults. The template source is preserved, and a copy plus the parameter
 values are saved with the project.
