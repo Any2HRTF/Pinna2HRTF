@@ -5,10 +5,18 @@ import SceneKit.ModelIO
 import AppKit
 import UserNotifications
 
+private struct ActivityLogEntry {
+    var date: Date
+    var message: String
+    var key: String?
+}
+
 final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     @Published var folders: [ProjectFolder]
     @Published var projects: [ProjectRecord]
     @Published var selectedProjectID: UUID?
+    @Published private(set) var technicalLogURLs: [UUID: URL] = [:]
+    @Published private(set) var environmentTechnicalLogURL: URL?
     @Published var environment: EnvironmentConfig
     @Published var persistenceMessage: String?
     @Published var registryRecoveryPresented = false
@@ -29,11 +37,15 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published var stageStates: [Stage: StageState] = Dictionary(uniqueKeysWithValues: Stage.allCases.map { ($0, .ready) })
     @Published var runningProcesses: [UUID: Process] = [:]
     @Published var runningStages: [UUID: Stage] = [:]
+    @Published private(set) var liveLogStatusByProject: [UUID: String] = [:]
     @Published private var outputOperations = Set<UUID>()
     private var outputStores: [String: GeneratedOutputManifest] = [:]
     @Published var environmentProcess: Process?
     @Published var failedStagesByProject: [UUID: Set<Stage>] = [:]
-    private var logTextByProject: [UUID: String] = [:]
+    private var logEntriesByProject: [UUID: [ActivityLogEntry]] = [:]
+    private var pipelineLogCaptures: [UUID: PipelineLogCapture] = [:]
+    private var environmentLogCapture: PipelineLogCapture?
+    private var stageStartedAtByProject: [UUID: Date] = [:]
     private var viewerStateByProject: [UUID: ProjectViewerState] = [:]
     private var selectedCameraCenter = SCNVector3Zero
     private var selectedCameraScale: Double = 1
@@ -72,6 +84,12 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         environment = registry.environment
         viewerStateByProject = Self.loadViewerStates()
         super.init()
+        for project in projects {
+            if let url = Self.latestTechnicalLogURL(for: project.id) {
+                technicalLogURLs[project.id] = url
+            }
+        }
+        environmentTechnicalLogURL = Self.latestEnvironmentTechnicalLogURL()
         registryStore.save(registry)
         persistenceMessage = registryStore.lastError ?? registryStore.recoveryMessage
         registryRecoveryPresented = registryStore.savingBlocked
@@ -348,7 +366,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         runningProcesses[selectedProjectID] = nil
         runningStages[selectedProjectID] = nil
         failedStagesByProject[selectedProjectID] = nil
-        logTextByProject[selectedProjectID] = nil
+        logEntriesByProject[selectedProjectID] = nil
         projects.removeAll { $0.id == selectedProjectID }
         self.selectedProjectID = projects.first?.id
         persist()
@@ -519,7 +537,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let microphone = microphonePosition(for: url)
         let loadID = UUID()
         meshLoadID = loadID
-        appendLog("Loading \(url.lastPathComponent)…")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
             let asset = MDLAsset(url: url)
@@ -597,7 +614,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                     self.viewerStateByProject[projectID, default: ProjectViewerState(selectedArtifactPath: url.path)].cameraByArtifact[url.path] = self.selectedCameraState
                 }
                 self.rememberSelectedArtifact(url)
-                self.appendLog("Loaded \(url.lastPathComponent).")
             }
         }
     }
@@ -1109,27 +1125,69 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
         process.currentDirectoryURL = executionPackageURL
         process.environment = processEnvironment()
+        process.environment?["PINNA2HRTF_LIVE_EVENTS"] = "1"
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
+        let runID = UUID()
+        let startedAt = Date()
+        let logURL = Self.technicalLogURL(projectID: project.id, stage: stage, runID: runID, date: startedAt)
+        let capture: PipelineLogCapture?
+        do {
+            let header = [
+                "Pinna2HRTF technical output",
+                "Project: \(project.name)",
+                "Stage: \(stage.title)",
+                "Started: \(startedAt.formatted(date: .complete, time: .standard))",
+                "Command: \(process.executableURL?.path ?? "") \((process.arguments ?? []).joined(separator: " "))",
+                "",
+                "--- stdout and stderr ---",
+                ""
+            ].joined(separator: "\n")
+            capture = try PipelineLogCapture(fileURL: logURL, header: header, onEvent: { [weak self] event in
+                Task { @MainActor [weak self] in
+                    self?.recordPipelineEvent(event, stage: stage, projectID: project.id, runID: runID)
+                }
+            }, onFailure: { [weak self] message in
+                Task { @MainActor [weak self] in
+                    self?.appendLog("Could not save complete technical output: \(message)", for: project.id)
+                }
+            })
+            technicalLogURLs[project.id] = logURL
+            pipelineLogCaptures[project.id] = capture
+        } catch {
+            capture = nil
+            appendLog("Could not create a technical log: \(error.localizedDescription)", for: project.id)
+        }
         runningProcesses[project.id] = process
         runningStages[project.id] = stage
+        liveLogStatusByProject[project.id] = "Running · \(stage.title)"
+        stageStartedAtByProject[project.id] = startedAt
         setStageOutcome(stage, for: project.id, to: .running)
         refreshArtifacts()
-        appendLog("\(stage.title) started.")
-        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        let details = stageStartDetails(stage: stage, project: project)
+        appendLog("\(stage.title) started\(details.isEmpty ? "" : " · \(details)")", for: project.id)
+        let readLock = NSLock()
+        pipe.fileHandleForReading.readabilityHandler = { handle in
+            readLock.lock()
             let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            guard let store = self else { return }
-            Task { @MainActor in store.appendLog(text.trimmingCharacters(in: .newlines), for: project.id) }
+            if !data.isEmpty { capture?.append(data) }
+            readLock.unlock()
         }
         process.terminationHandler = { [weak self] process in
+            pipe.fileHandleForReading.readabilityHandler = nil
+            readLock.lock()
+            let remaining = pipe.fileHandleForReading.readDataToEndOfFile()
+            capture?.append(remaining)
+            capture?.finish()
+            readLock.unlock()
             guard let store = self else { return }
             Task { @MainActor in
-                pipe.fileHandleForReading.readabilityHandler = nil
                 store.outputOperations.insert(project.id)
                 store.runningProcesses[project.id] = nil
                 store.runningStages[project.id] = nil
+                store.pipelineLogCaptures[project.id] = nil
+                store.liveLogStatusByProject[project.id] = "Checking outputs · \(stage.title)"
                 let stopped = store.stoppingProjects.contains(project.id) || store.projects.first(where: { $0.id == project.id })?.stageOutcomes?[stage.rawValue] == .stopped
                 var outcome: StageState = stopped ? .stopped : .failed
                 var validationError: String?
@@ -1155,15 +1213,21 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                     store.appendLog("Output tracking is pending; it will be retried before reset.", for: project.id)
                 }
                 store.setStageOutcome(stage, for: project.id, to: outcome)
+                let elapsed = store.elapsedDescription(since: store.stageStartedAtByProject.removeValue(forKey: project.id) ?? startedAt)
                 if outcome == .done {
+                    store.liveLogStatusByProject[project.id] = "Completed · \(stage.title)"
                     store.notifyStageCompletion(stage, project: project)
-                    store.appendLog("\(stage.title) finished; outputs verified.", for: project.id)
+                    store.appendLog("\(stage.title) finished in \(elapsed) · outputs verified", for: project.id)
                 } else if outcome == .stopped {
-                    store.appendLog("\(stage.title) stopped. Previous results may still be available.", for: project.id)
+                    store.liveLogStatusByProject[project.id] = "Stopped · \(stage.title)"
+                    store.appendLog("\(stage.title) stopped after \(elapsed). Previous results may still be available.", for: project.id)
                 } else {
-                    let detail = validationError ?? "Exit status \(process.terminationStatus)"
+                    store.liveLogStatusByProject[project.id] = "Failed · \(stage.title)"
+                    let cause = validationError ?? "Exit status \(process.terminationStatus)."
+                    let logHint = store.technicalLogURLs[project.id].map { "Technical output: \($0.lastPathComponent)." } ?? "Open the technical log for details."
+                    let detail = "\(cause) \(logHint)"
                     store.sendNotification(title: "\(stage.title) failed", body: "\(project.name): \(detail)")
-                    store.appendLog("\(stage.title) failed: \(detail). Previous results are not a successful rerun.", for: project.id)
+                    store.appendLog("\(stage.title) failed after \(elapsed): \(detail) Previous results are not a successful rerun.", for: project.id)
                 }
                 store.outputOperations.remove(project.id)
                 store.refreshArtifacts()
@@ -1172,9 +1236,14 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         do {
             try process.run()
         } catch {
+            pipe.fileHandleForReading.readabilityHandler = nil
+            capture?.finish()
+            pipelineLogCaptures[project.id] = nil
+            stageStartedAtByProject[project.id] = nil
             setStageOutcome(stage, for: project.id, to: .failed)
             runningProcesses[project.id] = nil
             runningStages[project.id] = nil
+            liveLogStatusByProject[project.id] = "Could not start · \(stage.title)"
             refreshArtifacts()
             appendLog("Could not start \(stage.title): \(error.localizedDescription)", for: project.id)
             do { try await Task.detached { try outputs.complete() }.value }
@@ -1282,22 +1351,52 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         process.arguments = bundledUV ? ["sync", "--no-editable"] : ["uv", "sync", "--no-editable"]
         process.currentDirectoryURL = executionPackageURL
         process.environment = processEnvironment()
+        process.environment?["PINNA2HRTF_LIVE_EVENTS"] = "1"
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
         environmentProcess = process
-        appendLog("Environment setup started.")
-        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        let runID = UUID()
+        let logURL = Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
+            .appendingPathComponent("Environment-\(runID.uuidString).log")
+        let capture: PipelineLogCapture?
+        do {
+            capture = try PipelineLogCapture(fileURL: logURL, header: "Pinna2HRTF environment setup\nStarted: \(Date().formatted(date: .complete, time: .standard))\n\n--- stdout and stderr ---\n\n", onEvent: { _ in }, onFailure: { [weak self] message in
+                Task { @MainActor [weak self] in
+                    self?.appendLog("Could not save complete environment setup output: \(message)", for: logProjectID)
+                }
+            })
+            environmentTechnicalLogURL = logURL
+            if let logProjectID { technicalLogURLs[logProjectID] = logURL }
+            environmentLogCapture = capture
+        } catch {
+            capture = nil
+            appendLog("Could not create an environment setup log: \(error.localizedDescription)", for: logProjectID)
+        }
+        appendLog("Environment setup started.", for: logProjectID)
+        if let logProjectID { liveLogStatusByProject[logProjectID] = "Setting up environment" }
+        let readLock = NSLock()
+        pipe.fileHandleForReading.readabilityHandler = { handle in
+            readLock.lock()
             let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            guard let store = self else { return }
-            Task { @MainActor in store.appendLog(text.trimmingCharacters(in: .newlines), for: logProjectID) }
+            if !data.isEmpty { capture?.append(data) }
+            readLock.unlock()
         }
         process.terminationHandler = { [weak self] process in
+            pipe.fileHandleForReading.readabilityHandler = nil
+            readLock.lock()
+            let remaining = pipe.fileHandleForReading.readDataToEndOfFile()
+            capture?.append(remaining)
+            capture?.finish()
+            readLock.unlock()
             guard let store = self else { return }
             Task { @MainActor in
-                pipe.fileHandleForReading.readabilityHandler = nil
-                store.appendLog(process.terminationStatus == 0 ? "Environment setup finished." : "Environment setup failed (status \(process.terminationStatus)).", for: logProjectID)
+                store.environmentLogCapture = nil
+                let result = process.terminationStatus == 0 ? "Environment setup finished." : "Environment setup failed (status \(process.terminationStatus)). Technical output: \(logURL.lastPathComponent)."
+                store.appendLog(result, for: logProjectID)
+                if let logProjectID {
+                    store.liveLogStatusByProject[logProjectID] = process.terminationStatus == 0 ? "Environment ready" : "Environment setup failed"
+                }
                 store.environmentProcess = nil
                 store.refreshArtifacts()
             }
@@ -1305,7 +1404,11 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         do {
             try process.run()
         } catch {
+            pipe.fileHandleForReading.readabilityHandler = nil
+            capture?.finish()
+            environmentLogCapture = nil
             environmentProcess = nil
+            if let logProjectID { liveLogStatusByProject[logProjectID] = "Could not start environment setup" }
             appendLog("Could not start environment setup: \(error.localizedDescription)")
         }
     }
@@ -1493,32 +1596,117 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
     }
 
+    var selectedTechnicalLogURL: URL? {
+        selectedProjectID.flatMap { technicalLogURLs[$0] } ?? environmentTechnicalLogURL
+    }
+
+    func openTechnicalLog() {
+        guard let url = selectedTechnicalLogURL, FileManager.default.fileExists(atPath: url.path) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     func loadSelectedProjectLog() {
-        logText = selectedProjectID.flatMap { logTextByProject[$0] } ?? ""
+        guard let selectedProjectID else { logText = ""; return }
+        logText = renderedActivity(for: selectedProjectID)
+        if technicalLogURLs[selectedProjectID] == nil,
+           let url = Self.latestTechnicalLogURL(for: selectedProjectID) {
+            technicalLogURLs[selectedProjectID] = url
+        }
     }
 
     func clearSelectedProjectLog() {
         guard let selectedProjectID else { return }
-        logTextByProject[selectedProjectID] = ""
+        logEntriesByProject[selectedProjectID] = []
         logText = ""
     }
 
     func appendLog(_ text: String, for projectID: UUID? = nil) {
-        let compactText = text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { line in
-            guard !line.isEmpty else { return false }
-            let lower = line.lowercased()
-            if lower.hasPrefix("info: total files") && lower.contains("failed 0") { return false }
-            if lower.contains("error") || lower.contains("warning") || lower.contains("failed") || lower.contains("exception") || lower.contains("traceback") { return true }
-            let redundantPrefixes = ["using config:", "left input mesh:", "right input mesh:", "running inference in ", "running preprocessing into ", "running local numcalc with ", "local numcalc project root:", "running postprocessing into ", "started left, step ", "started right, step "]
-            return !redundantPrefixes.contains(where: { lower.hasPrefix($0) }) && !line.hasPrefix("/") && !(line.contains("Mem:") && line.contains("Time:")) && !line.hasPrefix("Fra:") && !lower.hasPrefix("blender ") && lower != "blender quit" && !lower.hasPrefix("read blend:") && !lower.hasPrefix("saved: '")
-        }.joined(separator: "\n")
-        guard !compactText.isEmpty else { return }
+        for line in text.components(separatedBy: .newlines) {
+            let message = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !message.isEmpty else { continue }
+            appendActivity(message, for: projectID)
+        }
+    }
+
+    private func recordPipelineEvent(_ event: PipelineLogEvent, stage: Stage, projectID: UUID, runID: UUID) {
+        let message: String
+        switch event.level?.lowercased() {
+        case "warning": message = "Warning · \(stage.title) · \(event.message)"
+        case "error": message = "Error · \(stage.title) · \(event.message)"
+        default: message = "\(stage.title) · \(event.message)"
+        }
+        let key = event.key.map { "\(runID.uuidString):\($0)" }
+        appendActivity(message, for: projectID, key: key)
+    }
+
+    private func appendActivity(_ message: String, for projectID: UUID?, key: String? = nil) {
         guard let projectID = projectID ?? selectedProjectID else { return }
-        let current = logTextByProject[projectID] ?? ""
-        let updated = current.isEmpty ? compactText : "\(current)\n\(compactText)"
-        logTextByProject[projectID] = updated
-        if projectID == selectedProjectID {
-            logText = updated
+        var entries = logEntriesByProject[projectID, default: []]
+        if let key, let existing = entries.lastIndex(where: { $0.key == key }) {
+            entries.remove(at: existing)
+        }
+        entries.append(ActivityLogEntry(date: Date(), message: message, key: key))
+        if entries.count > 400 { entries.removeFirst(entries.count - 400) }
+        logEntriesByProject[projectID] = entries
+        if projectID == selectedProjectID { logText = render(entries) }
+    }
+
+    private func renderedActivity(for projectID: UUID) -> String {
+        render(logEntriesByProject[projectID] ?? [])
+    }
+
+    private func render(_ entries: [ActivityLogEntry]) -> String {
+        entries.map { "[\($0.date.formatted(date: .omitted, time: .standard))] \($0.message)" }.joined(separator: "\n")
+    }
+
+    private func stageStartDetails(stage: Stage, project: ProjectRecord) -> String {
+        if stage == .scanPreparation {
+            let scan = URL(fileURLWithPath: project.scanPreparation.scanPath).lastPathComponent
+            let sides = [project.scanPreparation.prepareLeft ? "Left" : nil, project.scanPreparation.prepareRight ? "Right" : nil].compactMap { $0 }.joined(separator: " + ")
+            return "\(scan) · \(sides) ear\(sides.contains("+") ? "s" : "") · rotation \(project.scanPreparation.rotationDegrees)°"
+        }
+        if stage == .numcalc || stage == .postprocessing { return "Project output: \(URL(fileURLWithPath: project.saveLocation).lastPathComponent)" }
+        let inputs = [("Left", project.pipelineLeftEar), ("Right", project.pipelineRightEar)]
+            .filter { !$0.1.isEmpty }
+            .map { "\($0.0) \(URL(fileURLWithPath: $0.1).lastPathComponent)" }
+        return inputs.isEmpty ? "" : "Inputs: \(inputs.joined(separator: ", "))"
+    }
+
+    private func elapsedDescription(since start: Date) -> String {
+        let seconds = max(0, Int(Date().timeIntervalSince(start).rounded()))
+        if seconds < 60 { return "\(seconds)s" }
+        return "\(seconds / 60)m \(seconds % 60)s"
+    }
+
+    private static func technicalLogURL(projectID: UUID, stage: Stage, runID: UUID, date: Date) -> URL {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let filename = "\(formatter.string(from: date))-\(stage.rawValue)-\(runID.uuidString.prefix(8)).log"
+        return Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
+            .appendingPathComponent(projectID.uuidString, isDirectory: true)
+            .appendingPathComponent(filename)
+    }
+
+    private static func latestTechnicalLogURL(for projectID: UUID) -> URL? {
+        let directory = Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
+            .appendingPathComponent(projectID.uuidString, isDirectory: true)
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey]) else { return nil }
+        return urls.filter { $0.pathExtension == "log" }.max {
+            let first = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let second = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return first < second
+        }
+    }
+
+    private static func latestEnvironmentTechnicalLogURL() -> URL? {
+        let directory = Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey]) else { return nil }
+        return urls.filter { $0.lastPathComponent.hasPrefix("Environment-") && $0.pathExtension == "log" }.max {
+            let first = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let second = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return first < second
         }
     }
 

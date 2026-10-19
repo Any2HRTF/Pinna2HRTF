@@ -11,6 +11,7 @@ from .src.create_head import head
 from .src.ear_canal_closer import ear_canal_closer, estimate_ear_canal_position
 from .src.cut_eararea import cut_eararea, cut_eararea_projected_footprint
 from HRTFCalculation.Config import PreprocessingConfig
+from HRTFCalculation.LiveEvents import emit_live_event
 
 
 def pinna_y_center(ear):
@@ -106,6 +107,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             if path is not None:
                 side_dirs[side].mkdir(parents=True, exist_ok=True)
     try:
+        emit_live_event("Loading selected ear meshes")
         logger("Loading input ear meshes")
         left_ear = trimesh.load(left_path) if left_path is not None else None
         right_ear = trimesh.load(right_path) if right_path is not None else None
@@ -134,13 +136,17 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             if source_position is None and source_position_input is not None:
                 source_position = tuple(coordinate + translation for coordinate, translation in zip(source_position_input, translations[side]))
             landmarks[side] = {"position": list(source_position), "method": "configured", "confidence": 1.0} if source_position is not None else estimate_ear_canal_position(ear, side=side)
+            method = "using the saved position" if landmarks[side]["method"] == "configured" else "estimating the source position"
+            emit_live_event(f"{side.title()} ear · {method}")
             with open(landmark_paths[side], "w") as f:
                 json.dump(landmarks[side], f, indent=2)
             logger(f"{side.title()} source landmark: {landmarks[side]['method']} at {[round(v, 3) for v in landmarks[side]['position']]}, confidence {landmarks[side]['confidence']:.2f}")
         logger("Closing ear canals")
         for side, ear in ears.items():
             if ear is not None:
+                emit_live_event(f"{side.title()} ear · Closing the ear canal")
                 ear_canal_closer(ear, mode=settings.ear_canal_closer_mode).export(closed[side])
+        emit_live_event("Building the dummy head")
         logger("Creating dummy head mesh")
         head(
             left_ear,
@@ -155,6 +161,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             min_width_scale=settings.head_min_width_scale,
             max_height_scale=settings.head_max_height_scale,
         )
+        emit_live_event("Cutting ear areas from the head mesh")
         logger("Cutting ear areas from dummy head")
         dummy_head_mesh = trimesh.load(dummy_head, process=False)
         closed_meshes = {
@@ -176,8 +183,10 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
         for side, ear in ears.items():
             if ear is None:
                 continue
+            emit_live_event(f"{side.title()} ear · Joining ear to head")
             logger(f"Stitching {side} ear to head")
             head_stitcher(head_path=str(cut[side]), ear_path=str(closed[side]), export_path=str(stitched[side]), seam_smoothing_iterations=settings.seam_smoothing_iterations, seam_smoothing_factor=settings.seam_smoothing_factor)
+            emit_live_event(f"{side.title()} mesh · Grading (this may take several minutes)")
             logger(f"Grading {side} head mesh; this can take several minutes")
             gamma_l = settings.mesh_gamma if side == "left" else settings.mesh_gamma_opposite
             gamma_r = settings.mesh_gamma_opposite if side == "left" else settings.mesh_gamma
@@ -198,6 +207,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
         for side, ear in ears.items():
             if ear is None:
                 continue
+            emit_live_event(f"{side.title()} ear · Creating Mesh2HRTF project")
             logger(f"Creating {side} Mesh2HRTF project")
             mesh2input_main(
                 head=str(graded[side]), title=settings.title, source_type=source_types[side], filepath=str(projects[side]), mesh2hrtf_path=str(mesh2hrtf_path), evaluationGrids=str(evaluation_grid), method=settings.method, pictures=settings.pictures, reference=settings.reference, computeHRIRs=settings.compute_hrirs, unit=settings.unit, speedOfSound=settings.speed_of_sound, densityOfMedium=settings.air_density, materialSearchPaths=settings.material_search_paths, min_frequency=settings.min_frequency, max_frequency=settings.max_frequency, frequency_vector_type=settings.frequency_vector_type, frequency_step_count=settings.frequency_step_count, tolerance=settings.source_assignment_tolerance, source_position=landmarks[side]["position"], source_assignment_mode=settings.source_assignment_mode, source_face_count=settings.source_assignment_face_count,
@@ -211,6 +221,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
                 with parameters_path.open("w", encoding="utf-8") as file:
                     json.dump(parameters, file, indent=4)
                 logger(f"Set {side} receiver position exactly to {parameters['sourceCenter']} m")
+        emit_live_event("Mesh2HRTF projects are ready")
         logger(f"Preprocessing completed: {', '.join(str(projects[side]) for side, ear in ears.items() if ear is not None)}")
     finally:
         if cleanup is not None:

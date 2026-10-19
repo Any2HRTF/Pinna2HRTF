@@ -14,6 +14,7 @@ import pandas as pd
 import bpy
 from bezierppm import BezierPPM
 from bezierppm.render_helpers import render
+from HRTFCalculation.LiveEvents import emit_live_event
 
 try:
     from .src.swin_transformer_v2 import SwinTransformerV2
@@ -363,6 +364,7 @@ def main(args):
             if stl_file[-4:] != ".stl":
                 continue
             print(f"{data_dir}/{stl_file}")
+            emit_live_event(f"{direction} ear · Aligning input mesh")
 
             stem = stl_file[:-4]
             paired_alignment = None
@@ -388,6 +390,7 @@ def main(args):
             )
             target_cloud = np.array(trimesh.load_mesh(f"{data_dir}/{stl_file}").vertices)
 
+            emit_live_event(f"{direction} ear · Predicting ear shape")
             prediction_ppm = get_model_prediction(model, data)
 
             tempdir = tempfile.mkdtemp()
@@ -410,6 +413,7 @@ def main(args):
             if not os.path.isdir(prediction_stl_dir):
                 os.makedirs(prediction_stl_dir)
             predicted_cloud.export(f"{prediction_stl_dir}/Prediction_{stl_file[:-4]}.stl")
+            emit_live_event(f"{direction} ear · Prediction saved")
             predicted_cloud = np.array(predicted_cloud.vertices)
 
             minimal_distances_direction_1 = minimal_distances(predicted_cloud, target_cloud)

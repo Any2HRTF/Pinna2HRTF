@@ -163,9 +163,19 @@ struct MeshViewerView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Button("Clear") { store.clearSelectedProjectLog() }
+                Button {
+                    store.openTechnicalLog()
+                } label: {
+                    Label("Technical Log", systemImage: "doc.text.magnifyingglass")
+                }
+                .buttonStyle(.borderless)
+                .help("Open the complete technical output for this project")
+                .accessibilityLabel("Open Technical Log")
+                .disabled(store.selectedTechnicalLogURL == nil)
+                Button("Clear Activity") { store.clearSelectedProjectLog() }
                     .buttonStyle(.borderless)
                     .disabled(store.logText.isEmpty)
+                    .help("Clear the activity timeline. Technical logs remain available.")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -191,9 +201,12 @@ struct MeshViewerView: View {
     }
 
     var logSummary: String {
-        if store.selectedProjectIsRunning || store.environmentProcess != nil { return "Running" }
-        if store.logText.isEmpty { return "No output yet" }
-        return store.logText.split(separator: "\n").last.map(String.init) ?? "Ready"
+        if store.environmentProcess != nil { return "Setting up environment" }
+        if let project = store.selectedProject, let stage = store.runningStages[project.id] { return "\(stage.title) running" }
+        if store.selectedProjectIsRunning { return "Checking outputs" }
+        if let project = store.selectedProject, let status = store.liveLogStatusByProject[project.id] { return status }
+        if store.logText.isEmpty { return store.selectedTechnicalLogURL == nil ? "No activity yet" : "Technical log available" }
+        return "Ready"
     }
 
     var microphoneCoordinates: String {

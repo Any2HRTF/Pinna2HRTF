@@ -4,6 +4,7 @@ Geometry follows the archived crop/remesh/Screened Poisson/boundary method.
 Crop rotations are explicit per project; there is no subject-name calibration.
 """
 from pathlib import Path
+from .LiveEvents import emit_live_event
 import hashlib
 import json
 import shutil
@@ -499,12 +500,15 @@ def prepare_scan(config, logger=print):
         for side, enabled in (("left", settings.prepare_left), ("right", settings.prepare_right)):
             if not enabled:
                 continue
+            emit_live_event(f"{side.title()} ear · Cropping and remeshing")
             logger(f"Scan preparation: cropping and remeshing {side} ear")
             planes = cut_planes(mesh, side, settings)
             remeshed = remesh(cut_side(mesh, side, settings), work / f"{side}_remeshed.stl", degrees, settings.target_edge_mm)
+            emit_live_event(f"{side.title()} ear · Closing mesh holes")
             logger(f"Scan preparation: Screened Poisson hole closing, {side} ear")
             poisson = screened_poisson(remeshed, work / f"{side}_poisson.ply")
             ready_path = work / f"{side.title()}.stl"
+            emit_live_event(f"{side.title()} ear · Restoring and checking the attachment boundary")
             logger(f"Scan preparation: restoring and validating {side} attachment boundary")
             ready, inset = restore_attachment_boundary(poisson, planes, degrees, ready_path, settings.target_edge_mm)
             if np.sign(np.mean(ready.vertices[:, 1])) != (1 if side == "left" else -1):
@@ -522,6 +526,7 @@ def prepare_scan(config, logger=print):
         report_temp.write_text(json.dumps(report, indent=2) + "\n")
         report_temp.replace(output / "mesh_preparation.json")
     validate_prepared(config)
+    emit_live_event("Prepared ears passed validation")
     logger(f"Scan preparation completed: {output}")
 
 
