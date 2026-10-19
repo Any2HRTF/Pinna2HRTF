@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Build the Pinna2HRTF desktop app from source on macOS or Windows.">
+  <title>Build from source — Pinna2HRTF Documentation</title><link rel="icon" href="../favicon.png" type="image/png" sizes="64x64"><link rel="stylesheet" href="styles.css">
+</head>
+<body><a class="skip-link" href="#main">Skip to content</a><div class="docs-frame">
+  <header class="docs-header"><a class="brand" href="../" aria-label="Pinna2HRTF home"><img src="../assets/app-icon.webp" alt=""><strong>Pinna2HRTF</strong></a><nav class="top-nav" aria-label="Main navigation"><a href="../">Home</a><a href="../#downloads">Downloads</a><a href="index.html" aria-current="page">Documentation</a></nav></header>
+  <div class="docs-layout"><aside class="docs-sidebar"><p class="sidebar-label">Documentation</p><nav class="sidebar-links" aria-label="Documentation pages"><a href="index.html">Overview</a><a href="desktop-app.html">Desktop app</a><a href="scan-preparation.html">Scan preparation &amp; ear editing</a><a href="cli.html">Python CLI</a><a href="building.html" aria-current="page">Build from source</a></nav></aside>
+    <main class="docs-content" id="main">
+      <p class="kicker"><span class="dot" aria-hidden="true"></span> DEVELOPMENT</p><h1>Build the desktop app.</h1>
+      <p class="lede">These instructions are for developers packaging a local build. Most users should download the release assets from the <a href="../#downloads">downloads page</a>.</p>
+      <h2>macOS</h2><p>Build on Apple Silicon with Git, <code>uv</code>, Xcode Command Line Tools, and the Swift toolchain available:</p><pre><code>bash Scripts/build_and_run.sh</code></pre>
+      <p>This prepares external tools, builds <code>build/release/Pinna2HRTF.app</code>, and opens it. To build without launching:</p><pre><code>bash Scripts/prepare_external_tools.sh
+bash Scripts/build_release_app.sh</code></pre>
+      <p>Local builds are ad-hoc signed. To create a drag-to-Applications DMG that is ad-hoc signed and not notarized:</p><pre><code>bash Scripts/build_release_app.sh --installer</code></pre>
+      <p>The installer and SHA-256 checksum are written to <code>dist/</code>. The first launch may be blocked by macOS because the package is not notarized. The build defaults to SDK 26.5; set <code>PINNA2HRTF_MACOS_SDK</code> to choose another installed SDK.</p>
+      <h3>Signed and notarized distribution</h3><p>Install a Developer ID Application certificate and save notarization credentials in Keychain under <code>Pinna2HRTF-notary</code>, then run:</p><pre><code>bash Scripts/build_release_app.sh --distribution</code></pre>
+      <p>Set <code>PINNA2HRTF_SIGNING_IDENTITY</code> to choose a certificate or <code>PINNA2HRTF_NOTARY_PROFILE</code> to select another Keychain profile.</p>
+      <h2>Windows</h2><p>Use PowerShell with the .NET 8 SDK, Git, and <code>uv</code> installed:</p><pre><code>.\Scripts\prepare_windows_external_tools.ps1
+.\Scripts\build_windows_port.ps1</code></pre><p>The portable app is written to <code>dist\windows\Pinna2HRTF</code>.</p>
+      <h2>License</h2><p>Pinna2HRTF is distributed under the <a href="https://github.com/Any2HRTF/Pinna2HRTF/blob/main/LICENSE">European Union Public Licence 1.2</a>. Bundled dependencies retain their own licenses.</p>
+    </main></div>
+  <footer class="docs-footer"><small>Individualized HRTFs from pinna meshes</small><nav aria-label="Footer"><a href="index.html">Documentation home</a><a href="../#downloads">Downloads</a><a href="https://github.com/Any2HRTF/Pinna2HRTF">GitHub</a></nav></footer>
+</div></body></html>

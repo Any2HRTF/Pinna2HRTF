@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Pinna2HRTF documentation for the desktop app, full-head scan preparation, ear editing, and Python CLI.">
+  <title>Documentation — Pinna2HRTF</title>
+  <link rel="icon" href="../favicon.png" type="image/png" sizes="64x64">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="docs-frame">
+    <header class="docs-header">
+      <a class="brand" href="../" aria-label="Pinna2HRTF home"><img src="../assets/app-icon.webp" alt=""><strong>Pinna2HRTF</strong></a>
+      <nav class="top-nav" aria-label="Main navigation"><a href="../">Home</a><a href="../#downloads">Downloads</a><a href="index.html" aria-current="page">Documentation</a></nav>
+    </header>
+    <div class="docs-layout">
+      <aside class="docs-sidebar">
+        <p class="sidebar-label">Documentation</p>
+        <nav class="sidebar-links" aria-label="Documentation pages">
+          <a href="index.html" aria-current="page">Overview</a><a href="desktop-app.html">Desktop app</a><a href="scan-preparation.html">Scan preparation &amp; ear editing</a><a href="cli.html">Python CLI</a><a href="building.html">Build from source</a>
+        </nav>
+      </aside>
+      <main class="docs-content" id="main">
+        <p class="kicker"><span class="dot" aria-hidden="true"></span> USER GUIDE</p>
+        <h1>From pinna meshes to spatial audio.</h1>
+        <p class="lede">Pinna2HRTF prepares one or two ear meshes, builds an acoustic simulation, and exports individualized HRTF and HRIR data in SOFA files.</p>
+        <div class="release-note"><p><strong>Release status</strong></p><p>This guide describes the current app and CLI work being prepared for the 1.5 release, including full-head scan preparation, reviewed ear edits, project organization, and pipeline controls. The public download links still point to v1.1.0; the 1.5 release has not been published yet.</p></div>
+
+        <h2>Choose a guide</h2>
+        <div class="page-cards">
+          <a class="page-card" href="desktop-app.html"><strong>Desktop app</strong><span>Projects, mesh inputs, pipeline stages, previews, logs, and outputs.</span></a>
+          <a class="page-card" href="scan-preparation.html"><strong>Scan preparation &amp; ear editing</strong><span>Align a head scan, prepare left and right ears, review and save edits.</span></a>
+          <a class="page-card" href="cli.html"><strong>Python CLI</strong><span>Install the environment, prepare native tools, run stages, and configure YAML.</span></a>
+          <a class="page-card" href="building.html"><strong>Build from source</strong><span>Package a local macOS or Windows app for development.</span></a>
+        </div>
+
+        <h2>Workflow at a glance</h2>
+        <ol>
+          <li><strong>Choose geometry.</strong> Import one or both pinna meshes, or prepare ears from an edited full-head scan.</li>
+          <li><strong>Review the inputs.</strong> Inspect mesh orientation and, for prepared scans, check each automatically extracted ear and save any manual edits.</li>
+          <li><strong>Prepare the simulation.</strong> Set the evaluation grid and frequency range, then run preprocessing.</li>
+          <li><strong>Solve and export.</strong> Run NumCalc locally or through Slurm, then write HRTF and HRIR results to SOFA.</li>
+        </ol>
+
+        <figure><img src="../assets/screenshots/desktop-workspace.jpg" alt="Pinna2HRTF desktop workspace with an ear mesh shown in the 3D viewer and the live log along the bottom" loading="lazy"><figcaption>The desktop viewer shows the current mesh and provides previews, microphone placement, and run activity.</figcaption></figure>
+
+        <h2>Downloads and support</h2>
+        <p>Get the macOS or Windows app from the <a href="../#downloads">download section</a>. The installers bundle Python, the models, and simulation tools. The <a href="https://github.com/Any2HRTF/Pinna2HRTF/releases">release page</a> has checksums and previous versions.</p>
+        <p>For code, issue reports, and release notes, visit the <a href="https://github.com/Any2HRTF/Pinna2HRTF">Pinna2HRTF GitHub repository</a>.</p>
+      </main>
+    </div>
+    <footer class="docs-footer"><small>Individualized HRTFs from pinna meshes</small><nav aria-label="Footer"><a href="../">Home</a><a href="../#downloads">Downloads</a><a href="https://github.com/Any2HRTF/Pinna2HRTF">GitHub</a></nav></footer>
+  </div>
+</body>
+</html>
