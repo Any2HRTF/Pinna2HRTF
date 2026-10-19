@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 160" fill="none">
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <path d="M31 69c-12 17-12 39 0 55m17-69c-18 22-18 54 0 76m83-76c18 22 18 54 0 76m17-63c12 17 12 39 0 55" stroke="#fff" stroke-width="17"/>
+    <path d="M31 69c-12 17-12 39 0 55m17-69c-18 22-18 54 0 76m83-76c18 22 18 54 0 76m17-63c12 17 12 39 0 55" stroke="#9b67ff" stroke-width="6"/>
+    <path d="M64 91h15l8-22 13 54 12-39h10" stroke="#fff" stroke-width="15"/>
+    <path d="M64 91h15l8-22 13 54 12-39h10" stroke="#46d9e9" stroke-width="6"/>
+    <rect x="58" y="120" width="76" height="30" rx="15" fill="#ff658e" stroke="#fff" stroke-width="7"/>
+    <rect x="58" y="120" width="76" height="30" rx="15" stroke="#29224c" stroke-width="3"/>
+    <path d="m47 40 4-10 5 10 10 4-10 5-5 10-4-10-10-5 10-4Zm86 11 3-7 4 7 7 3-7 4-4 7-3-7-7-4 7-3Z" fill="#ffcf3f" stroke="#fff" stroke-width="4"/>
+  </g>
+  <text x="96" y="141" fill="#29224c" font-family="Arial, sans-serif" font-size="16" font-weight="900" letter-spacing="1.2" text-anchor="middle">HRIR!</text>
+</svg>

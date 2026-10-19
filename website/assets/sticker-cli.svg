@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 150" fill="none">
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <rect x="22" y="22" width="137" height="102" rx="16" fill="#fff" stroke="#fff" stroke-width="15"/>
+    <rect x="22" y="22" width="137" height="102" rx="16" fill="#6846c6" stroke="#29224c" stroke-width="5"/>
+    <path d="M25 51h131" stroke="#fff" stroke-width="4"/>
+    <circle cx="42" cy="37" r="5" fill="#ff658e" stroke="#fff" stroke-width="3"/>
+    <circle cx="60" cy="37" r="5" fill="#ffcf3f" stroke="#fff" stroke-width="3"/>
+    <circle cx="78" cy="37" r="5" fill="#51dcec" stroke="#fff" stroke-width="3"/>
+    <path d="m52 70 17 13-17 13m32 0h37" stroke="#fff" stroke-width="7"/>
+    <rect x="103" y="105" width="58" height="32" rx="16" fill="#ffcf3f" stroke="#fff" stroke-width="7"/>
+    <rect x="103" y="105" width="58" height="32" rx="16" stroke="#29224c" stroke-width="3"/>
+    <path d="m25 119 3-7 4 7 7 3-7 4-4 7-3-7-7-4 7-3Z" fill="#51dcec" stroke="#fff" stroke-width="4"/>
+  </g>
+  <text x="132" y="127" fill="#29224c" font-family="Arial, sans-serif" font-size="15" font-weight="900" letter-spacing="1" text-anchor="middle">CLI!</text>
+</svg>
