@@ -136,7 +136,7 @@ struct ContentView: View {
             createProject: { store.createProject() },
             importProject: { store.importProject() },
             duplicateProject: { store.duplicateSelectedProject() },
-            removeProject: { store.forgetSelectedProject() },
+            removeProject: { store.removeSelectedProject() },
             runNextStage: { store.runNextStage() },
             runStage: { store.run(stage: $0) },
             stopProject: { store.stopRunningProcess() },

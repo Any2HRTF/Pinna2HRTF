@@ -68,6 +68,11 @@ public partial class MainWindow : Window
     readonly Dictionary<Guid, DateTime> lastOutputScan = [];
     readonly Dictionary<Process, GeneratedOutputManifest> processOutputStores = [];
     readonly Dictionary<Guid, string> projectLogs = [];
+    readonly Dictionary<Guid, string> legacyProjectLogs = [];
+    readonly Dictionary<Guid, string> technicalLogPaths = [];
+    readonly Dictionary<Process, PipelineLogCapture> pipelineLogCaptures = [];
+    readonly Dictionary<Guid, Dictionary<string, int>> projectLogKeyIndices = [];
+    readonly HashSet<Guid> projectsBeingRemoved = [];
     readonly Dictionary<Guid, ProjectRowUi> projectRows = [];
     readonly Dictionary<Guid, ProjectViewerState> viewerStates = [];
     readonly Dictionary<string, SettingHelpEntry> settingHelp = [];
@@ -142,6 +147,7 @@ public partial class MainWindow : Window
     Border? projectsPaneBorder;
     Border? previewPanelBorder;
     Border? logPanelBorder;
+    Button? technicalLogButton;
     Border? settingsPaneBorder;
     TextBlock? projectsHeaderText;
     FrameworkElement? projectsBody;
@@ -856,12 +862,17 @@ public partial class MainWindow : Window
         var header = new Grid { Height = LogHeaderHeight, MinHeight = LogHeaderHeight, Margin = new Thickness(10, 0, 6, 0), HorizontalAlignment = HorizontalAlignment.Stretch };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var title = new TextBlock { Text = "Live Log", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(title, 0);
         header.Children.Add(title);
+        technicalLogButton = new Button { Content = "Technical Log", HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(10, 2, 10, 2), IsEnabled = false };
+        technicalLogButton.Click += OpenTechnicalLogClicked;
+        Grid.SetColumn(technicalLogButton, 1);
+        header.Children.Add(technicalLogButton);
         var clear = new Button { Content = "Clear", HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(10, 2, 10, 2) };
         clear.Click += ClearLogClicked;
-        Grid.SetColumn(clear, 1);
+        Grid.SetColumn(clear, 2);
         header.Children.Add(clear);
         logText = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Consolas"), FontSize = 12, BorderThickness = new Thickness(0), Margin = new Thickness(10) };
         ScrollViewer.SetVerticalScrollBarVisibility(logText, ScrollBarVisibility.Auto);
@@ -1583,7 +1594,25 @@ public partial class MainWindow : Window
     void LoadSelectedProjectLog()
     {
         logText.Text = selectedProject != null && projectLogs.TryGetValue(selectedProject.Id, out var value) ? value : "";
+        if (selectedProject is { } project && (!technicalLogPaths.TryGetValue(project.Id, out var path) || !File.Exists(path)) && LatestTechnicalLogPath(project) is string latest)
+            technicalLogPaths[project.Id] = latest;
+        RefreshTechnicalLogButton();
         RestoreLogScroll(0, true);
+    }
+
+    void RefreshTechnicalLogButton()
+    {
+        if (technicalLogButton == null) return;
+        technicalLogButton.IsEnabled = selectedProject != null
+            && technicalLogPaths.TryGetValue(selectedProject.Id, out var path)
+            && File.Exists(path);
+    }
+
+    void OpenTechnicalLogClicked(object sender, RoutedEventArgs e)
+    {
+        if (selectedProject == null || !technicalLogPaths.TryGetValue(selectedProject.Id, out var path) || !File.Exists(path)) return;
+        try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
+        catch (Exception error) { AppendLog("Could not open the technical log: " + error.Message, selectedProject.Id); }
     }
 
     void RefreshModelOptions()
@@ -1971,24 +2000,153 @@ public partial class MainWindow : Window
         return new ProjectRecord { Name = "Project " + index, Settings = new ProjectSettings { Inference = new InferenceSettings { ModelConfig = Path.Combine(resources, "Local 3 Views.yaml"), ModelCheckpoint = Path.Combine(resources, "Local 3 Views.pth") } } };
     }
 
-    void RemoveProject()
+    async void RemoveProject()
     {
-        if (selectedProject == null)
-            return;
-        StopProject(selectedProject);
-        projectLogs.Remove(selectedProject.Id);
-        SaveProjectLogs();
-        projects.Remove(selectedProject);
-        selectedProject = projects.FirstOrDefault();
-        if (selectedProject == null)
-            CreateProject();
-        else
+        if (selectedProject is not { } project || !projectsBeingRemoved.Add(project.Id)) return;
+        try
         {
-            Persist();
-            RefreshProjectList();
-            LoadSelectedProject();
-            RefreshArtifacts();
+            if (runningProcesses.ContainsKey(project.Id) || outputOperations.Contains(project.Id) || outputScans.Contains(project.Id))
+            {
+                await ShowProjectRemovalErrorAsync("Wait for the project task and output checks to finish before removing this project.");
+                return;
+            }
+
+            var confirmation = new ContentDialog
+            {
+                Title = $"Move {project.Name} to Recycle Bin?",
+                Content = "This removes the project from Pinna2HRTF and moves its project folder and contents to the Recycle Bin. You can restore the folder from there.",
+                PrimaryButtonText = "Move to Recycle Bin",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = Root.XamlRoot
+            };
+            if (await confirmation.ShowAsync() != ContentDialogResult.Primary) return;
+            if (!projects.Contains(project)) return;
+            if (runningProcesses.ContainsKey(project.Id) || outputOperations.Contains(project.Id) || outputScans.Contains(project.Id))
+            {
+                await ShowProjectRemovalErrorAsync("The project started a task while the confirmation was open. Wait for it to finish, then remove the project again.");
+                return;
+            }
+
+            var location = project.SaveLocation?.Trim();
+            if (!string.IsNullOrWhiteSpace(location))
+            {
+                string folder;
+                try { folder = Path.GetFullPath(location); }
+                catch (Exception error)
+                {
+                    await ShowProjectRemovalErrorAsync("The saved project folder path is invalid. The project remains in the app. " + error.Message);
+                    return;
+                }
+                if (!CanRecycleProjectFolder(project, folder, out var reason))
+                {
+                    await ShowProjectRemovalErrorAsync(reason);
+                    return;
+                }
+                if (Directory.Exists(folder))
+                {
+                    try
+                    {
+                        Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(folder,
+                            Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                            Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                    }
+                    catch (Exception error)
+                    {
+                        await ShowProjectRemovalErrorAsync("The project folder could not be moved to the Recycle Bin. The project remains in the app. " + error.Message);
+                        return;
+                    }
+                }
+                else if (File.Exists(folder))
+                {
+                    await ShowProjectRemovalErrorAsync("The saved project location is a file, not a folder. It was left in place and the project remains in the app.");
+                    return;
+                }
+            }
+
+            projectLogs.Remove(project.Id);
+            legacyProjectLogs.Remove(project.Id);
+            technicalLogPaths.Remove(project.Id);
+            projectLogKeyIndices.Remove(project.Id);
+            viewerStates.Remove(project.Id);
+            failedStages.Remove(project.Id);
+            queuedStages.Remove(project.Id);
+            knownOutputs.Remove(project.Id);
+            lastOutputScan.Remove(project.Id);
+            projects.Remove(project);
+            SaveProjectLogs();
+            selectedProject = projects.FirstOrDefault();
+            if (selectedProject == null) CreateProject();
+            else
+            {
+                Persist();
+                RefreshProjectList();
+                LoadSelectedProject();
+                RefreshArtifacts();
+            }
         }
+        finally { projectsBeingRemoved.Remove(project.Id); }
+    }
+
+    bool CanRecycleProjectFolder(ProjectRecord project, string folder, out string reason)
+    {
+        try
+        {
+            var normalized = NormalizeDirectoryPath(folder);
+            if (normalized == Path.GetPathRoot(normalized))
+            {
+                reason = "A drive root cannot be moved to the Recycle Bin as a project folder.";
+                return false;
+            }
+            var package = string.IsNullOrWhiteSpace(packageRoot) ? "" : NormalizeDirectoryPath(packageRoot);
+            var appDataRoot = string.IsNullOrWhiteSpace(appData) ? "" : NormalizeDirectoryPath(appData);
+            if (package.Length > 0 && (IsSameOrChildPath(package, normalized) || IsSameOrChildPath(normalized, package))
+                || appDataRoot.Length > 0 && IsSameOrChildPath(normalized, appDataRoot))
+            {
+                reason = "This folder is a protected app location. Choose a separate project folder before removing it.";
+                return false;
+            }
+            foreach (var other in projects.Where(item => item.Id != project.Id && !string.IsNullOrWhiteSpace(item.SaveLocation)))
+            {
+                var otherPath = NormalizeDirectoryPath(other.SaveLocation);
+                if (string.Equals(normalized, otherPath, StringComparison.OrdinalIgnoreCase) || IsSameOrChildPath(normalized, otherPath))
+                {
+                    reason = "This folder contains another project. Move the projects to separate folders before removing it.";
+                    return false;
+                }
+            }
+            reason = "";
+            return true;
+        }
+        catch (Exception error) { reason = "Could not validate the project folder path. The project remains in the app. " + error.Message; return false; }
+    }
+
+    static string NormalizeDirectoryPath(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(full) ?? "";
+        return full.Length > root.Length ? full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) : full;
+    }
+
+    static bool IsSameOrChildPath(string parent, string child)
+    {
+        var normalizedParent = NormalizeDirectoryPath(parent);
+        var normalizedChild = NormalizeDirectoryPath(child);
+        return normalizedChild.Equals(normalizedParent, StringComparison.OrdinalIgnoreCase)
+            || normalizedChild.StartsWith(normalizedParent + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    async Task ShowProjectRemovalErrorAsync(string message)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = "Could not remove project",
+            Content = message,
+            CloseButtonText = "OK",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = Root.XamlRoot
+        };
+        await dialog.ShowAsync();
     }
 
     async void BrowseLeftEarClicked(object sender, RoutedEventArgs e) { var path = await PickFileAsync(leftEarBox.Text); if (path != null) leftEarBox.Text = path; }
@@ -2695,21 +2853,41 @@ public partial class MainWindow : Window
             var executable = BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
             var info = new ProcessStartInfo(executable, $"-m HRTFCalculation.CLI {stage.Value} --config {QuoteArgument(config)}") { WorkingDirectory = packageRoot, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
             ApplyProcessEnvironment(info);
+            var runId = Guid.NewGuid();
+            var startedAt = DateTime.Now;
+            var logPath = TechnicalLogPath(project, stage, runId, startedAt);
+            PipelineLogCapture? capture = null;
+            try
+            {
+                capture = new PipelineLogCapture(logPath,
+                    $"Pinna2HRTF technical output\nProject: {project.Name}\nStage: {stage.Title}\nStarted: {startedAt.ToString("F", CultureInfo.CurrentCulture)}\nCommand: {executable} {info.Arguments}\n\n--- stdout and stderr ---",
+                    progress => DispatcherQueue.TryEnqueue(() => RecordPipelineEvent(progress, stage, project.Id, runId)),
+                    message => DispatcherQueue.TryEnqueue(() => AppendLog("Could not save complete technical output: " + message, project.Id)));
+                technicalLogPaths[project.Id] = logPath;
+                RefreshTechnicalLogButton();
+            }
+            catch (Exception error) { AppendLog("Could not create a technical log: " + error.Message, project.Id); }
             var process = new Process { StartInfo = info, EnableRaisingEvents = true };
-            process.OutputDataReceived += (_, args) => AppendLog(args.Data, project.Id);
-            process.ErrorDataReceived += (_, args) => AppendLog(args.Data, project.Id);
-            process.Exited += (_, _) => DispatcherQueue.TryEnqueue(() => ProcessFinished(process, project, stage));
+            process.OutputDataReceived += (_, args) => capture?.Append("stdout", args.Data);
+            process.ErrorDataReceived += (_, args) => capture?.Append("stderr", args.Data);
+            process.Exited += (_, _) =>
+            {
+                try { process.WaitForExit(); } catch { }
+                capture?.Dispose();
+                DispatcherQueue.TryEnqueue(() => ProcessFinished(process, project, stage));
+            };
             runningProcesses[project.Id] = process;
             runningStages[project.Id] = stage;
             processOutputStores[process] = outputStore;
+            if (capture != null) pipelineLogCaptures[process] = capture;
             FailedStages(project.Id).Remove(stage);
             if (!process.Start())
                 throw new InvalidOperationException("Process.Start returned false.");
             AssignPipelineJob(process, project.Id);
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
-            AppendLog(stage.Title + " started.", project.Id);
-            AppendLog($"{stage.Title} process: {executable}", project.Id);
+            var details = StageStartDetails(stage, project);
+            AppendLog($"{stage.Title} started{(details.Length == 0 ? "" : " · " + details)}.", project.Id);
             RefreshPipelineStatus();
         }
         catch (Exception error)
@@ -2720,6 +2898,7 @@ public partial class MainWindow : Window
                 runningStages.Remove(project.Id);
                 TryTerminate(failedProcess);
                 processOutputStores.Remove(failedProcess);
+                if (pipelineLogCaptures.Remove(failedProcess, out var capture)) capture.Dispose();
                 try { failedProcess.Dispose(); } catch { }
             }
             FailedStages(project.Id).Add(stage);
@@ -2759,8 +2938,11 @@ public partial class MainWindow : Window
         runningProcesses.Remove(project.Id);
         runningStages.Remove(project.Id);
         outputOperations.Remove(project.Id);
-        AppendLog(code == 0 ? stage.Title + " finished." : stage.Title + " failed (status " + code + ").", project.Id);
+        pipelineLogCaptures.Remove(process);
+        var technicalOutput = technicalLogPaths.TryGetValue(project.Id, out var logPath) ? $" Technical output: {Path.GetFileName(logPath)}." : "";
+        AppendLog(code == 0 ? stage.Title + " finished." : stage.Title + " failed (status " + code + ")." + technicalOutput, project.Id);
         process.Dispose();
+        RefreshTechnicalLogButton();
         RefreshArtifacts();
         if (!shutdownCleanupDone && captured && code == 0 && queuedStages.TryGetValue(project.Id, out var queue) && queue.Count > 0) RunStage(queue.Dequeue(), project, true); else queuedStages.Remove(project.Id);
         RefreshPipelineStatus();
@@ -2775,6 +2957,7 @@ public partial class MainWindow : Window
         info.Environment["BLENDER_USER_CONFIG"] = Path.Combine(appData, "Blender", "config");
         info.Environment["BLENDER_USER_SCRIPTS"] = Path.Combine(appData, "Blender", "scripts");
         info.Environment["BLENDER_USER_DATAFILES"] = Path.Combine(appData, "Blender", "datafiles");
+        info.Environment["PINNA2HRTF_LIVE_EVENTS"] = "1";
         var sitePackages = PythonSitePackagesPath();
         info.Environment["PYTHONPATH"] = packageRoot + (sitePackages == null ? "" : Path.PathSeparator + sitePackages);
         info.Environment["PATH"] = Path.Combine(environment.ExternalDir, "bin") + Path.PathSeparator + (info.Environment.TryGetValue("PATH", out var path) ? path : "");
@@ -3007,6 +3190,7 @@ ui:
             StopTrackedProcess(process, 1500);
             runningProcesses.Remove(project.Id);
             runningStages.Remove(project.Id);
+            if (pipelineLogCaptures.Remove(process, out var capture)) capture.Dispose();
             if (processOutputStores.Remove(process, out var store)) store.ReleaseForRecovery();
             try { process.Dispose(); } catch { }
             AppendLog("Stopping task.", project.Id);
@@ -3086,7 +3270,14 @@ ui:
         return c.Equals(p, StringComparison.OrdinalIgnoreCase) || c.StartsWith(p + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
-    void ClearLogClicked(object sender, RoutedEventArgs e) { if (selectedProject != null) projectLogs[selectedProject.Id] = ""; logText.Text = ""; SaveProjectLogs(); }
+    void ClearLogClicked(object sender, RoutedEventArgs e)
+    {
+        if (selectedProject == null) return;
+        projectLogs[selectedProject.Id] = "";
+        projectLogKeyIndices.Remove(selectedProject.Id);
+        logText.Text = "";
+        if (!SaveProjectLog(selectedProject.Id)) SaveProjectLogs();
+    }
 
     static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
     {
@@ -3171,11 +3362,13 @@ ui:
         });
     }
 
-    void AppendLog(string? text, Guid? projectId = null)
+    void AppendLog(string? text, Guid? projectId = null, string? key = null)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
-        var compact = string.Join(Environment.NewLine, text.Replace("\r\n", "\n").Split('\n').Select(x => x.Trim()).Where(x => x.Length > 0 && !Path.IsPathRooted(x) && !x.Contains("Mem:") && !x.StartsWith("Fra:") && !x.StartsWith("Blender", StringComparison.OrdinalIgnoreCase)));
-        if (compact.Length == 0) return;
+        var compactLines = text.Replace("\r\n", "\n").Split('\n').Select(x => x.Trim())
+            .Where(x => x.Length > 0 && !Path.IsPathRooted(x) && !x.Contains("Mem:") && !x.StartsWith("Fra:") && !x.StartsWith("Blender", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (compactLines.Length == 0) return;
         var id = projectId ?? selectedProject?.Id;
         if (id == null) return;
         void Append()
@@ -3184,9 +3377,33 @@ ui:
             var scroll = logScrollViewer ?? FindDescendant<ScrollViewer>(logText);
             var oldOffset = scroll?.VerticalOffset ?? 0;
             var followTail = logFollowTail;
-            var current = projectLogs.TryGetValue(id.Value, out var value) ? value : "";
-            projectLogs[id.Value] = current.Length == 0 ? compact : current + Environment.NewLine + compact;
-            SaveProjectLogs();
+            var current = projectLogs.TryGetValue(id.Value, out var value) && value.Length > 0
+                ? value.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).ToList()
+                : new List<string>();
+            var timestamp = DateTime.Now.ToString("T", CultureInfo.CurrentCulture);
+            var formatted = compactLines.Select(line => $"[{timestamp}] {line}").ToArray();
+            projectLogKeyIndices.TryGetValue(id.Value, out var keyIndices);
+            if (key != null && keyIndices != null && keyIndices.TryGetValue(key, out var existingIndex) && existingIndex < current.Count)
+                current[existingIndex] = formatted[0];
+            else
+            {
+                var firstIndex = current.Count;
+                current.AddRange(formatted);
+                if (key != null)
+                {
+                    keyIndices ??= [];
+                    keyIndices[key] = firstIndex;
+                    projectLogKeyIndices[id.Value] = keyIndices;
+                }
+            }
+            if (current.Count > 400)
+            {
+                current.RemoveRange(0, current.Count - 400);
+                projectLogKeyIndices.Remove(id.Value);
+            }
+            projectLogs[id.Value] = string.Join(Environment.NewLine, current);
+            if (!SaveProjectLog(id.Value)) legacyProjectLogs[id.Value] = projectLogs[id.Value];
+            else legacyProjectLogs.Remove(id.Value);
             if (selectedProject?.Id == id)
             {
                 logText.Text = projectLogs[id.Value];
@@ -3194,6 +3411,41 @@ ui:
             }
         }
         if (DispatcherQueue.HasThreadAccess) Append(); else DispatcherQueue.TryEnqueue(Append);
+    }
+
+    void RecordPipelineEvent(PipelineLogEvent progress, Stage stage, Guid projectId, Guid runId)
+    {
+        var message = progress.Level?.ToLowerInvariant() switch
+        {
+            "warning" => $"Warning · {stage.Title} · {progress.Message}",
+            "error" => $"Error · {stage.Title} · {progress.Message}",
+            _ => $"{stage.Title} · {progress.Message}"
+        };
+        var key = progress.Key == null ? null : $"{runId:N}:{progress.Key}";
+        AppendLog(message, projectId, key);
+    }
+
+    string StageStartDetails(Stage stage, ProjectRecord project)
+    {
+        if (stage == Stage.ScanPreparation)
+        {
+            var scan = Path.GetFileName(project.Settings.ScanPreparation.ScanPath);
+            var sides = new List<string>();
+            if (project.Settings.ScanPreparation.PrepareLeft) sides.Add("Left");
+            if (project.Settings.ScanPreparation.PrepareRight) sides.Add("Right");
+            return $"{scan} · {string.Join(" + ", sides)} ear{(sides.Count == 1 ? "" : "s")}";
+        }
+        if (stage == Stage.Numcalc || stage == Stage.Postprocessing)
+            return $"Project output: {Path.GetFileName(project.SaveLocation)}";
+
+        var inputs = new[]
+        {
+            ("Left", project.Settings.ScanPreparation.Enabled && project.Settings.ScanPreparation.PrepareLeft ? Path.Combine(project.SaveLocation, "Prepared", "Left.stl") : project.LeftEar),
+            ("Right", project.Settings.ScanPreparation.Enabled && project.Settings.ScanPreparation.PrepareRight ? Path.Combine(project.SaveLocation, "Prepared", "Right.stl") : project.RightEar)
+        }.Where(input => !string.IsNullOrWhiteSpace(input.Item2))
+            .Select(input => $"{input.Item1} {Path.GetFileName(input.Item2)}");
+        var description = string.Join(", ", inputs);
+        return description.Length == 0 ? "" : "Inputs: " + description;
     }
 
     void RefreshNumCalcStatus() { numCalcStatusText.Text = selectedProject == null ? "No project selected" : NumCalcStatus(selectedProject); }
@@ -3517,6 +3769,8 @@ ui:
             WaitForExitSafe(process, 1000);
             try { process.Dispose(); } catch { }
         }
+        foreach (var capture in pipelineLogCaptures.Values) capture.Dispose();
+        pipelineLogCaptures.Clear();
         runningProcesses.Clear();
         foreach (var store in processOutputStores.Values.Distinct()) store.ReleaseForRecovery();
         processOutputStores.Clear();
@@ -3590,19 +3844,117 @@ ui:
 
     void LoadProjectLogs()
     {
-        if (!File.Exists(logsPath)) return;
-        try
+        if (File.Exists(logsPath))
         {
-            foreach (var pair in JsonSerializer.Deserialize<Dictionary<Guid, string>>(File.ReadAllText(logsPath), jsonOptions) ?? [])
-                projectLogs[pair.Key] = pair.Value;
+            try
+            {
+                foreach (var pair in JsonSerializer.Deserialize<Dictionary<Guid, string>>(File.ReadAllText(logsPath), jsonOptions) ?? [])
+                    legacyProjectLogs[pair.Key] = pair.Value;
+            }
+            catch { legacyProjectLogs.Clear(); }
         }
-        catch { projectLogs.Clear(); }
+        foreach (var project in projects)
+        {
+            var activityPath = ProjectActivityLogPath(project);
+            if (activityPath != null && File.Exists(activityPath))
+            {
+                try
+                {
+                    var savedText = File.ReadAllText(activityPath);
+                    var normalizedText = NormalizeActivityLog(savedText);
+                    projectLogs[project.Id] = normalizedText;
+                    legacyProjectLogs.Remove(project.Id);
+                    if (!string.Equals(savedText, normalizedText, StringComparison.Ordinal)) SaveProjectLog(project.Id);
+                }
+                catch { }
+            }
+            else if (legacyProjectLogs.TryGetValue(project.Id, out var oldLog))
+            {
+                projectLogs[project.Id] = NormalizeActivityLog(oldLog);
+                if (SaveProjectLog(project.Id)) legacyProjectLogs.Remove(project.Id);
+            }
+            if (LatestTechnicalLogPath(project) is string path) technicalLogPaths[project.Id] = path;
+        }
+        SaveLegacyProjectLogs();
     }
 
     void SaveProjectLogs()
     {
-        if (!string.IsNullOrWhiteSpace(logsPath))
-            File.WriteAllText(logsPath, JsonSerializer.Serialize(projectLogs, jsonOptions));
+        foreach (var pair in projectLogs.ToArray())
+        {
+            if (SaveProjectLog(pair.Key)) legacyProjectLogs.Remove(pair.Key);
+            else legacyProjectLogs[pair.Key] = pair.Value;
+        }
+        SaveLegacyProjectLogs();
+    }
+
+    bool SaveProjectLog(Guid projectId)
+    {
+        var project = projects.FirstOrDefault(item => item.Id == projectId);
+        var activityPath = project == null ? null : ProjectActivityLogPath(project);
+        if (activityPath == null) return false;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(activityPath)!);
+            var temporaryPath = activityPath + ".tmp";
+            File.WriteAllText(temporaryPath, projectLogs.TryGetValue(projectId, out var value) ? value : "", new UTF8Encoding(false));
+            File.Move(temporaryPath, activityPath, true);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    static string NormalizeActivityLog(string text)
+    {
+        var lines = text.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        return string.Join(Environment.NewLine, lines.TakeLast(400));
+    }
+
+    void SaveLegacyProjectLogs()
+    {
+        if (string.IsNullOrWhiteSpace(logsPath)) return;
+        if (legacyProjectLogs.Count == 0)
+        {
+            try { if (File.Exists(logsPath)) File.Delete(logsPath); } catch { }
+            return;
+        }
+        try { File.WriteAllText(logsPath, JsonSerializer.Serialize(legacyProjectLogs, jsonOptions)); } catch { }
+    }
+
+    static string? ProjectLogDirectory(ProjectRecord project) => string.IsNullOrWhiteSpace(project.SaveLocation)
+        ? null
+        : ResolveProjectLogDirectory(project.SaveLocation);
+
+    static string? ResolveProjectLogDirectory(string location)
+    {
+        try { return Path.Combine(Path.GetFullPath(location), "Logs"); }
+        catch { return null; }
+    }
+
+    static string? ProjectActivityLogPath(ProjectRecord project) => ProjectLogDirectory(project) is string directory
+        ? Path.Combine(directory, "Activity.log")
+        : null;
+
+    static string TechnicalLogPath(ProjectRecord project, Stage stage, Guid runId, DateTime startedAt)
+    {
+        var directory = ProjectLogDirectory(project)
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Pinna2HRTF", "Logs", project.Id.ToString("D"));
+        var filename = $"{startedAt.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)}-{stage.Value}-{runId.ToString("N")[..8]}.log";
+        return Path.Combine(directory, filename);
+    }
+
+    static string? LatestTechnicalLogPath(ProjectRecord project)
+    {
+        var directory = ProjectLogDirectory(project);
+        if (directory == null || !Directory.Exists(directory)) return null;
+        try
+        {
+            return Directory.EnumerateFiles(directory, "*.log", SearchOption.TopDirectoryOnly)
+                .Where(path => !string.Equals(Path.GetFileName(path), "Activity.log", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .FirstOrDefault();
+        }
+        catch { return null; }
     }
 
     void Persist()

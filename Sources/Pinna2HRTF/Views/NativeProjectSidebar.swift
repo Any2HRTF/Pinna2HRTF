@@ -272,7 +272,7 @@ struct NativeProjectSidebar: NSViewRepresentable {
                 move.submenu = submenu
                 menu.addItem(move)
                 add("Duplicate Project", to: menu) { self.parent.store.selectedProjectID = id; self.parent.store.duplicateSelectedProject() }
-                add("Remove Project", to: menu, enabled: parent.store.canRemoveProject(id)) { self.parent.store.selectedProjectID = id; self.parent.store.forgetSelectedProject() }
+                add("Remove Project", to: menu, enabled: parent.store.canRemoveProject(id)) { self.parent.store.selectedProjectID = id; self.parent.store.removeSelectedProject() }
             }
             return menu
         }

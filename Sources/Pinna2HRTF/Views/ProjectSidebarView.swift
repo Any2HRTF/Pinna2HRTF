@@ -40,13 +40,13 @@ struct ProjectSidebarView: View {
                         selectedFolderID = nil
                         store.removeFolder(id)
                     } else {
-                        store.forgetSelectedProject()
+                        store.removeSelectedProject()
                     }
                 } label: {
                     Label(selectedFolderID == nil ? "Remove Project" : "Remove Folder", systemImage: "minus")
                         .frame(width: 28, height: 28)
                 }
-                .help(selectedFolderID == nil ? "Remove the selected project from Pinna2HRTF" : "Remove the selected folder and keep its projects")
+                .help(selectedFolderID == nil ? "Move the selected project folder to Trash" : "Remove the selected folder and keep its projects")
                 .disabled(selectedFolderID == nil && !store.canRemoveSelectedProject)
                 Button { editFolder() } label: {
                     Label("New Folder", systemImage: "folder.badge.plus").frame(width: 28, height: 28)

@@ -39,6 +39,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published var runningStages: [UUID: Stage] = [:]
     @Published private(set) var liveLogStatusByProject: [UUID: String] = [:]
     @Published private var outputOperations = Set<UUID>()
+    @Published private var projectsBeingRemoved = Set<UUID>()
     private var outputStores: [String: GeneratedOutputManifest] = [:]
     @Published var environmentProcess: Process?
     @Published var failedStagesByProject: [UUID: Set<Stage>] = [:]
@@ -85,7 +86,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         viewerStateByProject = Self.loadViewerStates()
         super.init()
         for project in projects {
-            if let url = Self.latestTechnicalLogURL(for: project.id) {
+            if let url = Self.latestTechnicalLogURL(for: project) {
                 technicalLogURLs[project.id] = url
             }
         }
@@ -107,7 +108,11 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     var selectedProjectIsRunning: Bool {
         guard let selectedProject else { return false }
-        return runningProcesses[selectedProject.id] != nil || outputOperations.contains(selectedProject.id) || stoppingProjects.contains(selectedProject.id) || meshEditorRequest?.projectID == selectedProject.id
+        return runningProcesses[selectedProject.id] != nil
+            || outputOperations.contains(selectedProject.id)
+            || stoppingProjects.contains(selectedProject.id)
+            || meshEditorRequest?.projectID == selectedProject.id
+            || projectsBeingRemoved.contains(selectedProject.id)
     }
 
     var selectedProjectIsManagingOutputs: Bool {
@@ -146,7 +151,12 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func canRemoveProject(_ id: UUID) -> Bool {
-        projects.contains { $0.id == id } && runningProcesses[id] == nil && !outputOperations.contains(id) && !stoppingProjects.contains(id)
+        projects.contains { $0.id == id }
+            && runningProcesses[id] == nil
+            && !outputOperations.contains(id)
+            && !stoppingProjects.contains(id)
+            && meshEditorRequest?.projectID != id
+            && !projectsBeingRemoved.contains(id)
     }
     var canRemoveSelectedProject: Bool { selectedProjectID.map(canRemoveProject) ?? false }
 
@@ -357,20 +367,97 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         return ""
     }
 
-    func forgetSelectedProject() {
-        guard let selectedProjectID else { return }
-        guard canRemoveSelectedProject else {
-            appendLog("Stop the task and wait for output checks before removing this project.")
+    func removeSelectedProject() {
+        guard let project = selectedProject else { return }
+        let projectID = project.id
+        guard canRemoveProject(projectID) else {
+            appendLog("Close the ear editor or wait for running tasks and output checks before moving this project to Trash.")
             return
         }
-        runningProcesses[selectedProjectID] = nil
-        runningStages[selectedProjectID] = nil
-        failedStagesByProject[selectedProjectID] = nil
-        logEntriesByProject[selectedProjectID] = nil
-        projects.removeAll { $0.id == selectedProjectID }
-        self.selectedProjectID = projects.first?.id
+
+        let alert = NSAlert()
+        alert.messageText = "Move \(project.name) to Trash?"
+        alert.informativeText = "This removes the project from Pinna2HRTF and moves its project folder and contents to Trash. You can restore the folder from Trash."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let location = project.saveLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !location.isEmpty else {
+            finishRemovingProject(projectID)
+            return
+        }
+
+        let projectFolder = URL(fileURLWithPath: location, isDirectory: true).standardizedFileURL
+        guard canTrashProjectFolder(projectFolder, for: project) else {
+            showProjectRemovalError("This folder is a protected app location or contains another project. Move the project to a separate folder before removing it.")
+            return
+        }
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: projectFolder.path, isDirectory: &isDirectory) else {
+            finishRemovingProject(projectID)
+            return
+        }
+        guard isDirectory.boolValue else {
+            showProjectRemovalError("The saved project location is not a folder, so it was left in place and the project remains in the app.")
+            return
+        }
+
+        projectsBeingRemoved.insert(projectID)
+        NSWorkspace.shared.recycle([projectFolder]) { [weak self] _, error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.projectsBeingRemoved.remove(projectID)
+                if let error {
+                    self.showProjectRemovalError("The project folder could not be moved to Trash. The project remains in the app. \(error.localizedDescription)")
+                    return
+                }
+                self.finishRemovingProject(projectID)
+            }
+        }
+    }
+
+    private func canTrashProjectFolder(_ folder: URL, for project: ProjectRecord) -> Bool {
+        let folderPath = folder.standardizedFileURL.path
+        guard folderPath != "/" else { return false }
+
+        let protectedFolders = [rootURL, packageURL, Defaults.appDataURL]
+        for protected in protectedFolders {
+            let protectedPath = protected.standardizedFileURL.path
+            if protectedPath == folderPath || protectedPath.hasPrefix(folderPath + "/") { return false }
+        }
+
+        for other in projects where other.id != project.id && !other.saveLocation.isEmpty {
+            let otherPath = URL(fileURLWithPath: other.saveLocation).standardizedFileURL.path
+            if otherPath == folderPath || otherPath.hasPrefix(folderPath + "/") { return false }
+        }
+        return true
+    }
+
+    private func finishRemovingProject(_ id: UUID) {
+        runningProcesses[id] = nil
+        runningStages[id] = nil
+        failedStagesByProject[id] = nil
+        logEntriesByProject[id] = nil
+        pipelineLogCaptures[id] = nil
+        liveLogStatusByProject[id] = nil
+        technicalLogURLs[id] = nil
+        viewerStateByProject[id] = nil
+        projects.removeAll { $0.id == id }
+        if selectedProjectID == id { selectedProjectID = projects.first?.id }
         persist()
         refreshArtifacts()
+    }
+
+    private func showProjectRemovalError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Could not move project to Trash"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     func updateSelectedProject(refresh: Bool = true, _ update: (inout ProjectRecord) -> Void) {
@@ -1131,7 +1218,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         process.standardError = pipe
         let runID = UUID()
         let startedAt = Date()
-        let logURL = Self.technicalLogURL(projectID: project.id, stage: stage, runID: runID, date: startedAt)
+        let logURL = Self.technicalLogURL(project: project, stage: stage, runID: runID, date: startedAt)
         let capture: PipelineLogCapture?
         do {
             let header = [
@@ -1357,8 +1444,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         process.standardError = pipe
         environmentProcess = process
         let runID = UUID()
-        let logURL = Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
-            .appendingPathComponent("Environment-\(runID.uuidString).log")
+        let projectForLog = logProjectID.flatMap { id in projects.first { $0.id == id } }
+        let logDirectory = projectForLog.flatMap(Self.projectLogDirectory(for:))
+            ?? Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
+        let logURL = logDirectory.appendingPathComponent("Environment-\(runID.uuidString).log")
         let capture: PipelineLogCapture?
         do {
             capture = try PipelineLogCapture(fileURL: logURL, header: "Pinna2HRTF environment setup\nStarted: \(Date().formatted(date: .complete, time: .standard))\n\n--- stdout and stderr ---\n\n", onEvent: { _ in }, onFailure: { [weak self] message in
@@ -1609,7 +1698,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         guard let selectedProjectID else { logText = ""; return }
         logText = renderedActivity(for: selectedProjectID)
         if technicalLogURLs[selectedProjectID] == nil,
-           let url = Self.latestTechnicalLogURL(for: selectedProjectID) {
+           let project = projects.first(where: { $0.id == selectedProjectID }),
+           let url = Self.latestTechnicalLogURL(for: project) {
             technicalLogURLs[selectedProjectID] = url
         }
     }
@@ -1678,20 +1768,59 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         return "\(seconds / 60)m \(seconds % 60)s"
     }
 
-    private static func technicalLogURL(projectID: UUID, stage: Stage, runID: UUID, date: Date) -> URL {
+    private static func technicalLogURL(project: ProjectRecord, stage: Stage, runID: UUID, date: Date) -> URL {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = .current
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         let filename = "\(formatter.string(from: date))-\(stage.rawValue)-\(runID.uuidString.prefix(8)).log"
-        return Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
-            .appendingPathComponent(projectID.uuidString, isDirectory: true)
-            .appendingPathComponent(filename)
+        return projectLogDirectory(for: project)?.appendingPathComponent(filename)
+            ?? Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
+                .appendingPathComponent(project.id.uuidString, isDirectory: true)
+                .appendingPathComponent(filename)
     }
 
-    private static func latestTechnicalLogURL(for projectID: UUID) -> URL? {
-        let directory = Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
-            .appendingPathComponent(projectID.uuidString, isDirectory: true)
+    private static func latestTechnicalLogURL(for project: ProjectRecord) -> URL? {
+        guard let directory = projectLogDirectory(for: project) else { return nil }
+        migrateLegacyTechnicalLogs(for: project, to: directory)
+        return latestLog(in: directory)
+            ?? latestLog(in: Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
+                .appendingPathComponent(project.id.uuidString, isDirectory: true))
+    }
+
+    private static func projectLogDirectory(for project: ProjectRecord) -> URL? {
+        let location = project.saveLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !location.isEmpty else { return nil }
+        return URL(fileURLWithPath: location, isDirectory: true)
+            .appendingPathComponent("Logs", isDirectory: true)
+    }
+
+    private static func migrateLegacyTechnicalLogs(for project: ProjectRecord, to directory: URL) {
+        let legacyDirectory = Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
+            .appendingPathComponent(project.id.uuidString, isDirectory: true)
+        guard legacyDirectory.standardizedFileURL != directory.standardizedFileURL,
+              let files = try? FileManager.default.contentsOfDirectory(at: legacyDirectory, includingPropertiesForKeys: nil),
+              !files.isEmpty else { return }
+
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            for source in files where source.pathExtension == "log" {
+                var destination = directory.appendingPathComponent(source.lastPathComponent)
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    let suffix = UUID().uuidString.prefix(8)
+                    destination = directory.appendingPathComponent("\(source.deletingPathExtension().lastPathComponent)-\(suffix).log")
+                }
+                try FileManager.default.moveItem(at: source, to: destination)
+            }
+            if (try? FileManager.default.contentsOfDirectory(atPath: legacyDirectory.path).isEmpty) == true {
+                try? FileManager.default.removeItem(at: legacyDirectory)
+            }
+        } catch {
+            // Keep any logs that could not be moved in their legacy location; lookup falls back to it.
+        }
+    }
+
+    private static func latestLog(in directory: URL) -> URL? {
         guard let urls = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey]) else { return nil }
         return urls.filter { $0.pathExtension == "log" }.max {
             let first = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
