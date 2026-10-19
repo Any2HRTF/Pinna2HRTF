@@ -28,7 +28,7 @@ struct ProjectInspectorView: View {
 
     var settingsPanel: some View {
         Form {
-            Section {
+            Section("Inputs") {
                 requiredPanel
             }
             Section {
@@ -36,7 +36,7 @@ struct ProjectInspectorView: View {
             } header: {
                 Text("Manual PPM Fit")
             }
-            Section {
+            Section("Processing") {
                 SettingsDisclosure("Scan Preparation", systemImage: "bandage") {
                     LabeledTextField("Target edge (mm)", helpID: "scan.target_edge", text: scanTextBinding(\.targetEdgeMM))
                     LabeledTextField("Left crop margin (mm)", helpID: "scan.left_margin", text: scanTextBinding(\.leftMarginMM))
@@ -103,6 +103,8 @@ struct ProjectInspectorView: View {
                     LabeledTextField("CPU limit (%)", helpID: "numcalc.cpu_limit", text: numcalcBinding(\.maxCPULoad))
                     SettingToggle(title: "Adaptive FMM expansion length", helpID: "numcalc.adaptive_fmm", isOn: numcalcBoolBinding(\.adaptiveFmmLength))
                 }
+            }
+            Section("Results") {
                 SettingsDisclosure("Postprocessing", systemImage: "slider.horizontal.3") {
                     PathField("SOFA output folder (optional)", helpID: "postprocessing.output_folder", text: postprocessingOutputFolderBinding, mode: .directory)
                     SettingToggle(title: "Normalize HRTFs", helpID: "postprocessing.normalize", isOn: postprocessingNormalizeBinding)
@@ -150,7 +152,7 @@ struct ProjectInspectorView: View {
 
     var manualPPMPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Fit the Bezier PPM against each target ear. The editor overlays the target and the model, then lets you adjust global alignment, convex regions, and concave details.")
+            Text("Fit a parametric model to either ear.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             ForEach(EarSide.allCases) { side in
@@ -166,7 +168,8 @@ struct ProjectInspectorView: View {
                         .disabled(!canFitManually(side))
                 }
             }
-            Toggle("Use saved manual fits for preprocessing", isOn: manualPPMBinding)
+            Toggle("Use saved manual fits", isOn: manualPPMBinding)
+                .toggleStyle(.checkbox)
                 .help("Use the saved manual PPM mesh for each fitted side. Unfitted sides keep their current preprocessing source.")
             if let project = store.selectedProject,
                let issue = ProjectValidation.issues(for: project).first(where: { $0.id.hasPrefix("manual_ppm") }) {

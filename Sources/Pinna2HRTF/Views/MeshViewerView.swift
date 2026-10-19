@@ -154,7 +154,7 @@ struct MeshViewerView: View {
                         logExpanded.toggle()
                     }
                 } label: {
-                    Label("Live Log", systemImage: logExpanded ? "chevron.down" : "chevron.right")
+                    Label("Activity", systemImage: logExpanded ? "chevron.down" : "chevron.right")
                 }
                 .buttonStyle(.plain)
                 .font(.headline)
@@ -163,6 +163,7 @@ struct MeshViewerView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if logExpanded {
                 Button {
                     store.openTechnicalLog()
                 } label: {
@@ -176,6 +177,7 @@ struct MeshViewerView: View {
                     .buttonStyle(.borderless)
                     .disabled(store.logText.isEmpty)
                     .help("Clear the activity timeline. Technical logs remain available.")
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)

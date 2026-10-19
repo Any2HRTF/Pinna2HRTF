@@ -364,7 +364,7 @@ final class PPMFittingModel: ObservableObject {
         for index in 0..<asset.count {
             let node = SCNNode(mdlObject: asset.object(at: index))
             let material = SCNMaterial()
-            material.diffuse.contents = NSColor(calibratedRed: 0.22, green: 0.48, blue: 0.74, alpha: 1)
+            material.diffuse.contents = NSColor(calibratedWhite: 0.62, alpha: 1)
             material.transparency = 0.32
             material.isDoubleSided = true
             material.lightingModel = .physicallyBased

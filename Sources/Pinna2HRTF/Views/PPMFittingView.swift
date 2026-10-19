@@ -6,23 +6,34 @@ struct PPMFittingView: View {
     @StateObject private var model: PPMFittingModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @State private var selectedSection = "Global"
+    @State private var displayMode = "Overlay"
+    @State private var showingHelp = false
+    var closeWindow: (() -> Void)?
+    var busyChanged: (Bool) -> Void = { _ in }
     let saved: (PPMFittingRequest, String) -> Void
 
-    init(request: PPMFittingRequest, saved: @escaping (PPMFittingRequest, String) -> Void) {
+    init(request: PPMFittingRequest, closeWindow: (() -> Void)? = nil, busyChanged: @escaping (Bool) -> Void = { _ in }, saved: @escaping (PPMFittingRequest, String) -> Void) {
         _model = StateObject(wrappedValue: PPMFittingModel(request: request))
+        self.closeWindow = closeWindow
+        self.busyChanged = busyChanged
         self.saved = saved
+    }
+
+    private func closeEditor() {
+        if let closeWindow { closeWindow() } else { dismiss() }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            HStack(spacing: 0) {
+            HSplitView {
                 ZStack(alignment: .topLeading) {
                     PPMFittingSceneViewport(scene: model.scene, darkMode: colorScheme == .dark)
                     VStack(alignment: .leading, spacing: 6) {
                         Label("Target ear", systemImage: "circle.fill")
-                            .foregroundStyle(Color(red: 0.22, green: 0.48, blue: 0.74))
+                            .foregroundStyle(Color.gray)
                         Label("PPM · distance error", systemImage: "circle.fill")
                             .foregroundStyle(.primary)
                         HStack(spacing: 6) {
@@ -61,16 +72,16 @@ struct PPMFittingView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     }
                 }
-                .frame(minWidth: 520, maxWidth: .infinity, minHeight: 520, maxHeight: .infinity)
-                Divider()
+                .frame(minWidth: 400, maxWidth: .infinity, minHeight: 400, maxHeight: .infinity)
                 controlsPanel
-                    .frame(width: 390)
+                    .frame(minWidth: 320, idealWidth: 390, maxWidth: 500)
             }
             Divider()
             footer
         }
-        .frame(minWidth: 1050, idealWidth: 1340, minHeight: 720, idealHeight: 850)
+        .frame(minWidth: 800, idealWidth: 1200, minHeight: 600, idealHeight: 800)
         .interactiveDismissDisabled(model.busy || model.isUpdatingPreview)
+        .onChange(of: model.busy || model.isUpdatingPreview) { busyChanged($0) }
         .task { await model.open() }
     }
 
@@ -84,12 +95,36 @@ struct PPMFittingView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Toggle("Target", isOn: $model.showTarget)
-                .toggleStyle(.checkbox)
-            Toggle("PPM", isOn: $model.showPPM)
-                .toggleStyle(.checkbox)
-            Button("Reset to Template") { Task { await model.resetControls() } }
-                .disabled(model.busy || model.isUpdatingPreview)
+            Picker("Display", selection: $displayMode) {
+                ForEach(["Overlay", "Target", "Error Map", "Hidden"], id: \.self) { Text($0).tag($0) }
+            }
+            .fixedSize()
+            .onChange(of: displayMode) { mode in
+                model.showTarget = mode == "Overlay" || mode == "Target"
+                model.showPPM = mode == "Overlay" || mode == "Error Map"
+            }
+            Button("Undo", systemImage: "arrow.uturn.backward") { model.undo() }
+                .disabled(!model.canUndo || model.busy)
+                .keyboardShortcut("z", modifiers: .command)
+            Button("Redo", systemImage: "arrow.uturn.forward") { model.redo() }
+                .disabled(!model.canRedo || model.busy)
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+            Menu {
+                Button("Reset to Template") { Task { await model.resetControls() } }
+                    .disabled(model.busy || model.isUpdatingPreview)
+            } label: { Image(systemName: "ellipsis.circle") }
+            .fixedSize()
+            .help("Fitting actions")
+            Button("Help", systemImage: "questionmark.circle") { showingHelp.toggle() }
+                .labelStyle(.iconOnly)
+                .popover(isPresented: $showingHelp) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Manual Fitting").font(.headline)
+                        Text("Fit the whole model first, then convex regions, then concave details. Changes update the preview automatically.")
+                        Text("For a right ear, the model is mirrored across Y; control axes follow the template.")
+                        Link("Fitting workflow · Perfler et al. (2025)", destination: URL(string: "https://doi.org/10.1016/j.compbiomed.2025.109817")!)
+                    }.padding().frame(width: 320)
+                }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -97,65 +132,44 @@ struct PPMFittingView: View {
 
     var controlsPanel: some View {
         VStack(spacing: 0) {
-            ppmOpacityControl
-                .padding(.horizontal, 14)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
             meshMetrics
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
+                .padding(14)
             Divider()
+            Picker("Fitting section", selection: $selectedSection) {
+                ForEach(["Global", "Convex", "Concave"], id: \.self) { Text($0).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(14)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("Fit in three passes")
-                        .font(.subheadline.weight(.semibold))
-                    Text("Edits update the PPM preview as you move a control. Fit the whole model first, then convex regions, then concave details; iterate as needed.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Link("Manual fitting workflow · Perfler et al. (2025)",
-                         destination: URL(string: "https://doi.org/10.1016/j.compbiomed.2025.109817")!)
-                        .font(.caption)
-                    if model.request.side == .right {
-                        Text("The right-side model is mirrored across Y; control axes follow the template.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    GroupBox("1 · Global fit") {
-                        VStack(spacing: 8) {
-                            ForEach(model.globalControls) { control in
-                                PPMFittingParameterRow(control: control, model: model)
+                    ppmOpacityControl.disabled(!model.showPPM)
+                    Divider()
+                    if selectedSection == "Global" {
+                        ForEach(["Location", "Rotation", "Scale"], id: \.self) { kind in
+                            GroupBox(kind == "Location" ? "Position (mm)" : (kind == "Rotation" ? "Rotation (°)" : "Scale")) {
+                                VStack(spacing: 8) {
+                                    ForEach(model.globalControls.filter { $0.id.split(separator: "|").dropFirst(2).first == Substring(kind) }) { control in
+                                        PPMFittingParameterRow(control: control, model: model)
+                                    }
+                                }.padding(.top, 6)
                             }
                         }
-                        .padding(.top, 6)
-                    }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("2 · Convex regions")
-                            .font(.subheadline.weight(.semibold))
+                    } else if selectedSection == "Convex" {
                         ForEach(model.convexGroups, id: \.self) { group in
                             DisclosureGroup(group) {
                                 VStack(spacing: 8) {
                                     ForEach(model.controls.filter { $0.section == "convex" && $0.group == group }) { control in
                                         PPMFittingParameterRow(control: control, model: model)
                                     }
-                                }
-                                .padding(.top, 7)
-                            }
-                            .font(.callout.weight(.medium))
-                        }
-                    }
-
-                    GroupBox("3 · Concave details") {
-                        VStack(spacing: 8) {
-                            ForEach(model.concaveControls) { control in
-                                PPMFittingParameterRow(control: control, model: model)
+                                }.padding(.top, 7)
                             }
                         }
-                        .padding(.top, 6)
+                    } else {
+                        ForEach(model.concaveControls) { control in
+                            PPMFittingParameterRow(control: control, model: model)
+                        }
                     }
-                }
-                .padding(14)
+                }.padding(14)
             }
             .disabled(model.busy)
         }
@@ -176,52 +190,28 @@ struct PPMFittingView: View {
     }
 
     private var meshMetrics: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 7) {
-                Text("Nearest-vertex RMSE both ways; summary statistics use PPM → target")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            if let metric = model.metrics.first(where: { $0.label == "Symmetric RMSE" }) {
                 HStack {
-                    Text("Type").frame(maxWidth: .infinity, alignment: .leading)
-                    Text("Value").frame(width: 100, alignment: .trailing)
+                    Text("Symmetric RMSE").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text(String(format: "%.3f mm", metric.value)).monospacedDigit()
                 }
-                .font(.caption.weight(.medium))
-                ForEach(model.metrics) { metric in
-                    HStack {
-                        Text(metric.label).frame(maxWidth: .infinity, alignment: .leading)
-                        Text(String(format: "%.3f mm", metric.value))
-                            .frame(width: 100, alignment: .trailing)
-                            .monospacedDigit()
-                    }
-                    .font(.caption)
-                }
-                if model.metrics.isEmpty {
-                    Text("Calculating mesh distances…")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            } else {
+                Text("Calculating mesh distances…").foregroundStyle(.secondary)
             }
-            .padding(.top, 5)
-        } label: {
-            HStack(spacing: 6) {
-                Text("Mesh distance (mm)")
-                Spacer(minLength: 4)
-                Button("Undo", systemImage: "arrow.uturn.backward") {
-                    model.undo()
-                }
-                .labelStyle(.titleAndIcon)
-                .controlSize(.small)
-                .disabled(!model.canUndo || model.busy)
-                .help("Undo the last parameter change")
-                .accessibilityLabel("Undo parameter change")
-                Button("Redo", systemImage: "arrow.uturn.forward") {
-                    model.redo()
-                }
-                .labelStyle(.titleAndIcon)
-                .controlSize(.small)
-                .disabled(!model.canRedo || model.busy)
-                .help("Redo the last undone parameter change")
-                .accessibilityLabel("Redo parameter change")
+            DisclosureGroup("Distance Details") {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Nearest-vertex RMSE both ways; summary statistics use PPM → target.")
+                        .foregroundStyle(.secondary)
+                    ForEach(model.metrics) { metric in
+                        HStack {
+                            Text(metric.label)
+                            Spacer()
+                            Text(String(format: "%.3f mm", metric.value)).monospacedDigit()
+                        }
+                    }
+                }.font(.caption).padding(.top, 6)
             }
         }
     }
@@ -240,14 +230,14 @@ struct PPMFittingView: View {
                 }
             }
             Spacer()
-            Button("Cancel") { dismiss() }
+            Button("Cancel") { closeEditor() }
                 .keyboardShortcut(.cancelAction)
                 .disabled(model.busy || model.isUpdatingPreview)
             Button("Save Manual Fit") {
                 Task {
                     if await model.save() {
                         saved(model.request, model.templateBlendPath)
-                        dismiss()
+                        closeEditor()
                     }
                 }
             }
@@ -271,6 +261,13 @@ private struct PPMFittingParameterRow: View {
         )
     }
 
+    private var parameterLabel: String {
+        let parts = control.id.split(separator: "|")
+        guard parts.count == 4 else { return control.label }
+        let kind = parts[2] == "Location" ? "Position" : String(parts[2])
+        return control.section == "global" ? String(parts[3]) : "\(parts[1]) · \(kind) \(parts[3])"
+    }
+
     private var step: Double {
         switch control.unit {
         case "mm", "°": 0.1
@@ -282,11 +279,11 @@ private struct PPMFittingParameterRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Text(control.label)
+                Text(parameterLabel)
                     .font(.caption)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                TextField(control.label, value: value, format: .number.precision(.fractionLength(2)))
+                TextField(parameterLabel, value: value, format: .number.precision(.fractionLength(2)))
                     .labelsHidden()
                     .multilineTextAlignment(.trailing)
                     .textFieldStyle(.roundedBorder)
@@ -306,15 +303,15 @@ private struct PPMFittingParameterRow: View {
                         model.endControlEditing()
                     }
                 }
-                    .accessibilityLabel("\(control.group) \(control.label)")
+                    .accessibilityLabel("\(control.group) \(parameterLabel)")
                 Stepper(value: value, in: control.minimum...control.maximum, step: step) {
-                    Text(control.label)
+                    Text(parameterLabel)
                 }
                 .labelsHidden()
                 .controlSize(.small)
                 .frame(width: 48)
                 .help("Adjust in \(step, specifier: "%.2g") \(control.unit.isEmpty ? "units" : control.unit) steps")
-                .accessibilityLabel("Step \(control.group) \(control.label)")
+                .accessibilityLabel("Step \(control.group) \(parameterLabel)")
             }
         }
     }

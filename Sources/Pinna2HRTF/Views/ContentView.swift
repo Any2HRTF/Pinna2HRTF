@@ -7,6 +7,7 @@ struct ContentView: View {
 
     var body: some View {
         workspace
+        .disabled(store.meshEditorRequest != nil || store.ppmFittingRequest != nil)
         .navigationTitle(store.selectedProject?.name ?? "Pinna2HRTF")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -19,10 +20,10 @@ struct ContentView: View {
                         }
                     }
                 } label: {
-                    Label("Preview", systemImage: "list.bullet.rectangle")
+                    Label(store.artifacts.first(where: { $0.url == store.selectedMesh })?.title ?? "Preview", systemImage: "list.bullet.rectangle")
                 }
                 .labelStyle(.titleAndIcon)
-                .accessibilityLabel("Preview")
+                .accessibilityLabel(store.artifacts.first(where: { $0.url == store.selectedMesh })?.title ?? "Preview")
                 .help("Choose a File to Preview")
                 .disabled(store.selectedProject == nil || store.isPlacingMicrophone)
             }
@@ -30,6 +31,7 @@ struct ContentView: View {
                 ToolbarSpacer(.fixed, placement: .primaryAction)
             }
             ToolbarItemGroup(placement: .primaryAction) {
+                Menu {
                 ForEach(EarSide.allCases) { side in
                     Button {
                         store.beginMicrophonePlacement(side)
@@ -40,6 +42,9 @@ struct ContentView: View {
                     .help("Place \(side.title) Microphone")
                     .disabled(store.isPlacingMicrophone || store.selectedProject.map { side == .left ? $0.pipelineLeftEar.isEmpty : $0.pipelineRightEar.isEmpty } ?? true)
                 }
+                } label: { Label("Microphone", systemImage: "scope") }
+                .accessibilityLabel("Microphone")
+                .help("Place a microphone on the left or right ear")
             }
             if #available(macOS 26.0, *) {
                 ToolbarSpacer(.fixed, placement: .primaryAction)
@@ -65,12 +70,17 @@ struct ContentView: View {
         } message: {
             Text(store.registryStore.recoveryMessage ?? store.persistenceMessage ?? "The original project list will be preserved before recovery.")
         }
-        .sheet(item: $store.meshEditorRequest) { request in
+        .sheet(item: Binding(get: { store.meshEditorRequest?.isAlignment == true ? store.meshEditorRequest : nil }, set: { store.meshEditorRequest = $0 })) { request in
             MeshEditorView(request: request, saved: store.finishMeshEditing)
         }
-        .sheet(item: $store.ppmFittingRequest) { request in
-            PPMFittingView(request: request) { request, templateBlendPath in
-                store.finishManualPPMFitting(request, templateBlendPath: templateBlendPath)
+        .background {
+            EditorWindow(request: Binding(get: { store.meshEditorRequest?.isAlignment == false ? store.meshEditorRequest : nil }, set: { store.meshEditorRequest = $0 }), title: "Edit Ear") { request, close, busy in
+                AnyView(MeshEditorView(request: request, closeWindow: close, busyChanged: busy, saved: store.finishMeshEditing))
+            }
+            EditorWindow(request: $store.ppmFittingRequest, title: "Manual PPM Fit") { request, close, busy in
+                AnyView(PPMFittingView(request: request, closeWindow: close, busyChanged: busy) { request, templateBlendPath in
+                    store.finishManualPPMFitting(request, templateBlendPath: templateBlendPath)
+                })
             }
         }
         .alert("Cannot Edit Mesh", isPresented: Binding(get: { store.meshEditorError != nil }, set: { if !$0 { store.meshEditorError = nil } })) {

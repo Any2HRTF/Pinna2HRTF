@@ -55,7 +55,7 @@ final class MeshEditorModel: ObservableObject {
     }
     deinit { try? FileManager.default.removeItem(at: workspace) }
 
-    var tools: [Tool] { request.isAlignment ? [.landmarks] : [.selection, .plane] }
+    var tools: [Tool] { request.isAlignment ? [.landmarks] : [.navigate, .selection, .plane] }
     var canUndo: Bool { !busy && currentVersion > 0 }
     var canRedo: Bool { !busy && currentVersion + 1 < versions.count }
     var hasAlignment: Bool { operations.prefix(currentVersion).contains { $0["action"] as? String == "align" } }
@@ -82,6 +82,12 @@ final class MeshEditorModel: ObservableObject {
 
     var validPlanePreviewSize: Bool {
         planePreviewWidth.isFinite && planePreviewHeight.isFinite && planePreviewWidth > 0 && planePreviewHeight > 0
+    }
+
+    func invertSelection() {
+        guard !busy else { return }
+        selectedFaces = Set(0..<(faces.count / 3)).subtracting(selectedFaces)
+        refreshOverlays()
     }
 
     func setNavigationMode(_ active: Bool) {
@@ -250,7 +256,7 @@ final class MeshEditorModel: ObservableObject {
             edges.materials = [edgeMaterial]
             let edgeNode = SCNNode(geometry: edges)
             edgeNode.renderingOrder = 20
-            edgeNode.categoryBitMask = 0
+            edgeNode.categoryBitMask = 2
             edgeNode.castsShadow = false
             scene.rootNode.addChildNode(edgeNode)
             meshEdgesNode = edgeNode
@@ -301,10 +307,14 @@ final class MeshEditorModel: ObservableObject {
     }
 
     func resetCamera() {
+        setCameraView(request.isAlignment ? "Front" : (request.side == .right ? "Right" : "Left"))
+    }
+
+    func setCameraView(_ direction: String) {
         cameraRevision += 1
         targetNode?.simdPosition = center
-        let side: Float = request.side == .right ? -1 : 1
-        cameraNode?.simdPosition = center + SIMD3<Float>(0, side * Float(span * 1.7), Float(span * 0.15))
+        let offset: SIMD3<Float> = direction == "Front" ? SIMD3(1, 0, 0.08) : SIMD3(0, direction == "Right" ? -1 : 1, 0.08)
+        cameraNode?.simdPosition = center + offset * Float(span * 1.4)
         revision += 1
     }
     var pointOfView: SCNNode? { cameraNode }

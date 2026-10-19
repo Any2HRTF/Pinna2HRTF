@@ -127,6 +127,7 @@ struct SettingToggle: View {
     var body: some View {
         HStack(spacing: 6) {
             Toggle(title, isOn: $isOn)
+                .toggleStyle(.checkbox)
             SettingHelpButton(helpID: helpID)
         }
     }
@@ -261,6 +262,7 @@ struct PathField: View {
     @Binding var text: String
     var mode: PathFieldMode = .any
     var showsOpenButton = false
+    @State private var editingPath = false
 
     init(_ title: String, helpID: String, text: Binding<String>, mode: PathFieldMode = .any, showsOpenButton: Bool = false) {
         self.title = title
@@ -279,10 +281,17 @@ struct PathField: View {
         VStack(alignment: .leading, spacing: 4) {
             SettingLabel(title: title, helpID: helpID)
             HStack(spacing: 6) {
-                TextField(title, text: $text)
-                    .textFieldStyle(.roundedBorder)
-                    .labelsHidden()
-                Button("Choose") {
+                Text(text.isEmpty ? "No file selected" : URL(fileURLWithPath: text).lastPathComponent)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(text)
+                    .contextMenu {
+                        Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
+                        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: text)]) }
+                            .disabled(text.isEmpty)
+                    }
+                Button("Choose…") {
                     let panel = NSOpenPanel()
                     panel.canChooseFiles = mode != .directory
                     panel.canChooseDirectories = mode != .file
@@ -300,6 +309,10 @@ struct PathField: View {
                     .disabled(!folderExists)
                 }
             }
+            DisclosureGroup("Path", isExpanded: $editingPath) {
+                TextField(title, text: $text).textFieldStyle(.roundedBorder).labelsHidden()
+            }
+            .font(.caption)
         }
     }
 }
@@ -379,4 +392,14 @@ struct ModelPicker: View {
 
 extension UTType {
     static var yaml: UTType { UTType(filenameExtension: "yaml")! }
+}
+
+struct ViewportControlsMaterial: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
+        } else {
+            content.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
 }

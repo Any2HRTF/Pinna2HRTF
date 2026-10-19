@@ -1098,12 +1098,18 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func runNextStage() {
-        guard let project = selectedProject else {
+        guard selectedProject != nil else {
             appendLog("Create or select a project before running.")
             return
         }
-        let stage = Stage.allCases.filter { $0 != .scanPreparation || project.scanPreparation.enabled }.first { [.failed, .stopped].contains(project.stageOutcomes?[$0.rawValue] ?? .ready) || !ArtifactScanner.stageIsComplete($0, project: project) } ?? .postprocessing
-        run(stage: stage)
+        run(stage: nextStage ?? .postprocessing)
+    }
+
+    var nextStage: Stage? {
+        guard let project = selectedProject else { return nil }
+        return Stage.allCases.filter { $0 != .scanPreparation || project.scanPreparation.enabled }.first {
+            [.failed, .stopped].contains(project.stageOutcomes?[$0.rawValue] ?? .ready) || !ArtifactScanner.stageIsComplete($0, project: project)
+        }
     }
 
     func stageBlocked(_ stage: Stage) -> Bool {
@@ -1115,6 +1121,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func runUnavailableReason(stage: Stage) -> String? {
         guard let project = selectedProject else { return "Select a project first." }
+        if meshEditorRequest != nil || ppmFittingRequest != nil { return "Finish editing before running the pipeline." }
         if selectedProjectIsRunning { return stoppingProjects.contains(project.id) ? "Waiting for the task to stop." : "Wait for the current task and output checks to finish." }
         if environmentProcess != nil { return "Wait for dependency setup to finish." }
         return stageUnavailableReason(stage, project: project)
@@ -1122,7 +1129,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func canRunNextStage() -> Bool {
         guard let project = selectedProject, runningProcesses[project.id] == nil else { return false }
-        guard let next = Stage.allCases.filter({ $0 != .scanPreparation || project.scanPreparation.enabled }).first(where: { [.failed, .stopped].contains(project.stageOutcomes?[$0.rawValue] ?? .ready) || !ArtifactScanner.stageIsComplete($0, project: project) }) else { return false }
+        guard let next = nextStage else { return false }
         return canRun(stage: next)
     }
 

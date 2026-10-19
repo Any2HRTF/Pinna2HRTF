@@ -5,11 +5,19 @@ import AppKit
 struct MeshEditorView: View {
     @StateObject private var model: MeshEditorModel
     @Environment(\.dismiss) private var dismiss
+    var closeWindow: (() -> Void)?
+    var busyChanged: (Bool) -> Void = { _ in }
     let saved: (MeshEditorRequest) -> Void
 
-    init(request: MeshEditorRequest, saved: @escaping (MeshEditorRequest) -> Void) {
+    init(request: MeshEditorRequest, closeWindow: (() -> Void)? = nil, busyChanged: @escaping (Bool) -> Void = { _ in }, saved: @escaping (MeshEditorRequest) -> Void) {
         _model = StateObject(wrappedValue: MeshEditorModel(request: request))
+        self.closeWindow = closeWindow
+        self.busyChanged = busyChanged
         self.saved = saved
+    }
+
+    private func closeEditor() {
+        if let closeWindow { closeWindow() } else { dismiss() }
     }
 
     var body: some View {
@@ -23,29 +31,27 @@ struct MeshEditorView: View {
                 if model.busy { ProgressView().controlSize(.small) }
             }.padding(16)
             Divider()
-            HStack(spacing: 0) {
-                ZStack(alignment: .topLeading) {
+            HSplitView {
+                ZStack(alignment: .topTrailing) {
                     EditorSceneView(model: model)
-                    if !model.request.isAlignment && (model.tool == .selection || model.tool == .navigate) {
-                        Toggle("Navigate", isOn: Binding(
-                            get: { model.tool == .navigate },
-                            set: { model.setNavigationMode($0) }
-                        ))
-                            .toggleStyle(.button)
-                            .buttonStyle(.bordered)
-                            .keyboardShortcut(.space, modifiers: [])
-                            .help("Toggle camera navigation (Space).")
-                            .padding(12)
-                    }
+                        HStack {
+                            Button("Fit") { model.resetCamera() }
+                            ForEach(["Front", "Left", "Right"], id: \.self) { direction in
+                                Button(direction) { model.setCameraView(direction) }
+                            }
+                        }
+                        .controlSize(.small)
+                        .padding(8)
+                        .modifier(ViewportControlsMaterial())
+                        .padding(12)
+
                 }
                 .frame(minWidth: 520, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
-                Divider()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         if model.request.isAlignment {
                             alignmentControls
-                        } else if model.tool == .navigate {
-                            navigationControls
+
                         } else {
                             Picker("Tool", selection: $model.tool) {
                                 ForEach(model.tools) { tool in Text(tool.rawValue).tag(tool) }
@@ -53,6 +59,7 @@ struct MeshEditorView: View {
                             .pickerStyle(.segmented)
                             .onChange(of: model.tool) { _ in model.refreshOverlays() }
                         }
+                        if model.tool == .navigate { navigationControls }
                         if !model.request.isAlignment && model.tool == .landmarks { alignmentControls }
                         if model.tool == .selection { selectionControls }
                         if model.tool == .plane { planeControls }
@@ -61,17 +68,18 @@ struct MeshEditorView: View {
                             Button("Undo") { Task { await model.moveHistory(-1) } }.disabled(!model.canUndo)
                             Button("Redo") { Task { await model.moveHistory(1) } }.disabled(!model.canRedo)
                         }
-                        Button("Reset View") { model.resetCamera() }
                         if !model.request.isAlignment {
+                            Menu("Mesh Cleanup") {
                             Button("Keep Largest Component") { Task { await model.edit("largest") } }
                                 .help("Remove disconnected fragments from this working copy. Undo is available.")
+                            }
                         }
                         Text(model.message).font(.caption).foregroundStyle(.secondary)
                         if let error = model.error {
                             Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
                         }
                     }.padding(16)
-                }.frame(width: 290)
+                }.frame(minWidth: 290, idealWidth: 320, maxWidth: 440)
                 .disabled(model.busy)
             }
             Divider()
@@ -79,25 +87,27 @@ struct MeshEditorView: View {
                 Text(model.request.isAlignment ? "Preview a rigid alignment before saving." : "Cuts remain open. Saving checks the attachment boundary and ear-canal opening.")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.busy)
-                Button(model.request.isAlignment ? "Save Aligned Scan" : "Save Reviewed Ear") {
+                Button("Cancel") { closeEditor() }.keyboardShortcut(.cancelAction).disabled(model.busy)
+                Button(model.request.isAlignment ? "Save Aligned Scan" : "Save Ear") {
                     Task {
-                        if await model.save() { saved(model.request); dismiss() }
+                        if await model.save() { saved(model.request); closeEditor() }
                     }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!model.canSave)
+                .keyboardShortcut(.defaultAction)
             }.padding(16)
         }
         .frame(minWidth: 900, idealWidth: 1120, minHeight: 640, idealHeight: 740)
         .interactiveDismissDisabled(model.busy)
+        .onChange(of: model.busy) { busyChanged($0) }
         .task { await model.open() }
     }
 
     var alignmentControls: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Nose and ear landmarks").font(.subheadline.weight(.semibold))
-            Text("Click each landmark on the scan. Drag to rotate between picks. Select a row to replace a point.")
+            Text(model.landmarks.count == 3 ? "All landmarks placed. Preview the alignment, or select a row to replace a point." : "\(model.landmarks.count + 1) of 3 — Select \(["the nose tip", "the left ear-canal entrance", "the right ear-canal entrance"][min(model.landmarkSlot, 2)]).")
                 .font(.caption).foregroundStyle(.secondary)
             ForEach(Array(["Nose tip", "Left ear-canal entrance", "Right ear-canal entrance"].enumerated()), id: \.offset) { index, name in
                 Button {
@@ -108,14 +118,20 @@ struct MeshEditorView: View {
                             .foregroundStyle([Color.red, .blue, .green][index])
                         Text(name)
                         Spacer()
-                        if model.landmarkSlot == index { Image(systemName: "scope") }
+                        Text(index < model.landmarks.count ? "Placed" : (model.landmarkSlot == index ? "Current" : "Pending"))
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 .buttonStyle(.bordered)
                 .disabled(index > model.landmarks.count)
             }
+            DisclosureGroup("Alignment Details") {
             Text("Pick the tip of the nose and the center of each ear-canal entrance. Their plane becomes horizontal, with the ear midpoint at the origin, X toward the nose, Y left, and Z up. Left and right refer to the person being scanned.")
                 .font(.caption).foregroundStyle(.secondary)
+            }
+            if model.landmarks.count != 3 {
+                Text("Place all three landmarks to preview.").font(.caption).foregroundStyle(.secondary)
+            }
             Button("Preview Alignment") {
                 let points = model.landmarks.map { [Double($0.x), Double($0.y), Double($0.z)] }
                 Task { await model.edit("align", arguments: ["points": points]) }
@@ -128,8 +144,6 @@ struct MeshEditorView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Draw a closed lasso around the faces to remove. A click toggles one face. Red faces are selected.")
                 .font(.caption).foregroundStyle(.secondary)
-            Text("Triangle edges stay visible to make face selection easier.")
-                .font(.caption).foregroundStyle(.secondary)
             Toggle("Select through mesh", isOn: $model.throughSelection)
                 .help("Include occluded and back-facing faces. With this off, select only the visible front surface.")
             Toggle("Add to current selection", isOn: $model.addToSelection)
@@ -137,14 +151,18 @@ struct MeshEditorView: View {
             Button("Delete Selected Faces") {
                 Task { await model.edit("delete", arguments: ["faces": model.selectedFaces.sorted()]) }
             }.disabled(model.selectedFaces.isEmpty)
+            HStack {
+            Button("Invert Selection") { model.invertSelection() }
+                .disabled(model.faces.isEmpty)
             Button("Clear Selection") { model.selectedFaces.removeAll(); model.refreshOverlays() }
                 .disabled(model.selectedFaces.isEmpty)
+            }
         }
     }
 
     var navigationControls: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Drag to rotate and scroll to zoom. Press Space or click Navigate to return to the selected tool.")
+            Text("Drag to rotate and scroll to zoom. Choose Select Faces or Cutting Plane to edit.")
                 .font(.callout).foregroundStyle(.secondary)
         }
     }
