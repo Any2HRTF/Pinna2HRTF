@@ -193,7 +193,7 @@ With the .NET 8 SDK, Git, and `uv` installed, run in PowerShell:
 
 The packaged app is written to `dist\windows\Pinna2HRTF`.
 
-## Ear distance from head center (v1.2.0)
+## Ear distance from head center (v1.1.1)
 
 Mesh2HRTF displays the mean lateral distance of the ear attachment boundaries in millimetres. It measures the original meshes, or the inferred meshes when Mesh2PPM output is available. Manual edits move both ears outward or inward by the same amount, preserving their distance difference. Head size follows the resulting ear positions automatically.
 

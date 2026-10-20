@@ -22,7 +22,7 @@ final class ProjectRegistryStore {
                 let converted = try JSONSerialization.data(withJSONObject: migrated)
                 let registry = try JSONDecoder().decode(ProjectRegistry.self, from: converted)
                 if try JSONSerialization.data(withJSONObject: object, options: .sortedKeys) != JSONSerialization.data(withJSONObject: geometry, options: .sortedKeys) {
-                    let backup = url.appendingPathExtension("pre-1.2.0-\(UUID().uuidString).bak")
+                    let backup = url.appendingPathExtension("pre-1.1.1-\(UUID().uuidString).bak")
                     try data.write(to: backup, options: .withoutOverwriting)
                     try JSONEncoder.pretty.encode(registry).write(to: url, options: .atomic)
                 }
