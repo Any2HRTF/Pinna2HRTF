@@ -602,20 +602,20 @@ public partial class MainWindow
         using var document = JsonDocument.Parse(stdout); return document.RootElement.Clone();
     }
 
-    bool EarReviewIsCurrent(ProjectRecord project, string side)
+    bool EarReviewIsCurrent(ProjectRecord project, string side, ArtifactInspection? inspection = null)
     {
+        inspection ??= new ArtifactInspection();
         try
         {
             var settings = project.Settings.ScanPreparation;
             var reviewed = side == "left" ? settings.ReviewedLeft : settings.ReviewedRight;
             if (string.IsNullOrWhiteSpace(reviewed) || !File.Exists(reviewed)) return false;
             var folder = Path.Combine(project.SaveLocation, "Prepared");
-            using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "mesh_preparation.json")));
-            using var receipt = JsonDocument.Parse(File.ReadAllText(Path.ChangeExtension(reviewed, ".json")));
-            var reportRoot = report.RootElement; var receiptRoot = receipt.RootElement;
+            var reportRoot = inspection.Document(Path.Combine(folder, "mesh_preparation.json"));
+            var receiptRoot = inspection.Document(Path.ChangeExtension(reviewed, ".json"));
             var generation = reportRoot.GetProperty("generation").GetString();
             var baseEar = Path.Combine(folder, side == "left" ? "Left.stl" : "Right.stl");
-            var baseDigest = FileDigest(baseEar); var editedDigest = FileDigest(reviewed);
+            var baseDigest = inspection.Digest(baseEar); var editedDigest = inspection.Digest(reviewed);
             return receiptRoot.GetProperty("kind").GetString() == "ear" &&
                 receiptRoot.GetProperty("side").GetString() == side &&
                 receiptRoot.GetProperty("generation").GetString() == generation &&
@@ -625,15 +625,15 @@ public partial class MainWindow
         catch { return false; }
     }
 
-    bool ScanReviewStageReceiptCurrent(ProjectRecord project, string stage)
+    bool ScanReviewStageReceiptCurrent(ProjectRecord project, string stage, ArtifactInspection? inspection = null)
     {
+        inspection ??= new ArtifactInspection();
         try
         {
             var folder = Path.Combine(project.SaveLocation, "Prepared");
-            using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "mesh_preparation.json")));
-            using var receipt = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, stage + ".json")));
-            var generation = report.RootElement.GetProperty("generation").GetString();
-            var receiptRoot = receipt.RootElement;
+            var reportRoot = inspection.Document(Path.Combine(folder, "mesh_preparation.json"));
+            var receiptRoot = inspection.Document(Path.Combine(folder, stage + ".json"));
+            var generation = reportRoot.GetProperty("generation").GetString();
             if (receiptRoot.GetProperty("generation").GetString() != generation || !receiptRoot.TryGetProperty("input_ears", out var inputEars)) return false;
             foreach (var (side, enabled, reviewPath) in new[]
             {
@@ -642,9 +642,9 @@ public partial class MainWindow
             })
             {
                 if (!enabled) continue;
-                var useReviewed = !string.IsNullOrWhiteSpace(reviewPath) && EarReviewIsCurrent(project, side);
+                var useReviewed = !string.IsNullOrWhiteSpace(reviewPath) && EarReviewIsCurrent(project, side, inspection);
                 var path = useReviewed ? reviewPath! : Path.Combine(folder, side == "left" ? "Left.stl" : "Right.stl");
-                if (!File.Exists(path) || !inputEars.TryGetProperty(side, out var recorded) || recorded.GetString() != FileDigest(path)) return false;
+                if (!File.Exists(path) || !inputEars.TryGetProperty(side, out var recorded) || recorded.GetString() != inspection.Digest(path)) return false;
             }
             return true;
         }

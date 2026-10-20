@@ -45,7 +45,9 @@ struct MeshViewerView: View {
         ZStack {
             Rectangle()
                 .fill(colorScheme == .dark ? Color(nsColor: NSColor(calibratedWhite: 0.12, alpha: 1)) : Color(nsColor: NSColor(calibratedWhite: 0.93, alpha: 1)))
-            if let image = store.selectedImage {
+            if let source = store.selectedPressure {
+                PressureFieldView(source: source).id(source)
+            } else if let image = store.selectedImage {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
@@ -84,7 +86,7 @@ struct MeshViewerView: View {
                         .help("Edit the selected prepared ear")
                         .disabled(store.selectedProjectIsRunning)
                 }
-                if store.selectedMesh != nil && store.selectedImage == nil {
+                if store.selectedMesh != nil && store.selectedImage == nil && store.selectedPressure == nil {
                     Button(action: store.resetSelectedMeshView) {
                         Label("Reset view", systemImage: "arrow.counterclockwise")
                     }
@@ -154,7 +156,7 @@ struct MeshViewerView: View {
                         logExpanded.toggle()
                     }
                 } label: {
-                    Label("Live Log", systemImage: logExpanded ? "chevron.down" : "chevron.right")
+                    Label("Activity", systemImage: logExpanded ? "chevron.down" : "chevron.right")
                 }
                 .buttonStyle(.plain)
                 .font(.headline)
@@ -163,9 +165,21 @@ struct MeshViewerView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Button("Clear") { store.clearSelectedProjectLog() }
+                if logExpanded {
+                Button {
+                    store.openTechnicalLog()
+                } label: {
+                    Label("Technical Log", systemImage: "doc.text.magnifyingglass")
+                }
+                .buttonStyle(.borderless)
+                .help("Open the complete technical output for this project")
+                .accessibilityLabel("Open Technical Log")
+                .disabled(store.selectedTechnicalLogURL == nil)
+                Button("Clear Activity") { store.clearSelectedProjectLog() }
                     .buttonStyle(.borderless)
                     .disabled(store.logText.isEmpty)
+                    .help("Clear the activity timeline. Technical logs remain available.")
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -191,9 +205,12 @@ struct MeshViewerView: View {
     }
 
     var logSummary: String {
-        if store.selectedProjectIsRunning || store.environmentProcess != nil { return "Running" }
-        if store.logText.isEmpty { return "No output yet" }
-        return store.logText.split(separator: "\n").last.map(String.init) ?? "Ready"
+        if store.environmentProcess != nil { return "Setting up environment" }
+        if let project = store.selectedProject, let stage = store.runningStages[project.id] { return "\(stage.title) running" }
+        if store.selectedProjectIsRunning { return "Checking outputs" }
+        if let project = store.selectedProject, let status = store.liveLogStatusByProject[project.id] { return status }
+        if store.logText.isEmpty { return store.selectedTechnicalLogURL == nil ? "No activity yet" : "Technical log available" }
+        return "Ready"
     }
 
     var microphoneCoordinates: String {
@@ -245,7 +262,7 @@ struct PersistentSceneView: NSViewRepresentable {
         let viewport = MeshSceneViewport(frame: .zero)
         let view = viewport.sceneView
         view.scene = scene
-        view.pointOfView = scene.rootNode.childNodes.first { $0.camera != nil }
+        view.configureNavigation(camera: scene.rootNode.childNodes.first { $0.camera != nil })
         view.allowsCameraControl = true
         view.autoenablesDefaultLighting = false
         view.backgroundColor = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
@@ -268,7 +285,7 @@ struct PersistentSceneView: NSViewRepresentable {
         context.coordinator.surfaceSelected = surfaceSelected
         if view.scene !== scene {
             view.scene = scene
-            view.pointOfView = scene.rootNode.childNodes.first { $0.camera != nil }
+            view.configureNavigation(camera: scene.rootNode.childNodes.first { $0.camera != nil })
             context.coordinator.lastPosition = nil
         }
         let background = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)

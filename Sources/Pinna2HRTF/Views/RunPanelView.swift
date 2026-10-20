@@ -1,9 +1,5 @@
 import SwiftUI
 
-private enum RunButtonLayout {
-    static let contentHeight: CGFloat = 58
-}
-
 struct RunPanelView: View {
     @ObservedObject var store: AppStore
 
@@ -11,7 +7,7 @@ struct RunPanelView: View {
         TimelineView(.periodic(from: .now, by: 2)) { _ in
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Run")
+                Text("Pipeline")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 Text(summary)
@@ -31,7 +27,7 @@ struct RunPanelView: View {
                         .lineLimit(2)
                 }
             }
-            VStack(spacing: 6) {
+            VStack(spacing: 2) {
                 ForEach(Stage.allCases.filter { $0 != .scanPreparation || store.selectedProject?.scanPreparation.enabled == true }) { stage in
                     StageRunButton(stage: stage, state: store.stageStates[stage] ?? .ready, available: store.canRun(stage: stage), unavailableReason: store.runUnavailableReason(stage: stage), previousResults: store.selectedProject.map { ArtifactScanner.stageIsComplete(stage, project: $0) } ?? false) {
                         store.run(stage: stage)
@@ -39,6 +35,7 @@ struct RunPanelView: View {
                 }
             }
             HStack(spacing: 8) {
+                if store.selectedProjectIsRunning {
                 Button {
                     store.stopRunningProcess()
                 } label: {
@@ -47,13 +44,21 @@ struct RunPanelView: View {
                 }
                 .tint(.red)
                 .disabled(store.selectedProject.map { store.runningProcesses[$0.id] == nil } ?? true)
-                Button(role: .destructive) {
+                } else {
+                    Button(store.nextStage.map { "Run \($0.title)" } ?? "Complete", systemImage: "play.fill") { store.runNextStage() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!store.canRunNextStage())
+                }
+                Spacer()
+                Menu {
+                Button("Reset Outputs…", role: .destructive) {
                     store.confirmResetSelectedProjectOutputs()
-                } label: {
-                    Label("Reset Outputs…", systemImage: "trash")
-                        .frame(maxWidth: .infinity)
                 }
                 .disabled(store.selectedProjectIsRunning)
+                } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Project actions")
             }
         }
         }
@@ -65,7 +70,8 @@ struct RunPanelView: View {
     var summary: String {
         if store.selectedProjectIsManagingOutputs { return "Updating outputs" }
         if store.selectedProjectIsRunning { return "Running" }
-        if let project = store.selectedProject { return ArtifactScanner.summary(for: project) }
+        if let stage = store.nextStage { return store.canRun(stage: stage) ? "Ready" : "Action Required" }
+        if store.selectedProject != nil { return "Complete" }
         return "No project"
     }
 }
@@ -92,21 +98,15 @@ struct StageRunButton: View {
                         .font(.caption)
                         .foregroundStyle(stateColor)
                         .lineLimit(1)
-                    if !available, let unavailableReason {
-                        Text(unavailableReason)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
                 }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 4)
-            .padding(.vertical, 5)
+            .padding(.vertical, 2)
             .frame(maxWidth: .infinity)
-            .frame(height: RunButtonLayout.contentHeight)
+
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.plain)
         .help(unavailableReason ?? stateLabel)
         .disabled(!available)
     }
@@ -123,6 +123,9 @@ struct StageRunButton: View {
 
     var stateLabel: String {
         if [.failed, .stopped].contains(state) && previousResults { return "\(state.rawValue.capitalized) · previous results available" }
-        return state == .skipped && stage == .inference ? "Skipped · not run" : state.rawValue.capitalized
+        if state == .done { return "Complete" }
+        if state == .skipped { return "Not Used" }
+        if state == .ready { return available ? "Ready to Run" : "Waiting for Prerequisites" }
+        return state.rawValue.capitalized
     }
 }

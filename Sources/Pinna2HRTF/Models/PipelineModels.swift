@@ -75,9 +75,10 @@ struct Artifact: Identifiable, Hashable {
 
     var id: String { url.path }
     var exists: Bool { FileManager.default.fileExists(atPath: url.path) }
+    var isPressure: Bool { url.lastPathComponent == "NC.inp" }
     var isMesh: Bool { ["stl", "ply"].contains(url.pathExtension.lowercased()) }
     var isImage: Bool { ["jpeg", "jpg", "pdf", "png"].contains(url.pathExtension.lowercased()) }
-    var systemImage: String { isImage ? "photo" : "cube" }
+    var systemImage: String { isPressure ? "waveform.path" : isImage ? "photo" : "cube" }
 }
 
 struct ViewerCameraState: Codable, Equatable {
@@ -123,6 +124,44 @@ struct InferenceSettings: Codable, Equatable {
     var predictionLeftFolder = "Intermediates/Left"
     var predictionRightFolder = "Intermediates/Right"
     var usePredictionsForPreprocessing = false
+}
+
+struct ManualPPMFittingSettings: Codable, Equatable {
+    var useForPreprocessing = false
+    var templateBlendPath: String?
+    var leftMeshPath: String?
+    var rightMeshPath: String?
+    var leftParametersPath: String?
+    var rightParametersPath: String?
+    var leftBlendPath: String?
+    var rightBlendPath: String?
+    var leftSourcePath: String?
+    var rightSourcePath: String?
+    var leftSourceIdentity: String?
+    var rightSourceIdentity: String?
+
+    func meshPath(for side: EarSide) -> String? { side == .left ? leftMeshPath : rightMeshPath }
+    func parametersPath(for side: EarSide) -> String? { side == .left ? leftParametersPath : rightParametersPath }
+    func blendPath(for side: EarSide) -> String? { side == .left ? leftBlendPath : rightBlendPath }
+    func sourcePath(for side: EarSide) -> String? { side == .left ? leftSourcePath : rightSourcePath }
+    func sourceIdentity(for side: EarSide) -> String? { side == .left ? leftSourceIdentity : rightSourceIdentity }
+
+    mutating func setFit(meshPath: String, parametersPath: String, blendPath: String, sourcePath: String,
+                         sourceIdentity: String, for side: EarSide) {
+        if side == .left {
+            leftMeshPath = meshPath
+            leftParametersPath = parametersPath
+            leftBlendPath = blendPath
+            leftSourcePath = sourcePath
+            leftSourceIdentity = sourceIdentity
+        } else {
+            rightMeshPath = meshPath
+            rightParametersPath = parametersPath
+            rightBlendPath = blendPath
+            rightSourcePath = sourcePath
+            rightSourceIdentity = sourceIdentity
+        }
+    }
 }
 
 struct PreprocessingSettings: Codable, Equatable {
@@ -194,10 +233,36 @@ struct PostprocessingSettings: Codable, Equatable {
 
 struct ProjectSettings: Codable, Equatable {
     var inference: InferenceSettings
+    var manualPPMFitting = ManualPPMFittingSettings()
     var scanPreparation: ScanPreparationSettings?
     var preprocessing = PreprocessingSettings()
     var numcalc = NumCalcSettings()
     var postprocessing: PostprocessingSettings? = PostprocessingSettings()
+
+    private enum CodingKeys: String, CodingKey {
+        case inference, manualPPMFitting, scanPreparation, preprocessing, numcalc, postprocessing
+    }
+
+    init(inference: InferenceSettings, manualPPMFitting: ManualPPMFittingSettings = ManualPPMFittingSettings(),
+         scanPreparation: ScanPreparationSettings? = nil, preprocessing: PreprocessingSettings = PreprocessingSettings(),
+         numcalc: NumCalcSettings = NumCalcSettings(), postprocessing: PostprocessingSettings? = PostprocessingSettings()) {
+        self.inference = inference
+        self.manualPPMFitting = manualPPMFitting
+        self.scanPreparation = scanPreparation
+        self.preprocessing = preprocessing
+        self.numcalc = numcalc
+        self.postprocessing = postprocessing
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        inference = try values.decode(InferenceSettings.self, forKey: .inference)
+        manualPPMFitting = try values.decodeIfPresent(ManualPPMFittingSettings.self, forKey: .manualPPMFitting) ?? ManualPPMFittingSettings()
+        scanPreparation = try values.decodeIfPresent(ScanPreparationSettings.self, forKey: .scanPreparation)
+        preprocessing = try values.decodeIfPresent(PreprocessingSettings.self, forKey: .preprocessing) ?? PreprocessingSettings()
+        numcalc = try values.decodeIfPresent(NumCalcSettings.self, forKey: .numcalc) ?? NumCalcSettings()
+        postprocessing = try values.decodeIfPresent(PostprocessingSettings.self, forKey: .postprocessing) ?? PostprocessingSettings()
+    }
 }
 
 struct ProjectRecord: Identifiable, Codable, Equatable {
@@ -215,11 +280,12 @@ struct ProjectRecord: Identifiable, Codable, Equatable {
 
 extension ProjectRecord {
     var scanPreparation: ScanPreparationSettings { settings.scanPreparation ?? ScanPreparationSettings() }
-    var pipelineLeftEar: String {
-        scanPreparation.enabled ? (scanPreparation.prepareLeft ? (ArtifactScanner.preparedEarURL(for: .left, in: self)?.path ?? URL(fileURLWithPath: saveLocation).appendingPathComponent("Prepared/Left.stl").path) : "") : leftEar
-    }
-    var pipelineRightEar: String {
-        scanPreparation.enabled ? (scanPreparation.prepareRight ? (ArtifactScanner.preparedEarURL(for: .right, in: self)?.path ?? URL(fileURLWithPath: saveLocation).appendingPathComponent("Prepared/Right.stl").path) : "") : rightEar
+    var pipelineLeftEar: String { pipelineEar(for: .left) }
+    var pipelineRightEar: String { pipelineEar(for: .right) }
+
+    func pipelineEar(for side: EarSide, inspection: ArtifactScanner.Inspection = .init()) -> String {
+        guard scanPreparation.enabled else { return side == .left ? leftEar : rightEar }
+        return ArtifactScanner.preparedEarURL(for: side, in: self, inspection: inspection)?.path ?? ""
     }
 }
 

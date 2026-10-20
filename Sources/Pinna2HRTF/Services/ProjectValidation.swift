@@ -42,6 +42,20 @@ enum ProjectValidation {
         if let min = Double(pre.meshMinEdgeLength), let max = Double(pre.meshMaxEdgeLength), max < min {
             errors.append(("mesh_grading.max_edge_length", "Max edge length must be at least the min edge length."))
         }
+        if project.settings.manualPPMFitting.useForPreprocessing {
+            var hasValidFit = false
+            for side in EarSide.allCases where !(side == .left ? project.pipelineLeftEar : project.pipelineRightEar).isEmpty {
+                guard let path = project.settings.manualPPMFitting.meshPath(for: side), !path.isEmpty else { continue }
+                if ArtifactScanner.validManualPPMFittingMesh(for: project, side: side) != nil {
+                    hasValidFit = true
+                } else {
+                    errors.append(("manual_ppm.\(side.rawValue)", "The saved \(side.rawValue) PPM fit is missing or no longer matches its source ear."))
+                }
+            }
+            if !hasValidFit {
+                errors.append(("manual_ppm.fit", "Fit at least one ear with the manual PPM editor before selecting manual preprocessing."))
+            }
+        }
         let scan = project.scanPreparation
         if scan.enabled {
             if scan.scanPath.isEmpty { errors.append(("scan.path", "Choose a full-head scan.")) }

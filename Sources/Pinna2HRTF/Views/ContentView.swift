@@ -7,6 +7,7 @@ struct ContentView: View {
 
     var body: some View {
         workspace
+        .disabled(store.meshEditorRequest != nil || store.ppmFittingRequest != nil || store.projectDuplicationRequest != nil)
         .navigationTitle(store.selectedProject?.name ?? "Pinna2HRTF")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -19,10 +20,10 @@ struct ContentView: View {
                         }
                     }
                 } label: {
-                    Label("Preview", systemImage: "list.bullet.rectangle")
+                    Label(store.artifacts.first(where: { $0.url == store.selectedMesh })?.title ?? "Preview", systemImage: "list.bullet.rectangle")
                 }
                 .labelStyle(.titleAndIcon)
-                .accessibilityLabel("Preview")
+                .accessibilityLabel(store.artifacts.first(where: { $0.url == store.selectedMesh })?.title ?? "Preview")
                 .help("Choose a File to Preview")
                 .disabled(store.selectedProject == nil || store.isPlacingMicrophone)
             }
@@ -30,6 +31,7 @@ struct ContentView: View {
                 ToolbarSpacer(.fixed, placement: .primaryAction)
             }
             ToolbarItemGroup(placement: .primaryAction) {
+                Menu {
                 ForEach(EarSide.allCases) { side in
                     Button {
                         store.beginMicrophonePlacement(side)
@@ -40,6 +42,9 @@ struct ContentView: View {
                     .help("Place \(side.title) Microphone")
                     .disabled(store.isPlacingMicrophone || store.selectedProject.map { side == .left ? $0.pipelineLeftEar.isEmpty : $0.pipelineRightEar.isEmpty } ?? true)
                 }
+                } label: { Label("Microphone", systemImage: "scope") }
+                .accessibilityLabel("Microphone")
+                .help("Place a microphone on the left or right ear")
             }
             if #available(macOS 26.0, *) {
                 ToolbarSpacer(.fixed, placement: .primaryAction)
@@ -65,12 +70,24 @@ struct ContentView: View {
         } message: {
             Text(store.registryStore.recoveryMessage ?? store.persistenceMessage ?? "The original project list will be preserved before recovery.")
         }
-        .sheet(item: $store.meshEditorRequest) { request in
-            MeshEditorView(request: request, saved: store.finishMeshEditing)
+        .sheet(item: editorPresentation) { editor in
+            switch editor {
+            case .duplicate(let request):
+                ProjectDuplicationView(store: store, request: request)
+            case .mesh(let request):
+                MeshEditorView(request: request, saved: store.finishMeshEditing)
+            case .ppm(let request):
+                PPMFittingView(request: request) { request, templateBlendPath in
+                    store.finishManualPPMFitting(request, templateBlendPath: templateBlendPath)
+                }
+            }
         }
         .alert("Cannot Edit Mesh", isPresented: Binding(get: { store.meshEditorError != nil }, set: { if !$0 { store.meshEditorError = nil } })) {
             Button("OK") { store.meshEditorError = nil }
         } message: { Text(store.meshEditorError ?? "") }
+        .alert("Cannot Open Manual PPM Fitting", isPresented: Binding(get: { store.ppmFittingError != nil }, set: { if !$0 { store.ppmFittingError = nil } })) {
+            Button("OK") { store.ppmFittingError = nil }
+        } message: { Text(store.ppmFittingError ?? "") }
         .focusedSceneValue(\.pipelineCommands, commandContext)
         .onChange(of: store.selectedProjectID) { _ in
             store.persist()
@@ -78,6 +95,21 @@ struct ContentView: View {
             store.refreshArtifacts()
             store.restoreViewer()
         }
+    }
+
+    private var editorPresentation: Binding<ProjectEditorPresentation?> {
+        Binding(get: {
+            if let request = store.projectDuplicationRequest { return .duplicate(request) }
+            if let request = store.meshEditorRequest { return .mesh(request) }
+            if let request = store.ppmFittingRequest { return .ppm(request) }
+            return nil
+        }, set: { value in
+            if value == nil {
+                store.projectDuplicationRequest = nil
+                store.meshEditorRequest = nil
+                store.ppmFittingRequest = nil
+            }
+        })
     }
 
     @ViewBuilder var workspace: some View {
@@ -136,7 +168,7 @@ struct ContentView: View {
             createProject: { store.createProject() },
             importProject: { store.importProject() },
             duplicateProject: { store.duplicateSelectedProject() },
-            removeProject: { store.forgetSelectedProject() },
+            removeProject: { store.removeSelectedProject() },
             runNextStage: { store.runNextStage() },
             runStage: { store.run(stage: $0) },
             stopProject: { store.stopRunningProcess() },
@@ -147,5 +179,19 @@ struct ContentView: View {
             toggleLog: { withAnimation { logExpanded.toggle() } },
             toggleInspector: { withAnimation { inspectorPresented.toggle() } }
         )
+    }
+}
+
+private enum ProjectEditorPresentation: Identifiable {
+    case duplicate(ProjectDuplicationRequest)
+    case mesh(MeshEditorRequest)
+    case ppm(PPMFittingRequest)
+
+    var id: String {
+        switch self {
+        case .duplicate(let request): return "duplicate-\(request.id)"
+        case .mesh(let request): return "mesh-\(request.id)"
+        case .ppm(let request): return "ppm-\(request.id)"
+        }
     }
 }

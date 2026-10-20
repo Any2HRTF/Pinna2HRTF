@@ -6,7 +6,7 @@ import simd
 @MainActor
 final class MeshEditorModel: ObservableObject {
     enum Tool: String, CaseIterable, Identifiable {
-        case navigate = "Navigate", landmarks = "Landmarks", selection = "Select Faces", plane = "Cutting Plane"
+        case landmarks = "Landmarks", selection = "Select Faces", plane = "Cutting Plane"
         var id: String { rawValue }
     }
     let request: MeshEditorRequest
@@ -21,6 +21,7 @@ final class MeshEditorModel: ObservableObject {
     @Published var addToSelection = false
     @Published var landmarks: [SCNVector3] = []
     @Published var landmarkSlot = 0
+    @Published var showCoordinateSystem = true { didSet { coordinateNode?.isHidden = !showCoordinateSystem } }
     @Published var planeX = "0"
     @Published var planeY = "1"
     @Published var planeZ = "0"
@@ -33,7 +34,6 @@ final class MeshEditorModel: ObservableObject {
     private(set) var cameraRevision = 0
     private var versions: [URL] = []
     private var operations: [[String: Any]] = []
-    private var toolBeforeNavigation: Tool = .selection
     private var currentVersion = 0
     private var versionCounter = 0
     private var originalSHA256 = ""
@@ -41,6 +41,7 @@ final class MeshEditorModel: ObservableObject {
     private(set) var faces: [UInt32] = []
     private var vertexData = Data(), normalData = Data()
     private var boundsMin = SIMD3<Float>(repeating: -1), boundsMax = SIMD3<Float>(repeating: 1)
+    private var coordinateNode: SCNNode?
     private var meshNode: SCNNode?
     private var meshEdgesNode: SCNNode?
     private var selectionNode: SCNNode?
@@ -84,15 +85,10 @@ final class MeshEditorModel: ObservableObject {
         planePreviewWidth.isFinite && planePreviewHeight.isFinite && planePreviewWidth > 0 && planePreviewHeight > 0
     }
 
-    func setNavigationMode(_ active: Bool) {
-        guard !request.isAlignment else { return }
-        if active {
-            guard tool != .navigate else { return }
-            toolBeforeNavigation = tool
-            tool = .navigate
-        } else if tool == .navigate {
-            tool = toolBeforeNavigation
-        }
+    func invertSelection() {
+        guard !busy else { return }
+        selectedFaces = Set(0..<(faces.count / 3)).subtracting(selectedFaces)
+        refreshOverlays()
     }
 
     func updatePlanePreviewSizing() {
@@ -161,7 +157,7 @@ final class MeshEditorModel: ObservableObject {
             currentVersion += 1
             selectedFaces.removeAll()
             if action == "align" { landmarks.removeAll(); refreshMarkers(); tool = .landmarks; resetCamera() }
-            if action == "cut" { toolBeforeNavigation = .plane; tool = .navigate; planeOffset = 0 }
+            if action == "cut" { tool = .selection; planeOffset = 0 }
             refreshOverlays()
             message = "\(faces.count / 3) faces · Edit applied. Undo is available."
             revision += 1
@@ -182,7 +178,7 @@ final class MeshEditorModel: ObservableObject {
             selectedFaces.removeAll()
             landmarks.removeAll()
             refreshMarkers()
-            tool = request.isAlignment ? .landmarks : .navigate
+            tool = request.isAlignment ? .landmarks : .selection
             refreshOverlays()
             revision += 1
             message = "\(faces.count / 3) faces · \(offset < 0 ? "Undone" : "Redone")"
@@ -250,10 +246,17 @@ final class MeshEditorModel: ObservableObject {
             edges.materials = [edgeMaterial]
             let edgeNode = SCNNode(geometry: edges)
             edgeNode.renderingOrder = 20
-            edgeNode.categoryBitMask = 0
+            edgeNode.categoryBitMask = 2
             edgeNode.castsShadow = false
             scene.rootNode.addChildNode(edgeNode)
             meshEdgesNode = edgeNode
+        }
+        if request.isAlignment {
+            coordinateNode?.removeFromParentNode()
+            let axes = CoordinateSystem.axes(span: Float(span))
+            axes.isHidden = !showCoordinateSystem
+            scene.rootNode.addChildNode(axes)
+            coordinateNode = axes
         }
         if cameraNode == nil { configureCamera() }
         selectedFaces.removeAll()
@@ -276,9 +279,6 @@ final class MeshEditorModel: ObservableObject {
         let node = SCNNode(); let camera = SCNCamera()
         camera.zNear = 0.05; camera.zFar = max(span * 30, 10000); camera.fieldOfView = 38
         node.camera = camera
-        let constraint = SCNLookAtConstraint(target: target)
-        constraint.worldUp = SCNVector3(0,0,1); constraint.isGimbalLockEnabled = true
-        node.constraints = [constraint]
         scene.rootNode.addChildNode(node); cameraNode = node
         // Equal lights on the two ear sides keep either ear readable when orbiting.
         for side: Float in [-1, 1] {
@@ -301,10 +301,15 @@ final class MeshEditorModel: ObservableObject {
     }
 
     func resetCamera() {
+        setCameraView(request.isAlignment ? "Front" : (request.side == .right ? "Right" : "Left"))
+    }
+
+    func setCameraView(_ direction: String) {
         cameraRevision += 1
         targetNode?.simdPosition = center
-        let side: Float = request.side == .right ? -1 : 1
-        cameraNode?.simdPosition = center + SIMD3<Float>(0, side * Float(span * 1.7), Float(span * 0.15))
+        let offset: SIMD3<Float> = direction == "Front" ? SIMD3(1, 0, 0.08) : SIMD3(0, direction == "Right" ? -1 : 1, 0.08)
+        cameraNode?.simdPosition = center + offset * Float(span * 1.4)
+        cameraNode?.look(at: SCNVector3(center), up: SCNVector3(0,0,1), localFront: SCNVector3(0,0,-1))
         revision += 1
     }
     var pointOfView: SCNNode? { cameraNode }

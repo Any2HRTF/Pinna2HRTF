@@ -8,7 +8,7 @@ reconstruction runs after a manual edit.
 """
 from __future__ import annotations
 
-import hashlib
+from .FileIdentity import sha256 as digest, file_identity as identity
 import json
 from pathlib import Path
 import uuid
@@ -16,19 +16,6 @@ import uuid
 import networkx as nx
 import numpy as np
 import trimesh
-
-
-def digest(path):
-    hasher = hashlib.sha256()
-    with Path(path).open('rb') as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
-            hasher.update(chunk)
-    return hasher.hexdigest()
-
-
-def identity(path):
-    stat = Path(path).stat()
-    return dict(size=stat.st_size, mtime=stat.st_mtime)
 
 
 def load(path, merge=False):

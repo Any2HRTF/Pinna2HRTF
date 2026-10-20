@@ -42,6 +42,7 @@ struct ScanPreparationChecks {
     }
 
     static func main() throws {
+        try projectDuplicationChecks()
         cuttingPlanePreviewChecks()
         let root = Defaults.packageRoot()
         var project = Defaults.newProject(packageRoot: root, index: 1)
@@ -53,7 +54,7 @@ struct ScanPreparationChecks {
         encoder.outputFormatting = [.sortedKeys]
         let legacySignature = [legacy.leftEar, legacy.rightEar, legacy.inputHandling.rawValue, "", "",
             String(data: try encoder.encode(legacy.settings.inference), encoding: .utf8)!,
-            String(data: try encoder.encode(legacy.settings.preprocessing), encoding: .utf8)!].joined(separator: "\n")
+            String(data: try encoder.encode(legacy.settings.preprocessing), encoding: .utf8)!, "", "", ""].joined(separator: "\n")
         precondition(ArtifactScanner.preprocessingSignature(for: legacy) == legacySignature)
         var disabledScanProject = legacy
         disabledScanProject.settings.scanPreparation = ScanPreparationSettings()
@@ -62,6 +63,7 @@ struct ScanPreparationChecks {
         let temporary = URL(fileURLWithPath: "/private/tmp/pinna-mac-checks-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: temporary) }
+        try ProcessChecks.run(in: temporary)
         let source = temporary.appendingPathComponent("Input/scan.stl")
         try FileManager.default.createDirectory(at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("source scan".utf8).write(to: source)
@@ -76,14 +78,27 @@ struct ScanPreparationChecks {
         precondition(project.pipelineLeftEar.isEmpty)
         precondition(project.pipelineRightEar.hasSuffix("Prepared/Right.stl"))
         precondition(ProjectValidation.issues(for: project).isEmpty)
-        let yaml = PipelineConfigWriter.yaml(project: project, environment: Defaults.environment(root: root))
+        let mapping = PipelineConfigWriter.mapping(project: project, environment: Defaults.environment(root: root))
+        let yaml = try ProjectConfigDocument.encode(mapping)
         let parsed = try ProjectConfigDocument.parse(yaml)
         let restored = try ProjectConfigDocument.restore(parsed, into: legacy, folder: URL(fileURLWithPath: project.saveLocation), packageRoot: root)
         precondition(restored.scanPreparation == scan)
-        let merged = try ProjectConfigDocument.mergedYAML(generated: yaml, preservedJSON: "{\"scan_preparation\":{\"rotation_degrees\":270,\"crop_polygon_xz\":[[0,0],[1,0],[0,1]]}}")
-        let preserved = try ProjectConfigDocument.parse(merged)["scan_preparation"] as! [String: Any]
-        precondition(preserved["rotation_degrees"] as? Int == 90)
+        let merged = try ProjectConfigDocument.merged(generated: mapping, preservedJSON: "{\"scan_preparation\":{\"rotation_degrees\":270,\"crop_polygon_xz\":[[0,0],[1,0],[0,1]]}}")
+        let preserved = merged["scan_preparation"] as! [String: Any]
+        precondition((preserved["rotation_degrees"] as? NSNumber)?.doubleValue == 90)
         precondition(preserved["crop_polygon_xz"] != nil)
+        let unexposed = try ProjectConfigDocument.merged(generated: mapping, preservedJSON: "{\"paths\":{\"left_ear\":\"old.stl\"},\"preprocessing\":{\"head_width_scale\":1.7,\"head_radius\":90,\"source_position_input_left\":[1,2,3]}}")
+        let unexposedPre = unexposed["preprocessing"] as! [String: Any]
+        precondition(unexposedPre["head_width_scale"] as? Double == 1.7)
+        precondition(unexposedPre["head_radius"] == nil && unexposedPre["source_position_input_left"] == nil)
+        precondition((unexposed["paths"] as! [String: Any])["left_ear"] is NSNull)
+        var namedProject = project
+        namedProject.name = "Quoted \"project\"\nwith a backslash \\"
+        namedProject.settings.preprocessing.maxFrequency = "9007199254740993"
+        let namedYAML = try ProjectConfigDocument.encode(PipelineConfigWriter.mapping(project: namedProject, environment: Defaults.environment(root: root)))
+        let namedPre = try ProjectConfigDocument.parse(namedYAML)["preprocessing"] as! [String: Any]
+        precondition(namedPre["title"] as? String == namedProject.name)
+        precondition((namedPre["max_frequency"] as? NSNumber)?.int64Value == 9007199254740993)
         precondition(GeneratedOutputManifest.classify("Prepared/Left.stl") == .scanPreparation)
         precondition(GeneratedOutputManifest.classify("Prepared/mesh_preparation.json") == .scanPreparation)
         precondition(GeneratedOutputManifest.classify("Prepared/inference.json") == .inference)
@@ -140,6 +155,20 @@ struct ScanPreparationChecks {
         precondition(FileManager.default.fileExists(atPath: source.path))
         precondition(FileManager.default.fileExists(atPath: unrelated.path))
         precondition(FileManager.default.fileExists(atPath: edited.path))
+        let solver = temporary.appendingPathComponent("solver")
+        let sourceFolder = solver.appendingPathComponent("NumCalc/source_1")
+        let stepFolder = sourceFolder.appendingPathComponent("be.out/be.1")
+        try FileManager.default.createDirectory(at: stepFolder, withIntermediateDirectories: true)
+        try Data("{\"numFrequencies\":1}".utf8).write(to: solver.appendingPathComponent("parameters.json"))
+        let inspection = ArtifactScanner.Inspection()
+        precondition(!ArtifactScanner.numcalcIsComplete(solver, inspection: inspection))
+        for name in ["pBoundary", "pEvalGrid", "vBoundary", "vEvalGrid"] {
+            try Data("result".utf8).write(to: stepFolder.appendingPathComponent(name))
+        }
+        try Data("---------- NumCalc ended:".utf8).write(to: sourceFolder.appendingPathComponent("NC1-1_log.txt"))
+        precondition(!ArtifactScanner.numcalcIsComplete(solver, inspection: inspection))
+        precondition(ArtifactScanner.numcalcIsComplete(solver))
+        precondition(ArtifactScanner.numcalcCompleted(solver) == 1)
         print("Mac settings, legacy decoding, YAML round-trip, output ownership and freshness checks passed.")
     }
 }
