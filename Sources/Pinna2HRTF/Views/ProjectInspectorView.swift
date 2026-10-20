@@ -45,6 +45,7 @@ struct ProjectInspectorView: View {
     }
 
     var settingsPanel: some View {
+        ScrollViewReader { proxy in
         Form {
             Section {
                 requiredPanel
@@ -53,10 +54,9 @@ struct ProjectInspectorView: View {
                 SettingsDisclosure("Mesh2PPM", systemImage: "wand.and.stars") {
                     ModelPicker(selection: modelNameBinding, options: store.modelOptions, helpID: "inference.model")
                 }
-                SettingsDisclosure("Mesh2HRTF", systemImage: "waveform.path.ecg") {
+                SettingsDisclosure("Mesh2HRTF", systemImage: "waveform.path.ecg", expandRequest: store.earDistanceFocusRequest) {
                     PathField("Evaluation grid", helpID: "mesh2hrtf.evaluation_grid", text: optionalPreprocessingBinding(\.evaluationGrid), mode: .directory)
-                    SettingToggle(title: "Use custom head radius", helpID: "mesh2hrtf.use_head_radius", isOn: useCustomHeadRadiusBinding)
-                    LabeledMillimeterSlider("Head radius", helpID: "mesh2hrtf.head_radius", value: headRadiusBinding, range: 0...200, sliderEnabled: useCustomHeadRadiusBinding.wrappedValue)
+                    HeadGeometryControls(store: store)
                     LabeledTextField("Min frequency", helpID: "mesh2hrtf.min_frequency", text: preprocessingBinding(\.minFrequency))
                     LabeledTextField("Max frequency", helpID: "mesh2hrtf.max_frequency", text: preprocessingBinding(\.maxFrequency))
                     HStack {
@@ -111,6 +111,12 @@ struct ProjectInspectorView: View {
         }
         .formStyle(.grouped)
         .modifier(WorkspaceScrollEdges())
+        .onChange(of: store.earDistanceFocusRequest) { value in
+            if value != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { proxy.scrollTo("ear-distance", anchor: .center) }
+            }
+        }
+        }
     }
 
     var requiredPanel: some View {
@@ -186,42 +192,6 @@ struct ProjectInspectorView: View {
         Binding(
             get: { store.selectedProject?.settings.preprocessing[keyPath: keyPath] ?? false },
             set: { value in store.updateSelectedProject { $0.settings.preprocessing[keyPath: keyPath] = value } }
-        )
-    }
-
-    var headRadiusBinding: Binding<Double> {
-        Binding(
-            get: {
-                guard let text = store.selectedProject?.settings.preprocessing.headRadius, let value = Double(text) else {
-                    return 0
-                }
-                return min(max(value, 0), 200)
-            },
-            set: { value in
-                let rounded = Int(min(max(value, 0), 200).rounded())
-                store.updateSelectedProject { project in
-                    project.settings.preprocessing.headRadius = "\(rounded)"
-                }
-            }
-        )
-    }
-
-    var useCustomHeadRadiusBinding: Binding<Bool> {
-        Binding(
-            get: {
-                guard let preprocessing = store.selectedProject?.settings.preprocessing else {
-                    return false
-                }
-                return preprocessing.useCustomHeadRadius ?? (preprocessing.headRadius != nil)
-            },
-            set: { value in
-                store.updateSelectedProject { project in
-                    project.settings.preprocessing.useCustomHeadRadius = value
-                    if value, project.settings.preprocessing.headRadius == nil {
-                        project.settings.preprocessing.headRadius = "0"
-                    }
-                }
-            }
         )
     }
 

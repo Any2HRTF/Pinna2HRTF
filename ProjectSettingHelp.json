@@ -49,16 +49,12 @@
     ]
   },
   {
-    "id": "mesh2hrtf.use_head_radius",
-    "title": "Use custom head radius",
-    "description": "Enables manual placement of the input pinnae at a specified lateral head radius before the dummy head is created. Leave disabled to preserve the input placement.",
-    "publications": []
-  },
-  {
-    "id": "mesh2hrtf.head_radius",
-    "title": "Head radius",
-    "description": "The lateral distance in millimetres used to place the left and right pinnae before head construction. This value is used only when Use custom head radius is enabled.",
-    "publications": []
+    "id": "mesh2hrtf.ear_distance",
+    "title": "Ear distance from head center",
+    "description": "Moves both ears inward or outward by the same amount. Head size adjusts automatically.\n\nFor reference: about 75 mm per side, based on an average ear-canal entrance spacing of 150 mm in a study of 21 adults.",
+    "publications": [
+      { "title": "Gutierrez-Parera et al. (2022), Table 1", "url": "https://doi.org/10.1186/s13636-022-00241-y" }
+    ]
   },
   {
     "id": "mesh2hrtf.min_frequency",

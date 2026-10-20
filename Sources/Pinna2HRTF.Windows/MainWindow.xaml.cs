@@ -185,7 +185,6 @@ public partial class MainWindow : Window
     readonly TextBox rightEarBox = new();
     readonly TextBox saveLocationBox = new();
     readonly TextBox evaluationGridBox = new();
-    readonly TextBox headRadiusBox = new();
     readonly TextBox minFrequencyBox = new();
     readonly TextBox maxFrequencyBox = new();
     readonly TextBox frequencyStepsBox = new();
@@ -200,7 +199,6 @@ public partial class MainWindow : Window
     readonly TextBox maxCpuLoadBox = new();
     readonly TextBox levelOffsetBox = new();
     readonly CheckBox usePredictionsBox = new();
-    readonly CheckBox useHeadRadiusBox = new();
     readonly CheckBox adaptiveFmmLengthBox = new();
     readonly CheckBox normalizeHrtfsBox = new();
     readonly CheckBox resampleHrirsBox = new();
@@ -328,7 +326,10 @@ public partial class MainWindow : Window
     {
         BuildInterface();
         packageRoot = FindPackageRoot();
-        appData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Pinna2HRTF");
+        appData = Environment.GetEnvironmentVariable("PINNA2HRTF_APP_DATA") is string overrideData && Path.IsPathFullyQualified(overrideData) ? overrideData : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Pinna2HRTF");
+#if PINNA2HRTF_REVIEW
+        appData = Path.Combine(AppContext.BaseDirectory, ".appdata");
+#endif
         registryPath = Path.Combine(appData, "projects.json");
         viewerStatePath = Path.Combine(appData, "viewer-state.json");
         uiStatePath = Path.Combine(appData, "ui-state.json");
@@ -922,7 +923,7 @@ public partial class MainWindow : Window
         settings.Children.Add(new TextBlock { Text = "Choose at least one ear mesh.", Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)), Margin = new Thickness(0, 3, 0, 4) });
         AddSetting(settings, "Use Mesh2PPM", "project.use_bezierppm", usePredictionsBox, "Use Mesh2PPM");
         AddExpander(settings, "Mesh2PPM", [AddSettingPanel("Model", "inference.model", modelPicker)]);
-        AddExpander(settings, "Mesh2HRTF", [PathSettingPanel("Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked), AddSettingPanel("Use custom head radius", "mesh2hrtf.use_head_radius", useHeadRadiusBox, "Use custom head radius"), AddSettingPanel("Head radius", "mesh2hrtf.head_radius", headRadiusBox), AddSettingPanel("Min frequency", "mesh2hrtf.min_frequency", minFrequencyBox), AddSettingPanel("Max frequency", "mesh2hrtf.max_frequency", maxFrequencyBox), AddSettingPanel("Frequency steps (minimum 2)", "mesh2hrtf.frequency_steps", frequencyStepsBox), AddSettingPanel("Microphone faces", "mesh2hrtf.microphone_faces", microphoneFacesBox)]);
+        AddExpander(settings, "Mesh2HRTF", [PathSettingPanel("Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked), GeometryPanel(), AddSettingPanel("Min frequency", "mesh2hrtf.min_frequency", minFrequencyBox), AddSettingPanel("Max frequency", "mesh2hrtf.max_frequency", maxFrequencyBox), AddSettingPanel("Frequency steps (minimum 2)", "mesh2hrtf.frequency_steps", frequencyStepsBox), AddSettingPanel("Microphone faces", "mesh2hrtf.microphone_faces", microphoneFacesBox)]);
         AddExpander(settings, "Mesh Grading", [AddSettingPanel("Min edge length", "mesh_grading.min_edge_length", meshMinEdgeBox), AddSettingPanel("Max edge length", "mesh_grading.max_edge_length", meshMaxEdgeBox), AddSettingPanel("Max error", "mesh_grading.max_error", meshMaxErrorBox), AddSettingPanel("Gamma", "mesh_grading.gamma", meshGammaBox), AddSettingPanel("Gamma opposite", "mesh_grading.gamma_opposite", meshGammaOppositeBox)]);
         AddExpander(settings, "NumCalc", [AddSettingPanel("Parallel instances", "numcalc.parallel_instances", maxInstancesBox), AddSettingPanel("CPU limit (%)", "numcalc.cpu_limit", maxCpuLoadBox), AddSettingPanel("Adaptive FMM expansion length", "numcalc.adaptive_fmm", adaptiveFmmLengthBox, "Adaptive FMM expansion length")]);
         AddExpander(settings, "Postprocessing", [AddSettingPanel("Normalize HRTFs", "postprocessing.normalize", normalizeHrtfsBox, "Normalize HRTFs"), AddSettingPanel("Level offset (dB)", "postprocessing.level_offset", levelOffsetBox), AddSettingPanel("Resample HRIRs", "postprocessing.resample_hrirs", resampleHrirsBox, "Resample HRIRs"), AddSettingPanel("Sampling rate (Hz)", "postprocessing.sampling_rate", samplingRateBox)]);
@@ -973,10 +974,7 @@ public partial class MainWindow : Window
         settingControls[id] = control;
         if (control is TextBox textBox)
         {
-            if (id.StartsWith("project.", StringComparison.OrdinalIgnoreCase) && id != "project.use_bezierppm")
-                textBox.TextChanged += ProjectEdited;
-            else
-                textBox.LostFocus += SettingTextBoxLostFocus;
+            AttachSettingInput(textBox);
         }
         if (control is CheckBox box)
         {
@@ -1026,8 +1024,7 @@ public partial class MainWindow : Window
         row.Children.Add(box);
         box.Tag = id;
         settingControls[id] = box;
-        if (id.StartsWith("project.", StringComparison.OrdinalIgnoreCase)) box.TextChanged += ProjectEdited;
-        else box.LostFocus += SettingTextBoxLostFocus;
+        AttachSettingInput(box);
         return row;
     }
 
@@ -1149,8 +1146,7 @@ public partial class MainWindow : Window
         saveLocationBox.Text = project?.SaveLocation ?? "";
         usePredictionsBox.IsChecked = project?.Settings.Inference.UsePredictionsForPreprocessing ?? true;
         evaluationGridBox.Text = project?.Settings.Preprocessing.EvaluationGrid ?? "";
-        useHeadRadiusBox.IsChecked = project?.Settings.Preprocessing.UseCustomHeadRadius == true;
-        headRadiusBox.Text = project?.Settings.Preprocessing.HeadRadius ?? "";
+        earDistanceBox.Text = "";
         minFrequencyBox.Text = project?.Settings.Preprocessing.MinFrequency ?? "0";
         maxFrequencyBox.Text = project?.Settings.Preprocessing.MaxFrequency ?? "24000";
         frequencyStepsBox.Text = project?.Settings.Preprocessing.FrequencyStepCount ?? "129";
@@ -1172,6 +1168,8 @@ public partial class MainWindow : Window
         loading = false;
         UpdatePostprocessingControls();
         UpdatePlacementButtons();
+        RebaseSettingInputs();
+        RefreshGeometry();
     }
 
     Stage? SettingResetStage(string id)
@@ -1187,8 +1185,7 @@ public partial class MainWindow : Window
         "project.use_bezierppm" => (usePredictionsBox.IsChecked == true).ToString(),
         "inference.model" => modelPicker.SelectedItem?.ToString() ?? "",
         "mesh2hrtf.evaluation_grid" => evaluationGridBox.Text,
-        "mesh2hrtf.use_head_radius" => (useHeadRadiusBox.IsChecked == true).ToString(),
-        "mesh2hrtf.head_radius" => headRadiusBox.Text,
+        "mesh2hrtf.ear_distance" => earDistanceBox.Text,
         "mesh2hrtf.min_frequency" => minFrequencyBox.Text,
         "mesh2hrtf.max_frequency" => maxFrequencyBox.Text,
         "mesh2hrtf.frequency_steps" => frequencyStepsBox.Text,
@@ -1213,8 +1210,7 @@ public partial class MainWindow : Window
         "project.use_bezierppm" => project.Settings.Inference.UsePredictionsForPreprocessing.ToString(),
         "inference.model" => ModelName(project.Settings.Inference.ModelConfig),
         "mesh2hrtf.evaluation_grid" => project.Settings.Preprocessing.EvaluationGrid ?? "",
-        "mesh2hrtf.use_head_radius" => (project.Settings.Preprocessing.UseCustomHeadRadius == true).ToString(),
-        "mesh2hrtf.head_radius" => project.Settings.Preprocessing.HeadRadius ?? "",
+        "mesh2hrtf.ear_distance" => project.Settings.Preprocessing.EarDistance ?? "",
         "mesh2hrtf.min_frequency" => project.Settings.Preprocessing.MinFrequency ?? "",
         "mesh2hrtf.max_frequency" => project.Settings.Preprocessing.MaxFrequency ?? "",
         "mesh2hrtf.frequency_steps" => project.Settings.Preprocessing.FrequencyStepCount ?? "",
@@ -1279,15 +1275,10 @@ public partial class MainWindow : Window
         _ = HandleSettingChangeAsync(id);
     }
 
-    void SettingTextBoxLostFocus(object sender, RoutedEventArgs e)
-    {
-        if (loading || sender is not TextBox box || box.Tag is not string id) return;
-        _ = HandleSettingChangeAsync(id);
-    }
-
     async Task HandleSettingChangeAsync(string id)
     {
         if (loading || selectedProject == null) return;
+        if (id == "mesh2hrtf.ear_distance") { await EditGeometryAsync("ear", earDistanceBox.Text); return; }
         var project = selectedProject;
         var desired = CurrentSettingValue(id);
         if (desired == StoredSettingValue(project, id)) return;
@@ -1342,8 +1333,7 @@ public partial class MainWindow : Window
             case "project.use_bezierppm": usePredictionsBox.IsChecked = bool.TryParse(value, out var use) && use; break;
             case "inference.model": modelPicker.SelectedItem = value; break;
             case "mesh2hrtf.evaluation_grid": evaluationGridBox.Text = value; break;
-            case "mesh2hrtf.use_head_radius": useHeadRadiusBox.IsChecked = bool.TryParse(value, out var radius) && radius; break;
-            case "mesh2hrtf.head_radius": headRadiusBox.Text = value; break;
+            case "mesh2hrtf.ear_distance": earDistanceBox.Text = value; break;
             case "mesh2hrtf.min_frequency": minFrequencyBox.Text = value; break;
             case "mesh2hrtf.max_frequency": maxFrequencyBox.Text = value; break;
             case "mesh2hrtf.frequency_steps": frequencyStepsBox.Text = value; break;
@@ -1378,8 +1368,6 @@ public partial class MainWindow : Window
         UpdatePlacementButtons();
         if (placementSide != null && (project.Settings.Inference.UsePredictionsForPreprocessing || !PlacementIsCurrent())) EndPlacement();
         project.Settings.Preprocessing.EvaluationGrid = evaluationGridBox.Text.Trim();
-        project.Settings.Preprocessing.UseCustomHeadRadius = useHeadRadiusBox.IsChecked == true;
-        project.Settings.Preprocessing.HeadRadius = headRadiusBox.Text.Trim();
         project.Settings.Preprocessing.MinFrequency = minFrequencyBox.Text.Trim();
         project.Settings.Preprocessing.MaxFrequency = maxFrequencyBox.Text.Trim();
         project.Settings.Preprocessing.FrequencyStepCount = Math.Max(int.TryParse(frequencyStepsBox.Text, out var steps) ? steps : 129, 2).ToString(CultureInfo.InvariantCulture);
@@ -1512,7 +1500,12 @@ public partial class MainWindow : Window
         project.LeftEar = ImportedMesh(folder, "Left");
         project.RightEar = ImportedMesh(folder, "Right");
         project.Settings.Inference.UsePredictionsForPreprocessing = false;
-        TryReadProjectSettings(project);
+        try { TryReadProjectSettings(project); }
+        catch (Exception error)
+        {
+            AppendLog("Could not import project settings: " + error.Message);
+            return;
+        }
         InvalidateManualPositions(project);
         projects.Add(project);
         failedStages[project.Id] = [];
@@ -1530,6 +1523,7 @@ public partial class MainWindow : Window
         if (!File.Exists(path))
             return;
         var text = File.ReadAllText(path);
+        ReadGeometrySettings(project, path);
         project.Settings.Inference.UsePredictionsForPreprocessing = !text.Contains("use_predictions_for_preprocessing: false", StringComparison.OrdinalIgnoreCase);
         foreach (var (key, setter) in new (string, Action<string>)[] { ("min_frequency", v => project.Settings.Preprocessing.MinFrequency = v), ("max_frequency", v => project.Settings.Preprocessing.MaxFrequency = v), ("frequency_step_count", v => project.Settings.Preprocessing.FrequencyStepCount = Math.Max(int.TryParse(v, out var n) ? n : 129, 2).ToString(CultureInfo.InvariantCulture)), ("mesh_min_edge_length", v => project.Settings.Preprocessing.MeshMinEdgeLength = v), ("mesh_max_edge_length", v => project.Settings.Preprocessing.MeshMaxEdgeLength = v), ("mesh_max_error", v => project.Settings.Preprocessing.MeshMaxError = v), ("mesh_gamma", v => project.Settings.Preprocessing.MeshGamma = v), ("mesh_gamma_opposite", v => project.Settings.Preprocessing.MeshGammaOpposite = v) })
         {
@@ -1730,6 +1724,7 @@ public partial class MainWindow : Window
 
     void RefreshArtifacts()
     {
+        RefreshGeometry();
         if (placementSide != null) return;
         if (selectedProject == null)
         {
@@ -2317,7 +2312,11 @@ public partial class MainWindow : Window
         outputOperations.Add(project.Id);
         try
         {
-            if (stage == Stage.Preprocessing && !ValidateExternalRuntime(project)) return;
+            if (stage == Stage.Preprocessing)
+            {
+                if (!await ConfirmEarDistanceAsync(project)) return;
+                if (!ValidateExternalRuntime(project)) return;
+            }
             Directory.CreateDirectory(project.SaveLocation);
             if (stage == Stage.Inference)
             {
@@ -2399,6 +2398,7 @@ public partial class MainWindow : Window
         AppendLog(code == 0 ? stage.Title + " finished." : stage.Title + " failed (status " + code + ").", project.Id);
         process.Dispose();
         RefreshArtifacts();
+        RefreshGeometry();
         if (!shutdownCleanupDone && captured && code == 0 && queuedStages.TryGetValue(project.Id, out var queue) && queue.Count > 0) RunStage(queue.Dequeue(), project, true); else queuedStages.Remove(project.Id);
         RefreshPipelineStatus();
     }
@@ -2574,7 +2574,7 @@ preprocessing:
   ear_cut_clearance_scale: 1.3
   ear_cut_mode: ellipse
   projected_cut_margin: 10.0
-  seam_smoothing_iterations: 5
+{GeometryYaml(preprocessing)}  seam_smoothing_iterations: 5
   seam_smoothing_factor: 0.35
   mesh_min_edge_length: {preprocessing.MeshMinEdgeLength}
   mesh_max_edge_length: {preprocessing.MeshMaxEdgeLength}
@@ -2977,7 +2977,7 @@ ui:
 
     async void ShowAboutClicked(object sender, RoutedEventArgs e)
     {
-        var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "1.1.0";
+        var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "1.2.0";
         var content = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
         var logoPath = Path.Combine(AppContext.BaseDirectory, "icon.png");
         if (File.Exists(logoPath)) content.Children.Add(new Image { Source = new BitmapImage(new Uri(logoPath)), Width = 336, Height = 240, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center });
@@ -3116,7 +3116,21 @@ ui:
 
     void LoadRegistry()
     {
-        if (File.Exists(registryPath)) try { registry = JsonSerializer.Deserialize<ProjectRegistry>(File.ReadAllText(registryPath), jsonOptions) ?? new ProjectRegistry(); } catch { registry = new ProjectRegistry(); }
+        if (File.Exists(registryPath))
+        {
+            try
+            {
+                var original = File.ReadAllText(registryPath);
+                var migrated = HeadGeometry.MigrateRegistry(original, out var changed);
+                registry = JsonSerializer.Deserialize<ProjectRegistry>(migrated, jsonOptions) ?? throw new InvalidDataException("Invalid registry.");
+                if (changed)
+                {
+                    File.Copy(registryPath, registryPath + ".pre-1.2.0-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff") + ".bak");
+                    HeadGeometry.AtomicWrite(registryPath, migrated);
+                }
+            }
+            catch (Exception error) { registrySavingBlocked = true; AppendLog("Project list could not be migrated; the original file is protected: " + error.Message); }
+        }
         projects.Clear();
         foreach (var project in registry.Projects) projects.Add(project);
         if (projects.Count == 0) { var project = NewProject(1); projects.Add(project); }
@@ -3168,8 +3182,9 @@ ui:
 
     void Persist()
     {
+        if (registrySavingBlocked) return;
         registry = new ProjectRegistry { Projects = projects.ToList(), SelectedProjectID = selectedProject?.Id, Environment = environment };
-        if (!string.IsNullOrWhiteSpace(registryPath)) File.WriteAllText(registryPath, JsonSerializer.Serialize(registry, jsonOptions));
+        if (!string.IsNullOrWhiteSpace(registryPath)) HeadGeometry.AtomicWrite(registryPath, JsonSerializer.Serialize(registry, jsonOptions));
     }
 
     void LoadViewerStates()
@@ -3315,7 +3330,7 @@ class EnvironmentConfig { public string UvExecutable { get; set; } = ""; public 
 class ProjectRecord { public Guid Id { get; set; } = Guid.NewGuid(); public string Name { get; set; } = ""; public string LeftEar { get; set; } = ""; public string RightEar { get; set; } = ""; public string SaveLocation { get; set; } = ""; public InputHandling InputHandling { get; set; } = InputHandling.Copy; public ProjectSettings Settings { get; set; } = new(); [JsonIgnore] public string StatusText { get; set; } = ""; [JsonIgnore] public bool IsRunning { get; set; } }
 class ProjectSettings { public InferenceSettings Inference { get; set; } = new(); public PreprocessingSettings Preprocessing { get; set; } = new(); public NumCalcSettings NumCalc { get; set; } = new(); public PostprocessingSettings? Postprocessing { get; set; } = new(); }
 class InferenceSettings { public string ModelConfig { get; set; } = ""; public string ModelCheckpoint { get; set; } = ""; public string TargetLeftFolder { get; set; } = "Input/Left"; public string TargetRightFolder { get; set; } = "Input/Right"; public string PredictionLeftFolder { get; set; } = "Intermediates/Left"; public string PredictionRightFolder { get; set; } = "Intermediates/Right"; public bool UsePredictionsForPreprocessing { get; set; } = true; }
-class PreprocessingSettings { public string MinFrequency { get; set; } = "0"; public string MaxFrequency { get; set; } = "24000"; public string FrequencyStepCount { get; set; } = "129"; public string? EvaluationGrid { get; set; } public string? HeadRadius { get; set; } public bool? UseCustomHeadRadius { get; set; } public string SourceAssignmentFaceCount { get; set; } = "6"; public string MeshMinEdgeLength { get; set; } = "0.5"; public string MeshMaxEdgeLength { get; set; } = "10.0"; public string MeshMaxError { get; set; } = "0.5"; public string MeshGamma { get; set; } = "0.2"; public string MeshGammaOpposite { get; set; } = "0.1"; public ManualMicrophonePosition? SourcePositionInputLeft { get; set; } public ManualMicrophonePosition? SourcePositionInputRight { get; set; } }
+class PreprocessingSettings { public string MinFrequency { get; set; } = "0"; public string MaxFrequency { get; set; } = "24000"; public string FrequencyStepCount { get; set; } = "129"; public string? EvaluationGrid { get; set; } public string? EarDistance { get; set; } public string SourceAssignmentFaceCount { get; set; } = "6"; public string MeshMinEdgeLength { get; set; } = "0.5"; public string MeshMaxEdgeLength { get; set; } = "10.0"; public string MeshMaxError { get; set; } = "0.5"; public string MeshGamma { get; set; } = "0.2"; public string MeshGammaOpposite { get; set; } = "0.1"; public ManualMicrophonePosition? SourcePositionInputLeft { get; set; } public ManualMicrophonePosition? SourcePositionInputRight { get; set; } }
 class ManualMicrophonePosition { public double X { get; set; } public double Y { get; set; } public double Z { get; set; } public string MeshPath { get; set; } = ""; public string MeshIdentity { get; set; } = ""; }
 class PostprocessingSettings { public bool Normalize { get; set; } = true; public string LevelOffsetDB { get; set; } = "-30";  public bool ResampleHrirs { get; set; } = false; public string SamplingRate { get; set; } = "48000"; }
 class NumCalcSettings { public string MaxInstances { get; set; } = "1"; public string MaxCpuLoad { get; set; } = "90"; public bool AdaptiveFmmLength { get; set; } = true; }

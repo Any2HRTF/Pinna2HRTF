@@ -135,12 +135,14 @@ struct SettingToggle: View {
 struct SettingsDisclosure<Content: View>: View {
     let title: String
     let systemImage: String
+    let expandRequest: UUID?
     @State private var isExpanded: Bool
     @ViewBuilder let content: () -> Content
 
-    init(_ title: String, systemImage: String, expanded: Bool = false, @ViewBuilder content: @escaping () -> Content) {
+    init(_ title: String, systemImage: String, expanded: Bool = false, expandRequest: UUID? = nil, @ViewBuilder content: @escaping () -> Content) {
         self.title = title
         self.systemImage = systemImage
+        self.expandRequest = expandRequest
         self._isExpanded = State(initialValue: expanded)
         self.content = content
     }
@@ -173,6 +175,7 @@ struct SettingsDisclosure<Content: View>: View {
                 .padding(.leading, 2)
             }
         }
+        .onChange(of: expandRequest) { value in if value != nil { isExpanded = true } }
     }
 }
 

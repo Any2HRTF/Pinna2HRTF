@@ -74,6 +74,23 @@ struct MacOSFeatureChecks {
         post.samplingRate = "44100"; project.settings.postprocessing = post
         let yaml = PipelineConfigWriter.yaml(project: project, environment: EnvironmentConfig(uvExecutable: "uv", numcalcExecutable: "NumCalc", meshGradingExecutable: "hrtf_mesh_grading", externalDir: root.path), manualPositions: [:])
         require(yaml.contains("resample_hrirs: true") && yaml.contains("sampling_rate: 44100"), "Resampling options are missing from pipeline YAML")
+        let original = GeometryValues(left: 80, right: 70)
+        let moved = try original.atDistance(85)
+        require(moved.left == 90 && moved.right == 80, "Asymmetry was not preserved")
+        require(HeadGeometrySettings.needsWarning(50) && !HeadGeometrySettings.needsWarning(50.1), "Warning boundary incorrect")
+        let oldRegistry: [String: Any] = ["projects": [["settings": ["preprocessing": ["headRadius": "80", "useCustomHeadRadius": true]]]]]
+        let migrated = try HeadGeometrySettings.migrateRegistry(oldRegistry) as! [String: Any]
+        let migratedProject = (migrated["projects"] as! [[String: Any]])[0]
+        let migratedGeometry = (migratedProject["settings"] as! [String: Any])["preprocessing"] as! [String: Any]
+        require(migratedGeometry["earDistance"] as? String == "80" && migratedGeometry["headRadius"] == nil, "Legacy override not converted")
+        project.settings.preprocessing.earDistance = "90"
+        let geometryYAML = PipelineConfigWriter.yaml(project: project, environment: EnvironmentConfig(uvExecutable: "uv", numcalcExecutable: "NumCalc", meshGradingExecutable: "grading", externalDir: root.path), manualPositions: [:])
+        require(geometryYAML.contains("ear_distance: 90") && !geometryYAML.contains("  head_radius:"), "Canonical distance missing from YAML")
+        try write("scoped/Intermediates/Left/Prediction_ear.stl")
+        try write("scoped/Intermediates/dummy_head.stl")
+        let scoped = try GeneratedOutputManifest(projectRoot: root.appendingPathComponent("scoped").path, inputs: [])
+        require(scoped.reset(from: .preprocessing).success, "Scoped geometry reset failed")
+        require(exists("scoped/Intermediates/Left/Prediction_ear.stl") && !exists("scoped/Intermediates/dummy_head.stl"), "Geometry reset must preserve inference")
         print("Passed macOS checks: output deletion, protected and edited files, empty shells, locking, recovery, symlinks, corrupt metadata, settings migration, and resampling YAML.")
     }
 }

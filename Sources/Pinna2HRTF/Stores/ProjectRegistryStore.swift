@@ -4,6 +4,8 @@ final class ProjectRegistryStore {
     let url: URL
     let rootURL: URL
     let packageURL: URL
+    private(set) var savingBlocked = false
+    private(set) var migrationError: String?
 
     init(rootURL: URL, packageURL: URL, url: URL = Defaults.appDataURL.appendingPathComponent("projects.json")) {
         self.rootURL = rootURL
@@ -13,12 +15,25 @@ final class ProjectRegistryStore {
 
     func load() -> ProjectRegistry {
         if let data = try? Data(contentsOf: url) {
-            if let registry = try? JSONDecoder().decode(ProjectRegistry.self, from: data) {
+            do {
+                let object = try JSONSerialization.jsonObject(with: data)
+                let geometry = try HeadGeometrySettings.migrateRegistry(object)
+                let migrated = Self.migrateLegacyMeshSettings(geometry) ?? geometry
+                let converted = try JSONSerialization.data(withJSONObject: migrated)
+                let registry = try JSONDecoder().decode(ProjectRegistry.self, from: converted)
+                if try JSONSerialization.data(withJSONObject: object, options: .sortedKeys) != JSONSerialization.data(withJSONObject: geometry, options: .sortedKeys) {
+                    let backup = url.appendingPathExtension("pre-1.2.0-\(UUID().uuidString).bak")
+                    try data.write(to: backup, options: .withoutOverwriting)
+                    try JSONEncoder.pretty.encode(registry).write(to: url, options: .atomic)
+                }
                 return registry
+            } catch {
+                savingBlocked = true
+                migrationError = "Project list could not be migrated. The original file is protected: \(error.localizedDescription)"
             }
-            if let object = try? JSONSerialization.jsonObject(with: data), let migratedObject = Self.migrateLegacyMeshSettings(object), let migratedData = try? JSONSerialization.data(withJSONObject: migratedObject), let registry = try? JSONDecoder().decode(ProjectRegistry.self, from: migratedData) {
-                return registry
-            }
+        } else if FileManager.default.fileExists(atPath: url.path) {
+            savingBlocked = true
+            migrationError = "The project list is unreadable and has been preserved."
         }
         let environment = Defaults.environment(root: rootURL)
         return ProjectRegistry(projects: [], selectedProjectID: nil, environment: environment)
@@ -46,6 +61,7 @@ final class ProjectRegistryStore {
     }
 
     func save(_ registry: ProjectRegistry) {
+        guard !savingBlocked else { return }
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             let data = try JSONEncoder.pretty.encode(registry)

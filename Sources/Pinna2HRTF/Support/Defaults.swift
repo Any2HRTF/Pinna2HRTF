@@ -42,6 +42,7 @@ enum Defaults {
     }
 
     static var appDataURL: URL {
+        if let path = ProcessInfo.processInfo.environment["PINNA2HRTF_APP_DATA"], path.hasPrefix("/") { return URL(fileURLWithPath: path, isDirectory: true) }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return base.appendingPathComponent("Pinna2HRTF", isDirectory: true)
     }

@@ -28,10 +28,11 @@ final class GeneratedOutputManifest {
         var Pending: PendingRun?
     }
     struct ResetResult {
+        var fromStage: OutputStage?
         var deleted = 0, modified = 0, nonEmpty = 0, errors = 0
         var success: Bool { modified == 0 && errors == 0 }
         var summary: String {
-            "Outputs reset (all): deleted \(deleted), kept modified \(modified), kept non-empty directories \(nonEmpty), errors \(errors)."
+            "Outputs reset (\(fromStage?.rawValue ?? "all")): deleted \(deleted), kept modified \(modified), kept non-empty directories \(nonEmpty), errors \(errors)."
         }
     }
     enum Failure: LocalizedError {
@@ -88,9 +89,9 @@ final class GeneratedOutputManifest {
         try save(doc)
     }
 
-    func reset() -> ResetResult {
+    func reset(from: OutputStage? = nil) -> ResetResult {
         gate.lock(); defer { gate.unlock() }
-        var result = ResetResult()
+        var result = ResetResult(fromStage: from)
         do {
             guard runLock == nil else { throw Failure.busy }
             guard fm.fileExists(atPath: root.path) else { return result }
@@ -100,6 +101,7 @@ final class GeneratedOutputManifest {
             try reconcile(&doc)
             try save(doc)
             for (relative, entry) in doc.Files {
+                if let from, entry.Stage.order < from.order { continue }
                 guard let url = safePath(relative) else { result.errors += 1; continue }
                 do {
                     guard fm.fileExists(atPath: url.path) else { doc.Files.removeValue(forKey: relative); continue }
@@ -113,6 +115,7 @@ final class GeneratedOutputManifest {
             }
             let directories = Set(doc.Directories.keys).union(try scan().directories.filter { Self.classifyEmptyDirectory($0) != nil })
             for relative in directories.sorted(by: { $0.count > $1.count }) {
+                if let from, let stage = doc.Directories[relative] ?? Self.classifyEmptyDirectory(relative), stage.order < from.order { continue }
                 guard let url = safePath(relative) else { result.errors += 1; continue }
                 do {
                     guard fm.fileExists(atPath: url.path) else { doc.Directories.removeValue(forKey: relative); continue }

@@ -21,7 +21,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published var stageStates: [Stage: StageState] = Dictionary(uniqueKeysWithValues: Stage.allCases.map { ($0, .ready) })
     @Published var runningProcesses: [UUID: Process] = [:]
     @Published var runningStages: [UUID: Stage] = [:]
-    @Published private var outputOperations = Set<UUID>()
+    @Published var outputOperations = Set<UUID>()
     private var outputStores: [String: GeneratedOutputManifest] = [:]
     @Published var environmentProcess: Process?
     @Published var failedStagesByProject: [UUID: Set<Stage>] = [:]
@@ -35,6 +35,14 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published private var automaticMicrophoneProcesses: [String: Process] = [:]
     private let microphoneMarkerName = "pinna2hrtf-microphone-marker"
     private var notificationsConfigured = false
+
+    @Published var earDistanceFocusRequest: UUID?
+    @Published var geometryValues: GeometryValues?
+    @Published var geometryMessage = "Load an ear mesh to calculate geometry."
+    @Published var geometryEditing = false
+    var geometryCache: [String: GeometryValues] = [:]
+    var geometryRequests = Set<String>()
+    var geometryKey = ""
 
     let rootURL: URL
     let packageURL: URL
@@ -58,6 +66,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         environment = registry.environment
         viewerStateByProject = Self.loadViewerStates()
         super.init()
+        if let error = registryStore.migrationError { appendLog(error) }
         registryStore.save(ProjectRegistry(projects: projects, selectedProjectID: selectedProjectID, environment: environment))
         refreshArtifacts()
         restoreViewer()
@@ -187,6 +196,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         for configName in ["Project Settings.yaml", ".pinna2hrtf_native_run.yaml", "pipeline.yaml"] {
             let configURL = folder.appendingPathComponent(configName)
             guard let config = try? String(contentsOf: configURL, encoding: .utf8) else { continue }
+            do { try readDistanceSettings(configURL, into: &project.settings.preprocessing) }
+            catch { appendLog("Could not import geometry: \(error.localizedDescription)"); return }
             var section = ""
             for line in config.components(separatedBy: .newlines) {
                 if !line.hasPrefix(" "), line.hasSuffix(":") {
@@ -197,6 +208,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                     project.settings.inference.usePredictionsForPreprocessing = false
                 }
             }
+            break
         }
         projects.append(project)
         selectedProjectID = project.id
@@ -294,6 +306,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func refreshArtifacts() {
+        refreshGeometry()
         guard let selectedProject else {
             artifacts = []
             stageStates = Dictionary(uniqueKeysWithValues: Stage.allCases.map { ($0, .ready) })
@@ -460,7 +473,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func microphoneDisplayPosition(_ position: SCNVector3, meshURL: URL, project: ProjectRecord, side: EarSide, positionIsInput: Bool) -> SCNVector3 {
-        guard let preprocessing = project.settings.preprocessing.headRadius, project.settings.preprocessing.useCustomHeadRadius ?? true, let radius = Double(preprocessing), radius >= 0 else { return position }
+        guard project.settings.preprocessing.earDistance != nil else { return position }
         let sourceMesh = ArtifactScanner.preprocessingMesh(for: project, side: side)
         let translatedMesh = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Intermediates/\(side.title)/input_ear.stl")
         guard let sourceMesh, FileManager.default.fileExists(atPath: translatedMesh.path), let sourceCenterY = meshCenterY(sourceMesh), let translatedCenterY = meshCenterY(translatedMesh) else { return position }
@@ -795,7 +808,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let inference = (try? encoder.encode(project.settings.inference)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        let preprocessing = (try? encoder.encode(project.settings.preprocessing)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let geometrySettings = project.settings.preprocessing
+        let preprocessing = (try? encoder.encode(geometrySettings)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
         let leftIdentity = project.leftEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: project.leftEar)) ?? "")
         let rightIdentity = project.rightEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: project.rightEar)) ?? "")
         return [project.leftEar, project.rightEar, project.inputHandling.rawValue, leftIdentity, rightIdentity, inference, preprocessing].joined(separator: "\n")
@@ -845,6 +859,11 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             appendLog("\(stage.title) is not ready. Check the project inputs and previous stages.")
             return
         }
+        if stage == .preprocessing { checkEarDistanceAndRun(project); return }
+        prepareAndRun(stage: stage, project: project)
+    }
+
+    func prepareAndRun(stage: Stage, project: ProjectRecord) {
         do {
             try prepareRuntimeProject()
             let configURL = try PipelineConfigWriter.prepare(project: project, environment: environment)

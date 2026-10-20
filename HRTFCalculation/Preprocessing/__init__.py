@@ -11,25 +11,17 @@ from .src.create_head import head
 from .src.ear_canal_closer import ear_canal_closer, estimate_ear_canal_position
 from .src.cut_eararea import cut_eararea, cut_eararea_projected_footprint
 from HRTFCalculation.Config import PreprocessingConfig
+from HRTFCalculation.Geometry import resolve_geometry, boundary_y, needs_distance_warning
 
 
 def pinna_y_center(ear):
-    entities = ear.outline().entities
-    if entities is not None and len(entities) > 0:
-        outline = max((entity.discrete(ear.vertices) for entity in entities), key=len)
-        return float(sum(point[1] for point in outline) / len(outline))
-    return float((ear.bounds[0][1] + ear.bounds[1][1]) / 2)
+    return boundary_y(ear)
 
 
-def place_pinnae_at_head_radius(left_ear, right_ear, head_radius):
-    translations = {"left": (0.0, 0.0, 0.0), "right": (0.0, 0.0, 0.0)}
-    if left_ear is not None:
-        translations["left"] = (0.0, head_radius - pinna_y_center(left_ear), 0.0)
-        left_ear.apply_translation(translations["left"])
-    if right_ear is not None:
-        translations["right"] = (0.0, -head_radius - pinna_y_center(right_ear), 0.0)
-        right_ear.apply_translation(translations["right"])
-    return translations
+def reposition_ears_laterally(ears, translations):
+    for side, ear in ears.items():
+        if ear is not None:
+            ear.apply_translation(translations[side])
 
 
 def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, mesh2hrtf_path, evaluation_grid, preprocessing=None, output_dir=None, export_path=None, logger=print):
@@ -40,6 +32,13 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
     right_path = Path(right_path) if right_path else None
     if left_path is None and right_path is None:
         raise ValueError("At least one ear mesh is required")
+    # Inspect and validate before cleaning any previous output.
+    left_ear = trimesh.load(left_path) if left_path is not None else None
+    right_ear = trimesh.load(right_path) if right_path is not None else None
+    ears = {"left": left_ear, "right": right_ear}
+    geometry = resolve_geometry(ears, settings)
+    if needs_distance_warning(geometry["ear_distance"]):
+        logger(f"Warning: ear distance from head center is {geometry['ear_distance']:.3f} mm (50 mm or less). This will produce a very small head.")
     if output_dir is not None:
         output_dir = Path(output_dir)
         projects_dir = output_dir / "Projects"
@@ -107,13 +106,9 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
                 side_dirs[side].mkdir(parents=True, exist_ok=True)
     try:
         logger("Loading input ear meshes")
-        left_ear = trimesh.load(left_path) if left_path is not None else None
-        right_ear = trimesh.load(right_path) if right_path is not None else None
-        translations = {"left": (0.0, 0.0, 0.0), "right": (0.0, 0.0, 0.0)}
-        if settings.head_radius is not None:
-            translations = place_pinnae_at_head_radius(left_ear, right_ear, settings.head_radius)
-            logger(f"Placed pinnae at head radius: {settings.head_radius}")
-        ears = {"left": left_ear, "right": right_ear}
+        translations = {side: geometry["translations"].get(side, (0., 0., 0.)) for side in ears}
+        reposition_ears_laterally(ears, translations)
+        logger(f"Ear distance from head center (mm): left={geometry['ear_distance_left']}, right={geometry['ear_distance_right']}")
         for side, ear in ears.items():
             if ear is not None:
                 ear.export(side_dirs[side] / "input_ear.stl")
@@ -228,24 +223,30 @@ def preprocess():
     parser.add_argument('--ear-cut-clearance-scale', type=float, default=1.3)
     parser.add_argument('--ear-cut-mode', choices=['ellipse', 'projected_footprint', 'exact'], default='ellipse')
     parser.add_argument('--ear-canal-closer-mode', choices=['legacy', 'interpolated'], default='legacy')
-    parser.add_argument('--head-radius', type=float, default=None, help='Optional lateral head radius in millimeters used to place pinnae before preprocessing.')
+    parser.add_argument('--head-radius', type=float, default=None, help='Deprecated alias for --ear-distance; removed in v2.0.0.')
+    parser.add_argument('--ear-distance', type=float, help='Mean ear distance from head center in mm; preserves left/right asymmetry.')
     parser.add_argument('--min-frequency', type=int, default=1000)
     parser.add_argument('--max-frequency', type=int, default=24000)
     parser.add_argument('--frequency-step-count', type=int, default=129)
     parser.add_argument('--source-face-count', type=int, default=6)
     args = parser.parse_args()
+    if args.head_radius is not None and args.ear_distance is not None:
+        parser.error('--head-radius cannot be combined with --ear-distance.')
     if not args.left_path and not args.right_path:
         parser.error('At least one ear mesh path is required.')
     settings = PreprocessingConfig(
         ear_cut_clearance_scale=args.ear_cut_clearance_scale,
         ear_cut_mode=args.ear_cut_mode,
         ear_canal_closer_mode=args.ear_canal_closer_mode,
-        head_radius=args.head_radius,
+        ear_distance=args.ear_distance if args.ear_distance is not None else args.head_radius,
         min_frequency=args.min_frequency,
         max_frequency=args.max_frequency,
         frequency_step_count=args.frequency_step_count,
         source_assignment_face_count=args.source_face_count,
     )
+    # Version compatibility only; remove with v2.0.0.
+    if args.head_radius is not None:
+        print("Warning: --head-radius is deprecated; use --ear-distance. Removed in v2.0.0.")
     run_preprocessing_pipeline(
         left_path=args.left_path,
         right_path=args.right_path,

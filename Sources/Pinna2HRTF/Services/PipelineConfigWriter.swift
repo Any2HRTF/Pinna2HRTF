@@ -2,6 +2,7 @@ import Foundation
 
 enum PipelineConfigWriter {
     static func prepare(project: ProjectRecord, environment: EnvironmentConfig) throws -> URL {
+        try HeadGeometrySettings.validate(project.settings.preprocessing)
         let output = URL(fileURLWithPath: project.saveLocation)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let manualPositions = Dictionary(uniqueKeysWithValues: EarSide.allCases.compactMap { side in
@@ -43,8 +44,7 @@ enum PipelineConfigWriter {
         let postprocessing = project.settings.postprocessing ?? PostprocessingSettings()
         let selectedGrid = preprocessing.evaluationGrid?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let evaluationGrid = selectedGrid.isEmpty ? "Default" : selectedGrid
-        let useCustomHeadRadius = preprocessing.useCustomHeadRadius ?? (preprocessing.headRadius != nil)
-        let headRadius = useCustomHeadRadius ? "  head_radius: \(yamlNumber(preprocessing.headRadius) ?? "0")\n" : ""
+        let earDistance = preprocessing.earDistance.map { "  ear_distance: \(yamlNumber($0) ?? $0)\n" } ?? ""
         let sourceAssignmentFaceCount = max(Int(preprocessing.sourceAssignmentFaceCount ?? "") ?? 6, 1)
         let frequencyStepCount = max(Int(preprocessing.frequencyStepCount) ?? 129, 2)
         let levelOffsetDB = yamlNumber(postprocessing.levelOffsetDB) ?? "-30"
@@ -92,7 +92,7 @@ enum PipelineConfigWriter {
           ear_cut_clearance_scale: 1.3
           ear_cut_mode: ellipse
           projected_cut_margin: 10.0
-        \(headRadius)  seam_smoothing_iterations: 5
+        \(earDistance)  seam_smoothing_iterations: 5
           seam_smoothing_factor: 0.35
           mesh_min_edge_length: \(preprocessing.meshMinEdgeLength)
           mesh_max_edge_length: \(preprocessing.meshMaxEdgeLength)
@@ -138,7 +138,7 @@ enum PipelineConfigWriter {
     }
 
     static func yamlNumber(_ value: String?) -> String? {
-        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: ".") ?? ""
         if trimmed.isEmpty {
             return nil
         }

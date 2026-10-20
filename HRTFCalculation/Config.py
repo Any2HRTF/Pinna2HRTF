@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+import warnings
+from .Compatibility import import_legacy_distance, read_settings, annotate_legacy_distance
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def worktree_root() -> Path:
@@ -85,7 +87,21 @@ class PreprocessingConfig(BaseModel):
     ear_cut_mode: Literal["ellipse", "projected_footprint", "exact"] = "ellipse"
     ear_canal_closer_mode: Literal["legacy", "interpolated"] = "legacy"
     projected_cut_margin: float = 10.0
-    head_radius: float | None = None
+    ear_distance: float | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_distance(cls, data):
+        # Version compatibility only; remove with v2.0.0.
+        return import_legacy_distance({"preprocessing": data})["preprocessing"] if isinstance(data, dict) else data
+
+    @field_validator("ear_distance")
+    @classmethod
+    def validate_distance(cls, value):
+        if value is not None:
+            from .Geometry import positive
+            return positive(value, "Ear distance")
+        return value
     seam_smoothing_iterations: int = 5
     seam_smoothing_factor: float = 0.35
     mesh_min_edge_length: float = 0.5
@@ -217,15 +233,20 @@ def resolve_path(path: Path, base: Path) -> Path:
 
 def load_config(path: str | Path) -> PipelineConfig:
     config_path = Path(path).expanduser().resolve()
-    with config_path.open("r", encoding="utf-8") as file:
-        data = yaml.safe_load(file) or {}
-    return PipelineConfig.model_validate(data).resolved(config_path.parent)
+    raw, text, encoding = read_settings(config_path)
+    data = yaml.safe_load(text) or {}
+    config = PipelineConfig.model_validate(import_legacy_distance(data)).resolved(config_path.parent)
+    try:
+        annotate_legacy_distance(config_path, text, encoding, raw)
+    except (OSError, ValueError, yaml.YAMLError) as error:
+        warnings.warn(f"Legacy head_radius was imported, but the settings file could not be updated: {error}", UserWarning)
+    return config
 
 
 def save_config(config: PipelineConfig | dict[str, Any], path: str | Path) -> None:
     config_path = Path(path).expanduser().resolve()
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    data = config.yaml_dict() if isinstance(config, PipelineConfig) else config
+    data = config.yaml_dict() if isinstance(config, PipelineConfig) else PipelineConfig.model_validate(import_legacy_distance(config)).yaml_dict()
     with config_path.open("w", encoding="utf-8") as file:
         yaml.safe_dump(data, file, sort_keys=False)
 
