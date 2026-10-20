@@ -193,14 +193,6 @@ With the .NET 8 SDK, Git, and `uv` installed, run in PowerShell:
 
 The packaged app is written to `dist\windows\Pinna2HRTF`.
 
-## Ear distance from head center (v1.1.1)
-
-Mesh2HRTF displays the mean lateral distance of the ear attachment boundaries in millimetres. It measures the original meshes, or the inferred meshes when Mesh2PPM output is available. Manual edits move both ears outward or inward by the same amount, preserving their distance difference. Head size follows the resulting ear positions automatically.
-
-**Reset from meshes** clears the manual override. At preprocessing launch, distances of 50 mm or less produce a warning: proceed anyway, or cancel to open and select the setting. The command line logs the warning without prompting.
-
-Use preprocessing.ear_distance in project YAML, or --ear-distance with the preprocessing command. Loading legacy YAML copies head_radius into ear_distance unless the new key already exists, backs up the original file as .head-radius-compat.bak, and annotates the deprecated entry while preserving other content. New files contain only ear_distance. The deprecated --head-radius alias remains available until v2.0.0.
-
 ## License
 
 [European Union Public Licence 1.2](LICENSE). Bundled dependencies retain their own licences.
