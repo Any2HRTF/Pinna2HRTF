@@ -359,3 +359,7 @@ The packaged app is written to `dist\windows\Pinna2HRTF`.
 ## License
 
 [European Union Public Licence 1.2](LICENSE). Bundled dependencies retain their own licences.
+
+### Duplicate a project
+
+Duplicate Project opens a dialog for the project name and save location. The new project folder is named after the project and appears beneath the selected parent folder. Missing parent folders are created automatically. Existing destination folders and locations inside another project are rejected. Copies are prepared in a temporary folder before being added to the sidebar, and internal paths in project metadata and saved PPM parameters are relocated to the new folder.

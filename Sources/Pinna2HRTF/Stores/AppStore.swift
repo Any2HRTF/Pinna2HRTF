@@ -41,6 +41,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published var meshEditorError: String?
     @Published var ppmFittingRequest: PPMFittingRequest?
     @Published var ppmFittingError: String?
+    @Published var projectDuplicationRequest: ProjectDuplicationRequest?
     @Published var artifacts: [Artifact] = []
     @Published var stageStates: [Stage: StageState] = Dictionary(uniqueKeysWithValues: Stage.allCases.map { ($0, .ready) })
     @Published private var runs: [UUID: PipelineRun] = [:]
@@ -235,72 +236,31 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func duplicateSelectedProject() {
-        guard let selectedProject else { return }
-        var duplicate = selectedProject
-        duplicate.id = UUID()
-        duplicate.stageOutcomes = nil
-        duplicate.name = "\(selectedProject.name) Copy"
-        if !selectedProject.saveLocation.isEmpty {
-            let originalURL = URL(fileURLWithPath: selectedProject.saveLocation)
-            let baseName = originalURL.lastPathComponent.isEmpty ? "Project" : originalURL.lastPathComponent
-            var duplicateURL = originalURL.deletingLastPathComponent().appendingPathComponent("\(baseName) Copy", isDirectory: true)
-            var suffix = 2
-            while FileManager.default.fileExists(atPath: duplicateURL.path) {
-                duplicateURL = originalURL.deletingLastPathComponent().appendingPathComponent("\(baseName) Copy \(suffix)", isDirectory: true)
-                suffix += 1
-            }
-            duplicate.saveLocation = duplicateURL.path
-            if FileManager.default.fileExists(atPath: originalURL.path) {
-                do {
-                    try FileManager.default.copyItem(at: originalURL, to: duplicateURL)
-                    let originalPath = originalURL.standardizedFileURL.path
-                    let duplicatePath = duplicateURL.standardizedFileURL.path
-                    let relocated: (String) -> String = { path in
-                        let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
-                        guard normalized == originalPath || normalized.hasPrefix(originalPath + "/") else { return path }
-                        return duplicatePath + String(normalized.dropFirst(originalPath.count))
-                    }
-                    duplicate.leftEar = relocated(duplicate.leftEar)
-                    duplicate.rightEar = relocated(duplicate.rightEar)
-                    var manualPPMFitting = duplicate.settings.manualPPMFitting
-                    manualPPMFitting.templateBlendPath = manualPPMFitting.templateBlendPath.map(relocated)
-                    manualPPMFitting.leftMeshPath = manualPPMFitting.leftMeshPath.map(relocated)
-                    manualPPMFitting.rightMeshPath = manualPPMFitting.rightMeshPath.map(relocated)
-                    manualPPMFitting.leftParametersPath = manualPPMFitting.leftParametersPath.map(relocated)
-                    manualPPMFitting.rightParametersPath = manualPPMFitting.rightParametersPath.map(relocated)
-                    manualPPMFitting.leftSourcePath = manualPPMFitting.leftSourcePath.map(relocated)
-                    manualPPMFitting.rightSourcePath = manualPPMFitting.rightSourcePath.map(relocated)
-                    func relocatedIdentity(_ identity: String?) -> String? {
-                        guard let identity, let separator = identity.firstIndex(of: "|") else { return identity }
-                        return relocated(String(identity[..<separator])) + String(identity[separator...])
-                    }
-                    manualPPMFitting.leftSourceIdentity = relocatedIdentity(manualPPMFitting.leftSourceIdentity)
-                    manualPPMFitting.rightSourceIdentity = relocatedIdentity(manualPPMFitting.rightSourceIdentity)
-                    duplicate.settings.manualPPMFitting = manualPPMFitting
-                    if var scan = duplicate.settings.scanPreparation {
-                        scan.scanPath = relocated(scan.scanPath)
-                        scan.originalScanPath = scan.originalScanPath.map(relocated)
-                        scan.reviewedLeftPath = scan.reviewedLeftPath.map(relocated)
-                        scan.reviewedRightPath = scan.reviewedRightPath.map(relocated)
-                        duplicate.settings.scanPreparation = scan
-                    }
-                    if var postprocessing = duplicate.settings.postprocessing,
-                       let outputFolder = postprocessing.outputFolder {
-                        postprocessing.outputFolder = relocated(outputFolder)
-                        duplicate.settings.postprocessing = postprocessing
-                    }
-                    let settingsURL = duplicateURL.appendingPathComponent("Project Settings.yaml")
-                    if let settings = try? String(contentsOf: settingsURL, encoding: .utf8) {
-                        try? settings.replacingOccurrences(of: originalPath, with: duplicatePath).write(to: settingsURL, atomically: true, encoding: .utf8)
-                    }
-                } catch {
-                    appendLog("Could not duplicate project folder: \(error.localizedDescription)")
-                    return
-                }
-            }
+        guard let project = selectedProject, !selectedProjectIsRunning,
+              meshEditorRequest == nil, ppmFittingRequest == nil,
+              projectDuplicationRequest == nil else { return }
+        let parent = project.saveLocation.isEmpty
+            ? Defaults.appDataURL.appendingPathComponent("Projects", isDirectory: true)
+            : URL(fileURLWithPath: project.saveLocation).deletingLastPathComponent()
+        let baseName = "\(project.name) Copy"
+        var name = baseName
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: parent.appendingPathComponent(name).path) {
+            name = "\(baseName) \(suffix)"
+            suffix += 1
         }
-        duplicate.settings.preprocessing.sourcePositionInputLeft = nil
-        duplicate.settings.preprocessing.sourcePositionInputRight = nil
+        projectDuplicationRequest = ProjectDuplicationRequest(project: project, suggestedName: name, parentFolder: parent.path)
+    }
+
+    @MainActor
+    func duplicateProject(_ request: ProjectDuplicationRequest, name: String, parentFolder: String) async throws {
+        guard !registryStore.savingBlocked else {
+            throw ProjectValidation.Failure(message: "Restore the project list before adding a duplicate.")
+        }
+        let roots = projects.map(\.saveLocation)
+        let duplicate = try await Task.detached(priority: .userInitiated) {
+            try ProjectDuplicator.duplicate(request.project, name: name, parentFolder: parentFolder, projectRoots: roots)
+        }.value
         projects.append(duplicate)
         selectedProjectID = duplicate.id
         failedStagesByProject[duplicate.id] = []

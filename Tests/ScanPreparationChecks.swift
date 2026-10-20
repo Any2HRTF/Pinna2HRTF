@@ -42,6 +42,7 @@ struct ScanPreparationChecks {
     }
 
     static func main() throws {
+        try projectDuplicationChecks()
         cuttingPlanePreviewChecks()
         let root = Defaults.packageRoot()
         var project = Defaults.newProject(packageRoot: root, index: 1)

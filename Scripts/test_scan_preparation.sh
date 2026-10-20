@@ -12,10 +12,10 @@ trap 'rm -f "$CHECK_BIN"' EXIT
 CLANG_MODULE_CACHE_PATH=/private/tmp/pinna2hrtf-clang-cache swiftc -sdk "$SDK_PATH" \
   -Xfrontend -interface-compiler-version -Xfrontend "$SDK_SWIFT_VERSION" \
   Sources/Pinna2HRTF/Models/PipelineModels.swift Sources/Pinna2HRTF/Models/MeshEditorModels.swift Sources/Pinna2HRTF/Support/Defaults.swift \
-  Sources/Pinna2HRTF/Services/ProjectConfigDocument.swift Sources/Pinna2HRTF/Services/ProjectValidation.swift \
+  Sources/Pinna2HRTF/Services/ProjectConfigDocument.swift Sources/Pinna2HRTF/Services/ProjectDuplicator.swift Sources/Pinna2HRTF/Services/ProjectValidation.swift \
   Sources/Pinna2HRTF/Services/PipelineConfigWriter.swift Sources/Pinna2HRTF/Services/ArtifactScanner.swift \
   Sources/Pinna2HRTF/Services/GeneratedOutputManifest.swift Sources/Pinna2HRTF/Services/PipelineLogCapture.swift \
-  Sources/Pinna2HRTF/Services/ProcessTreeTerminator.swift Tests/ProcessChecks.swift Tests/ScanPreparationChecks.swift -o "$CHECK_BIN"
+  Sources/Pinna2HRTF/Services/ProcessTreeTerminator.swift Tests/ProcessChecks.swift Tests/ProjectDuplicationChecks.swift Tests/ScanPreparationChecks.swift -o "$CHECK_BIN"
 "$CHECK_BIN"
 
 CLANG_MODULE_CACHE_PATH=/private/tmp/pinna2hrtf-clang-cache swiftc -sdk "$SDK_PATH" \

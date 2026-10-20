@@ -7,7 +7,7 @@ struct ContentView: View {
 
     var body: some View {
         workspace
-        .disabled(store.meshEditorRequest != nil || store.ppmFittingRequest != nil)
+        .disabled(store.meshEditorRequest != nil || store.ppmFittingRequest != nil || store.projectDuplicationRequest != nil)
         .navigationTitle(store.selectedProject?.name ?? "Pinna2HRTF")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -72,6 +72,8 @@ struct ContentView: View {
         }
         .sheet(item: editorPresentation) { editor in
             switch editor {
+            case .duplicate(let request):
+                ProjectDuplicationView(store: store, request: request)
             case .mesh(let request):
                 MeshEditorView(request: request, saved: store.finishMeshEditing)
             case .ppm(let request):
@@ -97,11 +99,13 @@ struct ContentView: View {
 
     private var editorPresentation: Binding<ProjectEditorPresentation?> {
         Binding(get: {
+            if let request = store.projectDuplicationRequest { return .duplicate(request) }
             if let request = store.meshEditorRequest { return .mesh(request) }
             if let request = store.ppmFittingRequest { return .ppm(request) }
             return nil
         }, set: { value in
             if value == nil {
+                store.projectDuplicationRequest = nil
                 store.meshEditorRequest = nil
                 store.ppmFittingRequest = nil
             }
@@ -179,11 +183,13 @@ struct ContentView: View {
 }
 
 private enum ProjectEditorPresentation: Identifiable {
+    case duplicate(ProjectDuplicationRequest)
     case mesh(MeshEditorRequest)
     case ppm(PPMFittingRequest)
 
     var id: String {
         switch self {
+        case .duplicate(let request): return "duplicate-\(request.id)"
         case .mesh(let request): return "mesh-\(request.id)"
         case .ppm(let request): return "ppm-\(request.id)"
         }
