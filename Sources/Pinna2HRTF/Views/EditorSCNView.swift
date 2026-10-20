@@ -9,6 +9,9 @@ final class EditorSCNView: NavigableSCNView {
     private var points: [CGPoint] = []
     private var selecting = false
     private let lasso = CAShapeLayer()
+    private let orientationView = CoordinateOrientationView(frame: NSRect(x: 12, y: 12, width: 100, height: 100))
+    private var orientationTimer: Timer?
+    var showsCoordinateSystem = false { didSet { orientationView.isHidden = !showsCoordinateSystem } }
 
     override init(frame: NSRect = .zero, options: [String: Any]? = nil) {
         super.init(frame: frame, options: options)
@@ -18,8 +21,29 @@ final class EditorSCNView: NavigableSCNView {
         lasso.lineWidth = 2
         lasso.zPosition = 100
         layer?.addSublayer(lasso)
+        orientationView.isHidden = true
+        orientationView.toolTip = "Scan axes: X red, Y green, Z blue"
+        orientationView.setAccessibilityElement(true)
+        orientationView.setAccessibilityRole(.image)
+        orientationView.setAccessibilityLabel("Scan coordinate orientation: X red, Y green, Z blue")
+        addSubview(orientationView)
     }
     required init?(coder: NSCoder) { fatalError("Use init(frame:options:)") }
+
+    deinit { orientationTimer?.invalidate() }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        orientationTimer?.invalidate()
+        orientationTimer = nil
+        guard window != nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            guard let self, self.showsCoordinateSystem, let camera = self.pointOfView else { return }
+            self.orientationView.cameraOrientation = camera.presentation.simdWorldOrientation
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        orientationTimer = timer
+    }
 
     override var navigationEnabled: Bool { model != nil && model?.busy == false }
     override func navigationWillBegin() { cancelSelection() }

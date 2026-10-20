@@ -21,6 +21,7 @@ final class MeshEditorModel: ObservableObject {
     @Published var addToSelection = false
     @Published var landmarks: [SCNVector3] = []
     @Published var landmarkSlot = 0
+    @Published var showCoordinateSystem = true { didSet { coordinateNode?.isHidden = !showCoordinateSystem } }
     @Published var planeX = "0"
     @Published var planeY = "1"
     @Published var planeZ = "0"
@@ -40,6 +41,7 @@ final class MeshEditorModel: ObservableObject {
     private(set) var faces: [UInt32] = []
     private var vertexData = Data(), normalData = Data()
     private var boundsMin = SIMD3<Float>(repeating: -1), boundsMax = SIMD3<Float>(repeating: 1)
+    private var coordinateNode: SCNNode?
     private var meshNode: SCNNode?
     private var meshEdgesNode: SCNNode?
     private var selectionNode: SCNNode?
@@ -248,6 +250,13 @@ final class MeshEditorModel: ObservableObject {
             edgeNode.castsShadow = false
             scene.rootNode.addChildNode(edgeNode)
             meshEdgesNode = edgeNode
+        }
+        if request.isAlignment {
+            coordinateNode?.removeFromParentNode()
+            let axes = CoordinateSystem.axes(span: Float(span))
+            axes.isHidden = !showCoordinateSystem
+            scene.rootNode.addChildNode(axes)
+            coordinateNode = axes
         }
         if cameraNode == nil { configureCamera() }
         selectedFaces.removeAll()

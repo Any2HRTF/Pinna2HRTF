@@ -19,9 +19,11 @@ final class PPMFittingModel: ObservableObject {
     @Published var message = "Preparing the PPM fit…"
     @Published var error: String?
     @Published var templateBlendPath = ""
-    @Published var showTarget = true { didSet { targetNode?.isHidden = !showTarget } }
+    @Published var showTarget = true { didSet { updateTargetOpacity() } }
     @Published var showPPM = true { didSet { ppmNode?.isHidden = !showPPM } }
+    @Published var showSkeleton = true { didSet { skeletonNode?.isHidden = !showSkeleton } }
     @Published var targetOpacity = 0.32 { didSet { updateTargetOpacity() } }
+    @Published private(set) var cameraRevision = 0
     @Published private(set) var isUpdatingPreview = false
 
     private var parameters: [String: Double] = [:]
@@ -35,9 +37,11 @@ final class PPMFittingModel: ObservableObject {
     private var pythonWorker: PPMFittingPythonWorker?
     private var targetNode: SCNNode?
     private var ppmNode: SCNNode?
+    private var skeletonNode: SCNNode?
     private var cameraNode: SCNNode?
     private var targetCenter = SCNVector3Zero
     private var cameraConfigured = false
+    private var cameraExtent: CGFloat = 1
 
     init(request: PPMFittingRequest) {
         self.request = request
@@ -313,6 +317,9 @@ final class PPMFittingModel: ObservableObject {
     }
 
     private func install(_ result: [String: Any]) {
+        if let bones = result["skeleton"] as? [[String: Any]] {
+            installSkeleton(bones)
+        }
         if let values = result["parameters"] as? [String: NSNumber] {
             parameters = values.mapValues(\.doubleValue)
         }
@@ -353,6 +360,53 @@ final class PPMFittingModel: ObservableObject {
         }
     }
 
+    private func installSkeleton(_ bones: [[String: Any]]) {
+        let root = SCNNode()
+        root.name = "Blender posed skeleton"
+        if request.side == .right { root.scale = SCNVector3(1, -1, 1) }
+        for bone in bones {
+            guard let name = bone["name"] as? String,
+                  let coordinates = bone["points"] as? [[Double]], coordinates.count >= 2,
+                  coordinates.allSatisfy({ $0.count == 3 && $0.allSatisfy(\.isFinite) }) else { continue }
+            let points = coordinates.map { SIMD3<Float>(Float($0[0]), Float($0[1]), Float($0[2])) }
+            let material = SCNMaterial()
+            material.lightingModel = .constant
+            material.diffuse.contents = name.hasSuffix("-Bendy") ? NSColor.cyan : NSColor.systemYellow
+            // Draw through the surface, like Blender's armature In Front option.
+            material.readsFromDepthBuffer = false
+            material.writesToDepthBuffer = false
+            let boneNode = SCNNode()
+            boneNode.name = name
+            for (start, end) in zip(points, points.dropFirst()) {
+                let delta = end - start
+                let length = simd_length(delta)
+                guard length > 0.00001 else { continue }
+                let cylinder = SCNCylinder(radius: 0.12, height: CGFloat(length))
+                cylinder.radialSegmentCount = 6
+                cylinder.materials = [material]
+                let node = SCNNode(geometry: cylinder)
+                node.simdPosition = (start + end) / 2
+                node.simdOrientation = simd_quatf(from: SIMD3<Float>(0, 1, 0), to: delta / length)
+                node.renderingOrder = 100
+                boneNode.addChildNode(node)
+            }
+            for point in [points[0], points[points.count - 1]] {
+                let sphere = SCNSphere(radius: 0.22)
+                sphere.segmentCount = 8
+                sphere.materials = [material]
+                let node = SCNNode(geometry: sphere)
+                node.simdPosition = point
+                node.renderingOrder = 101
+                boneNode.addChildNode(node)
+            }
+            root.addChildNode(boneNode)
+        }
+        root.isHidden = !showSkeleton
+        skeletonNode?.removeFromParentNode()
+        scene.rootNode.addChildNode(root)
+        skeletonNode = root
+    }
+
     private func loadTarget() throws {
         guard FileManager.default.fileExists(atPath: request.targetMesh.path) else {
             throw ProjectValidation.Failure(message: "The target ear mesh could not be found.")
@@ -363,11 +417,6 @@ final class PPMFittingModel: ObservableObject {
         root.name = "Target ear"
         for index in 0..<asset.count {
             let node = SCNNode(mdlObject: asset.object(at: index))
-            let material = SCNMaterial()
-            material.diffuse.contents = NSColor(calibratedWhite: 0.62, alpha: 1)
-            material.isDoubleSided = true
-            material.lightingModel = .physicallyBased
-            node.geometry?.materials = [material]
             root.addChildNode(node)
         }
         scene.rootNode.addChildNode(root)
@@ -538,25 +587,43 @@ final class PPMFittingModel: ObservableObject {
     }
 
     private func updateTargetOpacity() {
-        targetNode?.enumerateChildNodes { node, _ in
-            for material in node.geometry?.materials ?? [] {
-                material.transparency = CGFloat(targetOpacity)
-                // Draw the translucent scan over the opaque error map without
-                // hiding PPM faces behind the target's depth buffer.
-                material.writesToDepthBuffer = false
-            }
-            node.renderingOrder = 10
-        }
+        guard let targetNode else { return }
+        PPMTargetAppearance.apply(to: targetNode, opacity: targetOpacity, visible: showTarget)
+    }
+
+    var pointOfView: SCNNode? { cameraNode }
+    var cameraTarget: SCNVector3 { targetCenter }
+    var cameraSpan: Double { Double(cameraExtent) }
+
+    func resetCamera() {
+        setCameraView(request.side == .right ? "Right" : "Left")
+    }
+
+    func setCameraView(_ direction: String) {
+        guard let cameraNode else { return }
+        let distance = cameraExtent * 1.8
+        let offset = direction == "Front" ? SCNVector3(1, 0, 0.08)
+            : SCNVector3(0, direction == "Right" ? -1 : 1, 0.08)
+        cameraNode.position = SCNVector3(targetCenter.x + offset.x * distance,
+                                        targetCenter.y + offset.y * distance,
+                                        targetCenter.z + offset.z * distance)
+        cameraNode.constraints = nil
+        cameraNode.look(at: targetCenter, up: SCNVector3(0, 0, 1), localFront: SCNVector3(0, 0, -1))
+        cameraRevision += 1
     }
 
     private func configureCameraIfNeeded() {
         guard targetNode != nil, ppmNode != nil, !cameraConfigured else { return }
         cameraConfigured = true
-        let bounds = scene.rootNode.boundingBox
+        let framing = SCNNode()
+        if let targetNode { framing.addChildNode(targetNode.clone()) }
+        if let ppmNode { framing.addChildNode(ppmNode.clone()) }
+        let bounds = framing.boundingBox
         targetCenter = SCNVector3((bounds.min.x + bounds.max.x) / 2,
                                   (bounds.min.y + bounds.max.y) / 2,
                                   (bounds.min.z + bounds.max.z) / 2)
         let extent = max(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z)
+        cameraExtent = max(extent, 1)
         let distance = max(extent * 1.8, 1)
         let target = SCNNode()
         target.name = "cameraTarget"
@@ -575,6 +642,7 @@ final class PPMFittingModel: ObservableObject {
         node.constraints = [lookAt]
         scene.rootNode.addChildNode(node)
         cameraNode = node
+        cameraRevision += 1
         let light = SCNLight()
         light.type = .directional
         light.intensity = 900

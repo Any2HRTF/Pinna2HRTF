@@ -5,23 +5,19 @@ import AppKit
 struct MeshEditorView: View {
     @StateObject private var model: MeshEditorModel
     @Environment(\.dismiss) private var dismiss
-    var closeWindow: (() -> Void)?
-    var busyChanged: (Bool) -> Void = { _ in }
     let saved: (MeshEditorRequest) -> Void
 
-    init(request: MeshEditorRequest, closeWindow: (() -> Void)? = nil, busyChanged: @escaping (Bool) -> Void = { _ in }, saved: @escaping (MeshEditorRequest) -> Void) {
+    init(request: MeshEditorRequest, saved: @escaping (MeshEditorRequest) -> Void) {
         _model = StateObject(wrappedValue: MeshEditorModel(request: request))
-        self.closeWindow = closeWindow
-        self.busyChanged = busyChanged
         self.saved = saved
     }
 
     private func closeEditor() {
-        if let closeWindow { closeWindow() } else { dismiss() }
+        dismiss()
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        EditorSheetLayout {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(model.request.title).font(.headline)
@@ -29,59 +25,49 @@ struct MeshEditorView: View {
                 }
                 Spacer()
                 if model.busy { ProgressView().controlSize(.small) }
-            }.padding(16)
-            Divider()
-            HSplitView {
-                ZStack(alignment: .topTrailing) {
-                    EditorSceneView(model: model)
-                        HStack {
-                            Button("Fit") { model.resetCamera() }
-                            ForEach(["Front", "Left", "Right"], id: \.self) { direction in
-                                Button(direction) { model.setCameraView(direction) }
-                            }
-                        }
-                        .controlSize(.small)
-                        .padding(8)
-                        .modifier(ViewportControlsMaterial())
-                        .padding(12)
-
-                }
-                .frame(minWidth: 520, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if model.request.isAlignment {
-                            alignmentControls
-
-                        } else {
-                            Picker("Tool", selection: $model.tool) {
-                                ForEach(model.tools) { tool in Text(tool.rawValue).tag(tool) }
-                            }
-                            .pickerStyle(.segmented)
-                            .onChange(of: model.tool) { _ in model.refreshOverlays() }
-                        }
-                        if !model.request.isAlignment && model.tool == .landmarks { alignmentControls }
-                        if model.tool == .selection { selectionControls }
-                        if model.tool == .plane { planeControls }
-                        Divider()
-                        HStack {
-                            Button("Undo") { Task { await model.moveHistory(-1) } }.disabled(!model.canUndo)
-                            Button("Redo") { Task { await model.moveHistory(1) } }.disabled(!model.canRedo)
-                        }
-                        if !model.request.isAlignment {
-                            Menu("Mesh Cleanup") {
-                            Button("Keep Largest Component") { Task { await model.edit("largest") } }
-                                .help("Remove disconnected fragments from this working copy. Undo is available.")
-                            }
-                        }
-                        Text(model.message).font(.caption).foregroundStyle(.secondary)
-                        if let error = model.error {
-                            Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
-                        }
-                    }.padding(16)
-                }.frame(minWidth: 290, idealWidth: 320, maxWidth: 440)
-                .disabled(model.busy)
             }
-            Divider()
+        } viewport: {
+            ZStack(alignment: .topTrailing) {
+                EditorSceneView(model: model)
+                EditorCameraControls(fit: model.resetCamera, direction: model.setCameraView)
+                    .padding(12)
+
+            }
+        } inspector: {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if model.request.isAlignment {
+                        alignmentControls
+
+                    } else {
+                        Picker("Tool", selection: $model.tool) {
+                            ForEach(model.tools) { tool in Text(tool.rawValue).tag(tool) }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: model.tool) { _ in model.refreshOverlays() }
+                    }
+                    if !model.request.isAlignment && model.tool == .landmarks { alignmentControls }
+                    if model.tool == .selection { selectionControls }
+                    if model.tool == .plane { planeControls }
+                    Divider()
+                    HStack {
+                        Button("Undo") { Task { await model.moveHistory(-1) } }.disabled(!model.canUndo)
+                        Button("Redo") { Task { await model.moveHistory(1) } }.disabled(!model.canRedo)
+                    }
+                    if !model.request.isAlignment {
+                        Menu("Mesh Cleanup") {
+                        Button("Keep Largest Component") { Task { await model.edit("largest") } }
+                            .help("Remove disconnected fragments from this working copy. Undo is available.")
+                        }
+                    }
+                    Text(model.message).font(.caption).foregroundStyle(.secondary)
+                    if let error = model.error {
+                        Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                    }
+                }.padding(16)
+            }
+            .disabled(model.busy)
+        } footer: {
             HStack {
                 Text(model.request.isAlignment ? "Preview a rigid alignment before saving." : "Cuts remain open. Saving checks the attachment boundary and ear-canal opening.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -95,17 +81,18 @@ struct MeshEditorView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!model.canSave)
                 .keyboardShortcut(.defaultAction)
-            }.padding(16)
+            }
         }
-        .frame(minWidth: 900, idealWidth: 1120, minHeight: 640, idealHeight: 740)
         .interactiveDismissDisabled(model.busy)
-        .onChange(of: model.busy) { busyChanged($0) }
         .task { await model.open() }
     }
 
     var alignmentControls: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Nose and ear landmarks").font(.subheadline.weight(.semibold))
+            Toggle("Show coordinate system", isOn: $model.showCoordinateSystem)
+            Text(model.hasAlignment ? "Aligned coordinates (mm): X forward · Y left · Z up. Origin: midpoint between the ear canals." : "Showing the scan’s current axes and origin. Preview Alignment sets X forward, Y left, Z up, with the ear midpoint at the origin.")
+                .font(.caption).foregroundStyle(.secondary)
             Text(model.landmarks.count == 3 ? "All landmarks placed. Preview the alignment, or select a row to replace a point." : "\(model.landmarks.count + 1) of 3 — Select \(["the nose tip", "the left ear-canal entrance", "the right ear-canal entrance"][min(model.landmarkSlot, 2)]).")
                 .font(.caption).foregroundStyle(.secondary)
             ForEach(Array(["Nose tip", "Left ear-canal entrance", "Right ear-canal entrance"].enumerated()), id: \.offset) { index, name in
@@ -173,6 +160,7 @@ struct MeshEditorView: View {
                         model.planeZ = axis == "Z" ? "1" : "0"
                         model.refreshOverlays()
                     }
+                    .accessibilityLabel("Set cutting plane normal to \(axis)")
                 }
             }
             HStack {
@@ -184,6 +172,7 @@ struct MeshEditorView: View {
             HStack {
                 Text("Offset (mm)")
                 TextField("Offset", value: $model.planeOffset, format: .number.precision(.fractionLength(2)))
+                    .accessibilityLabel("Cutting plane offset (mm)")
                     .textFieldStyle(.roundedBorder)
             }
             Slider(value: $model.planeOffset, in: -model.span/2...model.span/2)
@@ -239,6 +228,7 @@ private struct EditorSceneView: NSViewRepresentable {
     }
     func updateNSView(_ view: EditorSCNView, context: Context) {
         view.model = model
+        view.showsCoordinateSystem = model.request.isAlignment && model.showCoordinateSystem
         if view.lastCameraRevision != model.cameraRevision || view.pointOfView == nil {
             view.configureNavigation(camera: model.pointOfView, target: SCNVector3(model.center), span: model.span)
             view.lastCameraRevision = model.cameraRevision

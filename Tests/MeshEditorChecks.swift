@@ -6,6 +6,7 @@ import simd
 @main
 struct MeshEditorChecks {
     @MainActor static func main() async throws {
+        try targetAppearanceChecks()
         pressureQuantityChecks()
         try await pressureFrameChecks()
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("pinna-selection-check-\(UUID())")
@@ -157,6 +158,27 @@ struct MeshEditorChecks {
         await model.moveHistory(1)
         precondition(model.tool == .selection)
         print("Editor orbit, zoom, pan, selection preservation and history tool checks passed.")
+        let aligner = MeshEditorModel(request: MeshEditorRequest(projectID: UUID(), source: source,
+            originalSource: source, destination: folder.appendingPathComponent("aligned.ply"),
+            side: nil, preparedGeneration: nil, preparedReport: nil))
+        await aligner.open()
+        precondition(aligner.error == nil, aligner.error ?? "")
+        let axes = aligner.scene.rootNode.childNode(withName: "Coordinate axes", recursively: false)!
+        precondition(axes.simdPosition == .zero && axes.childNodes.count == 3)
+        axes.enumerateHierarchy { node, _ in precondition(node.categoryBitMask == 32) }
+        for (index, axis) in axes.childNodes.enumerated() {
+            precondition(simd_distance(axis.simdOrientation.act(SIMD3(0,1,0)), CoordinateSystem.directions[index]) < 0.001)
+        }
+        aligner.showCoordinateSystem = false
+        precondition(axes.isHidden)
+        aligner.showCoordinateSystem = true
+        precondition(!axes.isHidden)
+        await aligner.edit("align", arguments: ["points": [[10,0,0], [0,5,0], [0,-5,0]]])
+        precondition(aligner.error == nil && aligner.hasAlignment, aligner.error ?? "")
+        precondition(aligner.scene.rootNode.childNodes.filter { $0.name == "Coordinate axes" }.count == 1)
+        await aligner.moveHistory(-1)
+        precondition(!aligner.hasAlignment)
+        print("Aligner axes, positive directions, selection exclusion, visibility and alignment history passed.")
         let unchanged = try String(contentsOf: source, encoding: .utf8)
         precondition(unchanged == mesh)
         print("Mesh selection inversion, busy guard, camera directions and source preservation passed.")

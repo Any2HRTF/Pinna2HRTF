@@ -5,96 +5,99 @@ import AppKit
 struct PPMFittingView: View {
     @StateObject private var model: PPMFittingModel
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
     @State private var selectedSection = "Global"
     @State private var displayMode = "Overlay"
     @State private var showingHelp = false
-    var closeWindow: (() -> Void)?
-    var busyChanged: (Bool) -> Void = { _ in }
     let saved: (PPMFittingRequest, String) -> Void
 
-    init(request: PPMFittingRequest, closeWindow: (() -> Void)? = nil, busyChanged: @escaping (Bool) -> Void = { _ in }, saved: @escaping (PPMFittingRequest, String) -> Void) {
+    init(request: PPMFittingRequest, saved: @escaping (PPMFittingRequest, String) -> Void) {
         _model = StateObject(wrappedValue: PPMFittingModel(request: request))
-        self.closeWindow = closeWindow
-        self.busyChanged = busyChanged
         self.saved = saved
     }
 
     private func closeEditor() {
-        if let closeWindow { closeWindow() } else { dismiss() }
+        dismiss()
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        EditorSheetLayout {
             header
-            Divider()
-            HSplitView {
-                ZStack(alignment: .topLeading) {
-                    PPMFittingSceneViewport(scene: model.scene, darkMode: colorScheme == .dark)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Target ear", systemImage: "circle.fill")
-                            .foregroundStyle(Color.gray)
-                        Label("PPM · distance error", systemImage: "circle.fill")
-                            .foregroundStyle(.primary)
-                        HStack(spacing: 6) {
-                            Text("0")
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.10, green: 0.32, blue: 0.72),
-                                    Color(red: 0.16, green: 0.72, blue: 0.76),
-                                    Color(red: 0.94, green: 0.88, blue: 0.25),
-                                    Color(red: 0.94, green: 0.43, blue: 0.12),
-                                    Color(red: 0.72, green: 0.12, blue: 0.16)
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                            .frame(width: 105, height: 9)
-                            .clipShape(Capsule())
-                            Text("3+ mm")
-                        }
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 1)
-                        Text("Drag to rotate · Scroll to zoom")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.caption)
-                    .padding(10)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-                    .padding(12)
-                    if model.busy {
-                        ProgressView()
-                            .controlSize(.small)
-                            .padding(10)
-                            .background(.regularMaterial, in: Circle())
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                    }
+        } viewport: {
+            ZStack(alignment: .topTrailing) {
+                PPMFittingSceneViewport(model: model)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Target ear and fitted PPM 3D preview")
+                    .accessibilityAddTraits(.isImage)
+                legend.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                EditorCameraControls(fit: model.resetCamera, direction: model.setCameraView).padding(12)
+                if model.busy {
+                    ProgressView().controlSize(.small)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(minWidth: 400, maxWidth: .infinity, minHeight: 400, maxHeight: .infinity)
-                controlsPanel
-                    .frame(minWidth: 320, idealWidth: 390, maxWidth: 500)
             }
-            Divider()
+        } inspector: {
+            controlsPanel
+        } footer: {
             footer
         }
-        .frame(minWidth: 800, idealWidth: 1200, minHeight: 600, idealHeight: 800)
         .interactiveDismissDisabled(model.busy || model.isUpdatingPreview)
-        .onChange(of: model.busy || model.isUpdatingPreview) { busyChanged($0) }
         .task { await model.open() }
     }
 
+    private var legend: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Target ear", systemImage: "circle.fill")
+                .foregroundStyle(Color.gray)
+            Label("PPM · distance error", systemImage: "circle.fill")
+                .foregroundStyle(.primary)
+            HStack(spacing: 6) {
+                Text("0")
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.10, green: 0.32, blue: 0.72),
+                        Color(red: 0.16, green: 0.72, blue: 0.76),
+                        Color(red: 0.94, green: 0.88, blue: 0.25),
+                        Color(red: 0.94, green: 0.43, blue: 0.12),
+                        Color(red: 0.72, green: 0.12, blue: 0.16)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: 105, height: 9)
+                .clipShape(Capsule())
+                Text("3+ mm")
+            }
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .padding(.leading, 1)
+            if model.showSkeleton {
+                Label("Blender skeleton", systemImage: "line.diagonal")
+                    .foregroundStyle(.cyan)
+            }
+            Text("Drag to rotate · Scroll to zoom")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .font(.caption)
+        .padding(10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .padding(12)
+    }
+
     var header: some View {
-        HStack(spacing: 14) {
+        HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Manual PPM Fit · \(model.request.side.title) Ear")
-                    .font(.headline)
-                Text("Target: \(model.request.targetMesh.lastPathComponent)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("Manual PPM Fit · \(model.request.side.title) Ear").font(.headline)
+                Text("\(model.request.targetMesh.lastPathComponent) · Original mesh is preserved")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
+            if model.busy { ProgressView().controlSize(.small) }
+        }
+    }
+
+    private var fittingActions: some View {
+        VStack(alignment: .leading, spacing: 10) {
             Picker("Display", selection: $displayMode) {
                 ForEach(["Overlay", "Target", "Error Map", "Hidden"], id: \.self) { Text($0).tag($0) }
             }
@@ -103,16 +106,14 @@ struct PPMFittingView: View {
                 model.showTarget = mode == "Overlay" || mode == "Target"
                 model.showPPM = mode == "Overlay" || mode == "Error Map"
             }
-            Button("Undo", systemImage: "arrow.uturn.backward") { model.undo() }
-                .disabled(!model.canUndo || model.busy)
-                .keyboardShortcut("z", modifiers: .command)
-            Button("Redo", systemImage: "arrow.uturn.forward") { model.redo() }
-                .disabled(!model.canRedo || model.busy)
-                .keyboardShortcut("z", modifiers: [.command, .shift])
+            Toggle("Show Blender skeleton", isOn: $model.showSkeleton)
+                .accessibilityIdentifier("ppm.showSkeleton")
+                .help("Overlay the posed Blender bones, including curved Bendy bones, through the PPM surface.")
             Menu {
                 Button("Reset to Template") { Task { await model.resetControls() } }
                     .disabled(model.busy || model.isUpdatingPreview)
-            } label: { Image(systemName: "ellipsis.circle") }
+            } label: { Text("Fitting actions") }
+            .accessibilityLabel("Fitting actions")
             .fixedSize()
             .help("Fitting actions")
             Button("Help", systemImage: "questionmark.circle") { showingHelp.toggle() }
@@ -126,53 +127,70 @@ struct PPMFittingView: View {
                     }.padding().frame(width: 320)
                 }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+    }
+
+    private var historyControls: some View {
+        HStack {
+            Button("Undo", systemImage: "arrow.uturn.backward") { model.undo() }
+                .disabled(!model.canUndo || model.busy)
+                .keyboardShortcut("z", modifiers: .command)
+            Button("Redo", systemImage: "arrow.uturn.forward") { model.redo() }
+                .disabled(!model.canRedo || model.busy)
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+        }
     }
 
     var controlsPanel: some View {
         VStack(spacing: 0) {
-            meshMetrics
-                .padding(14)
+            meshMetrics.padding(16)
             Divider()
-            Picker("Fitting section", selection: $selectedSection) {
-                ForEach(["Global", "Convex", "Concave"], id: \.self) { Text($0).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding(14)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    targetOpacityControl.disabled(!model.showTarget)
-                    Divider()
-                    if selectedSection == "Global" {
-                        ForEach(["Location", "Rotation", "Scale"], id: \.self) { kind in
-                            GroupBox(kind == "Location" ? "Position (mm)" : (kind == "Rotation" ? "Rotation (°)" : "Scale")) {
-                                VStack(spacing: 8) {
-                                    ForEach(model.globalControls.filter { $0.id.split(separator: "|").dropFirst(2).first == Substring(kind) }) { control in
-                                        PPMFittingParameterRow(control: control, model: model)
-                                    }
-                                }.padding(.top, 6)
-                            }
-                        }
-                    } else if selectedSection == "Convex" {
-                        ForEach(model.convexGroups, id: \.self) { group in
-                            DisclosureGroup(group) {
-                                VStack(spacing: 8) {
-                                    ForEach(model.controls.filter { $0.section == "convex" && $0.group == group }) { control in
-                                        PPMFittingParameterRow(control: control, model: model)
-                                    }
-                                }.padding(.top, 7)
-                            }
-                        }
-                    } else {
-                        ForEach(model.concaveControls) { control in
-                            PPMFittingParameterRow(control: control, model: model)
+                fittingActions
+                Picker("Fitting section", selection: $selectedSection) {
+                    ForEach(["Global", "Convex", "Concave"], id: \.self) { Text($0).tag($0) }
+                }.pickerStyle(.segmented)
+                targetOpacityControl.disabled(!model.showTarget)
+                Divider()
+                // Plain headings preserve Computer access; GroupBox crashes the helper here.
+                if selectedSection == "Global" {
+                    ForEach(["Location", "Rotation", "Scale"], id: \.self) { kind in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(kind == "Location" ? "Position (mm)" : (kind == "Rotation" ? "Rotation (°)" : "Scale"))
+                                .font(.caption.weight(.semibold))
+                                .accessibilityAddTraits(.isHeader)
+                            VStack(spacing: 8) {
+                                ForEach(model.globalControls.filter { $0.id.split(separator: "|").dropFirst(2).first == Substring(kind) }) { control in
+                                    PPMFittingParameterRow(control: control, model: model)
+                                }
+                            }.padding(.top, 6)
                         }
                     }
-                }.padding(14)
+                } else if selectedSection == "Convex" {
+                    ForEach(model.convexGroups, id: \.self) { group in
+                        DisclosureGroup(group) {
+                            VStack(spacing: 8) {
+                                ForEach(model.controls.filter { $0.section == "convex" && $0.group == group }) { control in
+                                    PPMFittingParameterRow(control: control, model: model)
+                                }
+                            }.padding(.top, 7)
+                        }
+                    }
+                } else {
+                    ForEach(model.concaveControls) { control in
+                        PPMFittingParameterRow(control: control, model: model)
+                    }
+                }
+
+                Divider()
+                historyControls
+                Text(model.message).font(.caption).foregroundStyle(.secondary)
+                if let error = model.error {
+                    Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                }
+                }.padding(16)
             }
-            .disabled(model.busy)
-        }
+        }.disabled(model.busy)
     }
 
     private var targetOpacityControl: some View {
@@ -218,17 +236,8 @@ struct PPMFittingView: View {
 
     var footer: some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(model.message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if let error = model.error {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .textSelection(.enabled)
-                }
-            }
+            Text("Review shape and mesh distances before saving.")
+                .font(.caption).foregroundStyle(.secondary)
             Spacer()
             Button("Cancel") { closeEditor() }
                 .keyboardShortcut(.cancelAction)
@@ -245,7 +254,6 @@ struct PPMFittingView: View {
             .keyboardShortcut(.defaultAction)
             .disabled(!model.canSave)
         }
-        .padding(14)
     }
 
 }
@@ -268,6 +276,15 @@ private struct PPMFittingParameterRow: View {
         return control.section == "global" ? String(parts[3]) : "\(parts[1]) · \(kind) \(parts[3])"
     }
 
+    private var accessibilityName: String {
+        let parts = control.id.split(separator: "|")
+        if control.section == "global", parts.count == 4 {
+            let kind = parts[2] == "Location" ? "Position" : String(parts[2])
+            return "\(control.group) \(kind) \(parts[3])"
+        }
+        return "\(control.group) \(parameterLabel)"
+    }
+
     private var step: Double {
         switch control.unit {
         case "mm", "°": 0.1
@@ -285,6 +302,8 @@ private struct PPMFittingParameterRow: View {
                 Spacer(minLength: 4)
                 TextField(parameterLabel, value: value, format: .number.precision(.fractionLength(2)))
                     .labelsHidden()
+                    .accessibilityLabel(accessibilityName)
+                    .accessibilityIdentifier("ppm.parameter.\(control.id).value")
                     .multilineTextAlignment(.trailing)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 78)
@@ -303,7 +322,8 @@ private struct PPMFittingParameterRow: View {
                         model.endControlEditing()
                     }
                 }
-                    .accessibilityLabel("\(control.group) \(parameterLabel)")
+                    .accessibilityLabel(accessibilityName)
+                    .accessibilityIdentifier("ppm.parameter.\(control.id).slider")
                 Stepper(value: value, in: control.minimum...control.maximum, step: step) {
                     Text(parameterLabel)
                 }
@@ -311,30 +331,37 @@ private struct PPMFittingParameterRow: View {
                 .controlSize(.small)
                 .frame(width: 48)
                 .help("Adjust in \(step, specifier: "%.2g") \(control.unit.isEmpty ? "units" : control.unit) steps")
-                .accessibilityLabel("Step \(control.group) \(parameterLabel)")
+                .accessibilityLabel("Adjust \(accessibilityName)")
+                .accessibilityIdentifier("ppm.parameter.\(control.id).stepper")
             }
         }
     }
 }
 
 private struct PPMFittingSceneViewport: NSViewRepresentable {
-    let scene: SCNScene
-    let darkMode: Bool
+    @ObservedObject var model: PPMFittingModel
 
+    func makeCoordinator() -> Coordinator { Coordinator() }
     func makeNSView(context: Context) -> NavigableSCNView {
         let view = NavigableSCNView(frame: .zero)
-        view.scene = scene
-        view.configureNavigation(camera: scene.rootNode.childNodes.first { $0.camera != nil })
+        view.scene = model.scene
         view.allowsCameraControl = true
         view.autoenablesDefaultLighting = false
-        view.backgroundColor = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
+        view.backgroundColor = NSColor(calibratedWhite: 0.16, alpha: 1)
         return view
     }
 
     func updateNSView(_ view: NavigableSCNView, context: Context) {
-        if view.scene !== scene { view.scene = scene }
-        let camera = scene.rootNode.childNodes.first { $0.camera != nil }
-        if view.pointOfView !== camera { view.configureNavigation(camera: camera) }
-        view.backgroundColor = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
+        if view.scene !== model.scene { view.scene = model.scene }
+        if view.pointOfView !== model.pointOfView || context.coordinator.cameraRevision != model.cameraRevision {
+            view.configureNavigation(camera: model.pointOfView, target: model.cameraTarget, span: model.cameraSpan)
+            context.coordinator.cameraRevision = model.cameraRevision
+        }
+        view.allowsCameraControl = !model.busy
+        view.needsDisplay = true
+    }
+
+    final class Coordinator {
+        var cameraRevision = -1
     }
 }

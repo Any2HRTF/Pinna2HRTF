@@ -57,7 +57,7 @@ which allow 0 to 1. The PPM is color-mapped by each vertex's nearest
 target-vertex distance on a fixed 0–3+ mm scale, and the colors update with the
 preview. The metric panel stays above the scrolling controls, with Undo and Redo
 for parameter edits. The Target opacity slider fades the scanned ear over the opaque PPM error map
-so the distance colors stay readable. The editor uses
+so the distance colors stay readable. At 0% the target is hidden; at 100% it is opaque. The editor uses
 `~/Desktop/PPM.blend` when available and otherwise uses the built-in BezierPPM
 defaults. The template source is preserved, and a copy plus the parameter
 values are saved with the project.
@@ -114,8 +114,13 @@ The macOS preparation workspace also supports the manual steps around this stage
 
 Working edits stay in a temporary workspace until Save. Originals and automatic
 prepared meshes remain intact. Saved manual geometry and provenance live in
-`MeshEdits/`; Reset Outputs preserves this user-authored work. The ear editor
-requires a connected, manifold surface with consistent winding and one simple
+`MeshEdits/`; Reset Outputs preserves this user-authored work.
+
+The aligner’s **Show coordinate system** option displays world axes at the scan
+origin and a camera-linked X/Y/Z reference in the corner. After alignment, X
+points forward, Y left, and Z up; the ear-canal midpoint is the origin.
+
+The ear editor requires a connected, manifold surface with consistent winding and one simple
 attachment boundary, plus at most one canal opening. It does not fill the new
 opening. Later simulation preprocessing closes the canal and estimates its
 source landmark using the existing pipeline.
@@ -296,6 +301,21 @@ Only preprocessing is enabled in the template. Explicitly selected stages ignore
 **YAML postprocessing applies a −30 dB level offset and replaces its output folder by default.** Set `postprocessing.normalize: false` and/or `postprocessing.overwrite: false` to change these defaults. Direct `sofa` commands without `--config` do not apply the offset.
 
 For Slurm, set `numcalc.mode: slurm` and fill in the cluster settings. The Slurm worker skips existing frequency output folders; remove incomplete step folders before resubmitting.
+
+## macOS window accessibility checks
+
+Alignment, ear editing, and PPM fitting share `EditorSheetLayout` and `EditorCameraControls`, presented through one project-attached sheet. Keep editor headers, preview/sidebar sizing, and Cancel/Save footers in this shared layout when adding editor features.
+
+The main workspace, nose-and-ear alignment, ear editor, and manual PPM fitting expose standard labelled controls. Fitting fields, sliders, and steppers include the region, transform, and axis in their accessibility names. The fitting sections use plain headings and rows: replacing them with SwiftUI `GroupBox` causes the Computer helper to crash while reading the fitting window on the tested macOS setup.
+
+After changing an editor or its window host, use the Computer tool to:
+
+1. Open nose-and-ear alignment, change camera views, expand Alignment Details, capture a screenshot, and cancel.
+2. Open an ear editor, change camera views, switch between Select Faces and Cutting Plane, inspect the plane fields, and cancel without applying a cut.
+3. Open both left and right manual fits. Read the Global controls and Distance Details, expand a Convex region, switch to Concave, and capture a screenshot.
+4. Change one fitting parameter, verify that its displayed value and distance metrics update, then Undo and verify restoration. Check the display menu, opacity, Help, and Cancel. Reopen the fit to verify that unsaved edits were discarded.
+
+Keep tests on existing copies and cancel rather than saving diagnostic edits. Successful compilation does not replace this window-readability check.
 
 ## Build the apps
 

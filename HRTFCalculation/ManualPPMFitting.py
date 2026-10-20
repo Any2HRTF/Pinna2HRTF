@@ -292,6 +292,30 @@ def _write_preview_mesh(parameters: dict[str, float], path: str, mirror_y: bool 
     return metrics
 
 
+def _posed_skeleton() -> list[dict]:
+    """Return posed rig points in the same world coordinates as preview.meshbin.
+
+    Segment joint matrices are bone-local; the evaluated pose matrix places the
+    curved B-Bone in armature space, then matrix_world places it beside the mesh.
+    Mirroring is applied by the native preview to both mesh and rig together.
+    """
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    armature = bpy.data.objects["Armature"].evaluated_get(depsgraph)
+    bones = []
+    for bone in armature.pose.bones:
+        segments = bone.bone.bbone_segments
+        if segments > 1:
+            transform = armature.matrix_world @ bone.matrix
+            points = [transform @ bone.bbone_segment_matrix(i).translation
+                      for i in range(segments + 1)]
+        else:
+            points = [armature.matrix_world @ bone.head,
+                      armature.matrix_world @ bone.tail]
+        bones.append({"name": bone.name,
+                      "points": [[float(v) for v in point] for point in points]})
+    return bones
+
+
 def execute(command: dict) -> dict:
     action = command.get("action")
     template_blend = command.get("template_blend") or None
@@ -311,7 +335,7 @@ def execute(command: dict) -> dict:
                                       bool(command.get("mirror_y", False)))
         return {"parameters": parameters, "controls": _controls_from_parameters(parameters),
                 "template_blend": template_blend or "", "mesh_data": command["mesh_data"],
-                "metrics": _metric_report(metrics)}
+                "metrics": _metric_report(metrics), "skeleton": _posed_skeleton()}
 
     if action in {"preview", "preview_mesh", "save"}:
         submitted = command.get("parameters")
@@ -323,7 +347,7 @@ def execute(command: dict) -> dict:
                                           bool(command.get("mirror_y", False)))
             return {"parameters": parameters, "controls": _controls_from_parameters(parameters),
                     "template_blend": template_blend or "", "mesh_data": command["mesh_data"],
-                    "metrics": _metric_report(metrics)}
+                    "metrics": _metric_report(metrics), "skeleton": _posed_skeleton()}
         model = BezierPPM(from_dict=parameters)
         _export(model, command["output"], bool(command.get("mirror_y", False)))
         blend_output = command.get("blend_output")

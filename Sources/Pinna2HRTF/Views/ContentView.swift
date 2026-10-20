@@ -70,17 +70,14 @@ struct ContentView: View {
         } message: {
             Text(store.registryStore.recoveryMessage ?? store.persistenceMessage ?? "The original project list will be preserved before recovery.")
         }
-        .sheet(item: Binding(get: { store.meshEditorRequest?.isAlignment == true ? store.meshEditorRequest : nil }, set: { store.meshEditorRequest = $0 })) { request in
-            MeshEditorView(request: request, saved: store.finishMeshEditing)
-        }
-        .background {
-            EditorWindow(request: Binding(get: { store.meshEditorRequest?.isAlignment == false ? store.meshEditorRequest : nil }, set: { store.meshEditorRequest = $0 }), title: "Edit Ear") { request, close, busy in
-                AnyView(MeshEditorView(request: request, closeWindow: close, busyChanged: busy, saved: store.finishMeshEditing))
-            }
-            EditorWindow(request: $store.ppmFittingRequest, title: "Manual PPM Fit") { request, close, busy in
-                AnyView(PPMFittingView(request: request, closeWindow: close, busyChanged: busy) { request, templateBlendPath in
+        .sheet(item: editorPresentation) { editor in
+            switch editor {
+            case .mesh(let request):
+                MeshEditorView(request: request, saved: store.finishMeshEditing)
+            case .ppm(let request):
+                PPMFittingView(request: request) { request, templateBlendPath in
                     store.finishManualPPMFitting(request, templateBlendPath: templateBlendPath)
-                })
+                }
             }
         }
         .alert("Cannot Edit Mesh", isPresented: Binding(get: { store.meshEditorError != nil }, set: { if !$0 { store.meshEditorError = nil } })) {
@@ -96,6 +93,19 @@ struct ContentView: View {
             store.refreshArtifacts()
             store.restoreViewer()
         }
+    }
+
+    private var editorPresentation: Binding<ProjectEditorPresentation?> {
+        Binding(get: {
+            if let request = store.meshEditorRequest { return .mesh(request) }
+            if let request = store.ppmFittingRequest { return .ppm(request) }
+            return nil
+        }, set: { value in
+            if value == nil {
+                store.meshEditorRequest = nil
+                store.ppmFittingRequest = nil
+            }
+        })
     }
 
     @ViewBuilder var workspace: some View {
@@ -165,5 +175,17 @@ struct ContentView: View {
             toggleLog: { withAnimation { logExpanded.toggle() } },
             toggleInspector: { withAnimation { inspectorPresented.toggle() } }
         )
+    }
+}
+
+private enum ProjectEditorPresentation: Identifiable {
+    case mesh(MeshEditorRequest)
+    case ppm(PPMFittingRequest)
+
+    var id: String {
+        switch self {
+        case .mesh(let request): return "mesh-\(request.id)"
+        case .ppm(let request): return "ppm-\(request.id)"
+        }
     }
 }
