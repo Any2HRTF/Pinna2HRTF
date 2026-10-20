@@ -72,7 +72,7 @@ final class PPMFittingModel: ObservableObject {
             }
             try await initialize(usingSavedParameters: request.savedParameters)
             try loadTarget()
-            message = "Adjust a control to update the PPM preview. Fit globally, then convex regions, then concave details."
+            message = "Adjust a control to update the PPM preview. Fit globally, then local bone controls, then shape keys."
         } catch {
             self.error = error.localizedDescription
             message = "Could not open the fitting workspace."

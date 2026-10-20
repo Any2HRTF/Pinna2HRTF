@@ -121,7 +121,7 @@ struct PPMFittingView: View {
                 .popover(isPresented: $showingHelp) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Manual Fitting").font(.headline)
-                        Text("Fit the whole model first, then convex regions, then concave details. Changes update the preview automatically.")
+                        Text("Fit the whole model first, then local bone controls, then shape keys. Changes update the preview automatically.")
                         Text("For a right ear, the model is mirrored across Y; control axes follow the template.")
                         Link("Fitting workflow · Perfler et al. (2025)", destination: URL(string: "https://doi.org/10.1016/j.compbiomed.2025.109817")!)
                     }.padding().frame(width: 320)
@@ -142,13 +142,16 @@ struct PPMFittingView: View {
 
     var controlsPanel: some View {
         VStack(spacing: 0) {
-            meshMetrics.padding(16)
+            VStack(alignment: .leading, spacing: 12) {
+                historyControls
+                meshMetrics
+            }.padding(16)
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                 fittingActions
                 Picker("Fitting section", selection: $selectedSection) {
-                    ForEach(["Global", "Convex", "Concave"], id: \.self) { Text($0).tag($0) }
+                    ForEach(["Global", "Local", "Shape Keys"], id: \.self) { Text($0).tag($0) }
                 }.pickerStyle(.segmented)
                 targetOpacityControl.disabled(!model.showTarget)
                 Divider()
@@ -166,7 +169,7 @@ struct PPMFittingView: View {
                             }.padding(.top, 6)
                         }
                     }
-                } else if selectedSection == "Convex" {
+                } else if selectedSection == "Local" {
                     ForEach(model.convexGroups, id: \.self) { group in
                         DisclosureGroup(group) {
                             VStack(spacing: 8) {
@@ -183,7 +186,6 @@ struct PPMFittingView: View {
                 }
 
                 Divider()
-                historyControls
                 Text(model.message).font(.caption).foregroundStyle(.secondary)
                 if let error = model.error {
                     Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
