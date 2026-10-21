@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f0f0ee">
+  <meta name="description" content="Calculate individualized HRTFs and HRIRs from one or two pinna meshes with the Pinna2HRTF desktop app or Python CLI.">
+  <meta property="og:title" content="Pinna2HRTF — Individual HRTFs from pinna meshes">
+  <meta property="og:description" content="A desktop app and Python CLI for calculating individualized HRTFs and HRIRs from pinna meshes.">
+  <meta property="og:type" content="website">
+  <title>Pinna2HRTF — Individual HRTFs from pinna meshes</title>
+  <link rel="icon" href="favicon-macos.png?v=512" type="image/png" sizes="512x512">
+  <link rel="shortcut icon" href="favicon-macos.png?v=512" type="image/png">
+  <link rel="apple-touch-icon" href="favicon-macos.png?v=512">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="page-frame">
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Pinna2HRTF home">
+        <img class="brand-icon" src="assets/app-icon.webp" alt="" width="32" height="32" decoding="async">
+        <span class="brand-name">Pinna2HRTF</span>
+      </a>
+      <nav class="main-nav" aria-label="Main navigation">
+        <a href="#workflow">Workflow</a>
+        <a href="#cli">CLI</a>
+        <a href="#downloads">Downloads</a>
+        <a href="docs/">Docs</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero content-section" id="top">
+        <div class="hero-copy">
+          <p class="section-kicker"><span class="accent-dot" aria-hidden="true"></span> HRTF TOOLKIT <span class="slash">/</span> DESKTOP + CLI</p>
+          <h1>Individual HRTFs from pinna meshes.</h1>
+          <p class="hero-lede">Turn one or two ear meshes into head-related transfer functions and impulse responses. Export the results as SOFA files for spatial audio work.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#downloads">Download the app <span aria-hidden="true">↓</span></a>
+            <a class="button button-secondary" href="#cli">Set up the CLI <span aria-hidden="true">↘</span></a>
+          </div>
+        </div>
+        <button class="draggable-sticker sticker-girl" type="button" aria-label="Move the girl sticker" aria-describedby="sticker-hint">
+          <img src="assets/sticker-scan-it.webp" alt="" width="560" height="840" decoding="async" fetchpriority="low">
+        </button>
+        <aside class="quick-spec" aria-label="Pinna2HRTF at a glance">
+          <p class="quick-spec-title">At a glance</p>
+          <dl>
+            <div><dt>Input</dt><dd>One or two pinna meshes</dd></div>
+            <div><dt>Output</dt><dd>HRTF + HRIR in SOFA</dd></div>
+            <div><dt>Desktop</dt><dd>macOS and Windows</dd></div>
+            <div><dt>Automation</dt><dd>Python command-line tools</dd></div>
+          </dl>
+        </aside>
+      </section>
+
+      <section class="content-section workflow" id="workflow">
+        <button class="draggable-sticker sticker-headphones" type="button" aria-label="Move the headphones sticker" aria-describedby="sticker-hint">
+          <img src="assets/sticker-headphones.webp" alt="" width="420" height="420" loading="lazy" decoding="async">
+        </button>
+        <button class="draggable-sticker sticker-hrtf" type="button" aria-label="Move the spatial HRTF sticker" aria-describedby="sticker-hint">
+          <img src="assets/sticker-hrtf.svg" alt="" width="180" height="160" loading="lazy" decoding="async">
+        </button>
+        <div class="section-title">
+          <p class="section-kicker"><span class="accent-dot" aria-hidden="true"></span> WORKFLOW</p>
+          <h2>From geometry to acoustic output.</h2>
+        </div>
+        <div class="workflow-list">
+          <article class="workflow-step">
+            <span class="step-number">01</span>
+            <div><h3>Prepare the mesh</h3><p>Import one or two pinna meshes, or edit ears from a full-head scan.</p></div>
+          </article>
+          <article class="workflow-step">
+            <span class="step-number">02</span>
+            <div><h3>Run the simulation</h3><p>Prepare the model and solve with Mesh2HRTF and NumCalc. Mesh2PPM inference is optional.</p></div>
+          </article>
+          <article class="workflow-step">
+            <span class="step-number">03</span>
+            <div><h3>Export for audio</h3><p>Save head-related transfer functions and impulse responses in the SOFA format.</p></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="content-section downloads" id="downloads">
+        <button class="draggable-sticker sticker-mesh" type="button" aria-label="Move the cyber ear sculptor sticker" aria-describedby="sticker-hint">
+          <img src="assets/sticker-cyber-ear-sculptor.png" alt="" width="1214" height="1295" loading="lazy" decoding="async">
+        </button>
+        <button class="draggable-sticker sticker-wave" type="button" aria-label="Move the impulse response sticker" aria-describedby="sticker-hint">
+          <img src="assets/sticker-wave.svg" alt="" width="180" height="160" loading="lazy" decoding="async">
+        </button>
+        <button class="draggable-sticker sticker-sofa" type="button" aria-label="Move the SOFA file sticker" aria-describedby="sticker-hint">
+          <img src="assets/sticker-sofa.svg" alt="" width="180" height="160" loading="lazy" decoding="async">
+        </button>
+        <div class="section-title title-with-meta">
+          <div>
+            <p class="section-kicker"><span class="accent-dot" aria-hidden="true"></span> DOWNLOADS</p>
+            <h2>Desktop installers</h2>
+          </div>
+          <span class="release-version">LATEST RELEASE <b>v1.1.0</b></span>
+        </div>
+        <p class="section-intro">Each installer includes Python, the models, and simulation tools.</p>
+        <div class="download-list">
+          <article class="download-entry">
+            <div class="platform-name">
+              <div><h3>macOS</h3><p>Apple Silicon</p></div>
+            </div>
+            <p class="download-requirements">macOS 13 or later<br><span>Open the disk image and move Pinna2HRTF to Applications.</span></p>
+            <div class="download-actions">
+              <a class="button button-download" href="https://github.com/Any2HRTF/Pinna2HRTF/releases/download/v1.1.0/Pinna2HRTF-1.1.0-macOS-arm64.dmg">Download DMG <span aria-hidden="true">↓</span></a>
+              <a class="checksum-link" href="https://github.com/Any2HRTF/Pinna2HRTF/releases/download/v1.1.0/Pinna2HRTF-1.1.0-macOS-arm64.dmg.sha256">SHA-256 checksum</a>
+            </div>
+          </article>
+          <article class="download-entry">
+            <div class="platform-name"><div><h3>Windows</h3><p>x64</p></div></div>
+            <p class="download-requirements">Windows 10 (2004+) or 11<br><span>Windows ARM is untested.</span></p>
+            <div class="download-actions">
+              <a class="button button-download" href="https://github.com/Any2HRTF/Pinna2HRTF/releases/download/v1.1.0/Pinna2HRTF-Windows-Installer-v1.1.0.exe">Download installer <span aria-hidden="true">↓</span></a>
+              <a class="checksum-link" href="https://github.com/Any2HRTF/Pinna2HRTF/releases/download/v1.1.0/Pinna2HRTF-v1.1.0-Windows_x64.exe.sha256">SHA-256 checksum</a>
+            </div>
+          </article>
+        </div>
+        <div class="download-foot">
+          <a class="text-link" href="https://github.com/Any2HRTF/Pinna2HRTF/releases">All releases and release notes <span aria-hidden="true">↗</span></a>
+          <p class="signing-note">The macOS installer is ad-hoc signed and not notarized. The Windows installer is not digitally signed.</p>
+        </div>
+      </section>
+
+      <section class="content-section cli-section" id="cli">
+        <div class="section-title">
+          <p class="section-kicker"><span class="accent-dot" aria-hidden="true"></span> PYTHON CLI</p>
+          <h2>Use it in your pipeline.</h2>
+          <p class="section-intro">Clone the repository and install the locked Python environment with <code>uv</code>.</p>
+          <a class="text-link" href="docs/cli.html">Read the CLI guide <span aria-hidden="true">↗</span></a>
+        </div>
+        <div class="terminal-card">
+          <div class="terminal-topbar"><span>GETTING STARTED</span><button class="copy-button" type="button" data-copy="cli-command" aria-label="Copy CLI setup commands">Copy</button></div>
+          <pre><code id="cli-command"><span class="prompt">$</span> git clone https://github.com/Any2HRTF/Pinna2HRTF.git
+<span class="prompt">$</span> cd Pinna2HRTF
+<span class="prompt">$</span> uv sync --locked --python 3.11</code></pre>
+          <div class="terminal-divider"></div>
+          <p class="terminal-label">PREPARE NATIVE TOOLS</p>
+          <div class="terminal-platforms">
+            <div><code>bash Scripts/prepare_external_tools.sh</code><small>macOS / Linux</small></div>
+            <div><code>Scripts/prepare_windows_external_tools.ps1</code><small>Windows PowerShell</small></div>
+          </div>
+          <p class="copy-status" aria-live="polite"></p>
+        </div>
+        <button class="draggable-sticker sticker-cli" type="button" aria-label="Move the CLI sticker" aria-describedby="sticker-hint">
+          <img src="assets/sticker-cli.svg" alt="" width="180" height="150" loading="lazy" decoding="async">
+        </button>
+      </section>
+    </main>
+
+    <span class="visually-hidden" id="sticker-hint">Drag with a mouse or touch. Use the arrow keys to move a focused sticker.</span>
+
+    <footer class="site-footer">
+      <a class="brand footer-brand" href="#top"><span class="brand-name">Pinna2HRTF</span></a>
+      <span class="footer-caption">INDIVIDUALIZED HRTFs FROM PINNA MESHES</span>
+      <div class="footer-links"><a href="docs/">Docs</a><a href="https://github.com/Any2HRTF/Pinna2HRTF">GitHub</a><a href="https://github.com/Any2HRTF/Pinna2HRTF/releases">Releases</a></div>
+    </footer>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>

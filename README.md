@@ -1,21 +1,20 @@
 <p align="center">
-  <img src="icon.png" alt="Pinna2HRTF icon" width="256">
+  <img src="icon.png" alt="Pinna2HRTF icon" width="192">
 </p>
 
 # Pinna2HRTF
 
-Calculate individualized head-related transfer functions (HRTFs) from one or two pinna meshes. Available as a CLI and macOS/Windows apps.
+Calculate individualized head-related transfer functions (HRTFs) and impulse responses (HRIRs) from one or two pinna meshes. Available as a macOS or Windows desktop app and a Python CLI.
 
-The pipeline runs optional Mesh2PPM inference, prepares the meshes, solves the acoustics with Mesh2HRTF/NumCalc, and exports HRTFs and HRIRs as SOFA files.
+The pipeline supports optional Mesh2PPM inference, full-head scan preparation and manual ear review, acoustic simulation with Mesh2HRTF and NumCalc, and SOFA export.
 
-## Desktop apps
+## Get the app
 
-- **macOS:** Apple Silicon, macOS 13 or later. Open the DMG and drag Pinna2HRTF to Applications.
-- **Windows:** x64 portable App, Windows 10 version 2004 or later.
+Download the latest published desktop installers and checksums from [GitHub Releases](https://github.com/Any2HRTF/Pinna2HRTF/releases).
 
-[Downloads available on the release page.](https://github.com/Any2HRTF/Pinna2HRTF/releases)
+## Documentation
 
-Packaged apps include Python, the models, and the simulation tools. They work offline without a separate Blender or `uv` installation.
+The [Pinna2HRTF user guide](https://any2hrtf.github.io/Pinna2HRTF/docs/) covers the desktop app, scan preparation and ear editing, CLI setup and YAML configuration, and building from source.
 
 Create or import a project, select at least one ear mesh, and choose a save folder. Enable **Use Mesh2PPM** for inference, or use the macOS **Manual PPM Fit** editor to fit a Bezier PPM by hand. Run the stages in order. **Preview** shows meshes and plots; **Live Log** shows progress. **Place Left/Right Mic** lets you click a microphone position and confirm with **Done**. Escape cancels microphone placement. All macOS 3D viewers share these controls:
 
@@ -362,7 +361,3 @@ The packaged app is written to `dist\windows\Pinna2HRTF`.
 ## License
 
 [European Union Public Licence 1.2](LICENSE). Bundled dependencies retain their own licences.
-
-### Duplicate a project
-
-Duplicate Project opens a dialog for the project name and save location. The new project folder is named after the project and appears beneath the selected parent folder. Missing parent folders are created automatically. Existing destination folders and locations inside another project are rejected. Copies are prepared in a temporary folder before being added to the sidebar, and internal paths in project metadata and saved PPM parameters are relocated to the new folder.
