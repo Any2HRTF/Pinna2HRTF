@@ -16,7 +16,10 @@ fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$ROOT/.." && pwd)"
-APP_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$ROOT/pyproject.toml" | head -n 1)"
+APP_VERSION="2.0"
+APP_RELEASE_CHANNEL="beta"
+APP_DISPLAY_VERSION="$APP_VERSION $APP_RELEASE_CHANNEL"
+APP_ARTIFACT_VERSION="$APP_VERSION-$APP_RELEASE_CHANNEL"
 if git -C "$ROOT" rev-parse --verify HEAD >/dev/null 2>&1; then
   GIT_HEAD="$(git -C "$ROOT" rev-parse --short HEAD)"
   APP_BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD)"
@@ -186,6 +189,8 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <string>$APP_VERSION</string>
   <key>CFBundleVersion</key>
   <string>$APP_BUILD_NUMBER</string>
+  <key>Pinna2HRTFDisplayVersion</key>
+  <string>$APP_DISPLAY_VERSION</string>
   <key>Pinna2HRTFGitHead</key>
   <string>$GIT_HEAD</string>
   <key>LSMinimumSystemVersion</key>
@@ -269,7 +274,7 @@ codesign --verify --deep --strict --verbose=2 "$CLEAN_APP_DIR"
 if [[ "$MODE" == "distribution" ]]; then
   APP_ARCHIVE="$STAGE_ROOT/Pinna2HRTF.zip"
   DMG_STAGE="$STAGE_ROOT/dmg"
-  DMG_PATH="$DIST_DIR/Pinna2HRTF-$APP_VERSION-macOS-arm64.dmg"
+  DMG_PATH="$DIST_DIR/Pinna2HRTF-$APP_ARTIFACT_VERSION-macOS-arm64.dmg"
   ditto -c -k --sequesterRsrc --keepParent "$CLEAN_APP_DIR" "$APP_ARCHIVE"
   xcrun notarytool submit "$APP_ARCHIVE" --keychain-profile "$NOTARY_PROFILE" --wait
   xcrun stapler staple "$CLEAN_APP_DIR"
@@ -279,7 +284,7 @@ if [[ "$MODE" == "distribution" ]]; then
   ditto --norsrc --noextattr --noqtn "$CLEAN_APP_DIR" "$DMG_STAGE/Pinna2HRTF.app"
   ln -s /Applications "$DMG_STAGE/Applications"
   rm -f "$DMG_PATH" "$DMG_PATH.sha256"
-  hdiutil create -volname "Pinna2HRTF $APP_VERSION" -srcfolder "$DMG_STAGE" -format UDZO -ov "$DMG_PATH"
+  hdiutil create -volname "Pinna2HRTF $APP_DISPLAY_VERSION" -srcfolder "$DMG_STAGE" -format UDZO -ov "$DMG_PATH"
   codesign --force --sign "$SIGNING_IDENTITY" --timestamp "$DMG_PATH"
   xcrun notarytool submit "$DMG_PATH" --keychain-profile "$NOTARY_PROFILE" --wait
   xcrun stapler staple "$DMG_PATH"
@@ -298,12 +303,12 @@ else
   codesign --verify --deep --verbose=2 "$FINAL_APP_DIR"
   if [[ "$MODE" == "installer" ]]; then
     DMG_STAGE="$STAGE_ROOT/dmg"
-    DMG_NAME="Pinna2HRTF-$APP_VERSION-macOS-arm64.dmg"
+    DMG_NAME="Pinna2HRTF-$APP_ARTIFACT_VERSION-macOS-arm64.dmg"
     DMG_PATH="$DIST_DIR/$DMG_NAME"
     mkdir -p "$DMG_STAGE" "$DIST_DIR"
     ditto --norsrc --noextattr --noqtn "$CLEAN_APP_DIR" "$DMG_STAGE/Pinna2HRTF.app"
     ln -s /Applications "$DMG_STAGE/Applications"
-    hdiutil create -volname "Pinna2HRTF $APP_VERSION" -srcfolder "$DMG_STAGE" -format UDZO -ov "$DMG_PATH"
+    hdiutil create -volname "Pinna2HRTF $APP_DISPLAY_VERSION" -srcfolder "$DMG_STAGE" -format UDZO -ov "$DMG_PATH"
     codesign --force --sign - "$DMG_PATH"
     hdiutil verify "$DMG_PATH"
     (cd "$DIST_DIR" && shasum -a 256 "$DMG_NAME" > "$DMG_NAME.sha256")

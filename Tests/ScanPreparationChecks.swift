@@ -43,6 +43,7 @@ struct ScanPreparationChecks {
 
     static func main() throws {
         try projectDuplicationChecks()
+        try outputResetChecks()
         cuttingPlanePreviewChecks()
         let root = Defaults.packageRoot()
         var project = Defaults.newProject(packageRoot: root, index: 1)
@@ -151,10 +152,10 @@ struct ScanPreparationChecks {
         let unrelated = temporary.appendingPathComponent("notes.txt")
         try Data("keep me".utf8).write(to: unrelated)
         let reset = outputs.reset()
-        precondition(reset.success && reset.deleted == 3)
+        precondition(reset.success && reset.deleted == 5)
         precondition(FileManager.default.fileExists(atPath: source.path))
         precondition(FileManager.default.fileExists(atPath: unrelated.path))
-        precondition(FileManager.default.fileExists(atPath: edited.path))
+        precondition(!FileManager.default.fileExists(atPath: edited.path))
         let solver = temporary.appendingPathComponent("solver")
         let sourceFolder = solver.appendingPathComponent("NumCalc/source_1")
         let stepFolder = sourceFolder.appendingPathComponent("be.out/be.1")

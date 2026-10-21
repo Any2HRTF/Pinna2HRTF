@@ -63,14 +63,15 @@ defaults. The template source is preserved, and a copy plus the parameter
 values are saved with the project.
 Saving a fit selects manual preprocessing and turns off Mesh2PPM; an unfitted
 side keeps its current input mesh. The right-side preview and export mirror the
-template across Y. Reset Outputs preserves these saved fits.
+template across Y. On macOS, Reset Outputs removes saved fits, their parameters,
+editable Blender files, and archived template copies.
 
 The fitting sequence follows the manual registration procedure in
 [Perfler et al. (2025)](https://doi.org/10.1016/j.compbiomed.2025.109817):
 align the whole model, adjust convex features, tune concave shape keys, then
 iterate as needed.
 
-**Reset Outputs** removes generated results while keeping configured inputs and settings. Project files live in the chosen save folder; app settings and caches live in `~/Library/Application Support/Pinna2HRTF` on macOS or `%APPDATA%\Pinna2HRTF` on Windows.
+**Reset Outputs** removes generated results while keeping original inputs and settings. On macOS this also clears saved manual PPM fits, ear edits, and scan alignments, restores the original scan, and clears references to removed fits and reviews. Files used as inputs by another project, externally modified files, logs, and unrelated files are preserved. Project files live in the chosen save folder; app settings and caches live in `~/Library/Application Support/Pinna2HRTF` on macOS or `%APPDATA%\Pinna2HRTF` on Windows.
 
 ## Full-head scan preparation (pipeline and macOS)
 
@@ -114,7 +115,7 @@ The macOS preparation workspace also supports the manual steps around this stage
 
 Working edits stay in a temporary workspace until Save. Originals and automatic
 prepared meshes remain intact. Saved manual geometry and provenance live in
-`MeshEdits/`; Reset Outputs preserves this user-authored work.
+`MeshEdits/`; on macOS, Reset Outputs also removes these saved edits and alignments.
 
 The aligner’s **Show coordinate system** option displays world axes at the scan
 origin and a camera-linked X/Y/Z reference in the corner. After alignment, X
@@ -320,6 +321,8 @@ Keep tests on existing copies and cancel rather than saving diagnostic edits. Su
 ## Build the apps
 
 ### macOS
+
+The Mac app is currently **2.0 beta**. Its app version is set in `Scripts/build_release_app.sh`; the About panel shows the beta label, and installer filenames use `2.0-beta`.
 
 On Apple Silicon, with the Swift toolchain, Git, and `uv` installed:
 

@@ -6,6 +6,8 @@ import simd
 @main
 struct MeshEditorChecks {
     @MainActor static func main() async throws {
+        ppmFittingCameraChecks()
+        meshWorkspaceLayoutChecks()
         try targetAppearanceChecks()
         pressureQuantityChecks()
         try await pressureFrameChecks()

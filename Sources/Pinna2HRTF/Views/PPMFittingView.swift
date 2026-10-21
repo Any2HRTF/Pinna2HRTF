@@ -23,18 +23,17 @@ struct PPMFittingView: View {
         EditorSheetLayout {
             header
         } viewport: {
-            ZStack(alignment: .topTrailing) {
-                PPMFittingSceneViewport(model: model)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Target ear and fitted PPM 3D preview")
-                    .accessibilityAddTraits(.isImage)
-                legend.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                EditorCameraControls(fit: model.resetCamera, direction: model.setCameraView).padding(12)
-                if model.busy {
-                    ProgressView().controlSize(.small)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+            PPMFittingSceneViewport(model: model)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Target ear and fitted PPM 3D preview")
+                .accessibilityAddTraits(.isImage)
+                .overlay(alignment: .bottomLeading) { legend }
+                .overlay(alignment: .topTrailing) {
+                    EditorCameraControls(fit: model.resetCamera, direction: model.setCameraView).padding(12)
                 }
-            }
+                .overlay {
+                    if model.busy { ProgressView().controlSize(.small) }
+                }
         } inspector: {
             controlsPanel
         } footer: {
@@ -153,6 +152,8 @@ struct PPMFittingView: View {
                 Picker("Fitting section", selection: $selectedSection) {
                     ForEach(["Global", "Local", "Shape Keys"], id: \.self) { Text($0).tag($0) }
                 }.pickerStyle(.segmented)
+                    .labelsHidden()
+                    .accessibilityLabel("Fitting section")
                 targetOpacityControl.disabled(!model.showTarget)
                 Divider()
                 // Plain headings preserve Computer access; GroupBox crashes the helper here.
@@ -343,9 +344,8 @@ private struct PPMFittingParameterRow: View {
 private struct PPMFittingSceneViewport: NSViewRepresentable {
     @ObservedObject var model: PPMFittingModel
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
-    func makeNSView(context: Context) -> NavigableSCNView {
-        let view = NavigableSCNView(frame: .zero)
+    func makeNSView(context: Context) -> PPMFittingSceneView {
+        let view = PPMFittingSceneView(frame: .zero)
         view.scene = model.scene
         view.allowsCameraControl = true
         view.autoenablesDefaultLighting = false
@@ -353,17 +353,8 @@ private struct PPMFittingSceneViewport: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ view: NavigableSCNView, context: Context) {
-        if view.scene !== model.scene { view.scene = model.scene }
-        if view.pointOfView !== model.pointOfView || context.coordinator.cameraRevision != model.cameraRevision {
-            view.configureNavigation(camera: model.pointOfView, target: model.cameraTarget, span: model.cameraSpan)
-            context.coordinator.cameraRevision = model.cameraRevision
-        }
-        view.allowsCameraControl = !model.busy
-        view.needsDisplay = true
-    }
-
-    final class Coordinator {
-        var cameraRevision = -1
+    func updateNSView(_ view: PPMFittingSceneView, context: Context) {
+        view.update(scene: model.scene, camera: model.pointOfView, target: model.cameraTarget,
+                    span: model.cameraSpan, cameraRevision: model.cameraRevision, busy: model.busy)
     }
 }

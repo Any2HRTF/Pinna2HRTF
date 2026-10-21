@@ -146,6 +146,24 @@ struct ManualPPMFittingSettings: Codable, Equatable {
     func sourcePath(for side: EarSide) -> String? { side == .left ? leftSourcePath : rightSourcePath }
     func sourceIdentity(for side: EarSide) -> String? { side == .left ? leftSourceIdentity : rightSourceIdentity }
 
+    mutating func reconcileAfterOutputReset() {
+        for side in EarSide.allCases {
+            let files = [meshPath(for: side), parametersPath(for: side)]
+            guard files.contains(where: { $0.map { !FileManager.default.fileExists(atPath: $0) } ?? true }) else { continue }
+            if side == .left {
+                leftMeshPath = nil; leftParametersPath = nil; leftBlendPath = nil
+                leftSourcePath = nil; leftSourceIdentity = nil
+            } else {
+                rightMeshPath = nil; rightParametersPath = nil; rightBlendPath = nil
+                rightSourcePath = nil; rightSourceIdentity = nil
+            }
+        }
+        if leftMeshPath == nil && rightMeshPath == nil { useForPreprocessing = false }
+        if let templateBlendPath, !FileManager.default.fileExists(atPath: templateBlendPath) {
+            self.templateBlendPath = nil
+        }
+    }
+
     mutating func setFit(meshPath: String, parametersPath: String, blendPath: String, sourcePath: String,
                          sourceIdentity: String, for side: EarSide) {
         if side == .left {
@@ -279,6 +297,39 @@ struct ProjectRecord: Identifiable, Codable, Equatable {
 }
 
 extension ProjectRecord {
+    func protectedOutputInputs(resettingProjectID: UUID? = nil) -> [String] {
+        let scan = scanPreparation
+        var paths = [leftEar, rightEar, scan.originalScanPath ?? "", settings.preprocessing.evaluationGrid ?? ""]
+        let alignedScan = URL(fileURLWithPath: saveLocation).appendingPathComponent("MeshEdits/AlignedScan.ply").standardizedFileURL.path
+        let canResetAlignment = id == resettingProjectID && !(scan.originalScanPath ?? "").isEmpty
+            && URL(fileURLWithPath: scan.scanPath).standardizedFileURL.path == alignedScan
+            && scan.originalScanPath != scan.scanPath
+        if !canResetAlignment { paths.append(scan.scanPath) }
+        // A project's saved fits are outputs when explicitly resetting that
+        // project; fits used by any other project remain protected inputs.
+        if id != resettingProjectID {
+            paths += [scan.reviewedLeftPath ?? "", scan.reviewedRightPath ?? ""]
+            let fitting = settings.manualPPMFitting
+            paths += [fitting.leftMeshPath ?? "", fitting.rightMeshPath ?? "",
+                      fitting.leftParametersPath ?? "", fitting.rightParametersPath ?? "",
+                      fitting.leftBlendPath ?? "", fitting.rightBlendPath ?? "", fitting.templateBlendPath ?? ""]
+        }
+        return paths.filter { !$0.isEmpty && $0 != "Default" }
+    }
+
+    mutating func reconcileAfterOutputReset() {
+        settings.manualPPMFitting.reconcileAfterOutputReset()
+        if var scan = settings.scanPreparation {
+            if let path = scan.reviewedLeftPath, !FileManager.default.fileExists(atPath: path) { scan.reviewedLeftPath = nil }
+            if let path = scan.reviewedRightPath, !FileManager.default.fileExists(atPath: path) { scan.reviewedRightPath = nil }
+            if !FileManager.default.fileExists(atPath: scan.scanPath), let original = scan.originalScanPath {
+                scan.scanPath = original
+                scan.originalScanPath = nil
+            }
+            settings.scanPreparation = scan
+        }
+    }
+
     var scanPreparation: ScanPreparationSettings { settings.scanPreparation ?? ScanPreparationSettings() }
     var pipelineLeftEar: String { pipelineEar(for: .left) }
     var pipelineRightEar: String { pipelineEar(for: .right) }

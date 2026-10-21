@@ -29,11 +29,11 @@ final class GeneratedOutputManifest {
         var Pending: PendingRun?
     }
     struct ResetResult {
-        var deleted = 0, modified = 0, nonEmpty = 0, errors = 0
+        var deleted = 0, modified = 0, protectedInputs = 0, nonEmpty = 0, errors = 0
         // Keeping edited files is intentional; only reset errors block completion.
         var success: Bool { errors == 0 }
         var summary: String {
-            "Outputs reset (all): deleted \(deleted), kept modified \(modified), kept non-empty directories \(nonEmpty), errors \(errors)."
+            "Outputs reset (all): deleted \(deleted), kept modified \(modified), kept input files \(protectedInputs), kept non-empty directories \(nonEmpty), errors \(errors)."
         }
     }
     enum Failure: LocalizedError {
@@ -90,6 +90,33 @@ final class GeneratedOutputManifest {
         try save(doc)
     }
 
+    // Editors save outside the pipeline. Refresh ownership after each app save
+    // so a later edit is not mistaken for an externally modified output.
+    func recordGeneratedFiles(_ urls: [URL]) throws {
+        gate.lock(); defer { gate.unlock() }
+        guard runLock == nil else { throw Failure.busy }
+        let lease = try acquire(); defer { close(lease) }
+        var doc = try load()
+        try capture(&doc)
+        for url in urls where url.path.hasPrefix(root.path + "/") {
+            let relative = String(url.path.dropFirst(root.path.count + 1))
+            guard let stage = Self.classify(relative), let safe = safePath(relative),
+                  fm.fileExists(atPath: safe.path) else { continue }
+            // Archived templates are copied once and then reused as sources.
+            // A later fit save must not claim external changes to that copy.
+            if relative.hasPrefix("Manual PPM/Templates/"), doc.Files[relative] != nil { continue }
+            var entry = try fingerprint(safe)
+            entry.Stage = stage
+            doc.Files[relative] = entry
+            var directory = (relative as NSString).deletingLastPathComponent
+            while !directory.isEmpty {
+                doc.Directories[directory] = stage
+                directory = (directory as NSString).deletingLastPathComponent
+            }
+        }
+        try save(doc)
+    }
+
     func reset() -> ResetResult {
         gate.lock(); defer { gate.unlock() }
         var result = ResetResult()
@@ -102,7 +129,8 @@ final class GeneratedOutputManifest {
             try reconcile(&doc)
             try save(doc)
             for (relative, entry) in doc.Files {
-                guard let url = safePath(relative) else { result.errors += 1; continue }
+                guard let url = safePath(relative, protectingInputs: false) else { result.errors += 1; continue }
+                guard safePath(relative) != nil else { result.protectedInputs += 1; continue }
                 do {
                     guard fm.fileExists(atPath: url.path) else { doc.Files.removeValue(forKey: relative); continue }
                     let actual = try fingerprint(url)
@@ -115,7 +143,8 @@ final class GeneratedOutputManifest {
             }
             let directories = Set(doc.Directories.keys).union(try scan().directories.filter { Self.classifyEmptyDirectory($0) != nil })
             for relative in directories.sorted(by: { $0.count > $1.count }) {
-                guard let url = safePath(relative) else { result.errors += 1; continue }
+                guard let url = safePath(relative, protectingInputs: false) else { result.errors += 1; continue }
+                guard safePath(relative) != nil else { result.nonEmpty += 1; continue }
                 do {
                     guard fm.fileExists(atPath: url.path) else { doc.Directories.removeValue(forKey: relative); continue }
                     guard !inputs.contains(where: { $0.hasPrefix(Self.canonicalPath(url.path).lowercased() + "/") }), try fm.contentsOfDirectory(atPath: url.path).isEmpty else { result.nonEmpty += 1; continue }
@@ -185,6 +214,8 @@ final class GeneratedOutputManifest {
         path.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
     }
     static func classify(_ path: String) -> OutputStage? {
+        if match(path, #"^Manual PPM/((Left|Right)\.(stl|json|blend[0-9]*)|PPM\.blend[0-9]*|Templates/[0-9a-f-]{36}-PPM\.blend[0-9]*)$"#) { return .preprocessing }
+        if match(path, #"^MeshEdits/((Left|Right)\.(stl|json)|AlignedScan\.(ply|json))$"#) { return .scanPreparation }
         if match(path, #"^Prepared/inference\.json$"#) { return .inference }
         if match(path, #"^Prepared/preprocessing\.json$"#) { return .preprocessing }
         if match(path, #"^Prepared/(Left\.stl|Right\.stl|mesh_preparation\.json)$"#) { return .scanPreparation }
@@ -201,6 +232,8 @@ final class GeneratedOutputManifest {
         return nil
     }
     private static func classifyEmptyDirectory(_ path: String) -> OutputStage? {
+        if match(path, #"^Manual PPM(/Templates)?$"#) { return .preprocessing }
+        if match(path, #"^MeshEdits$"#) { return .scanPreparation }
         if match(path, #"^Prepared$"#) { return .scanPreparation }
         if match(path, #"^Intermediates$"#) || match(path, #"^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)$"#) { return .inference }
         if match(path, #"^Projects/(Left|Right)/NumCalc/source_[0-9]+/be\.out(/be\.[0-9]+)?$"#) { return .numcalc }
@@ -218,13 +251,15 @@ final class GeneratedOutputManifest {
         case .postprocessing: return match(path, #"^HRTF(/.*)?$"#) || match(path, #"^Projects/(Left|Right)/Output2HRTF(/.*)?$"#)
         }
     }
-    private func safePath(_ relative: String) -> URL? {
+    private func safePath(_ relative: String, protectingInputs: Bool = true) -> URL? {
         let parts = relative.split(separator: "/", omittingEmptySubsequences: false)
         guard !relative.contains(":"), !relative.contains("\\"), !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." || $0.hasSuffix(" ") || $0.hasSuffix(".") }),
-            Self.match(relative, #"^(Prepared|Intermediates|Projects|HRTF)(/|$)|^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)(/|$)|^Results Inference\.csv$|^\.pinna2hrtf(-preprocessing-signature|_native_run\.yaml)$"#) else { return nil }
+            Self.match(relative, #"^(Prepared|Intermediates|Projects|HRTF|Manual PPM|MeshEdits)(/|$)|^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)(/|$)|^Results Inference\.csv$|^\.pinna2hrtf(-preprocessing-signature|_native_run\.yaml)$"#) else { return nil }
         let url = root.appendingPathComponent(relative)
         let candidate = Self.canonicalPath(url.path).lowercased()
-        guard url.path.hasPrefix(root.path + "/"), !inputs.contains(where: { candidate == $0 || candidate.hasPrefix($0 + "/") }), !hasLinkedAncestor(url) else { return nil }
+        guard url.path.hasPrefix(root.path + "/"),
+              (!protectingInputs || !inputs.contains(where: { candidate == $0 || candidate.hasPrefix($0 + "/") })),
+              !hasLinkedAncestor(url) else { return nil }
         return url
     }
     private func hasLinkedAncestor(_ url: URL) -> Bool {

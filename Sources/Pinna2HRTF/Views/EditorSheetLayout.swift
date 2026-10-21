@@ -20,14 +20,34 @@ struct EditorSheetLayout<Header: View, Viewport: View, Inspector: View, Footer: 
         VStack(spacing: 0) {
             header.padding(16)
             Divider()
-            HSplitView {
-                viewport.frame(minWidth: 520, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
-                inspector.frame(minWidth: 290, idealWidth: 320, maxWidth: 440)
-            }
+            EditorPaneSplit(viewport: viewport, inspector: inspector)
+                .frame(minWidth: 961, minHeight: 480, maxHeight: .infinity)
             Divider()
             footer.padding(16)
         }
-        .frame(minWidth: 900, idealWidth: 1120, minHeight: 640, idealHeight: 740)
+        .frame(minWidth: 1000, idealWidth: 1200, minHeight: 640, idealHeight: 740)
+    }
+}
+
+private struct EditorPaneSplit<Viewport: View, Inspector: View>: NSViewRepresentable {
+    let viewport: Viewport
+    let inspector: Inspector
+
+    func makeNSView(context: Context) -> MeshWorkspaceSplitView {
+        let split = MeshWorkspaceSplitView(inspectorWidth: 340, minimumViewerWidth: 640,
+                                          minimumInspectorWidth: 320, maximumInspectorWidth: 440)
+        updateNSView(split, context: context)
+        return split
+    }
+
+    func updateNSView(_ split: MeshWorkspaceSplitView, context: Context) {
+        split.viewerHost.rootView = AnyView(viewport)
+        split.inspectorHost.rootView = AnyView(inspector)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: MeshWorkspaceSplitView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width.flatMap { $0.isFinite ? max(0, $0) : nil } ?? 0,
+               height: proposal.height.flatMap { $0.isFinite ? max(0, $0) : nil } ?? 0)
     }
 }
 
@@ -36,13 +56,17 @@ struct EditorCameraControls: View {
     let direction: (String) -> Void
 
     var body: some View {
-        HStack {
-            Button("Fit", action: fit).accessibilityLabel("Fit mesh in view")
+        HStack(spacing: 8) {
+            Button(action: fit) { Text("Fit").frame(width: 42, height: 20) }
+                .accessibilityLabel("Fit mesh in view")
             ForEach(["Front", "Left", "Right"], id: \.self) { name in
-                Button(name) { direction(name) }.accessibilityLabel("\(name) view")
+                Button { direction(name) } label: { Text(name).frame(width: 42, height: 20) }
+                    .accessibilityLabel("\(name) view")
             }
         }
+        .buttonStyle(.bordered)
         .controlSize(.small)
+        .fixedSize()
         .padding(8)
         .modifier(ViewportControlsMaterial())
     }

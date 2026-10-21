@@ -27,12 +27,11 @@ struct MeshEditorView: View {
                 if model.busy { ProgressView().controlSize(.small) }
             }
         } viewport: {
-            ZStack(alignment: .topTrailing) {
-                EditorSceneView(model: model)
-                EditorCameraControls(fit: model.resetCamera, direction: model.setCameraView)
-                    .padding(12)
-
-            }
+            EditorSceneView(model: model)
+                .overlay(alignment: .topTrailing) {
+                    EditorCameraControls(fit: model.resetCamera, direction: model.setCameraView)
+                        .padding(12)
+                }
         } inspector: {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {

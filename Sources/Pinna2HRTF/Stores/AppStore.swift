@@ -129,6 +129,11 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     var selectedProjectHasGeneratedOutputs: Bool {
         guard let selectedProject else { return false }
+        let fitting = selectedProject.settings.manualPPMFitting
+        if [fitting.leftMeshPath, fitting.rightMeshPath, fitting.leftParametersPath, fitting.rightParametersPath,
+            fitting.leftBlendPath, fitting.rightBlendPath, selectedProject.scanPreparation.reviewedLeftPath,
+            selectedProject.scanPreparation.reviewedRightPath, selectedProject.scanPreparation.originalScanPath == nil
+                ? nil : selectedProject.scanPreparation.scanPath].compactMap({ $0 }).contains(where: { FileManager.default.fileExists(atPath: $0) }) { return true }
         guard (!selectedProject.pipelineLeftEar.isEmpty || !selectedProject.pipelineRightEar.isEmpty) && !selectedProject.saveLocation.isEmpty else { return false }
         return (selectedProject.scanPreparation.enabled && ArtifactScanner.stageIsComplete(.scanPreparation, project: selectedProject)) || (selectedProject.settings.inference.usePredictionsForPreprocessing && ArtifactScanner.stageIsComplete(.inference, project: selectedProject)) || ArtifactScanner.stageIsComplete(.preprocessing, project: selectedProject) || ArtifactScanner.stageIsComplete(.numcalc, project: selectedProject) || ArtifactScanner.stageIsComplete(.postprocessing, project: selectedProject)
     }
@@ -638,6 +643,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         fitting.useForPreprocessing = true
         projects[index].settings.manualPPMFitting = fitting
         projects[index].settings.inference.usePredictionsForPreprocessing = false
+        recordEditorOutputs(for: projects[index], urls: [request.destinationMesh, request.destinationParameters,
+            request.destinationBlend] + (templateBlendPath.isEmpty ? [] : [URL(fileURLWithPath: templateBlendPath)]))
         persist()
         appendLog("Saved the manual \(request.side.rawValue) PPM fit. Preprocessing will use it until the source ear changes.", for: request.projectID)
         refreshArtifacts()
@@ -656,6 +663,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             scan.reviewedLeftPath = nil; scan.reviewedRightPath = nil
         }
         projects[index].settings.scanPreparation = scan
+        recordEditorOutputs(for: projects[index], urls: [request.destination,
+            request.destination.deletingPathExtension().appendingPathExtension("json")])
         projects[index].settings.preprocessing.sourcePositionInputLeft = nil
         projects[index].settings.preprocessing.sourcePositionInputRight = nil
         let resetStages = request.isAlignment ? Stage.allCases : Stage.allCases.filter { $0 != .scanPreparation }
@@ -1259,7 +1268,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
     }
 
-    func outputsFor(_ project: ProjectRecord) throws -> GeneratedOutputManifest {
+    func outputsFor(_ project: ProjectRecord, resettingOutputs: Bool = false) throws -> GeneratedOutputManifest {
         guard !project.saveLocation.isEmpty else { throw GeneratedOutputManifest.Failure.invalidRoot }
         let root = URL(fileURLWithPath: project.saveLocation).standardizedFileURL.resolvingSymlinksInPath().path
         for other in projects where other.id != project.id && !other.saveLocation.isEmpty {
@@ -1268,21 +1277,24 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 throw GeneratedOutputManifest.Failure.invalidRoot
             }
         }
-        let inputs = projects.reduce(into: [String]()) { values, project in
-            values.append(contentsOf: [project.leftEar, project.rightEar, project.scanPreparation.scanPath,
-                project.scanPreparation.originalScanPath ?? "", project.scanPreparation.reviewedLeftPath ?? "",
-                project.scanPreparation.reviewedRightPath ?? "", project.settings.preprocessing.evaluationGrid ?? ""])
-            values.append(contentsOf: [project.settings.manualPPMFitting.leftMeshPath ?? "",
-                project.settings.manualPPMFitting.rightMeshPath ?? "", project.settings.manualPPMFitting.leftParametersPath ?? "",
-                project.settings.manualPPMFitting.rightParametersPath ?? ""])
-        }
-        .filter { !$0.isEmpty && $0 != "Default" }
-        .sorted()
+        let inputs = projects.flatMap { $0.protectedOutputInputs(resettingProjectID: resettingOutputs ? project.id : nil) }.sorted()
         let key = project.saveLocation + "\n" + inputs.joined(separator: "\n")
         if let existing = outputStores[key] { return existing }
         let outputs = try GeneratedOutputManifest(projectRoot: project.saveLocation, inputs: inputs)
         outputStores[key] = outputs
         return outputs
+    }
+
+    private func recordEditorOutputs(for project: ProjectRecord, urls: [URL]) {
+        do {
+            let outputs = try outputsFor(project, resettingOutputs: true)
+            outputOperations.insert(project.id)
+            Task { @MainActor in
+                defer { outputOperations.remove(project.id); refreshArtifacts() }
+                do { try await Task.detached(priority: .userInitiated) { try outputs.recordGeneratedFiles(urls) }.value }
+                catch { appendLog("Could not record saved editor outputs: \(error.localizedDescription)", for: project.id) }
+            }
+        } catch { appendLog("Could not record saved editor outputs: \(error.localizedDescription)", for: project.id) }
     }
 
     @MainActor
@@ -1685,7 +1697,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     func confirmResetOutputs(for project: ProjectRecord) -> Bool {
         let alert = NSAlert()
         alert.messageText = "Reset pipeline outputs?"
-        alert.informativeText = "Remove generated outputs from all stages? Input meshes, microphone positions, settings, project logs, and modified or unrelated files will be kept."
+        alert.informativeText = "Remove all generated outputs, including saved manual PPM fits, parameters, Blender files, archived template copies, ear edits, and scan alignments? Original input meshes, microphone positions, other settings, project logs, and modified or unrelated files will be kept."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Reset Outputs")
         alert.addButton(withTitle: "Cancel")
@@ -1699,20 +1711,21 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             return
         }
         do {
-            let outputs = try outputsFor(project)
+            let outputs = try outputsFor(project, resettingOutputs: true)
             outputOperations.insert(project.id)
             if isPlacingMicrophone { cancelMicrophonePlacement() }
             Task { @MainActor in
                 let result = await Task.detached(priority: .userInitiated) { outputs.reset() }.value
                 outputOperations.remove(project.id)
+                if let index = projects.firstIndex(where: { $0.id == project.id }) {
+                    projects[index].reconcileAfterOutputReset()
+                }
                 if result.success {
                     failedStagesByProject[project.id] = []
                     if let index = projects.firstIndex(where: { $0.id == project.id }) { projects[index].stageOutcomes = nil; persist() }
                 }
                 if selectedProjectID == project.id {
-                    selectedMesh = nil
-                    selectedImage = nil
-                    selectedScene = SCNScene()
+                    resetViewer()
                     refreshArtifacts()
                 }
                 appendLog(result.summary, for: project.id)

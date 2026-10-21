@@ -17,6 +17,8 @@ struct Pinna2HRTFApp: App {
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About Pinna2HRTF") {
+                    let version = Bundle.main.object(forInfoDictionaryKey: "Pinna2HRTFDisplayVersion") as? String
+                        ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0 beta"
                     let revision = Bundle.main.object(forInfoDictionaryKey: "Pinna2HRTFGitHead") as? String ?? "unknown"
                     let paragraph = NSMutableParagraphStyle()
                     paragraph.alignment = .center
@@ -24,7 +26,7 @@ struct Pinna2HRTFApp: App {
                         string: "Ear-mesh preprocessing, Mesh2PPM inference, Mesh2HRTF simulation, and SOFA export.\n\nSource revision: \(revision)",
                         attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
                                      .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph])
-                    NSApplication.shared.orderFrontStandardAboutPanel(options: [.credits: credits])
+                    NSApplication.shared.orderFrontStandardAboutPanel(options: [.applicationVersion: version, .credits: credits])
                 }
             }
             SidebarCommands()
