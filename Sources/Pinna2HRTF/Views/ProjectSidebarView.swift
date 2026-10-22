@@ -120,6 +120,7 @@ struct ProjectSidebarView: View {
 struct ProjectRow: View {
     let project: ProjectRecord
     let runningStage: Stage?
+    let summary: String
 
     var body: some View {
         HStack(spacing: 10) {
@@ -129,7 +130,7 @@ struct ProjectRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(project.name)
                     .lineLimit(1)
-                Text(ArtifactScanner.summary(for: project))
+                Text(summary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

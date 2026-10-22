@@ -16,7 +16,21 @@ enum ArtifactScanner {
 
         func attributes(_ url: URL) -> [FileAttributeKey: Any]? {
             if let cached = metadata[url] { return cached }
-            let result = try? FileManager.default.attributesOfItem(atPath: url.path)
+            // FileManager's full attribute dictionary also fetches extended attributes.
+            // On SMB volumes those extra requests block status and validation views.
+            var freshURL = url
+            freshURL.removeAllCachedResourceValues()
+            let values = try? freshURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .fileResourceTypeKey])
+            let result: [FileAttributeKey: Any]?
+            if let values, values.fileResourceType == .regular,
+               let size = values.fileSize, let modified = values.contentModificationDate {
+                result = [.size: NSNumber(value: size), .modificationDate: modified, .type: FileAttributeType.typeRegular]
+            } else if values != nil {
+                // Preserve existing behavior for directories, symbolic links and special files.
+                result = try? FileManager.default.attributesOfItem(atPath: url.path)
+            } else {
+                result = nil
+            }
             metadata.updateValue(result, forKey: url)
             return result
         }
@@ -25,7 +39,7 @@ enum ArtifactScanner {
     static func artifacts(for project: ProjectRecord, inspection: Inspection = Inspection()) -> [Artifact] {
         let leftEar = project.pipelineEar(for: .left, inspection: inspection)
         let rightEar = project.pipelineEar(for: .right, inspection: inspection)
-        let output = URL(fileURLWithPath: project.saveLocation)
+        let output = URL(fileURLWithPath: project.saveLocation, isDirectory: true)
         let settings = project.settings.inference
         var next: [Artifact] = []
         if project.scanPreparation.enabled && !project.scanPreparation.scanPath.isEmpty {
@@ -57,13 +71,13 @@ enum ArtifactScanner {
             next.append(contentsOf: predictionArtifacts(title: pair.0, folder: pair.1))
         }
         for side in EarSide.allCases {
-            let solver = output.appendingPathComponent("Projects/\(side.title)/NumCalc")
+            let solver = output.appendingPathComponent("Projects/\(side.title)/NumCalc", isDirectory: true)
             let sources = (try? FileManager.default.contentsOfDirectory(at: solver, includingPropertiesForKeys: nil)) ?? []
             for source in sources.filter({ $0.lastPathComponent.hasPrefix("source_") }).sorted(by: { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }) {
-                let input = source.appendingPathComponent("NC.inp")
-                let steps = (try? FileManager.default.contentsOfDirectory(at: source.appendingPathComponent("be.out"), includingPropertiesForKeys: nil)) ?? []
+                let input = source.appendingPathComponent("NC.inp", isDirectory: false)
+                let steps = (try? FileManager.default.contentsOfDirectory(at: source.appendingPathComponent("be.out", isDirectory: true), includingPropertiesForKeys: nil)) ?? []
                 if FileManager.default.fileExists(atPath: input.path), steps.contains(where: {
-                    FileManager.default.fileExists(atPath: $0.appendingPathComponent("pBoundary").path) || FileManager.default.fileExists(atPath: $0.appendingPathComponent("pEvalGrid").path)
+                    FileManager.default.fileExists(atPath: $0.appendingPathComponent("pBoundary", isDirectory: false).path) || FileManager.default.fileExists(atPath: $0.appendingPathComponent("pEvalGrid", isDirectory: false).path)
                 }) {
                     let name = source.lastPathComponent.replacingOccurrences(of: "source_", with: "Source ")
                     next.append(Artifact(title: "\(side.title) pressure · \(name)", url: input))
@@ -104,7 +118,7 @@ enum ArtifactScanner {
             return FileManager.default.fileExists(atPath: source.path) ? source : nil
         }
         let folderName = side == .left ? project.settings.inference.predictionLeftFolder : project.settings.inference.predictionRightFolder
-        let folder = URL(fileURLWithPath: project.saveLocation).appendingPathComponent(folderName)
+        let folder = URL(fileURLWithPath: project.saveLocation, isDirectory: true).appendingPathComponent(folderName)
         let preferred = folder.appendingPathComponent("Prediction_\(source.deletingPathExtension().lastPathComponent).stl")
         if FileManager.default.fileExists(atPath: preferred.path) { return preferred }
         let legacyPreferred = folder.appendingPathComponent("\(source.deletingPathExtension().lastPathComponent).stl")
@@ -178,11 +192,11 @@ enum ArtifactScanner {
         if stageIsComplete(.numcalc, project: project, inspection: inspection) { return "Solved" }
         if stageIsComplete(.preprocessing, project: project, inspection: inspection) { return "Projects ready" }
         if project.settings.inference.usePredictionsForPreprocessing && stageIsComplete(.inference, project: project, inspection: inspection) { return "Mesh2PPM Inference ready" }
-        return URL(fileURLWithPath: project.saveLocation).lastPathComponent
+        return URL(fileURLWithPath: project.saveLocation, isDirectory: true).lastPathComponent
     }
 
     static func numcalcStatus(for project: ProjectRecord, inspection: Inspection = Inspection()) -> String {
-        let output = URL(fileURLWithPath: project.saveLocation)
+        let output = URL(fileURLWithPath: project.saveLocation, isDirectory: true)
         let sides = [("Left", project.pipelineEar(for: .left, inspection: inspection)), ("Right", project.pipelineEar(for: .right, inspection: inspection))].compactMap { side, ear in
             ear.isEmpty ? nil : "\(side) \(numcalcCompleted(output.appendingPathComponent("Projects/\(side)"), inspection: inspection))/\(numcalcTotal(output.appendingPathComponent("Projects/\(side)"), inspection: inspection))"
         }
@@ -190,7 +204,7 @@ enum ArtifactScanner {
     }
 
     static func stageIsComplete(_ stage: Stage, project: ProjectRecord, inspection: Inspection = Inspection()) -> Bool {
-        let output = URL(fileURLWithPath: project.saveLocation)
+        let output = URL(fileURLWithPath: project.saveLocation, isDirectory: true)
         let settings = project.settings.inference
         if stage == .inference && !settings.usePredictionsForPreprocessing { return true }
         if project.scanPreparation.enabled && stage != .scanPreparation {
@@ -217,9 +231,9 @@ enum ArtifactScanner {
             }
         case .numcalc:
             return !sides.isEmpty && sides.allSatisfy { side in
-                let folder = output.appendingPathComponent("Projects/\(side.title)")
+                let folder = output.appendingPathComponent("Projects/\(side.title)", isDirectory: true)
                 return numcalcIsComplete(folder, inspection: inspection)
-                    || containsSOFA(folder.appendingPathComponent("Output2HRTF"), inspection: inspection)
+                    || containsSOFA(folder.appendingPathComponent("Output2HRTF", isDirectory: true), inspection: inspection)
             }
         case .postprocessing:
             return containsSOFA(postprocessingDirectory(for: project), inspection: inspection)
@@ -247,7 +261,7 @@ enum ArtifactScanner {
 
     static func scanPreparationIsCurrent(_ project: ProjectRecord, inspection: Inspection = Inspection()) -> Bool {
         let scan = project.scanPreparation
-        let root = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Prepared")
+        let root = URL(fileURLWithPath: project.saveLocation, isDirectory: true).appendingPathComponent("Prepared")
         guard let report = inspection.document(root.appendingPathComponent("mesh_preparation.json")),
               report["status"] as? String == "completed",
               let signature = report["signature"] as? [String: Any],
@@ -274,7 +288,7 @@ enum ArtifactScanner {
     static func earReviewIsCurrent(_ project: ProjectRecord, side: EarSide, inspection: Inspection = Inspection()) -> Bool {
         let scan = project.scanPreparation
         guard let path = side == .left ? scan.reviewedLeftPath : scan.reviewedRightPath else { return false }
-        let folder = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Prepared")
+        let folder = URL(fileURLWithPath: project.saveLocation, isDirectory: true).appendingPathComponent("Prepared")
         let baseEar = folder.appendingPathComponent("\(side.title).stl")
         guard let report = inspection.document(folder.appendingPathComponent("mesh_preparation.json")),
               let generation = report["generation"] as? String,
@@ -296,7 +310,7 @@ enum ArtifactScanner {
            let reviewed = side == .left ? scan.reviewedLeftPath : scan.reviewedRightPath {
             return URL(fileURLWithPath: reviewed)
         }
-        return URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Prepared/\(side.title).stl")
+        return URL(fileURLWithPath: project.saveLocation, isDirectory: true).appendingPathComponent("Prepared/\(side.title).stl")
     }
 
     static func preparedEarSide(for mesh: URL, in project: ProjectRecord, inspection: Inspection = Inspection()) -> EarSide? {
@@ -307,7 +321,7 @@ enum ArtifactScanner {
     }
 
     static func scanReceiptIsCurrent(_ project: ProjectRecord, stage: String, inspection: Inspection = Inspection()) -> Bool {
-        let folder = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Prepared")
+        let folder = URL(fileURLWithPath: project.saveLocation, isDirectory: true).appendingPathComponent("Prepared")
         guard let report = inspection.document(folder.appendingPathComponent("mesh_preparation.json")),
               let generation = report["generation"] as? String,
               let receipt = inspection.document(folder.appendingPathComponent("\(stage).json")) else { return false }
@@ -333,7 +347,7 @@ enum ArtifactScanner {
 
     static func postprocessingDirectory(for project: ProjectRecord) -> URL {
         if let folder = project.settings.postprocessing?.outputFolder { return URL(fileURLWithPath: folder) }
-        return URL(fileURLWithPath: project.saveLocation).appendingPathComponent("HRTF")
+        return URL(fileURLWithPath: project.saveLocation, isDirectory: true).appendingPathComponent("HRTF")
     }
 
     static func fileHasData(_ url: URL, inspection: Inspection = Inspection()) -> Bool {
@@ -363,35 +377,35 @@ enum ArtifactScanner {
     }
 
     static func numcalcCompleted(_ project: URL, inspection: Inspection = Inspection()) -> Int {
-        let source = project.appendingPathComponent("NumCalc/source_1")
-        let files = (try? FileManager.default.contentsOfDirectory(at: source.appendingPathComponent("be.out"), includingPropertiesForKeys: nil)) ?? []
+        let source = project.appendingPathComponent("NumCalc/source_1", isDirectory: true)
+        let files = (try? FileManager.default.contentsOfDirectory(at: source.appendingPathComponent("be.out", isDirectory: true), includingPropertiesForKeys: nil)) ?? []
         let completed = files.filter { path in
             guard path.lastPathComponent.hasPrefix("be."), let step = Int(path.lastPathComponent.dropFirst(3)) else { return false }
             return frequencyStepComplete(source: source, step: step, inspection: inspection)
         }.count
-        return completed > 0 ? completed : containsSOFA(project.appendingPathComponent("Output2HRTF"), inspection: inspection) ? numcalcTotal(project, inspection: inspection) : 0
+        return completed > 0 ? completed : containsSOFA(project.appendingPathComponent("Output2HRTF", isDirectory: true), inspection: inspection) ? numcalcTotal(project, inspection: inspection) : 0
     }
 
     static func numcalcIsComplete(_ project: URL, inspection: Inspection = Inspection()) -> Bool {
         let total = numcalcTotal(project, inspection: inspection)
         guard total > 0 else { return false }
-        let source = project.appendingPathComponent("NumCalc/source_1")
+        let source = project.appendingPathComponent("NumCalc/source_1", isDirectory: true)
         return (1...total).allSatisfy { frequencyStepComplete(source: source, step: $0, inspection: inspection) }
     }
 
     static func frequencyStepComplete(source: URL, step: Int, inspection: Inspection = Inspection()) -> Bool {
-        let log = source.appendingPathComponent("NC\(step)-\(step)_log.txt")
+        let log = source.appendingPathComponent("NC\(step)-\(step)_log.txt", isDirectory: false)
         if let complete = inspection.completedSteps[log] { return complete }
-        let output = source.appendingPathComponent("be.out/be.\(step)")
+        let output = source.appendingPathComponent("be.out/be.\(step)", isDirectory: true)
         let required = ["pBoundary", "pEvalGrid", "vBoundary", "vEvalGrid"]
-        let complete = required.allSatisfy { fileHasData(output.appendingPathComponent($0), inspection: inspection) }
+        let complete = required.allSatisfy { fileHasData(output.appendingPathComponent($0, isDirectory: false), inspection: inspection) }
             && ((try? String(contentsOf: log, encoding: .utf8))?.contains("---------- NumCalc ended:") == true)
         inspection.completedSteps[log] = complete
         return complete
     }
 
     static func numcalcTotal(_ project: URL, inspection: Inspection = Inspection()) -> Int {
-        guard let object = inspection.document(project.appendingPathComponent("parameters.json")), let total = object["numFrequencies"] as? Int else { return 0 }
+        guard let object = inspection.document(project.appendingPathComponent("parameters.json", isDirectory: false)), let total = object["numFrequencies"] as? Int else { return 0 }
         return total
     }
 }

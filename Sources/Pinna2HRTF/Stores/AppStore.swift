@@ -18,7 +18,10 @@ private struct PipelineRun {
 
 final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     @Published var folders: [ProjectFolder]
-    @Published var projects: [ProjectRecord]
+    @Published var projects: [ProjectRecord] {
+        didSet { scheduleProjectSummaryRefresh() }
+    }
+    @Published private(set) var projectSummaries: [UUID: String] = [:]
     @Published var selectedProjectID: UUID?
     @Published private(set) var technicalLogURLs: [UUID: URL] = [:]
     @Published private(set) var environmentTechnicalLogURL: URL?
@@ -63,6 +66,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published private var automaticMicrophoneProcesses: [String: Process] = [:]
     private let microphoneMarkerName = "pinna2hrtf-microphone-marker"
     private var notificationsConfigured = false
+    private var projectSummaryRefreshWorkItem: DispatchWorkItem?
+    private var projectSummaryRefreshID = UUID()
+    private let projectSummaryQueue = DispatchQueue(label: "Pinna2HRTF.ProjectSummaryRefresh", qos: .utility)
+    private var projectSummarySources: [UUID: ProjectRecord] = [:]
 
     let rootURL: URL
     let packageURL: URL
@@ -101,6 +108,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         registryStore.save(registry)
         persistenceMessage = registryStore.lastError ?? registryStore.recoveryMessage
         registryRecoveryPresented = registryStore.savingBlocked
+        scheduleProjectSummaryRefresh()
         refreshArtifacts()
         restoreViewer()
     }
@@ -156,6 +164,29 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         registryStore.save(registry)
         persistenceMessage = registryStore.lastError
         if !wasBlocked && registryStore.savingBlocked { registryRecoveryPresented = true }
+    }
+
+    private func scheduleProjectSummaryRefresh() {
+        projectSummaryRefreshWorkItem?.cancel()
+        let refreshID = UUID()
+        projectSummaryRefreshID = refreshID
+        let snapshot = projects.filter { projectSummarySources[$0.id] != $0 || projectSummaries[$0.id] == nil }
+        let retainedIDs = Set(projects.map(\.id))
+        let workItem = DispatchWorkItem { [weak self] in
+            let inspection = ArtifactScanner.Inspection()
+            let summaries = Dictionary(uniqueKeysWithValues: snapshot.map { project in
+                (project.id, ArtifactScanner.summary(for: project, inspection: inspection))
+            })
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.projectSummaryRefreshID == refreshID else { return }
+                self.projectSummaries = self.projectSummaries.filter { retainedIDs.contains($0.key) }.merging(summaries) { _, new in new }
+                self.projectSummarySources = self.projectSummarySources.filter { retainedIDs.contains($0.key) }.merging(Dictionary(uniqueKeysWithValues: snapshot.map { ($0.id, $0) })) { _, new in new }
+                self.projectSummaryRefreshWorkItem = nil
+            }
+        }
+        projectSummaryRefreshWorkItem = workItem
+        guard !snapshot.isEmpty || projectSummarySources.keys.contains(where: { !retainedIDs.contains($0) }) else { return }
+        projectSummaryQueue.asyncAfter(deadline: .now() + .milliseconds(250), execute: workItem)
     }
 
     func recoverProjectRegistry() {

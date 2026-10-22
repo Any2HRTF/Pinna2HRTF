@@ -41,7 +41,38 @@ struct ScanPreparationChecks {
         print("Adaptive cutting-plane preview checks passed.")
     }
 
+    static func fileMetadataChecks() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("mesh.stl")
+        try Data("mesh".utf8).write(to: file)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_700_000_000.1234567)], ofItemAtPath: file.path)
+        let original = try FileManager.default.attributesOfItem(atPath: file.path)
+        let expected = "\(file.path)|\((original[.size] as! NSNumber).int64Value)|\((original[.modificationDate] as! Date).timeIntervalSince1970)"
+        let inspection = ArtifactScanner.Inspection()
+        precondition(ArtifactScanner.meshIdentity(file, inspection: inspection) == expected)
+        precondition(ArtifactScanner.fileHasData(file, inspection: inspection))
+        try Data("changed mesh".utf8).write(to: file)
+        precondition(ArtifactScanner.meshIdentity(file, inspection: inspection) == expected)
+        precondition(ArtifactScanner.meshIdentity(file) != expected)
+        precondition(!ArtifactScanner.fileHasData(directory))
+        let link = directory.appendingPathComponent("link.stl")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: file)
+        let linkAttributes = try FileManager.default.attributesOfItem(atPath: link.path)
+        let linkExpected = "\(link.path)|\((linkAttributes[.size] as! NSNumber).int64Value)|\((linkAttributes[.modificationDate] as! Date).timeIntervalSince1970)"
+        precondition(ArtifactScanner.meshIdentity(link) == linkExpected)
+        precondition(!ArtifactScanner.fileHasData(link))
+        let missing = directory.appendingPathComponent("missing.stl")
+        let negative = ArtifactScanner.Inspection()
+        precondition(ArtifactScanner.meshIdentity(missing, inspection: negative) == nil)
+        try Data("created".utf8).write(to: missing)
+        precondition(ArtifactScanner.meshIdentity(missing, inspection: negative) == nil)
+        precondition(ArtifactScanner.fileHasData(missing))
+    }
+
     static func main() throws {
+        try fileMetadataChecks()
         try projectDuplicationChecks()
         try outputResetChecks()
         cuttingPlanePreviewChecks()

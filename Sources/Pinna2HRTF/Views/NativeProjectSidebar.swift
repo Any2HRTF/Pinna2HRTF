@@ -61,6 +61,7 @@ struct NativeProjectSidebar: NSViewRepresentable {
         var displayedProjects: [ProjectRecord] = []
         var displayedFolders: [ProjectFolder] = []
         var displayedStages: [UUID: Stage] = [:]
+        var displayedSummaries: [UUID: String] = [:]
         var lastRevealToken: UUID?
 
         init(_ parent: NativeProjectSidebar) { self.parent = parent }
@@ -84,10 +85,12 @@ struct NativeProjectSidebar: NSViewRepresentable {
             defer { updating = false }
             let changed = projectNodes.isEmpty || displayedProjects != parent.store.projects
                 || displayedFolders != parent.store.folders || displayedStages != parent.store.runningStages
+                || displayedSummaries != parent.store.projectSummaries
             if changed {
                 displayedProjects = parent.store.projects
                 displayedFolders = parent.store.folders
                 displayedStages = parent.store.runningStages
+                displayedSummaries = parent.store.projectSummaries
                 projectNodes = Dictionary(uniqueKeysWithValues: parent.store.projects.map { ($0.id, projectNodes[$0.id] ?? Node(.project($0.id))) })
                 folderNodes = Dictionary(uniqueKeysWithValues: parent.store.folders.map { ($0.id, folderNodes[$0.id] ?? Node(.folder($0.id))) })
                 outline.reloadData()
@@ -145,7 +148,8 @@ struct NativeProjectSidebar: NSViewRepresentable {
                 view = AnyView(Label(folder.name, systemImage: "folder.fill").lineLimit(1).frame(maxWidth: .infinity, alignment: .leading))
             case let .project(id):
                 guard let project = parent.store.projects.first(where: { $0.id == id }) else { return nil }
-                view = AnyView(ProjectRow(project: project, runningStage: parent.store.runningStages[id]))
+                let summary = parent.store.projectSummaries[id] ?? URL(fileURLWithPath: project.saveLocation, isDirectory: true).lastPathComponent
+                view = AnyView(ProjectRow(project: project, runningStage: parent.store.runningStages[id], summary: summary))
             }
             let hosting = SidebarRowHostingView(rootView: view)
             hosting.toolTip = {
