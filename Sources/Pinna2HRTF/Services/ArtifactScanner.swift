@@ -6,6 +6,9 @@ enum ArtifactScanner {
         private var documents: [URL: [String: Any]?] = [:]
         private var metadata: [URL: [FileAttributeKey: Any]?] = [:]
         fileprivate var completedSteps: [URL: Bool] = [:]
+        let isCancelled: () -> Bool
+
+        init(isCancelled: @escaping () -> Bool = { false }) { self.isCancelled = isCancelled }
 
         func document(_ url: URL) -> [String: Any]? {
             if let cached = documents[url] { return cached }
@@ -36,7 +39,7 @@ enum ArtifactScanner {
         }
     }
 
-    static func artifacts(for project: ProjectRecord, inspection: Inspection = Inspection()) -> [Artifact] {
+    static func artifacts(for project: ProjectRecord, inspection: Inspection = Inspection(), includeSolverResults: Bool = true) -> [Artifact] {
         let leftEar = project.pipelineEar(for: .left, inspection: inspection)
         let rightEar = project.pipelineEar(for: .right, inspection: inspection)
         let output = URL(fileURLWithPath: project.saveLocation, isDirectory: true)
@@ -70,7 +73,7 @@ enum ArtifactScanner {
         for pair in [("Predicted left ear", output.appendingPathComponent(settings.predictionLeftFolder), leftEar), ("Predicted right ear", output.appendingPathComponent(settings.predictionRightFolder), rightEar)] where !pair.2.isEmpty {
             next.append(contentsOf: predictionArtifacts(title: pair.0, folder: pair.1))
         }
-        for side in EarSide.allCases {
+        for side in EarSide.allCases where includeSolverResults && !inspection.isCancelled() {
             let solver = output.appendingPathComponent("Projects/\(side.title)/NumCalc", isDirectory: true)
             let sources = (try? FileManager.default.contentsOfDirectory(at: solver, includingPropertiesForKeys: nil)) ?? []
             for source in sources.filter({ $0.lastPathComponent.hasPrefix("source_") }).sorted(by: { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }) {
@@ -166,13 +169,13 @@ enum ArtifactScanner {
         return placement
     }
 
-    static func stageStates(for project: ProjectRecord, runningStage: Stage?, failedStages: Set<Stage>, inspection: Inspection = Inspection()) -> [Stage: StageState] {
+    static func stageStates(for project: ProjectRecord, runningStage: Stage?, failedStages: Set<Stage>, inspection: Inspection = Inspection(), completedStages: Set<Stage>? = nil) -> [Stage: StageState] {
         Dictionary(uniqueKeysWithValues: Stage.allCases.map { stage in
             if runningStage == stage {
                 return (stage, .running)
             }
             if stage == .scanPreparation && !project.scanPreparation.enabled { return (stage, .skipped) }
-            let complete = stageIsComplete(stage, project: project, inspection: inspection)
+            let complete = completedStages?.contains(stage) ?? stageIsComplete(stage, project: project, inspection: inspection)
             if failedStages.contains(stage) || project.stageOutcomes?[stage.rawValue] == .failed {
                 return (stage, .failed)
             }
@@ -232,8 +235,8 @@ enum ArtifactScanner {
         case .numcalc:
             return !sides.isEmpty && sides.allSatisfy { side in
                 let folder = output.appendingPathComponent("Projects/\(side.title)", isDirectory: true)
-                return numcalcIsComplete(folder, inspection: inspection)
-                    || containsSOFA(folder.appendingPathComponent("Output2HRTF", isDirectory: true), inspection: inspection)
+                return containsSOFA(folder.appendingPathComponent("Output2HRTF", isDirectory: true), inspection: inspection)
+                    || numcalcIsComplete(folder, inspection: inspection)
             }
         case .postprocessing:
             return containsSOFA(postprocessingDirectory(for: project), inspection: inspection)
@@ -377,10 +380,13 @@ enum ArtifactScanner {
     }
 
     static func numcalcCompleted(_ project: URL, inspection: Inspection = Inspection()) -> Int {
+        if containsSOFA(project.appendingPathComponent("Output2HRTF", isDirectory: true), inspection: inspection) {
+            return numcalcTotal(project, inspection: inspection)
+        }
         let source = project.appendingPathComponent("NumCalc/source_1", isDirectory: true)
         let files = (try? FileManager.default.contentsOfDirectory(at: source.appendingPathComponent("be.out", isDirectory: true), includingPropertiesForKeys: nil)) ?? []
         let completed = files.filter { path in
-            guard path.lastPathComponent.hasPrefix("be."), let step = Int(path.lastPathComponent.dropFirst(3)) else { return false }
+            guard !inspection.isCancelled(), path.lastPathComponent.hasPrefix("be."), let step = Int(path.lastPathComponent.dropFirst(3)) else { return false }
             return frequencyStepComplete(source: source, step: step, inspection: inspection)
         }.count
         return completed > 0 ? completed : containsSOFA(project.appendingPathComponent("Output2HRTF", isDirectory: true), inspection: inspection) ? numcalcTotal(project, inspection: inspection) : 0
@@ -394,6 +400,7 @@ enum ArtifactScanner {
     }
 
     static func frequencyStepComplete(source: URL, step: Int, inspection: Inspection = Inspection()) -> Bool {
+        guard !inspection.isCancelled() else { return false }
         let log = source.appendingPathComponent("NC\(step)-\(step)_log.txt", isDirectory: false)
         if let complete = inspection.completedSteps[log] { return complete }
         let output = source.appendingPathComponent("be.out/be.\(step)", isDirectory: true)

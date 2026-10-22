@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 func projectStatusSnapshotChecks() throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -34,6 +35,22 @@ func projectStatusSnapshotChecks() throws {
         try write("Projects/Left/NumCalc/source_1/be.out/be.1/\(output)")
     }
     try write("Projects/Left/NumCalc/source_1/NC1-1_log.txt", "---------- NumCalc ended:")
+    let log = folder.appendingPathComponent("Projects/Left/NumCalc/source_1/NC1-1_log.txt", isDirectory: false)
+    try FileManager.default.removeItem(at: log)
+    precondition(mkfifo(log.path, 0o600) == 0)
+    // A blocked server log must not delay the first snapshot or sidebar labels.
+    // Reading this FIFO would block forever without a writer.
+    let quick = ProjectStatusSnapshot.load(project: project, environment: environment, projects: [project],
+                                           placingMicrophone: false, includeSolverResults: false)
+    precondition(quick.checkingSolverResults && !quick.completed.contains(.numcalc))
+    precondition(quick.completed.contains(.preprocessing) && quick.fittableSides == [.left])
+    precondition(quick.artifacts.contains(where: { $0.url.path == project.leftEar && $0.exists }))
+    precondition(quick.unavailableReasons[.postprocessing] == "Checking solver results…")
+    precondition(!ProjectStatusSnapshot.savedSummary(for: project).isEmpty)
+    try FileManager.default.removeItem(at: log)
+    try write("Projects/Left/NumCalc/source_1/NC1-1_log.txt", "---------- NumCalc ended:")
+    let cancelled = ArtifactScanner.Inspection(isCancelled: { true })
+    precondition(!ArtifactScanner.frequencyStepComplete(source: log.deletingLastPathComponent(), step: 1, inspection: cancelled))
     let solved = inspect()
     precondition(solved.completed.contains(.numcalc) && solved.states[.numcalc] == .done)
     precondition(solved.numcalcStatus.contains("Left 1/1"))

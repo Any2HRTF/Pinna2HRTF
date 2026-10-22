@@ -53,7 +53,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published private var projectStatus: ProjectStatusSnapshot?
     private var artifactRefreshID = UUID()
     private var artifactRefreshWorkItem: DispatchWorkItem?
-    private let artifactRefreshQueue = DispatchQueue(label: "Pinna2HRTF.ProjectStatusRefresh", qos: .userInitiated)
+    private let artifactRefreshQueue = DispatchQueue(label: "Pinna2HRTF.ProjectStatusRefresh", qos: .userInitiated, attributes: .concurrent)
+    private let solverRefreshQueue = DispatchQueue(label: "Pinna2HRTF.SolverStatusRefresh", qos: .utility)
+    private var statusRefreshProgress: Progress?
 
     var selectedProjectStatus: ProjectStatusSnapshot? {
         guard let status = projectStatus, status.project == selectedProject,
@@ -83,10 +85,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published private var automaticMicrophoneProcesses: [String: Process] = [:]
     private let microphoneMarkerName = "pinna2hrtf-microphone-marker"
     private var notificationsConfigured = false
-    private var projectSummaryRefreshWorkItem: DispatchWorkItem?
-    private var projectSummaryRefreshID = UUID()
-    private let projectSummaryQueue = DispatchQueue(label: "Pinna2HRTF.ProjectSummaryRefresh", qos: .utility)
-    private var projectSummarySources: [UUID: ProjectRecord] = [:]
 
     let rootURL: URL
     let packageURL: URL
@@ -189,26 +187,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     private func scheduleProjectSummaryRefresh() {
-        projectSummaryRefreshWorkItem?.cancel()
-        let refreshID = UUID()
-        projectSummaryRefreshID = refreshID
-        let snapshot = projects.filter { projectSummarySources[$0.id] != $0 || projectSummaries[$0.id] == nil }
-        let retainedIDs = Set(projects.map(\.id))
-        let workItem = DispatchWorkItem { [weak self] in
-            let inspection = ArtifactScanner.Inspection()
-            let summaries = Dictionary(uniqueKeysWithValues: snapshot.map { project in
-                (project.id, ArtifactScanner.summary(for: project, inspection: inspection))
-            })
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.projectSummaryRefreshID == refreshID else { return }
-                self.projectSummaries = self.projectSummaries.filter { retainedIDs.contains($0.key) }.merging(summaries) { _, new in new }
-                self.projectSummarySources = self.projectSummarySources.filter { retainedIDs.contains($0.key) }.merging(Dictionary(uniqueKeysWithValues: snapshot.map { ($0.id, $0) })) { _, new in new }
-                self.projectSummaryRefreshWorkItem = nil
-            }
-        }
-        projectSummaryRefreshWorkItem = workItem
-        guard !snapshot.isEmpty || projectSummarySources.keys.contains(where: { !retainedIDs.contains($0) }) else { return }
-        projectSummaryQueue.asyncAfter(deadline: .now() + .milliseconds(250), execute: workItem)
+        projectSummaries = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, ProjectStatusSnapshot.savedSummary(for: $0)) })
     }
 
     func recoverProjectRegistry() {
@@ -556,6 +535,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func refreshArtifacts(restoringViewer: Bool = false) {
         artifactRefreshWorkItem?.cancel()
+        statusRefreshProgress?.cancel()
+        let progress = Progress(totalUnitCount: 1)
+        statusRefreshProgress = progress
         let refreshID = UUID()
         artifactRefreshID = refreshID
         guard let project = selectedProject else {
@@ -576,28 +558,51 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let placingMicrophone = isPlacingMicrophone
         isCheckingProjectFiles = true
         let workItem = DispatchWorkItem { [weak self] in
+            guard !progress.isCancelled else { return }
             Self.migrateProjectDirectory(for: project)
             let status = ProjectStatusSnapshot.load(project: project, environment: currentEnvironment,
-                                                    projects: currentProjects, placingMicrophone: placingMicrophone)
+                                                    projects: currentProjects, placingMicrophone: placingMicrophone,
+                                                    includeSolverResults: false, isCancelled: { progress.isCancelled })
+            guard !progress.isCancelled else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.artifactRefreshID == refreshID,
                       self.selectedProject == project, self.environment == currentEnvironment else { return }
-                self.projectStatus = status
-                self.artifacts = status.artifacts
-                var states = status.states
-                for stage in Stage.allCases {
-                    if self.failedStagesByProject[project.id]?.contains(stage) == true { states[stage] = .failed }
-                    if self.runningStages[project.id] == stage { states[stage] = .running }
-                }
-                if status.preprocessingNeedsRerun, states[.preprocessing] == .done { states[.preprocessing] = .ready }
-                self.stageStates = states
+                self.applyProjectStatus(status)
                 self.isCheckingProjectFiles = false
                 self.artifactRefreshWorkItem = nil
                 if restoringViewer || changedProject { self.restoreViewer() }
+                let restorationLoadID = self.meshLoadID
+                self.solverRefreshQueue.async { [weak self] in
+                    guard !progress.isCancelled else { return }
+                    let detailed = ProjectStatusSnapshot.load(project: project, environment: currentEnvironment,
+                                                              projects: currentProjects, placingMicrophone: placingMicrophone,
+                                                              isCancelled: { progress.isCancelled })
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, !progress.isCancelled, self.artifactRefreshID == refreshID,
+                              self.selectedProject == project, self.environment == currentEnvironment else { return }
+                        self.applyProjectStatus(detailed)
+                        if (restoringViewer || changedProject) && self.meshLoadID == restorationLoadID && self.selectedMesh == nil {
+                            self.restoreViewer()
+                        }
+                    }
+                }
             }
         }
         artifactRefreshWorkItem = workItem
         artifactRefreshQueue.asyncAfter(deadline: .now() + .milliseconds(150), execute: workItem)
+    }
+
+    private func applyProjectStatus(_ status: ProjectStatusSnapshot) {
+        projectStatus = status
+        artifacts = status.artifacts
+        projectSummaries[status.project.id] = status.summary
+        var states = status.states
+        for stage in Stage.allCases {
+            if failedStagesByProject[status.project.id]?.contains(stage) == true { states[stage] = .failed }
+            if runningStages[status.project.id] == stage { states[stage] = .running }
+        }
+        if status.preprocessingNeedsRerun, states[.preprocessing] == .done { states[.preprocessing] = .ready }
+        stageStates = states
     }
 
     func restoreViewer() {

@@ -14,11 +14,32 @@ struct ProjectStatusSnapshot {
     let fittableSides: Set<EarSide>
     let validFitSides: Set<EarSide>
     let pipelineSides: Set<EarSide>
+    let checkingSolverResults: Bool
 
-    static func load(project: ProjectRecord, environment: EnvironmentConfig, projects: [ProjectRecord], placingMicrophone: Bool) -> Self {
-        let inspection = ArtifactScanner.Inspection()
-        let completed = Set(Stage.allCases.filter { ArtifactScanner.stageIsComplete($0, project: project, inspection: inspection) })
-        let states = ArtifactScanner.stageStates(for: project, runningStage: nil, failedStages: [], inspection: inspection)
+    var summary: String {
+        if project.stageOutcomes?.values.contains(.failed) == true { return "Latest run failed · previous results may remain" }
+        if project.stageOutcomes?.values.contains(.stopped) == true { return "Task stopped · previous results may remain" }
+        if completed.contains(.postprocessing) { return "Postprocessed" }
+        if completed.contains(.numcalc) { return "Solved" }
+        if completed.contains(.preprocessing) { return "Projects ready" }
+        if project.settings.inference.usePredictionsForPreprocessing && completed.contains(.inference) { return "Mesh2PPM Inference ready" }
+        return Self.savedSummary(for: project)
+    }
+
+    static func savedSummary(for project: ProjectRecord) -> String {
+        if project.stageOutcomes?.values.contains(.failed) == true { return "Latest run failed · previous results may remain" }
+        if project.stageOutcomes?.values.contains(.stopped) == true { return "Task stopped · previous results may remain" }
+        if project.stageOutcomes?[Stage.postprocessing.rawValue] == .done { return "Postprocessed" }
+        if project.stageOutcomes?[Stage.numcalc.rawValue] == .done { return "Solved" }
+        if project.stageOutcomes?[Stage.preprocessing.rawValue] == .done { return "Projects ready" }
+        return URL(fileURLWithPath: project.saveLocation, isDirectory: true).lastPathComponent
+    }
+
+    static func load(project: ProjectRecord, environment: EnvironmentConfig, projects: [ProjectRecord], placingMicrophone: Bool,
+                     includeSolverResults: Bool = true, isCancelled: @escaping () -> Bool = { false }) -> Self {
+        let inspection = ArtifactScanner.Inspection(isCancelled: isCancelled)
+        let completed = Set(Stage.allCases.filter { (includeSolverResults || $0 != .numcalc) && !isCancelled() && ArtifactScanner.stageIsComplete($0, project: project, inspection: inspection) })
+        let states = ArtifactScanner.stageStates(for: project, runningStage: nil, failedStages: [], inspection: inspection, completedStages: completed)
         let issues = ProjectValidation.issues(for: project, inspection: inspection)
         let signatureURL = URL(fileURLWithPath: project.saveLocation, isDirectory: true).appendingPathComponent(".pinna2hrtf-preprocessing-signature", isDirectory: false)
         var needsRerun = false
@@ -33,8 +54,9 @@ struct ProjectStatusSnapshot {
         var reasons: [Stage: String] = [:]
         for stage in Stage.allCases {
             reasons[stage] = unavailableReason(stage, project: project, environment: environment, projects: projects,
-                                               placingMicrophone: placingMicrophone, inspection: inspection, completed: completed)
+                                               placingMicrophone: placingMicrophone, inspection: inspection, completed: completed, resolveOutputLocations: false)
         }
+        if !includeSolverResults { reasons[.postprocessing] = "Checking solver results…" }
         let pipelineSides = Set(EarSide.allCases.filter { !project.pipelineEar(for: $0, inspection: inspection).isEmpty })
         let fittable = Set(EarSide.allCases.filter { side in
             guard !project.scanPreparation.enabled || completed.contains(.scanPreparation),
@@ -43,20 +65,21 @@ struct ProjectStatusSnapshot {
             return FileManager.default.fileExists(atPath: source.path)
         })
         let validFits = Set(EarSide.allCases.filter { ArtifactScanner.validManualPPMFittingMesh(for: project, side: $0, inspection: inspection) != nil })
-        let artifacts = ArtifactScanner.artifacts(for: project, inspection: inspection).map { artifact in
+        let artifacts = ArtifactScanner.artifacts(for: project, inspection: inspection, includeSolverResults: includeSolverResults).map { artifact in
             var cached = artifact
             cached.cachedExists = FileManager.default.fileExists(atPath: artifact.url.path)
             return cached
         }
         return Self(project: project, environment: environment, artifacts: artifacts, states: states, completed: completed,
                     unavailableReasons: reasons, issues: issues,
-                    numcalcStatus: ArtifactScanner.numcalcStatus(for: project, inspection: inspection),
-                    preprocessingNeedsRerun: needsRerun, fittableSides: fittable, validFitSides: validFits, pipelineSides: pipelineSides)
+                    numcalcStatus: includeSolverResults ? ArtifactScanner.numcalcStatus(for: project, inspection: inspection) : "NumCalc: checking results…",
+                    preprocessingNeedsRerun: needsRerun, fittableSides: fittable, validFitSides: validFits, pipelineSides: pipelineSides, checkingSolverResults: !includeSolverResults)
     }
 
     static func unavailableReason(_ stage: Stage, project: ProjectRecord, environment: EnvironmentConfig,
                                   projects: [ProjectRecord], placingMicrophone: Bool,
-                                  inspection: ArtifactScanner.Inspection = .init(), completed: Set<Stage>? = nil) -> String? {
+                                  inspection: ArtifactScanner.Inspection = .init(), completed: Set<Stage>? = nil,
+                                  resolveOutputLocations: Bool = true) -> String? {
         func isComplete(_ stage: Stage) -> Bool {
             completed?.contains(stage) ?? ArtifactScanner.stageIsComplete(stage, project: project, inspection: inspection)
         }
@@ -70,7 +93,7 @@ struct ProjectStatusSnapshot {
             if !FileManager.default.fileExists(atPath: path) { return "Input mesh is missing: \(URL(fileURLWithPath: path).lastPathComponent)" }
         }
         if let issue = ProjectValidation.issues(for: project, inspection: inspection).first { return "Fix \(issue.id.split(separator: ".").last?.replacingOccurrences(of: "_", with: " ") ?? "settings"): \(issue.message)" }
-        if let conflict = outputLocationConflict(for: project, projects: projects) { return conflict }
+        if let conflict = outputLocationConflict(for: project, projects: projects, resolvingSymlinks: resolveOutputLocations) { return conflict }
         switch stage {
         case .scanPreparation:
             if !project.scanPreparation.enabled { return "Enable full-head scan preparation first." }
@@ -94,19 +117,23 @@ struct ProjectStatusSnapshot {
             if !isComplete(.preprocessing) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.preprocessing.rawValue] ?? .ready) { return "Run preprocessing successfully first." }
             if !FileManager.default.isExecutableFile(atPath: environment.numcalcExecutable) { return "The NumCalc tool is unavailable." }
         case .postprocessing:
-            let output = ArtifactScanner.postprocessingDirectory(for: project).standardizedFileURL.resolvingSymlinksInPath().path
-            let root = URL(fileURLWithPath: project.saveLocation).standardizedFileURL.resolvingSymlinksInPath().path
+            let outputURL = ArtifactScanner.postprocessingDirectory(for: project).standardizedFileURL
+            let rootURL = URL(fileURLWithPath: project.saveLocation, isDirectory: true).standardizedFileURL
+            let output = (resolveOutputLocations ? outputURL.resolvingSymlinksInPath() : outputURL).path
+            let root = (resolveOutputLocations ? rootURL.resolvingSymlinksInPath() : rootURL).path
             if !output.hasPrefix(root + "/") { return "Choose a SOFA output subfolder inside this project folder." }
             if !isComplete(.numcalc) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.numcalc.rawValue] ?? .ready) { return "Finish NumCalc successfully first." }
         }
         return nil
     }
 
-    static func outputLocationConflict(for project: ProjectRecord, projects: [ProjectRecord]) -> String? {
+    static func outputLocationConflict(for project: ProjectRecord, projects: [ProjectRecord], resolvingSymlinks: Bool = true) -> String? {
         guard !project.saveLocation.isEmpty else { return "Choose a save location." }
-        let root = URL(fileURLWithPath: project.saveLocation).standardizedFileURL.resolvingSymlinksInPath().path
+        let rootURL = URL(fileURLWithPath: project.saveLocation, isDirectory: true).standardizedFileURL
+        let root = (resolvingSymlinks ? rootURL.resolvingSymlinksInPath() : rootURL).path
         for other in projects where other.id != project.id && !other.saveLocation.isEmpty {
-            let otherRoot = URL(fileURLWithPath: other.saveLocation).standardizedFileURL.resolvingSymlinksInPath().path
+            let otherURL = URL(fileURLWithPath: other.saveLocation, isDirectory: true).standardizedFileURL
+            let otherRoot = (resolvingSymlinks ? otherURL.resolvingSymlinksInPath() : otherURL).path
             if root == otherRoot || root.hasPrefix(otherRoot + "/") || otherRoot.hasPrefix(root + "/") {
                 return "Choose a separate output folder; this location overlaps \(other.name)."
             }

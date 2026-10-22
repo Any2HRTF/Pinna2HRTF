@@ -69,7 +69,7 @@ struct RunPanelView: View {
             while !Task.isCancelled {
                 do { try await Task.sleep(nanoseconds: 5_000_000_000) }
                 catch { return }
-                if store.selectedProjectIsRunning && !store.isCheckingProjectFiles { store.refreshArtifacts() }
+                if store.selectedProjectIsRunning && !store.isCheckingProjectFiles && store.selectedProjectStatus?.checkingSolverResults != true { store.refreshArtifacts() }
             }
         }
     }
