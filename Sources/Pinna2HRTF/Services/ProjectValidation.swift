@@ -22,7 +22,7 @@ enum ProjectValidation {
         return number > 0 ? nil : "Use a number greater than 0."
     }
 
-    static func issues(for project: ProjectRecord) -> [(id: String, message: String)] {
+    static func issues(for project: ProjectRecord, inspection: ArtifactScanner.Inspection = .init()) -> [(id: String, message: String)] {
         let pre = project.settings.preprocessing
         let post = project.settings.postprocessing ?? PostprocessingSettings()
         var fields: [(String, String)] = [
@@ -46,7 +46,7 @@ enum ProjectValidation {
             var hasValidFit = false
             for side in EarSide.allCases where !(side == .left ? project.pipelineLeftEar : project.pipelineRightEar).isEmpty {
                 guard let path = project.settings.manualPPMFitting.meshPath(for: side), !path.isEmpty else { continue }
-                if ArtifactScanner.validManualPPMFittingMesh(for: project, side: side) != nil {
+                if ArtifactScanner.validManualPPMFittingMesh(for: project, side: side, inspection: inspection) != nil {
                     hasValidFit = true
                 } else {
                     errors.append(("manual_ppm.\(side.rawValue)", "The saved \(side.rawValue) PPM fit is missing or no longer matches its source ear."))

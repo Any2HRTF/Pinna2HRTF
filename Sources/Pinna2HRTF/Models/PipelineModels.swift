@@ -74,7 +74,8 @@ struct Artifact: Identifiable, Hashable {
     let url: URL
 
     var id: String { url.path }
-    var exists: Bool { FileManager.default.fileExists(atPath: url.path) }
+    var cachedExists: Bool? = nil
+    var exists: Bool { cachedExists ?? FileManager.default.fileExists(atPath: url.path) }
     var isPressure: Bool { url.lastPathComponent == "NC.inp" }
     var isMesh: Bool { ["stl", "ply"].contains(url.pathExtension.lowercased()) }
     var isImage: Bool { ["jpeg", "jpg", "pdf", "png"].contains(url.pathExtension.lowercased()) }

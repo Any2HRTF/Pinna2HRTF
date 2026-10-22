@@ -120,8 +120,7 @@ struct ProjectInspectorView: View {
     }
 
     func validationMessage(_ id: String) -> String? {
-        guard let project = store.selectedProject else { return nil }
-        return ProjectValidation.issues(for: project).first { $0.id == id }?.message
+        return store.selectedValidationIssues.first { $0.id == id }?.message
     }
 
     var requiredPanel: some View {
@@ -171,8 +170,7 @@ struct ProjectInspectorView: View {
             Toggle("Use saved manual fits", isOn: manualPPMBinding)
                 .toggleStyle(.checkbox)
                 .help("Use the saved manual PPM mesh for each fitted side. Unfitted sides keep their current preprocessing source.")
-            if let project = store.selectedProject,
-               let issue = ProjectValidation.issues(for: project).first(where: { $0.id.hasPrefix("manual_ppm") }) {
+            if let issue = store.selectedValidationIssues.first(where: { $0.id.hasPrefix("manual_ppm") }) {
                 Text(issue.message)
                     .font(.caption)
                     .foregroundStyle(.orange)
@@ -181,17 +179,14 @@ struct ProjectInspectorView: View {
     }
 
     func canFitManually(_ side: EarSide) -> Bool {
-        guard let project = store.selectedProject,
-              !project.scanPreparation.enabled || ArtifactScanner.scanPreparationIsCurrent(project),
-              let target = ArtifactScanner.sourceEar(for: project, side: side),
-              ["stl", "ply"].contains(target.pathExtension.lowercased()) else { return false }
-        return FileManager.default.fileExists(atPath: target.path) && !store.selectedProjectIsRunning
+        (store.selectedProjectStatus?.fittableSides.contains(side) ?? false) && !store.selectedProjectIsRunning
     }
 
     func manualPPMStatus(for side: EarSide) -> String {
         guard let project = store.selectedProject,
               project.settings.manualPPMFitting.meshPath(for: side) != nil else { return "Not fitted" }
-        return ArtifactScanner.validManualPPMFittingMesh(for: project, side: side) == nil ? "Source changed; refit required" : "Saved fit available"
+        guard let status = store.selectedProjectStatus else { return "Checking saved fit…" }
+        return status.validFitSides.contains(side) ? "Saved fit available" : "Source changed; refit required"
     }
 
     var manualPPMBinding: Binding<Bool> {

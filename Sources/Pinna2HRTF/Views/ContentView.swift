@@ -40,7 +40,7 @@ struct ContentView: View {
                     }
                     .labelStyle(.titleAndIcon)
                     .help("Place \(side.title) Microphone")
-                    .disabled(store.isPlacingMicrophone || store.selectedProject.map { side == .left ? $0.pipelineLeftEar.isEmpty : $0.pipelineRightEar.isEmpty } ?? true)
+                    .disabled(store.isPlacingMicrophone || !(store.selectedProjectStatus?.pipelineSides.contains(side) ?? false))
                 }
                 } label: { Label("Microphone", systemImage: "scope") }
                 .accessibilityLabel("Microphone")
@@ -92,8 +92,7 @@ struct ContentView: View {
         .onChange(of: store.selectedProjectID) { _ in
             store.persist()
             store.loadSelectedProjectLog()
-            store.refreshArtifacts()
-            store.restoreViewer()
+            store.refreshArtifacts(restoringViewer: true)
         }
     }
 
@@ -161,7 +160,7 @@ struct ContentView: View {
             selectedArtifactURL: store.selectedMesh,
             canPreview: selectedProject != nil && !store.isPlacingMicrophone,
             canPlaceMicrophone: { side in
-                !store.isPlacingMicrophone && (selectedProject.map { side == .left ? !$0.pipelineLeftEar.isEmpty : !$0.pipelineRightEar.isEmpty } ?? false)
+                !store.isPlacingMicrophone && (store.selectedProjectStatus?.pipelineSides.contains(side) ?? false)
             },
             isLogExpanded: logExpanded,
             isInspectorPresented: inspectorPresented,

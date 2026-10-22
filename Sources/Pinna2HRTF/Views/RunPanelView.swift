@@ -16,7 +16,7 @@ struct RunPanelView: View {
                     .lineLimit(1)
             }
             if let project = store.selectedProject {
-                Text(ArtifactScanner.numcalcStatus(for: project))
+                Text(store.selectedProjectStatus?.numcalcStatus ?? "Checking project files…")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -29,7 +29,7 @@ struct RunPanelView: View {
             }
             VStack(spacing: 2) {
                 ForEach(Stage.allCases.filter { $0 != .scanPreparation || store.selectedProject?.scanPreparation.enabled == true }) { stage in
-                    StageRunButton(stage: stage, state: store.stageStates[stage] ?? .ready, available: store.canRun(stage: stage), unavailableReason: store.runUnavailableReason(stage: stage), previousResults: store.selectedProject.map { ArtifactScanner.stageIsComplete(stage, project: $0) } ?? false) {
+                    StageRunButton(stage: stage, state: store.stageStates[stage] ?? .ready, available: store.canRun(stage: stage), unavailableReason: store.runUnavailableReason(stage: stage), previousResults: store.selectedProjectStatus?.completed.contains(stage) ?? false) {
                         store.run(stage: stage)
                     }
                 }
@@ -45,7 +45,7 @@ struct RunPanelView: View {
                 .tint(.red)
                 .disabled(store.selectedProject.map { store.runningProcesses[$0.id] == nil } ?? true)
                 } else {
-                    Button(store.nextStage.map { "Run \($0.title)" } ?? "Complete", systemImage: "play.fill") { store.runNextStage() }
+                    Button(store.isCheckingProjectFiles ? "Checking project files…" : store.nextStage.map { "Run \($0.title)" } ?? "Complete", systemImage: "play.fill") { store.runNextStage() }
                         .buttonStyle(.borderedProminent)
                         .disabled(!store.canRunNextStage())
                 }
@@ -65,9 +65,17 @@ struct RunPanelView: View {
         .buttonStyle(.bordered)
         .controlSize(.regular)
         .padding(.top, 2)
+        .task(id: store.selectedProjectID) {
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 5_000_000_000) }
+                catch { return }
+                if store.selectedProjectIsRunning && !store.isCheckingProjectFiles { store.refreshArtifacts() }
+            }
+        }
     }
 
     var summary: String {
+        if store.isCheckingProjectFiles { return "Checking files" }
         if store.selectedProjectIsManagingOutputs { return "Updating outputs" }
         if store.selectedProjectIsRunning { return "Running" }
         if let stage = store.nextStage { return store.canRun(stage: stage) ? "Ready" : "Action Required" }

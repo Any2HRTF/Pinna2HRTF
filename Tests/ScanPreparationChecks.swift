@@ -73,6 +73,7 @@ struct ScanPreparationChecks {
 
     static func main() throws {
         try fileMetadataChecks()
+        try projectStatusSnapshotChecks()
         try projectDuplicationChecks()
         try outputResetChecks()
         cuttingPlanePreviewChecks()

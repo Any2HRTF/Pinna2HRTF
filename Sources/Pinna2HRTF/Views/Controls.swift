@@ -263,6 +263,7 @@ struct PathField: View {
     var mode: PathFieldMode = .any
     var showsOpenButton = false
     @State private var editingPath = false
+    @State private var folderExists = false
 
     init(_ title: String, helpID: String, text: Binding<String>, mode: PathFieldMode = .any, showsOpenButton: Bool = false) {
         self.title = title
@@ -272,16 +273,11 @@ struct PathField: View {
         self.showsOpenButton = showsOpenButton
     }
 
-    var folderExists: Bool {
-        var isDirectory: ObjCBool = false
-        return !text.isEmpty && FileManager.default.fileExists(atPath: text, isDirectory: &isDirectory) && isDirectory.boolValue
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             SettingLabel(title: title, helpID: helpID)
             HStack(spacing: 6) {
-                Text(text.isEmpty ? "No file selected" : URL(fileURLWithPath: text).lastPathComponent)
+                Text(text.isEmpty ? "No file selected" : URL(fileURLWithPath: text, isDirectory: mode == .directory).lastPathComponent)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -313,6 +309,17 @@ struct PathField: View {
                 TextField(title, text: $text).textFieldStyle(.roundedBorder).labelsHidden()
             }
             .font(.caption)
+        }
+        .task(id: text) {
+            guard showsOpenButton else { return }
+            let path = text
+            folderExists = false
+            let exists = await Task.detached(priority: .utility) {
+                var isDirectory: ObjCBool = false
+                return !path.isEmpty && FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+            }.value
+            guard !Task.isCancelled, text == path else { return }
+            folderExists = exists
         }
     }
 }

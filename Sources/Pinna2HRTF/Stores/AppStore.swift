@@ -19,7 +19,10 @@ private struct PipelineRun {
 final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     @Published var folders: [ProjectFolder]
     @Published var projects: [ProjectRecord] {
-        didSet { scheduleProjectSummaryRefresh() }
+        didSet {
+            scheduleProjectSummaryRefresh()
+            refreshArtifacts()
+        }
     }
     @Published private(set) var projectSummaries: [UUID: String] = [:]
     @Published var selectedProjectID: UUID?
@@ -46,6 +49,20 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     @Published var ppmFittingError: String?
     @Published var projectDuplicationRequest: ProjectDuplicationRequest?
     @Published var artifacts: [Artifact] = []
+    @Published private(set) var isCheckingProjectFiles = false
+    @Published private var projectStatus: ProjectStatusSnapshot?
+    private var artifactRefreshID = UUID()
+    private var artifactRefreshWorkItem: DispatchWorkItem?
+    private let artifactRefreshQueue = DispatchQueue(label: "Pinna2HRTF.ProjectStatusRefresh", qos: .userInitiated)
+
+    var selectedProjectStatus: ProjectStatusSnapshot? {
+        guard let status = projectStatus, status.project == selectedProject,
+              status.environment == environment else { return nil }
+        return status
+    }
+
+    var selectedValidationIssues: [(id: String, message: String)] { selectedProjectStatus?.issues ?? [] }
+
     @Published var stageStates: [Stage: StageState] = Dictionary(uniqueKeysWithValues: Stage.allCases.map { ($0, .ready) })
     @Published private var runs: [UUID: PipelineRun] = [:]
     var runningProcesses: [UUID: Process] { runs.mapValues(\.process) }
@@ -99,18 +116,23 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         environment = registry.environment
         viewerStateByProject = Self.loadViewerStates()
         super.init()
-        for project in projects {
-            if let url = Self.latestTechnicalLogURL(for: project) {
-                technicalLogURLs[project.id] = url
+        let startupProjects = projects
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let environmentLog = Self.latestEnvironmentTechnicalLogURL()
+            DispatchQueue.main.async { [weak self] in self?.environmentTechnicalLogURL = environmentLog }
+            for project in startupProjects {
+                let log = Self.latestTechnicalLogURL(for: project)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.projects.contains(where: { $0.id == project.id }), self.technicalLogURLs[project.id] == nil else { return }
+                    self.technicalLogURLs[project.id] = log
+                }
             }
         }
-        environmentTechnicalLogURL = Self.latestEnvironmentTechnicalLogURL()
         registryStore.save(registry)
         persistenceMessage = registryStore.lastError ?? registryStore.recoveryMessage
         registryRecoveryPresented = registryStore.savingBlocked
         scheduleProjectSummaryRefresh()
-        refreshArtifacts()
-        restoreViewer()
+        refreshArtifacts(restoringViewer: true)
     }
 
     var selectedProject: ProjectRecord? {
@@ -503,6 +525,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     func updateEnvironment(_ update: (inout EnvironmentConfig) -> Void) {
         update(&environment)
         persist()
+        refreshArtifacts()
     }
 
     func resourceOptions(extensions allowedExtensions: Set<String>) -> [String] {
@@ -531,20 +554,50 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         return stem.hasPrefix("Local ") ? String(stem.dropFirst("Local ".count)) : stem
     }
 
-    func refreshArtifacts() {
-        guard let selectedProject else {
+    func refreshArtifacts(restoringViewer: Bool = false) {
+        artifactRefreshWorkItem?.cancel()
+        let refreshID = UUID()
+        artifactRefreshID = refreshID
+        guard let project = selectedProject else {
             artifacts = []
+            projectStatus = nil
+            isCheckingProjectFiles = false
             stageStates = Dictionary(uniqueKeysWithValues: Stage.allCases.map { ($0, .ready) })
             return
         }
-        recordInitialPreprocessingSignature(for: selectedProject)
-        let inspection = ArtifactScanner.Inspection()
-        artifacts = ArtifactScanner.artifacts(for: selectedProject, inspection: inspection)
-        var states = ArtifactScanner.stageStates(for: selectedProject, runningStage: runningStages[selectedProject.id], failedStages: failedStagesByProject[selectedProject.id] ?? [], inspection: inspection)
-        if preprocessingNeedsRerun(for: selectedProject), states[.preprocessing] == .done {
-            states[.preprocessing] = .ready
+        let changedProject = projectStatus?.project.id != project.id
+        if changedProject {
+            artifacts = []
+            projectStatus = nil
+            resetViewer()
         }
-        stageStates = states
+        let currentEnvironment = environment
+        let currentProjects = projects
+        let placingMicrophone = isPlacingMicrophone
+        isCheckingProjectFiles = true
+        let workItem = DispatchWorkItem { [weak self] in
+            Self.migrateProjectDirectory(for: project)
+            let status = ProjectStatusSnapshot.load(project: project, environment: currentEnvironment,
+                                                    projects: currentProjects, placingMicrophone: placingMicrophone)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.artifactRefreshID == refreshID,
+                      self.selectedProject == project, self.environment == currentEnvironment else { return }
+                self.projectStatus = status
+                self.artifacts = status.artifacts
+                var states = status.states
+                for stage in Stage.allCases {
+                    if self.failedStagesByProject[project.id]?.contains(stage) == true { states[stage] = .failed }
+                    if self.runningStages[project.id] == stage { states[stage] = .running }
+                }
+                if status.preprocessingNeedsRerun, states[.preprocessing] == .done { states[.preprocessing] = .ready }
+                self.stageStates = states
+                self.isCheckingProjectFiles = false
+                self.artifactRefreshWorkItem = nil
+                if restoringViewer || changedProject { self.restoreViewer() }
+            }
+        }
+        artifactRefreshWorkItem = workItem
+        artifactRefreshQueue.asyncAfter(deadline: .now() + .milliseconds(150), execute: workItem)
     }
 
     func restoreViewer() {
@@ -1121,13 +1174,13 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     var nextStage: Stage? {
         guard let project = selectedProject else { return nil }
         return Stage.allCases.filter { $0 != .scanPreparation || project.scanPreparation.enabled }.first {
-            [.failed, .stopped].contains(project.stageOutcomes?[$0.rawValue] ?? .ready) || !ArtifactScanner.stageIsComplete($0, project: project)
+            [.failed, .stopped].contains(project.stageOutcomes?[$0.rawValue] ?? .ready) || !(selectedProjectStatus?.completed.contains($0) ?? false)
         }
     }
 
     func stageBlocked(_ stage: Stage) -> Bool {
         guard let project = selectedProject else { return false }
-        return stage == .preprocessing && project.settings.inference.usePredictionsForPreprocessing && !ArtifactScanner.stageIsComplete(.inference, project: project)
+        return stage == .preprocessing && project.settings.inference.usePredictionsForPreprocessing && !(selectedProjectStatus?.completed.contains(.inference) ?? false)
     }
 
     func canRun(stage: Stage) -> Bool { runUnavailableReason(stage: stage) == nil }
@@ -1137,7 +1190,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         if meshEditorRequest != nil || ppmFittingRequest != nil { return "Finish editing before running the pipeline." }
         if selectedProjectIsRunning { return stoppingProjects.contains(project.id) ? "Waiting for the task to stop." : "Wait for the current task and output checks to finish." }
         if environmentProcess != nil { return "Wait for dependency setup to finish." }
-        return stageUnavailableReason(stage, project: project)
+        if stage == .preprocessing && isPlacingMicrophone { return "Finish microphone placement first." }
+        guard let status = selectedProjectStatus, !isCheckingProjectFiles else { return "Checking project files…" }
+        return status.unavailableReasons[stage]
     }
 
     func canRunNextStage() -> Bool {
@@ -1149,65 +1204,16 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     func stageCanRun(_ stage: Stage, project: ProjectRecord) -> Bool { stageUnavailableReason(stage, project: project) == nil }
 
     func stageUnavailableReason(_ stage: Stage, project: ProjectRecord) -> String? {
-        if project.pipelineLeftEar.isEmpty && project.pipelineRightEar.isEmpty { return "Choose at least one ear mesh." }
-        if project.saveLocation.isEmpty { return "Choose a save location." }
-        if project.scanPreparation.enabled && stage != .scanPreparation && (!ArtifactScanner.stageIsComplete(.scanPreparation, project: project) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.scanPreparation.rawValue] ?? .ready)) {
-            return "Run Scan Preparation successfully with the current scan settings first."
-        }
-        let requiredInputs = project.scanPreparation.enabled ? [project.scanPreparation.scanPath] : [project.leftEar, project.rightEar]
-        for path in requiredInputs where !path.isEmpty {
-            if !FileManager.default.fileExists(atPath: path) { return "Input mesh is missing: \(URL(fileURLWithPath: path).lastPathComponent)" }
-        }
-        if let issue = ProjectValidation.issues(for: project).first { return "Fix \(issue.id.split(separator: ".").last?.replacingOccurrences(of: "_", with: " ") ?? "settings"): \(issue.message)" }
-        if let conflict = outputLocationConflict(for: project) { return conflict }
-        switch stage {
-        case .scanPreparation:
-            if !project.scanPreparation.enabled { return "Enable full-head scan preparation first." }
-        case .inference:
-            if !project.settings.inference.usePredictionsForPreprocessing { return "Use Mesh2PPM is turned off." }
-            if !FileManager.default.fileExists(atPath: project.settings.inference.modelConfig) || !FileManager.default.fileExists(atPath: project.settings.inference.modelCheckpoint) { return "The selected model or checkpoint is missing." }
-        case .preprocessing:
-            if project.settings.inference.usePredictionsForPreprocessing && (!ArtifactScanner.stageIsComplete(.inference, project: project) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.inference.rawValue] ?? .ready)) { return "Run Mesh2PPM Inference successfully first." }
-            if project.settings.manualPPMFitting.useForPreprocessing {
-                for side in EarSide.allCases where !(side == .left ? project.pipelineLeftEar : project.pipelineRightEar).isEmpty {
-                    if let path = project.settings.manualPPMFitting.meshPath(for: side), !path.isEmpty,
-                       ArtifactScanner.validManualPPMFittingMesh(for: project, side: side) == nil {
-                        return "The saved manual \(side.rawValue) PPM fit is missing or its source ear has changed. Refit that ear before preprocessing."
-                    }
-                }
-            }
-            if isPlacingMicrophone { return "Finish microphone placement first." }
-            if !FileManager.default.isExecutableFile(atPath: environment.meshGradingExecutable) { return "The mesh-grading tool is unavailable." }
-            if !FileManager.default.fileExists(atPath: environment.externalDir + "/src/Mesh2HRTF/mesh2hrtf") { return "Mesh2HRTF dependencies are unavailable." }
-        case .numcalc:
-            if !ArtifactScanner.stageIsComplete(.preprocessing, project: project) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.preprocessing.rawValue] ?? .ready) { return "Run preprocessing successfully first." }
-            if !FileManager.default.isExecutableFile(atPath: environment.numcalcExecutable) { return "The NumCalc tool is unavailable." }
-        case .postprocessing:
-            let output = ArtifactScanner.postprocessingDirectory(for: project).standardizedFileURL.resolvingSymlinksInPath().path
-            let root = URL(fileURLWithPath: project.saveLocation).standardizedFileURL.resolvingSymlinksInPath().path
-            if !output.hasPrefix(root + "/") { return "Choose a SOFA output subfolder inside this project folder." }
-            if !ArtifactScanner.stageIsComplete(.numcalc, project: project) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.numcalc.rawValue] ?? .ready) { return "Finish NumCalc successfully first." }
-        }
-        return nil
+        ProjectStatusSnapshot.unavailableReason(stage, project: project, environment: environment,
+                                               projects: projects, placingMicrophone: isPlacingMicrophone)
     }
 
     func outputLocationConflict(for project: ProjectRecord) -> String? {
-        guard !project.saveLocation.isEmpty else { return "Choose a save location." }
-        let root = URL(fileURLWithPath: project.saveLocation).standardizedFileURL.resolvingSymlinksInPath().path
-        for other in projects where other.id != project.id && !other.saveLocation.isEmpty {
-            let otherRoot = URL(fileURLWithPath: other.saveLocation).standardizedFileURL.resolvingSymlinksInPath().path
-            if root == otherRoot || root.hasPrefix(otherRoot + "/") || otherRoot.hasPrefix(root + "/") {
-                return "Choose a separate output folder; this location overlaps \(other.name)."
-            }
-        }
-        return nil
+        ProjectStatusSnapshot.outputLocationConflict(for: project, projects: projects)
     }
 
     func preprocessingNeedsRerun(for project: ProjectRecord) -> Bool {
-        guard ArtifactScanner.stageIsComplete(.preprocessing, project: project) else { return false }
-        let signatureURL = URL(fileURLWithPath: project.saveLocation).appendingPathComponent(".pinna2hrtf-preprocessing-signature")
-        guard let saved = try? String(contentsOf: signatureURL, encoding: .utf8) else { return false }
-        return saved != preprocessingSignature(for: project)
+        selectedProjectStatus?.project == project && selectedProjectStatus?.preprocessingNeedsRerun == true
     }
 
     func preprocessingSignature(for project: ProjectRecord) -> String {
@@ -1923,9 +1929,23 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
     }
 
+    private static func migrateProjectDirectory(for project: ProjectRecord) {
+        let projectFolder = URL(fileURLWithPath: project.saveLocation, isDirectory: true)
+        let entries = try? FileManager.default.contentsOfDirectory(at: projectFolder, includingPropertiesForKeys: nil)
+        let legacyIntermediates = entries?.first(where: { $0.lastPathComponent == "intermediates" })
+        let currentIntermediates = entries?.first(where: { $0.lastPathComponent == "Intermediates" })
+        if let legacyIntermediates, currentIntermediates == nil {
+            let migrationPath = projectFolder.appendingPathComponent(".pinna2hrtf-intermediates-migration")
+            try? FileManager.default.moveItem(at: legacyIntermediates, to: migrationPath)
+            try? FileManager.default.moveItem(at: migrationPath, to: projectFolder.appendingPathComponent("Intermediates"))
+        }
+    }
+
+
     static func migrated(_ registry: ProjectRegistry, rootURL: URL, packageURL: URL) -> ProjectRegistry {
         var next = registry
         let defaultEnvironment = Defaults.environment(root: rootURL)
+        if Defaults.isPackagedApp { next.environment = defaultEnvironment }
         let replacements: [(String, String)] = [
             (packageURL.appendingPathComponent("External").path, rootURL.appendingPathComponent("External").path),
             (packageURL.appendingPathComponent("Paper").path, rootURL.appendingPathComponent("Paper").path),
@@ -1956,15 +1976,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 let folderName = updated.name.replacingOccurrences(of: "/", with: "-")
                 updated.saveLocation = Defaults.appDataURL.appendingPathComponent("Projects/\(folderName)").path
             }
-            let projectFolder = URL(fileURLWithPath: updated.saveLocation)
-            let entries = try? FileManager.default.contentsOfDirectory(at: projectFolder, includingPropertiesForKeys: nil)
-            let legacyIntermediates = entries?.first(where: { $0.lastPathComponent == "intermediates" })
-            let currentIntermediates = entries?.first(where: { $0.lastPathComponent == "Intermediates" })
-            if let legacyIntermediates, currentIntermediates == nil {
-                let migrationPath = projectFolder.appendingPathComponent(".pinna2hrtf-intermediates-migration")
-                try? FileManager.default.moveItem(at: legacyIntermediates, to: migrationPath)
-                try? FileManager.default.moveItem(at: migrationPath, to: projectFolder.appendingPathComponent("Intermediates"))
-            }
             updated.settings.inference.modelConfig = migratedPath(updated.settings.inference.modelConfig, replacements: replacements)
             updated.settings.inference.modelCheckpoint = migratedPath(updated.settings.inference.modelCheckpoint, replacements: replacements)
             if updated.settings.inference.targetLeftFolder == "Target STL Left" { updated.settings.inference.targetLeftFolder = "Input/Left" }
@@ -1978,10 +1989,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 let resources = packageURL.appendingPathComponent("HRTFCalculation/Inference/resources", isDirectory: true)
                 let bundledConfig = resources.appendingPathComponent(URL(fileURLWithPath: updated.settings.inference.modelConfig).lastPathComponent)
                 let bundledCheckpoint = resources.appendingPathComponent(URL(fileURLWithPath: updated.settings.inference.modelCheckpoint).lastPathComponent)
-                if (updated.settings.inference.modelConfig.contains("HRTFCalculation/Inference/resources/") || !FileManager.default.fileExists(atPath: updated.settings.inference.modelConfig)), FileManager.default.fileExists(atPath: bundledConfig.path) {
+                if updated.settings.inference.modelConfig.contains("HRTFCalculation/Inference/resources/"), FileManager.default.fileExists(atPath: bundledConfig.path) {
                     updated.settings.inference.modelConfig = bundledConfig.path
                 }
-                if (updated.settings.inference.modelCheckpoint.contains("HRTFCalculation/Inference/resources/") || !FileManager.default.fileExists(atPath: updated.settings.inference.modelCheckpoint)), FileManager.default.fileExists(atPath: bundledCheckpoint.path) {
+                if updated.settings.inference.modelCheckpoint.contains("HRTFCalculation/Inference/resources/"), FileManager.default.fileExists(atPath: bundledCheckpoint.path) {
                     updated.settings.inference.modelCheckpoint = bundledCheckpoint.path
                 }
             }
