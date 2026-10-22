@@ -38,6 +38,7 @@ func projectStatusSnapshotChecks() throws {
     let log = folder.appendingPathComponent("Projects/Left/NumCalc/source_1/NC1-1_log.txt", isDirectory: false)
     try FileManager.default.removeItem(at: log)
     precondition(mkfifo(log.path, 0o600) == 0)
+    precondition(ProjectStatusSnapshot.configuredPreviewArtifacts(for: project).contains { $0.url.path == project.leftEar && $0.exists })
     // A blocked server log must not delay the first snapshot or sidebar labels.
     // Reading this FIFO would block forever without a writer.
     let quick = ProjectStatusSnapshot.load(project: project, environment: environment, projects: [project],

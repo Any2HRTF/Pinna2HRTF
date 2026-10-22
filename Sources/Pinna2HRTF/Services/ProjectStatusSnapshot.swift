@@ -16,6 +16,27 @@ struct ProjectStatusSnapshot {
     let pipelineSides: Set<EarSide>
     let checkingSolverResults: Bool
 
+    /// Configured paths can be offered before directory discovery completes.
+    /// Opening a preview still validates and loads the actual file.
+    static func configuredPreviewArtifacts(for project: ProjectRecord) -> [Artifact] {
+        var files: [Artifact] = []
+        if project.scanPreparation.enabled {
+            if !project.scanPreparation.scanPath.isEmpty {
+                files.append(Artifact(title: "Full-head scan", url: URL(fileURLWithPath: project.scanPreparation.scanPath, isDirectory: false), cachedExists: true))
+            }
+        } else {
+            for (title, path) in [("Input left ear", project.leftEar), ("Input right ear", project.rightEar)] where !path.isEmpty {
+                files.append(Artifact(title: title, url: URL(fileURLWithPath: path, isDirectory: false), cachedExists: true))
+            }
+        }
+        for side in EarSide.allCases {
+            if let path = project.settings.manualPPMFitting.meshPath(for: side), !path.isEmpty {
+                files.append(Artifact(title: "Manual \(side.rawValue) PPM fit", url: URL(fileURLWithPath: path, isDirectory: false), cachedExists: true))
+            }
+        }
+        return files
+    }
+
     var summary: String {
         if project.stageOutcomes?.values.contains(.failed) == true { return "Latest run failed · previous results may remain" }
         if project.stageOutcomes?.values.contains(.stopped) == true { return "Task stopped · previous results may remain" }

@@ -549,17 +549,22 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
         let changedProject = projectStatus?.project.id != project.id
         if changedProject {
-            artifacts = []
+            artifacts = ProjectStatusSnapshot.configuredPreviewArtifacts(for: project)
             projectStatus = nil
             resetViewer()
         }
+        let initialViewerLoadID = meshLoadID
         let currentEnvironment = environment
         let currentProjects = projects
         let placingMicrophone = isPlacingMicrophone
         isCheckingProjectFiles = true
         let workItem = DispatchWorkItem { [weak self] in
             guard !progress.isCancelled else { return }
-            Self.migrateProjectDirectory(for: project)
+            // Imported projects handle legacy folder names at import time. Only
+            // migrate app-managed local projects here; listing a server root can stall.
+            if project.saveLocation.hasPrefix(Defaults.appDataURL.appendingPathComponent("Projects", isDirectory: true).path + "/") {
+                Self.migrateProjectDirectory(for: project)
+            }
             let status = ProjectStatusSnapshot.load(project: project, environment: currentEnvironment,
                                                     projects: currentProjects, placingMicrophone: placingMicrophone,
                                                     includeSolverResults: false, isCancelled: { progress.isCancelled })
@@ -570,7 +575,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 self.applyProjectStatus(status)
                 self.isCheckingProjectFiles = false
                 self.artifactRefreshWorkItem = nil
-                if restoringViewer || changedProject { self.restoreViewer() }
+                if (restoringViewer || changedProject) && self.meshLoadID == initialViewerLoadID && self.selectedMesh == nil { self.restoreViewer() }
                 let restorationLoadID = self.meshLoadID
                 self.solverRefreshQueue.async { [weak self] in
                     guard !progress.isCancelled else { return }
