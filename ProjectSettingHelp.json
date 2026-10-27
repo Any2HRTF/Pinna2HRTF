@@ -238,7 +238,7 @@
   {
     "id": "postprocessing.spatial_upsampling",
     "title": "Spatial HRTF upsampling",
-    "description": "Runs the original EvaPPM ExpSuite/LocaDyn revision 1948 method with minimum-phase TOA removal, symmetric receiver metadata and dense-only output. Adds spatial directions without changing sampling rate or HRIR length. Requires MATLAB, AMT and its Signal Processing, Optimization and Statistics toolbox dependencies. Default subdivision level is 3. Originals are kept; dense exports and reports are written to Upsampled.",
+    "description": "Runs the Python port of the EvaPPM ExpSuite/LocaDyn revision 1948 method with minimum-phase TOA removal, symmetric receiver metadata and dense-only output. Adds spatial directions without changing sampling rate or HRIR length. Uses bundled Python libraries; MATLAB and AMT are not required. Default subdivision level is 3. Originals are kept; dense exports and reports are written to Upsampled.",
     "publications": []
   },
   {
@@ -250,13 +250,13 @@
   {
     "id": "postprocessing.matlab_executable",
     "title": "MATLAB executable",
-    "description": "Optional path to the MATLAB executable, such as /Applications/MATLAB_R2024b.app/bin/matlab. Leave blank to search PATH and installed macOS MATLAB applications.",
+    "description": "Legacy setting retained for compatibility. Python upsampling does not use MATLAB.",
     "publications": []
   },
   {
     "id": "postprocessing.amt_path",
     "title": "Auditory Modeling Toolbox folder",
-    "description": "Optional folder containing amt_start.m. When blank, searches Documents/Uni/MATLAB/amtoolbox and Documents/MATLAB/amtoolbox in your home folder.",
+    "description": "Legacy setting retained for compatibility. Python upsampling does not use AMT.",
     "publications": []
   }
 ]

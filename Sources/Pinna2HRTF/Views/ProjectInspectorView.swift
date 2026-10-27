@@ -115,13 +115,8 @@ struct ProjectInspectorView: View {
                     if store.selectedProject?.settings.postprocessing?.spatialUpsampling == true {
                         Stepper("Subdivision level: \(postprocessingValue(\.spatialSubdivisions).wrappedValue)", value: postprocessingValue(\.spatialSubdivisions), in: 0...5)
                         SettingToggle(title: "Normalize dense HRTFs (LocaDyn)", helpID: "postprocessing.spatial_normalize", isOn: postprocessingValue(\.spatialNormalize))
-                        Text("Adds source directions using the EvaPPM LocaDyn method. Sampling rate and HRIR length stay the same. Dense SOFA files are saved in the Upsampled subfolder. Requires MATLAB and AMT.")
+                        Text("Adds source directions using the EvaPPM LocaDyn method. Sampling rate and HRIR length stay the same. Dense SOFA files are saved in the Upsampled subfolder. Runs locally in Python.")
                             .font(.caption).foregroundStyle(.secondary)
-                        DisclosureGroup("MATLAB and AMT") {
-                            PathField("MATLAB executable (optional)", helpID: "postprocessing.matlab_executable", text: postprocessingOptionalPath(\.matlabExecutable), mode: .file)
-                            PathField("AMT folder (optional)", helpID: "postprocessing.amt_path", text: postprocessingOptionalPath(\.amtPath), mode: .directory)
-                            Text("Leave blank to use automatic detection.").font(.caption).foregroundStyle(.secondary)
-                        }
                     }
                 }
             }

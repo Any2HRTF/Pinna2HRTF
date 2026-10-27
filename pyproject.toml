@@ -39,4 +39,4 @@ include = ["HRTFCalculation*"]
 [tool.setuptools.package-data]
 "HRTFCalculation.Inference" = ["resources/*.csv", "resources/*.pth", "resources/*.stl", "resources/*.yaml"]
 
-"HRTFCalculation.Postprocessing" = ["*.m"]
+"HRTFCalculation.Postprocessing" = ["*.m", "*.txt"]
