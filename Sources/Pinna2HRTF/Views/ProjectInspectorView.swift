@@ -111,11 +111,11 @@ struct ProjectInspectorView: View {
                     LabeledTextField("Level offset (dB)", helpID: "postprocessing.level_offset", text: postprocessingLevelOffsetBinding, fieldEnabled: postprocessingNormalizeBinding.wrappedValue)
                     SettingToggle(title: "Resample HRIRs", helpID: "postprocessing.resample_hrirs", isOn: postprocessingResampleBinding)
                     LabeledTextField("Sampling rate (Hz)", helpID: "postprocessing.sampling_rate", text: postprocessingSamplingRateBinding, fieldEnabled: postprocessingResampleBinding.wrappedValue)
-                    SettingToggle(title: "Spatially upsample HRTFs (LocaDyn)", helpID: "postprocessing.spatial_upsampling", isOn: postprocessingValue(\.spatialUpsampling))
+                    SettingToggle(title: "Spatially upsample HRTFs", helpID: "postprocessing.spatial_upsampling", isOn: postprocessingValue(\.spatialUpsampling))
                     if store.selectedProject?.settings.postprocessing?.spatialUpsampling == true {
                         Stepper("Subdivision level: \(postprocessingValue(\.spatialSubdivisions).wrappedValue)", value: postprocessingValue(\.spatialSubdivisions), in: 0...5)
-                        SettingToggle(title: "Normalize dense HRTFs (LocaDyn)", helpID: "postprocessing.spatial_normalize", isOn: postprocessingValue(\.spatialNormalize))
-                        Text("Adds source directions using the EvaPPM LocaDyn method. Sampling rate and HRIR length stay the same. Dense SOFA files are saved in the Upsampled subfolder. Runs locally in Python.")
+                        SettingToggle(title: "Normalize upsampled HRTFs", helpID: "postprocessing.spatial_normalize", isOn: postprocessingValue(\.spatialNormalize))
+                        Text("Interpolates HRTFs at additional source directions while preserving direction-dependent arrival times. Sampling rate and HRIR length stay the same. Results are saved in the Upsampled subfolder.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }

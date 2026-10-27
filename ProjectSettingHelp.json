@@ -238,13 +238,16 @@
   {
     "id": "postprocessing.spatial_upsampling",
     "title": "Spatial HRTF upsampling",
-    "description": "Runs the Python port of the EvaPPM ExpSuite/LocaDyn revision 1948 method with minimum-phase TOA removal, symmetric receiver metadata and dense-only output. Adds spatial directions without changing sampling rate or HRIR length. Uses bundled Python libraries; MATLAB and AMT are not required. Default subdivision level is 3. Originals are kept; dense exports and reports are written to Upsampled.",
-    "publications": []
+    "description": "Creates a denser grid of source directions. Fits a continuous time-of-arrival model, interpolates minimum-phase HRIRs between neighboring directions using vector-base amplitude weights, then restores the direction-dependent delays. Sampling rate and HRIR length stay the same. Higher subdivision levels add more directions and increase calculation time and output size; the default is 3. Original exports are kept, and upsampled SOFA files are saved in the Upsampled subfolder.",
+    "publications": [
+      { "title": "Ziegelwanger & Majdak (2014)", "url": "https://doi.org/10.1121/1.4863196" },
+      { "title": "Pulkki (1997)", "url": "https://aes2.org/publications/elibrary-page/?id=7853" }
+    ]
   },
   {
     "id": "postprocessing.spatial_normalize",
-    "title": "LocaDyn normalization",
-    "description": "Matches the EvaPPM script default: rescales using the frontal (0°, 0°) HRIR to its -40 dB reference. This changes dense-export levels independently of the normal postprocessing level offset. Turn off to preserve the input levels.",
+    "title": "Upsampled HRTF normalization",
+    "description": "Scales the upsampled HRIRs using the frontal (0°, 0°) response as a -40 dB reference. This changes output levels independently of the normal postprocessing level offset. Turn off to preserve the input levels.",
     "publications": []
   },
   {
