@@ -67,7 +67,10 @@ struct ProjectStatusSnapshot {
         if completed.contains(.preprocessing), !project.saveLocation.isEmpty {
             let signature = ArtifactScanner.preprocessingSignature(for: project, inspection: inspection)
             if let saved = try? String(contentsOf: signatureURL, encoding: .utf8) {
-                needsRerun = saved != signature
+                needsRerun = !PreprocessingSignature.matches(saved, project: project, current: signature, inspection: inspection)
+                if !needsRerun && saved != signature {
+                    try? signature.write(to: signatureURL, atomically: true, encoding: .utf8)
+                }
             } else if !FileManager.default.fileExists(atPath: signatureURL.path) {
                 try? signature.write(to: signatureURL, atomically: true, encoding: .utf8)
             }

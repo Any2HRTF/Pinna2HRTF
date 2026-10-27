@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 enum ArtifactScanner {
     /// One refresh owns one inspection; subsequent refreshes always read fresh files.
@@ -146,7 +147,7 @@ enum ArtifactScanner {
               let sourceIdentity = settings.sourceIdentity(for: side),
               let source = sourceEar(for: project, side: side, inspection: inspection),
               source.standardizedFileURL.path == URL(fileURLWithPath: sourcePath).standardizedFileURL.path,
-              meshIdentity(source, inspection: inspection) == sourceIdentity,
+              meshIdentityMatches(sourceIdentity, meshIdentity(source, inspection: inspection)),
               FileManager.default.fileExists(atPath: path),
               let parameters = settings.parametersPath(for: side),
               FileManager.default.fileExists(atPath: parameters) else { return nil }
@@ -244,23 +245,23 @@ enum ArtifactScanner {
         }
     }
 
+    /// Filesystem timestamps may round slightly when a project is copied between
+    /// volumes or serialized through JSON. Preserve source validation without
+    /// treating sub-microsecond representation differences as changed geometry.
+    static func meshIdentityMatches(_ saved: String, _ current: String?) -> Bool {
+        guard let current else { return false }
+        if saved == current { return true }
+        let a = saved.components(separatedBy: "|")
+        let b = current.components(separatedBy: "|")
+        guard a.count >= 3, b.count >= 3,
+              a.dropLast(2) == b.dropLast(2),
+              a[a.count - 2] == b[b.count - 2],
+              let first = Double(a[a.count - 1]), let second = Double(b[b.count - 1]) else { return false }
+        return abs(first - second) < 0.000001
+    }
+
     static func preprocessingSignature(for project: ProjectRecord, inspection: Inspection = Inspection()) -> String {
-        let leftEar = project.pipelineEar(for: .left, inspection: inspection)
-        let rightEar = project.pipelineEar(for: .right, inspection: inspection)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let inference = (try? encoder.encode(project.settings.inference)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        let preprocessing = (try? encoder.encode(project.settings.preprocessing)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        let manualPPMFitting = project.settings.manualPPMFitting.useForPreprocessing
-            ? ((try? encoder.encode(project.settings.manualPPMFitting)).flatMap { String(data: $0, encoding: .utf8) } ?? "") : ""
-        let leftIdentity = leftEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: leftEar), inspection: inspection) ?? "")
-        let rightIdentity = rightEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: rightEar), inspection: inspection) ?? "")
-        let fittedLeftIdentity = project.settings.manualPPMFitting.useForPreprocessing ? project.settings.manualPPMFitting.leftMeshPath.flatMap { meshIdentity(URL(fileURLWithPath: $0), inspection: inspection) } ?? "" : ""
-        let fittedRightIdentity = project.settings.manualPPMFitting.useForPreprocessing ? project.settings.manualPPMFitting.rightMeshPath.flatMap { meshIdentity(URL(fileURLWithPath: $0), inspection: inspection) } ?? "" : ""
-        let original = [leftEar, rightEar, project.inputHandling.rawValue, leftIdentity, rightIdentity, inference, preprocessing, manualPPMFitting, fittedLeftIdentity, fittedRightIdentity].joined(separator: "\n")
-        guard project.scanPreparation.enabled else { return original }
-        let scan = (try? encoder.encode(project.scanPreparation)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        return original + "\n" + scan
+        PreprocessingSignature.capture(project, inspection: inspection)
     }
 
     static func scanPreparationIsCurrent(_ project: ProjectRecord, inspection: Inspection = Inspection()) -> Bool {
@@ -434,5 +435,213 @@ enum ArtifactScanner {
     static func numcalcTotal(_ project: URL, inspection: Inspection = Inspection()) -> Int {
         guard let object = inspection.document(project.appendingPathComponent("parameters.json", isDirectory: false)), let total = object["numFrequencies"] as? Int else { return 0 }
         return total
+    }
+}
+
+/// Compares the inputs and effective settings that determine preprocessing results.
+/// Storage locations, input-copy policy, and inactive settings are deliberately absent.
+enum PreprocessingSignature {
+    private static let format = "pinna2hrtf-preprocessing-v2"
+    private static let cacheLock = NSLock()
+    private static var digests: [String: String] = [:]
+
+    static func capture(_ project: ProjectRecord, inspection: ArtifactScanner.Inspection) -> String {
+        var value = configuration(project)
+        value["format"] = format
+        var inputs: [String: String] = [:]
+        for side in EarSide.allCases {
+            inputs[side.rawValue] = fingerprint(project.pipelineEar(for: side, inspection: inspection), inspection: inspection)
+            if project.settings.manualPPMFitting.useForPreprocessing {
+                inputs["fitted_" + side.rawValue] = fingerprint(project.settings.manualPPMFitting.meshPath(for: side) ?? "", inspection: inspection)
+            } else if project.settings.inference.usePredictionsForPreprocessing {
+                inputs["predicted_" + side.rawValue] = fingerprint(ArtifactScanner.preprocessingMesh(for: project, side: side, inspection: inspection)?.path ?? "", inspection: inspection)
+            }
+        }
+        if project.settings.inference.usePredictionsForPreprocessing && !project.settings.manualPPMFitting.useForPreprocessing {
+            inputs["model_config"] = fingerprint(project.settings.inference.modelConfig, inspection: inspection)
+            inputs["model_checkpoint"] = fingerprint(project.settings.inference.modelCheckpoint, inspection: inspection)
+        }
+        if project.scanPreparation.enabled { inputs["scan"] = fingerprint(project.scanPreparation.scanPath, inspection: inspection) }
+        let grid = gridPath(project.settings.preprocessing.evaluationGrid)
+        for name in ["Nodes.txt", "Elements.txt"] {
+            inputs["grid_" + name] = fingerprint(URL(fileURLWithPath: grid).appendingPathComponent(name).path, inspection: inspection)
+        }
+        value["inputs"] = inputs
+        return encoded(value)
+    }
+
+    static func matches(_ saved: String, project: ProjectRecord, current: String? = nil,
+                        inspection: ArtifactScanner.Inspection = .init()) -> Bool {
+        let next = current ?? capture(project, inspection: inspection)
+        if saved == next { return true }
+        // Early receipts contain seven fields; later ones add three manual-fit
+        // fields and an optional scan-settings field.
+        // Never blindly accept a legacy receipt or re-baseline genuinely changed settings.
+        var fields = saved.components(separatedBy: "\n")
+        if fields.count == 7 { fields += ["", "", ""] }
+        guard fields.count == 10 || fields.count == 11,
+              let inference = decode(InferenceSettings.self, fields[5]),
+              let preprocessing = decode(PreprocessingSettings.self, fields[6]) else { return false }
+        var previous = project
+        previous.leftEar = fields[0]; previous.rightEar = fields[1]
+        previous.settings.inference = inference
+        previous.settings.preprocessing = preprocessing
+        if fields[7].isEmpty { previous.settings.manualPPMFitting = ManualPPMFittingSettings() }
+        else if let manual = decode(ManualPPMFittingSettings.self, fields[7]) { previous.settings.manualPPMFitting = manual }
+        else { return false }
+        previous.settings.scanPreparation = nil
+        if fields.count == 11 {
+            guard let scan = decode(ScanPreparationSettings.self, fields[10]) else { return false }
+            previous.settings.scanPreparation = scan
+        }
+        guard encoded(configuration(previous)) == encoded(configuration(project)) else { return false }
+        var relocations: [(String, String)] = []
+        for (old, new) in [(previous.leftEar, project.leftEar), (previous.rightEar, project.rightEar)] {
+            guard !old.isEmpty, !new.isEmpty else { continue }
+            let a = URL(fileURLWithPath: old).pathComponents
+            let b = URL(fileURLWithPath: new).pathComponents
+            var count = 0
+            while count < min(a.count, b.count), a[a.count - count - 1] == b[b.count - count - 1] { count += 1 }
+            if count > 0 && count < min(a.count, b.count) {
+                let from = NSString.path(withComponents: Array(a.dropLast(count)))
+                let to = NSString.path(withComponents: Array(b.dropLast(count)))
+                if from != "/", to != "/" { relocations.append((from, to)) }
+            }
+        }
+        for (old, new, stamp) in [(fields[0], project.pipelineEar(for: .left, inspection: inspection), fields[3]),
+                                   (fields[1], project.pipelineEar(for: .right, inspection: inspection), fields[4])] {
+            guard legacyInputMatches(old, new, stamp: stamp, inspection: inspection) else { return false }
+        }
+        if project.settings.manualPPMFitting.useForPreprocessing {
+            for (side, index) in [(EarSide.left, 8), (.right, 9)] {
+                guard legacyInputMatches(previous.settings.manualPPMFitting.meshPath(for: side) ?? "",
+                                         project.settings.manualPPMFitting.meshPath(for: side) ?? "",
+                                         stamp: fields[index], inspection: inspection) else { return false }
+            }
+        } else if project.settings.inference.usePredictionsForPreprocessing {
+            guard resourceMatches(inference.modelConfig, project.settings.inference.modelConfig, relocations: relocations, inspection: inspection),
+                  resourceMatches(inference.modelCheckpoint, project.settings.inference.modelCheckpoint, relocations: relocations, inspection: inspection) else { return false }
+        }
+        if project.scanPreparation.enabled &&
+            !resourceMatches(previous.scanPreparation.scanPath, project.scanPreparation.scanPath, relocations: relocations, inspection: inspection) { return false }
+        return resourceMatches(gridPath(previous.settings.preprocessing.evaluationGrid), gridPath(project.settings.preprocessing.evaluationGrid),
+                               relocations: relocations, directory: true, inspection: inspection)
+    }
+
+    private static func configuration(_ project: ProjectRecord) -> [String: Any] {
+        var pre = object(project.settings.preprocessing)
+        pre.removeValue(forKey: "evaluationGrid")
+        let customRadius = project.settings.preprocessing.useCustomHeadRadius ?? (project.settings.preprocessing.headRadius != nil)
+        pre["useCustomHeadRadius"] = customRadius
+        if !customRadius { pre.removeValue(forKey: "headRadius") }
+        pre["skipMeshGrading"] = project.settings.preprocessing.skipMeshGrading ?? false
+        pre["sourceAssignmentFaceCount"] = project.settings.preprocessing.sourceAssignmentFaceCount ?? "6"
+        for (name, position) in [("sourcePositionInputLeft", project.settings.preprocessing.sourcePositionInputLeft),
+                                  ("sourcePositionInputRight", project.settings.preprocessing.sourcePositionInputRight)] {
+            pre.removeValue(forKey: name)
+            if let position { pre[name] = [position.x, position.y, position.z] }
+        }
+        let manual = project.settings.manualPPMFitting.useForPreprocessing
+        var result: [String: Any] = ["preprocessing": pre,
+            "inputMode": manual ? "manual" : project.settings.inference.usePredictionsForPreprocessing ? "inference" : "original"]
+        // Imported physical/geometry overrides also affect results; GUI values are
+        // represented above, and bookkeeping/export-only choices do not affect the solver.
+        if let json = project.preservedConfigJSON?.data(using: .utf8),
+           let document = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
+           var hidden = document["preprocessing"] as? [String: Any] {
+            for key in ["title", "enabled", "write_intermediates", "pictures", "material_search_paths",
+                        "min_frequency", "max_frequency", "frequency_step_count", "mesh_min_edge_length",
+                        "mesh_max_edge_length", "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite",
+                        "head_radius", "skip_mesh_grading", "source_assignment_face_count", "source_position_input_left", "source_position_input_right"] {
+                hidden.removeValue(forKey: key)
+            }
+            if !hidden.isEmpty { result["importedPreprocessing"] = hidden }
+        }
+        if project.scanPreparation.enabled {
+            var scan = object(project.scanPreparation)
+            for key in ["scanPath", "originalScanPath", "reviewedLeftPath", "reviewedRightPath", "requireManualReview"] { scan.removeValue(forKey: key) }
+            result["scanPreparation"] = scan
+        }
+        return normalized(result) as? [String: Any] ?? result
+    }
+
+    private static func legacyInputMatches(_ old: String, _ new: String, stamp: String,
+                                           inspection: ArtifactScanner.Inspection) -> Bool {
+        if old.isEmpty || new.isEmpty { return old.isEmpty && new.isEmpty }
+        let fields = stamp.components(separatedBy: "|")
+        if fields.count >= 3, let size = Int64(fields[fields.count - 2]), let modified = Double(fields[fields.count - 1]),
+           let attrs = inspection.attributes(URL(fileURLWithPath: new)),
+           (attrs[.size] as? NSNumber)?.int64Value == size,
+           let date = attrs[.modificationDate] as? Date,
+           abs(date.timeIntervalSince1970 - modified) < 0.00001 { return true }
+        if old == new { return stamp.isEmpty && ArtifactScanner.meshIdentity(URL(fileURLWithPath: new), inspection: inspection) == nil }
+        let oldDigest = fingerprint(old, inspection: inspection)
+        return oldDigest.hasPrefix("sha256:") && oldDigest == fingerprint(new, inspection: inspection)
+    }
+
+    private static func resourceMatches(_ old: String, _ new: String, relocations: [(String, String)],
+                                        directory: Bool = false, inspection: ArtifactScanner.Inspection) -> Bool {
+        if old == new { return true }
+        // A legacy receipt has no resource hashes. A consistent project-root move
+        // is accepted only after both ear stamps were verified above.
+        if relocations.contains(where: { from, to in
+            (old == from || old.hasPrefix(from + "/")) && to + String(old.dropFirst(from.count)) == new
+        }) { return true }
+        if directory {
+            return ["Nodes.txt", "Elements.txt"].allSatisfy { name in
+                resourceMatches(URL(fileURLWithPath: old).appendingPathComponent(name).path,
+                                URL(fileURLWithPath: new).appendingPathComponent(name).path,
+                                relocations: [], inspection: inspection)
+            }
+        }
+        let digest = fingerprint(old, inspection: inspection)
+        return digest.hasPrefix("sha256:") && digest == fingerprint(new, inspection: inspection)
+    }
+
+    private static func gridPath(_ value: String?) -> String {
+        let value = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty || value == "Default"
+            ? Defaults.pipelineRoot.appendingPathComponent("HRTFCalculation/Preprocessing/Resources/ARIGrid").path : value
+    }
+
+    private static func fingerprint(_ path: String, inspection: ArtifactScanner.Inspection) -> String {
+        if path.isEmpty { return "" }
+        let url = URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath()
+        guard let attrs = inspection.attributes(url), attrs[.type] as? FileAttributeType == .typeRegular,
+              let size = attrs[.size] as? NSNumber, let date = attrs[.modificationDate] as? Date else { return "unavailable" }
+        let key = "\(url.path)|\(size.int64Value)|\(date.timeIntervalSince1970)"
+        cacheLock.lock(); let cached = digests[key]; cacheLock.unlock()
+        if let cached { return cached }
+        guard let file = try? FileHandle(forReadingFrom: url) else { return "unavailable" }
+        defer { try? file.close() }
+        do {
+            var hash = SHA256()
+            while let data = try file.read(upToCount: 1_048_576), !data.isEmpty { hash.update(data: data) }
+            let digest = "sha256:" + hash.finalize().map { String(format: "%02x", $0) }.joined()
+            cacheLock.lock()
+            if digests.count > 512 { digests.removeAll(keepingCapacity: true) }
+            digests[key] = digest
+            cacheLock.unlock()
+            return digest
+        } catch { return "unavailable" }
+    }
+
+    private static func object<T: Encodable>(_ value: T) -> [String: Any] {
+        guard let data = try? JSONEncoder().encode(value),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return object
+    }
+    private static func decode<T: Decodable>(_ type: T.Type, _ text: String) -> T? {
+        text.data(using: .utf8).flatMap { try? JSONDecoder().decode(type, from: $0) }
+    }
+    private static func normalized(_ value: Any) -> Any {
+        if let values = value as? [String: Any] { return values.mapValues(normalized) }
+        if let values = value as? [Any] { return values.map(normalized) }
+        if let text = value as? String, let number = Double(text), number.isFinite { return number }
+        return value
+    }
+    private static func encoded(_ value: [String: Any]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return "" }
+        return String(decoding: data, as: UTF8.self)
     }
 }

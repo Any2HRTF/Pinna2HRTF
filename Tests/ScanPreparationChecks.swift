@@ -52,6 +52,11 @@ struct ScanPreparationChecks {
         let expected = "\(file.path)|\((original[.size] as! NSNumber).int64Value)|\((original[.modificationDate] as! Date).timeIntervalSince1970)"
         let inspection = ArtifactScanner.Inspection()
         precondition(ArtifactScanner.meshIdentity(file, inspection: inspection) == expected)
+        let stamp = (original[.modificationDate] as! Date).timeIntervalSince1970
+        let prefix = "\(file.path)|\((original[.size] as! NSNumber).int64Value)|"
+        precondition(ArtifactScanner.meshIdentityMatches(prefix + String(stamp + 0.0000002), expected))
+        precondition(!ArtifactScanner.meshIdentityMatches(prefix + String(stamp + 1), expected))
+        precondition(!ArtifactScanner.meshIdentityMatches("/other/path|4|" + String(stamp), expected))
         precondition(ArtifactScanner.fileHasData(file, inspection: inspection))
         try Data("changed mesh".utf8).write(to: file)
         precondition(ArtifactScanner.meshIdentity(file, inspection: inspection) == expected)
@@ -89,10 +94,10 @@ struct ScanPreparationChecks {
         let legacySignature = [legacy.leftEar, legacy.rightEar, legacy.inputHandling.rawValue, "", "",
             String(data: try encoder.encode(legacy.settings.inference), encoding: .utf8)!,
             String(data: try encoder.encode(legacy.settings.preprocessing), encoding: .utf8)!, "", "", ""].joined(separator: "\n")
-        precondition(ArtifactScanner.preprocessingSignature(for: legacy) == legacySignature)
+        precondition(PreprocessingSignature.matches(legacySignature, project: legacy))
         var disabledScanProject = legacy
         disabledScanProject.settings.scanPreparation = ScanPreparationSettings()
-        precondition(ArtifactScanner.preprocessingSignature(for: disabledScanProject) == legacySignature)
+        precondition(PreprocessingSignature.matches(legacySignature, project: disabledScanProject))
 
         let temporary = URL(fileURLWithPath: "/private/tmp/pinna-mac-checks-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
