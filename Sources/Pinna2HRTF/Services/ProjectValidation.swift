@@ -36,6 +36,12 @@ enum ProjectValidation {
         if post.normalize { fields.append(("postprocessing.level_offset", post.levelOffsetDB)) }
         if post.resampleHrirs { fields.append(("postprocessing.sampling_rate", post.samplingRate)) }
         var errors = fields.compactMap { id, value in fieldMessage(id, text: value).map { (id: id, message: $0) } }
+        if post.spatialUpsampling {
+            if !(0...5).contains(post.spatialSubdivisions) { errors.append(("postprocessing.spatial_subdivisions", "Choose a subdivision level from 0 to 5.")) }
+            if EarSide.allCases.contains(where: { project.pipelineEar(for: $0, inspection: inspection).isEmpty }) {
+                errors.append(("postprocessing.spatial_upsampling", "Spatial upsampling requires both left and right ears."))
+            }
+        }
         if let min = Int(pre.minFrequency), let max = Int(pre.maxFrequency), max <= min {
             errors.append(("mesh2hrtf.max_frequency", "Max frequency must be greater than min frequency."))
         }

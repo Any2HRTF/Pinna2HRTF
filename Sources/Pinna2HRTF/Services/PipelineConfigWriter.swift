@@ -119,7 +119,10 @@ enum PipelineConfigWriter {
                 "enabled": false, "overwrite": true,
                 "output_sofa_dir": post.outputFolder ?? URL(fileURLWithPath: project.saveLocation).appendingPathComponent("HRTF").path,
                 "normalize": post.normalize, "level_offset_db": number(post.levelOffsetDB, fallback: -30),
-                "resample_hrirs": post.resampleHrirs, "sampling_rate": post.normalizedSamplingRate
+                "resample_hrirs": post.resampleHrirs, "sampling_rate": post.normalizedSamplingRate,
+                "spatial_upsampling": post.spatialUpsampling, "spatial_subdivisions": post.spatialSubdivisions,
+                "spatial_normalize": post.spatialNormalize,
+                "matlab_executable": nullable(post.matlabExecutable), "amt_path": nullable(post.amtPath)
             ]
         ]
     }

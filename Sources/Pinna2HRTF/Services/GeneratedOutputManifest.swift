@@ -214,6 +214,8 @@ final class GeneratedOutputManifest {
         path.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
     }
     static func classify(_ path: String) -> OutputStage? {
+        if match(path, #"^HRTF/Upsampled/HRIR_[^/]+/(hrtf_Nd=[0-5](_dense)?\.sofa|upsampling_report\.(txt|mat)|upsampling\.json)$"#) { return .postprocessing }
+        if match(path, #"^HRTF/\.pinna2hrtf-upsampling-[a-z0-9_]{8}/(plan\.json|Upsampled/HRIR_[^/]+/(hrtf_Nd=[0-5](_dense)?\.sofa|upsampling_report\.(txt|mat)|upsampling\.json))$"#) { return .postprocessing }
         if match(path, #"^Manual PPM/((Left|Right)\.(stl|json|blend[0-9]*)|PPM\.blend[0-9]*|Templates/[0-9a-f-]{36}-PPM\.blend[0-9]*)$"#) { return .preprocessing }
         if match(path, #"^MeshEdits/((Left|Right)\.(stl|json)|AlignedScan\.(ply|json))$"#) { return .scanPreparation }
         if match(path, #"^Prepared/inference\.json$"#) { return .inference }

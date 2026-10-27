@@ -200,6 +200,11 @@ class PostprocessingConfig(BaseModel):
     sampling_rate: int = Field(default=48000, ge=2)
     normalize: bool = True
     level_offset_db: float = -30.0
+    spatial_upsampling: bool = False
+    spatial_subdivisions: int = Field(default=3, ge=0, le=5)
+    spatial_normalize: bool = True
+    matlab_executable: Path | None = None
+    amt_path: Path | None = None
 
     @field_validator("sampling_rate")
     @classmethod

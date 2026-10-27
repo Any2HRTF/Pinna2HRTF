@@ -111,6 +111,18 @@ struct ProjectInspectorView: View {
                     LabeledTextField("Level offset (dB)", helpID: "postprocessing.level_offset", text: postprocessingLevelOffsetBinding, fieldEnabled: postprocessingNormalizeBinding.wrappedValue)
                     SettingToggle(title: "Resample HRIRs", helpID: "postprocessing.resample_hrirs", isOn: postprocessingResampleBinding)
                     LabeledTextField("Sampling rate (Hz)", helpID: "postprocessing.sampling_rate", text: postprocessingSamplingRateBinding, fieldEnabled: postprocessingResampleBinding.wrappedValue)
+                    SettingToggle(title: "Spatially upsample HRTFs (LocaDyn)", helpID: "postprocessing.spatial_upsampling", isOn: postprocessingValue(\.spatialUpsampling))
+                    if store.selectedProject?.settings.postprocessing?.spatialUpsampling == true {
+                        Stepper("Subdivision level: \(postprocessingValue(\.spatialSubdivisions).wrappedValue)", value: postprocessingValue(\.spatialSubdivisions), in: 0...5)
+                        SettingToggle(title: "Normalize dense HRTFs (LocaDyn)", helpID: "postprocessing.spatial_normalize", isOn: postprocessingValue(\.spatialNormalize))
+                        Text("Adds source directions using the EvaPPM LocaDyn method. Sampling rate and HRIR length stay the same. Dense SOFA files are saved in the Upsampled subfolder. Requires MATLAB and AMT.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        DisclosureGroup("MATLAB and AMT") {
+                            PathField("MATLAB executable (optional)", helpID: "postprocessing.matlab_executable", text: postprocessingOptionalPath(\.matlabExecutable), mode: .file)
+                            PathField("AMT folder (optional)", helpID: "postprocessing.amt_path", text: postprocessingOptionalPath(\.amtPath), mode: .directory)
+                            Text("Leave blank to use automatic detection.").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
         }
@@ -358,6 +370,24 @@ struct ProjectInspectorView: View {
                 }
             }
         )
+    }
+
+    func postprocessingValue<T>(_ keyPath: WritableKeyPath<PostprocessingSettings, T>) -> Binding<T> {
+        Binding(get: { (store.selectedProject?.settings.postprocessing ?? PostprocessingSettings())[keyPath: keyPath] }, set: { value in
+            store.updateSelectedProject {
+                var settings = $0.settings.postprocessing ?? PostprocessingSettings()
+                settings[keyPath: keyPath] = value
+                $0.settings.postprocessing = settings
+            }
+        })
+    }
+
+    func postprocessingOptionalPath(_ keyPath: WritableKeyPath<PostprocessingSettings, String?>) -> Binding<String> {
+        let value = postprocessingValue(keyPath)
+        return Binding(get: { value.wrappedValue ?? "" }, set: {
+            let path = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            value.wrappedValue = path.isEmpty ? nil : path
+        })
     }
 
     var postprocessingOutputFolderBinding: Binding<String> {

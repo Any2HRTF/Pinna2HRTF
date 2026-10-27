@@ -361,3 +361,13 @@ The packaged app is written to `dist\windows\Pinna2HRTF`.
 ## License
 
 [European Union Public Licence 1.2](LICENSE). Bundled dependencies retain their own licences.
+
+### Optional spatial HRTF upsampling
+
+In the Mac app, open **Postprocessing** and enable **Spatially upsample HRTFs (LocaDyn)**. This uses the original EvaPPM `upsample_hrtf.m` implementation (ExpSuite/LocaDyn revision 1948), bundled with its license notices. It adds spatial source directions and preserves sampling rate and HRIR length. It is separate from HRIR sample-rate resampling.
+
+MATLAB and AMT are required, including MATLAB Signal Processing, Optimization and Statistics toolboxes. The app detects installed macOS MATLAB applications and the AMT folders `~/Documents/Uni/MATLAB/amtoolbox` and `~/Documents/MATLAB/amtoolbox`; optional paths can be selected in the postprocessing panel. Both ears must be exported.
+
+Subdivision levels 0–5 are supported; the default is 3. Dense-only export, minimum-phase TOA removal and symmetric receiver metadata match EvaPPM's experiment preparation. **Normalize dense HRTFs (LocaDyn)** defaults on and applies the script's frontal -40 dB reference; disable it to preserve input levels. Dense SOFA files and upsampling reports are saved under `HRTF/Upsampled/HRIR_<name>/`, alongside the original SOFA exports. Reset Outputs includes these generated files.
+
+The corresponding YAML options are `postprocessing.spatial_upsampling`, `spatial_subdivisions`, `spatial_normalize`, `matlab_executable`, and `amt_path`. Upsampling is off for existing projects unless explicitly enabled.

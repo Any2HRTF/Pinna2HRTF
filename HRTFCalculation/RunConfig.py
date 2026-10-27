@@ -315,6 +315,9 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
         return
     import mesh2hrtf as m2h
     output_dir = config.postprocessing.output_sofa_dir
+    if config.postprocessing.spatial_upsampling:
+        from .Postprocessing.spatial_upsampling import resolve_dependencies
+        resolve_dependencies(config.postprocessing)
     prepare_sofa_output(output_dir, config.postprocessing.overwrite)
     projects = project_dirs(config)
     for project in projects:
@@ -333,6 +336,10 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
     if len(projects) == 2:
         emit_live_event("Combining left and right results")
     collect_sofa_files(projects, output_dir)
+    if config.postprocessing.spatial_upsampling:
+        from .Postprocessing.spatial_upsampling import upsample_hrtf_files
+        emit_live_event("Spatially upsampling HRTFs with LocaDyn")
+        upsample_hrtf_files(output_dir, config.postprocessing, logger)
     try:
         emit_live_event("Creating SOFA inspection plots")
         inspect_sofa_files(output_dir)

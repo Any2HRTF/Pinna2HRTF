@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-"$ROOT/.venv/bin/python" -m unittest discover -s Tests -p 'test_*.py'
+"${PINNA2HRTF_PYTHON:-$ROOT/.venv/bin/python}" -m unittest discover -s Tests -p 'test_*.py'
 if [[ "$(uname -s)" != Darwin ]]; then exit 0; fi
 SDK_PATH="$(xcrun --sdk "${PINNA2HRTF_MACOS_SDK:-macosx26.5}" --show-sdk-path)"
 SDK_SWIFT_INTERFACE="$(find "$SDK_PATH/usr/lib/swift/Swift.swiftmodule" -name '*-apple-macos.swiftinterface' -print -quit)"
@@ -15,7 +15,7 @@ CLANG_MODULE_CACHE_PATH=/private/tmp/pinna2hrtf-clang-cache swiftc -sdk "$SDK_PA
   Sources/Pinna2HRTF/Services/ProjectConfigDocument.swift Sources/Pinna2HRTF/Services/ProjectDuplicator.swift Sources/Pinna2HRTF/Services/ProjectValidation.swift \
   Sources/Pinna2HRTF/Services/PipelineConfigWriter.swift Sources/Pinna2HRTF/Services/ArtifactScanner.swift \
   Sources/Pinna2HRTF/Services/GeneratedOutputManifest.swift Sources/Pinna2HRTF/Services/PipelineLogCapture.swift \
-  Sources/Pinna2HRTF/Services/ProjectStatusSnapshot.swift Tests/ProjectStatusSnapshotChecks.swift Sources/Pinna2HRTF/Services/ProcessTreeTerminator.swift Tests/ProcessChecks.swift Tests/ProjectDuplicationChecks.swift Tests/OutputResetChecks.swift Tests/ScanPreparationChecks.swift -o "$CHECK_BIN"
+  Sources/Pinna2HRTF/Services/ProjectStatusSnapshot.swift Tests/ProjectStatusSnapshotChecks.swift Tests/SpatialUpsamplingChecks.swift Sources/Pinna2HRTF/Services/ProcessTreeTerminator.swift Tests/ProcessChecks.swift Tests/ProjectDuplicationChecks.swift Tests/OutputResetChecks.swift Tests/ScanPreparationChecks.swift -o "$CHECK_BIN"
 "$CHECK_BIN"
 
 CLANG_MODULE_CACHE_PATH=/private/tmp/pinna2hrtf-clang-cache swiftc -sdk "$SDK_PATH" \

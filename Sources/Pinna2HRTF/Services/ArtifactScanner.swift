@@ -239,7 +239,8 @@ enum ArtifactScanner {
                     || numcalcIsComplete(folder, inspection: inspection)
             }
         case .postprocessing:
-            return containsSOFA(postprocessingDirectory(for: project), inspection: inspection)
+            let folder = postprocessingDirectory(for: project)
+            return containsSOFA(folder, inspection: inspection) && spatialUpsamplingIsCurrent(project, inspection: inspection)
         }
     }
 
@@ -351,6 +352,25 @@ enum ArtifactScanner {
     static func postprocessingDirectory(for project: ProjectRecord) -> URL {
         if let folder = project.settings.postprocessing?.outputFolder { return URL(fileURLWithPath: folder) }
         return URL(fileURLWithPath: project.saveLocation, isDirectory: true).appendingPathComponent("HRTF")
+    }
+
+    static func spatialUpsamplingIsCurrent(_ project: ProjectRecord, inspection: Inspection = Inspection()) -> Bool {
+        let settings = project.settings.postprocessing ?? PostprocessingSettings()
+        guard settings.spatialUpsampling else { return true }
+        let root = postprocessingDirectory(for: project)
+        guard let files = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { return false }
+        let sources = files.filter { $0.lastPathComponent.hasPrefix("HRIR_") && $0.pathExtension.lowercased() == "sofa" }
+        let denseName = "hrtf_Nd=\(settings.spatialSubdivisions)\(settings.spatialSubdivisions == 0 ? "_dense" : "").sofa"
+        return !sources.isEmpty && sources.allSatisfy { source in
+            let folder = root.appendingPathComponent("Upsampled/\(source.deletingPathExtension().lastPathComponent)", isDirectory: true)
+            let target = folder.appendingPathComponent(denseName, isDirectory: false)
+            guard let receipt = inspection.document(folder.appendingPathComponent("upsampling.json", isDirectory: false)),
+                  receipt["method"] as? String == "LocaDyn-1948",
+                  receipt["subdivisions"] as? Int == settings.spatialSubdivisions,
+                  receipt["normalize"] as? Bool == settings.spatialNormalize,
+                  let inputStamp = receipt["input"] as? [String: Any], let outputStamp = receipt["output"] as? [String: Any] else { return false }
+            return matchesStamp(source, inputStamp, inspection: inspection) && matchesStamp(target, outputStamp, inspection: inspection) && isSOFAContainer(target, inspection: inspection)
+        }
     }
 
     static func fileHasData(_ url: URL, inspection: Inspection = Inspection()) -> Bool {

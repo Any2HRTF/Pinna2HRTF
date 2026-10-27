@@ -75,7 +75,7 @@ enum ProjectConfigDocument {
             "manual_ppm": ["enabled", "left_mesh", "right_mesh", "left_parameters", "right_parameters", "left_blend", "right_blend", "left_source", "right_source", "left_source_identity", "right_source_identity", "template_blend"],
             "preprocessing": ["title", "head_radius", "min_frequency", "max_frequency", "frequency_step_count", "source_assignment_face_count", "source_position_input_left", "source_position_input_right", "mesh_min_edge_length", "mesh_max_edge_length", "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite", "skip_mesh_grading"],
             "numcalc": ["max_instances", "max_cpu_load", "adaptive_fmm_length"],
-            "postprocessing": ["output_sofa_dir", "normalize", "level_offset_db", "resample_hrirs", "sampling_rate"]
+            "postprocessing": ["output_sofa_dir", "normalize", "level_offset_db", "resample_hrirs", "sampling_rate", "spatial_upsampling", "spatial_subdivisions", "spatial_normalize", "matlab_executable", "amt_path"]
         ]
         for (section, keys) in editable {
             var values = saved[section] as? [String: Any] ?? current[section] as? [String: Any] ?? [:]
@@ -201,6 +201,11 @@ enum ProjectConfigDocument {
         restoredPost.levelOffsetDB = text(post, "level_offset_db") ?? "-30"
         restoredPost.resampleHrirs = bool(post, "resample_hrirs") ?? false
         restoredPost.samplingRate = text(post, "sampling_rate") ?? "48000"
+        restoredPost.spatialUpsampling = bool(post, "spatial_upsampling") ?? false
+        restoredPost.spatialSubdivisions = Int(text(post, "spatial_subdivisions") ?? "3") ?? 3
+        restoredPost.spatialNormalize = bool(post, "spatial_normalize") ?? true
+        restoredPost.matlabExecutable = text(post, "matlab_executable").map(relocated)
+        restoredPost.amtPath = text(post, "amt_path").map(relocated)
         restoredPost.outputFolder = text(post, "output_sofa_dir").map(relocated)
         project.settings.postprocessing = restoredPost
         project.preservedConfigJSON = String(data: try JSONSerialization.data(withJSONObject: config, options: [.sortedKeys]), encoding: .utf8)

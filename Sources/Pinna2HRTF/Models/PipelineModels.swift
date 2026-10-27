@@ -228,9 +228,15 @@ struct PostprocessingSettings: Codable, Equatable {
     var resampleHrirs = false
     var samplingRate = "48000"
     var outputFolder: String?
+    var spatialUpsampling = false
+    var spatialSubdivisions = 3
+    var spatialNormalize = true
+    var matlabExecutable: String?
+    var amtPath: String?
 
     enum CodingKeys: String, CodingKey {
         case normalize, levelOffsetDB, resampleHrirs, samplingRate, outputFolder
+        case spatialUpsampling, spatialSubdivisions, spatialNormalize, matlabExecutable, amtPath
     }
 
     init() {}
@@ -242,6 +248,11 @@ struct PostprocessingSettings: Codable, Equatable {
         resampleHrirs = try values.decodeIfPresent(Bool.self, forKey: .resampleHrirs) ?? false
         samplingRate = try values.decodeIfPresent(String.self, forKey: .samplingRate) ?? "48000"
         outputFolder = try values.decodeIfPresent(String.self, forKey: .outputFolder)
+        spatialUpsampling = try values.decodeIfPresent(Bool.self, forKey: .spatialUpsampling) ?? false
+        spatialSubdivisions = try values.decodeIfPresent(Int.self, forKey: .spatialSubdivisions) ?? 3
+        spatialNormalize = try values.decodeIfPresent(Bool.self, forKey: .spatialNormalize) ?? true
+        matlabExecutable = try values.decodeIfPresent(String.self, forKey: .matlabExecutable)
+        amtPath = try values.decodeIfPresent(String.self, forKey: .amtPath)
     }
 
     var normalizedSamplingRate: Int {

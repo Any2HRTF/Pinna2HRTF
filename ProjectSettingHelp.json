@@ -234,5 +234,29 @@
     "title": "Outer crop limit",
     "description": "Outer lateral crop distance in millimeters before the margin is applied, default 110.",
     "publications": []
+  },
+  {
+    "id": "postprocessing.spatial_upsampling",
+    "title": "Spatial HRTF upsampling",
+    "description": "Runs the original EvaPPM ExpSuite/LocaDyn revision 1948 method with minimum-phase TOA removal, symmetric receiver metadata and dense-only output. Adds spatial directions without changing sampling rate or HRIR length. Requires MATLAB, AMT and its Signal Processing, Optimization and Statistics toolbox dependencies. Default subdivision level is 3. Originals are kept; dense exports and reports are written to Upsampled.",
+    "publications": []
+  },
+  {
+    "id": "postprocessing.spatial_normalize",
+    "title": "LocaDyn normalization",
+    "description": "Matches the EvaPPM script default: rescales using the frontal (0°, 0°) HRIR to its -40 dB reference. This changes dense-export levels independently of the normal postprocessing level offset. Turn off to preserve the input levels.",
+    "publications": []
+  },
+  {
+    "id": "postprocessing.matlab_executable",
+    "title": "MATLAB executable",
+    "description": "Optional path to the MATLAB executable, such as /Applications/MATLAB_R2024b.app/bin/matlab. Leave blank to search PATH and installed macOS MATLAB applications.",
+    "publications": []
+  },
+  {
+    "id": "postprocessing.amt_path",
+    "title": "Auditory Modeling Toolbox folder",
+    "description": "Optional folder containing amt_start.m. When blank, searches Documents/Uni/MATLAB/amtoolbox and Documents/MATLAB/amtoolbox in your home folder.",
+    "publications": []
   }
 ]
