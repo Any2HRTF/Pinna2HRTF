@@ -165,6 +165,16 @@ path.write_text("\n".join(next_lines) + "\n")
 PY
 find "$RESOURCES/.venv/bin" -mindepth 1 -maxdepth 1 ! -name python ! -name python3 ! -name python3.11 -exec rm -rf {} +
 find "$RESOURCES" -type d -name __pycache__ -prune -exec rm -rf {} +
+# Blender can initialize Python with its own cache settings. Precompile its
+# bundled startup/add-on scripts so first launch cannot add sealed resources.
+PYTHONPYCACHEPREFIX="" "$RESOURCES/.venv/bin/python" - <<'PYBLENDERCACHE'
+import compileall
+from pathlib import Path
+import sysconfig
+for scripts in (Path(sysconfig.get_path("purelib")) / "bpy").glob("*/scripts"):
+    if not compileall.compile_dir(scripts, quiet=1, workers=1):
+        raise SystemExit("Could not prepare Blender's bundled bytecode cache")
+PYBLENDERCACHE
 find "$RESOURCES" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
