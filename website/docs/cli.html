@@ -7,11 +7,12 @@
 </head>
 <body><a class="skip-link" href="#main">Skip to content</a><div class="docs-frame">
   <header class="docs-header"><a class="brand" href="../" aria-label="Pinna2HRTF home"><img src="../assets/app-icon.webp" alt=""><strong>Pinna2HRTF</strong></a><nav class="top-nav" aria-label="Main navigation"><a href="../">Home</a><a href="../#downloads">Downloads</a><a href="index.html" aria-current="page">Documentation</a></nav></header>
-  <div class="docs-layout"><aside class="docs-sidebar"><p class="sidebar-label">Documentation</p><nav class="sidebar-links" aria-label="Documentation pages"><a href="index.html">Overview</a><a href="desktop-app.html">Desktop app</a><a href="scan-preparation.html">Scan preparation &amp; ear editing</a><a href="cli.html" aria-current="page">Python CLI</a><a href="building.html">Build from source</a></nav></aside>
+  <div class="docs-layout"><aside class="docs-sidebar"><p class="sidebar-label">Documentation</p><nav class="sidebar-links" aria-label="Documentation pages"><a href="index.html">Overview</a><a href="desktop-app.html">Desktop app</a><a href="scan-preparation.html">Scan preparation &amp; ear editing</a><a href="cli.html" aria-current="page">Python CLI</a><a href="building.html">Build from source</a></nav><nav class="on-this-page" aria-label="On this page"><p class="sidebar-label">On this page</p><a href="#install-the-python-environment">Install the Python environment</a><a href="#available-stages">Available stages</a><a href="#configure-a-run">Configure a run</a><a href="#scan-preparation-from-yaml">Scan preparation from YAML</a><a href="#run-individual-stages-without-yaml">Run individual stages without YAML</a></nav></aside>
     <main class="docs-content" id="main">
+      <p class="guide-status">SOURCE GUIDE <span>/</span> Features may differ from the published installer. Check your release before following a workflow.</p>
       <p class="kicker"><span class="dot" aria-hidden="true"></span> PYTHON CLI</p><h1>Run the pipeline from a terminal.</h1>
       <p class="lede">The CLI exposes scan preparation, optional Mesh2PPM inference, simulation preprocessing, NumCalc, and postprocessing. Run individual stages or drive them from one YAML configuration.</p>
-      <h2>Install the Python environment</h2><p>Install <a href="https://git-scm.com/install/">Git</a> and <a href="https://docs.astral.sh/uv/getting-started/installation/">uv</a>, then clone the repository and create the locked Python 3.11 environment:</p>
+      <h2 id="install-the-python-environment">Install the Python environment</h2><p>Install <a href="https://git-scm.com/install/">Git</a> and <a href="https://docs.astral.sh/uv/getting-started/installation/">uv</a>, then clone the repository and create the locked Python 3.11 environment:</p>
       <pre><code>git clone https://github.com/Any2HRTF/Pinna2HRTF.git
 cd Pinna2HRTF
 uv sync --locked --python 3.11</code></pre>
@@ -21,7 +22,7 @@ bash Scripts/prepare_external_tools.sh</code></pre>
 .\Scripts\prepare_windows_external_tools.ps1</code></pre>
       <p>The setup scripts download and build native dependencies. macOS requires Xcode Command Line Tools. Linux requires a C/C++ toolchain, Make, and the system libraries needed by Blender <code>bpy</code>. The Windows script installs MSYS2 if it is not already available.</p>
       <p>For help, run <code>uv run Pinna2HRTF --help</code> or add <code>--help</code> to a subcommand.</p>
-      <h2>Available stages</h2><div class="table-wrap"><table><thead><tr><th>Command</th><th>Purpose</th><th>Typical inputs / outputs</th></tr></thead><tbody>
+      <h2 id="available-stages">Available stages</h2><div class="table-wrap"><table><thead><tr><th>Command</th><th>Purpose</th><th>Typical inputs / outputs</th></tr></thead><tbody>
         <tr><td><code>scan-preparation</code></td><td>Extract and validate selected ears from a full-head scan.</td><td>Scan path and crop rotation; creates <code>Prepared/</code> ear meshes and report.</td></tr>
         <tr><td><code>inference</code></td><td>Optionally run Mesh2PPM to predict ear geometry.</td><td>Ear STL meshes; writes predictions under <code>Intermediates/</code>.</td></tr>
         <tr><td><code>preprocessing</code></td><td>Build the Mesh2HRTF simulation project.</td><td>One or two ear meshes; creates <code>Projects/</code>.</td></tr>
@@ -30,15 +31,16 @@ bash Scripts/prepare_external_tools.sh</code></pre>
         <tr><td><code>postprocessing</code></td><td>Normalize simulation output and optionally resample HRIRs.</td><td>Writes processed SOFA files to the configured output directory.</td></tr>
         <tr><td><code>run-config</code></td><td>Run configured stages in sequence or create a YAML template.</td><td>Configuration file; stages selected with <code>--stage</code>.</td></tr>
       </tbody></table></div>
-      <h2>Configure a run</h2><p>Create a complete configuration template:</p><pre><code>uv run Pinna2HRTF run-config --write-template pinna2hrtf.yaml</code></pre>
+      <h2 id="configure-a-run">Configure a run</h2><p>Create a complete configuration template:</p><pre><code>uv run Pinna2HRTF run-config --write-template pinna2hrtf.yaml</code></pre>
       <p>Edit input paths, output directory, external tool locations, evaluation grid, frequency range, and stage settings. Relative paths resolve from the YAML file’s directory. Set an unused ear to <code>null</code>. Mesh2PPM inference is disabled in the template, and preprocessing uses original meshes unless <code>inference.use_predictions_for_preprocessing</code> is set to <code>true</code>.</p>
-      <p>Run all enabled stages in order, or select a stage explicitly:</p><pre><code>uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage all
+      <p>Inspect the planned run first:</p><pre><code>uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage all --dry-run</code></pre>
+      <p>Then run all enabled stages, or run a single stage:</p><pre><code>uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage all
 uv run Pinna2HRTF preprocessing --config pinna2hrtf.yaml
 uv run Pinna2HRTF numcalc --config pinna2hrtf.yaml</code></pre>
       <p>Run multiple selected stages by repeating <code>--stage</code>. An explicitly selected stage runs even when its YAML <code>enabled</code> value is false. Add <code>--dry-run</code> to inspect a config-based run without executing the stages. YAML runs write left and right simulation projects under <code>Projects/Left</code> and <code>Projects/Right</code> in the output folder.</p>
       <h3>Postprocessing defaults</h3><p>YAML postprocessing normalizes output with a −30 dB level offset and replaces its output folder by default. Set <code>postprocessing.normalize: false</code> to skip normalization, <code>postprocessing.overwrite: false</code> to preserve an existing output folder, or <code>postprocessing.resample_hrirs: true</code> to resample HRIR files. Resampling defaults to 48,000 Hz. It changes HRIRs only; HRTF files are not resampled. Direct SOFA commands without a YAML config do not apply the level offset.</p>
       <h3>Slurm</h3><p>Set <code>numcalc.mode: slurm</code> and configure the cluster partition, QoS, memory, time limit, and array concurrency in the YAML file. The Slurm worker skips existing frequency output folders; remove incomplete step folders before resubmitting.</p>
-      <h2>Scan preparation from YAML</h2><p>Enable <code>scan_preparation</code>, choose a scan and explicit crop rotation, and select the ears. The <a href="scan-preparation.html">scan guide</a> explains alignment, orientation checks, manual review, and provenance.</p>
+      <h2 id="scan-preparation-from-yaml">Scan preparation from YAML</h2><p>Enable <code>scan_preparation</code>, choose a scan and explicit crop rotation, and select the ears. The <a href="scan-preparation.html">scan guide</a> explains alignment, orientation checks, manual review, and provenance.</p>
       <pre><code>scan_preparation:
   enabled: true
   scan_path: /path/to/edited-head.stl
@@ -49,7 +51,7 @@ uv run Pinna2HRTF numcalc --config pinna2hrtf.yaml</code></pre>
   require_manual_review: false
   reviewed_left: null
   reviewed_right: null</code></pre>
-      <h2>Run individual stages without YAML</h2><p>Every stage supports command-line options; inspect the current option list with its help flag. For example:</p><pre><code>uv run Pinna2HRTF scan-preparation --help
+      <h2 id="run-individual-stages-without-yaml">Run individual stages without YAML</h2><p>Every stage supports command-line options; inspect the current option list with its help flag. For example:</p><pre><code>uv run Pinna2HRTF scan-preparation --help
 uv run Pinna2HRTF preprocessing --help
 uv run Pinna2HRTF numcalc --help</code></pre>
       <p>Keep a separate output folder for each experiment and inspect the geometry and source placement after preprocessing before starting a long simulation.</p>

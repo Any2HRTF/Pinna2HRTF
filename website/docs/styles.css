@@ -90,3 +90,27 @@ tr:last-child td { border-bottom: 0; }
   .top-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* Compact reference navigation, using the same ruled-paper visual language. */
+.guide-status { padding-bottom: 12px; margin-bottom: 26px; border-bottom: 1px solid var(--rule); color: var(--muted); font: 11px/1.6 var(--mono); }
+.guide-status span { padding: 0 6px; }
+.on-this-page { display: grid; gap: 8px; margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--rule); }
+.on-this-page a { font-size: 12px; line-height: 1.4; text-decoration: none; color: var(--muted); }
+.on-this-page a:hover { color: var(--ink); text-decoration: underline; }
+h2[id] { scroll-margin-top: 24px; }
+details { margin: 24px 0; padding: 14px 16px; border: 1px solid var(--rule); }
+summary { cursor: pointer; font-weight: 650; }
+details[open] summary { margin-bottom: 14px; }
+.troubleshooting dt { margin-top: 20px; font-weight: 700; }
+.troubleshooting dd { margin: 5px 0 18px; color: var(--muted); }
+@media (min-width: 761px) {
+  .docs-sidebar { position: sticky; top: 16px; align-self: start; max-height: calc(100vh - 32px); overflow-y: auto; }
+}
+@media print {
+  body { padding: 0; background: white; }
+  .docs-frame { border: 0; }
+  .docs-layout { display: block; }
+  .docs-sidebar, .top-nav, .docs-footer, .skip-link { display: none; }
+  .docs-content { padding: 20px 0; }
+  pre { white-space: pre-wrap; }
+}
