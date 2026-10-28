@@ -114,3 +114,8 @@ details[open] summary { margin-bottom: 14px; }
   .docs-content { padding: 20px 0; }
   pre { white-space: pre-wrap; }
 }
+
+/* Screenshots retain their native macOS window edges. */
+figure { border: 0; background: transparent; }
+figure > a { display: block; }
+figcaption { border-top: 0; padding: 10px 0; }
