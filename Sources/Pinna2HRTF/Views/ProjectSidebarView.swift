@@ -2,37 +2,30 @@ import SwiftUI
 
 struct ProjectSidebarView: View {
     @ObservedObject var store: AppStore
+    @State private var showingFolderEditor = false
+    @State private var folderName = ""
+    @State private var editingFolderID: UUID?
+    @State private var movingProjectID: UUID?
+    @State private var selectedFolderID: UUID?
+
 
     var body: some View {
-        List(selection: $store.selectedProjectID) {
-            Section("Projects") {
-                if store.projects.isEmpty {
-                    Text("No Projects")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(store.projects) { project in
-                        ProjectRow(project: project, runningStage: store.runningStages[project.id])
-                            .tag(project.id)
-                            .contextMenu {
-                                Button("Duplicate Project") {
-                                    store.selectedProjectID = project.id
-                                    store.duplicateSelectedProject()
-                                }
-                                Button("Remove Project") {
-                                    store.selectedProjectID = project.id
-                                    store.forgetSelectedProject()
-                                }
-                            }
-                    }
-                    .onMove { source, destination in
-                        store.projects.move(fromOffsets: source, toOffset: destination)
-                        store.persist()
+        VStack(spacing: 0) {
+            if let message = store.persistenceMessage {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(message).font(.caption).foregroundStyle(.orange)
+                    if store.registryStore.savingBlocked {
+                        Button("Review recovery options") { store.registryRecoveryPresented = true }
                     }
                 }
+                .padding(10)
+            }
+            NativeProjectSidebar(store: store, selectedFolderID: $selectedFolderID) { folder, projectID in
+                editFolder(folder, moving: projectID)
             }
         }
-        .listStyle(.sidebar)
         .navigationTitle("Projects")
+        .onChange(of: store.selectedProjectID) { _ in selectedFolderID = nil }
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 8) {
                 Button {
@@ -43,17 +36,26 @@ struct ProjectSidebarView: View {
                 }
                 .help("Create a new empty project")
                 Button(role: .destructive) {
-                    store.forgetSelectedProject()
+                    if let id = selectedFolderID {
+                        selectedFolderID = nil
+                        store.removeFolder(id)
+                    } else {
+                        store.removeSelectedProject()
+                    }
                 } label: {
-                    Label("Remove Project", systemImage: "minus")
+                    Label(selectedFolderID == nil ? "Remove Project" : "Remove Folder", systemImage: "minus")
                         .frame(width: 28, height: 28)
                 }
-                .help("Remove the selected project from Pinna2HRTF")
-                .disabled(store.selectedProject == nil)
+                .help(selectedFolderID == nil ? "Move the selected project folder to Trash" : "Remove the selected folder and keep its projects")
+                .disabled(selectedFolderID == nil && !store.canRemoveSelectedProject)
+                Button { editFolder() } label: {
+                    Label("New Folder", systemImage: "folder.badge.plus").frame(width: 28, height: 28)
+                }
+                .help("Create a folder to organize projects")
                 Button {
                     store.importProject()
                 } label: {
-                    Label("Import Project", systemImage: "folder.badge.plus")
+                    Label("Import Project", systemImage: "square.and.arrow.down")
                         .frame(width: 28, height: 28)
                 }
                 .help("Import an existing project folder")
@@ -65,10 +67,7 @@ struct ProjectSidebarView: View {
                 }
                 .help("Duplicate the selected project, including its results")
                 .disabled(store.selectedProject == nil)
-                Spacer()
-                Text(projectCountText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
             }
             .buttonStyle(.borderless)
             .labelStyle(.iconOnly)
@@ -76,17 +75,52 @@ struct ProjectSidebarView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
         }
+        .sheet(isPresented: $showingFolderEditor) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(editingFolderID == nil ? "New Folder" : "Rename Folder")
+                    .font(.headline)
+                TextField("Folder name", text: $folderName)
+                    .onSubmit { saveFolder() }
+                HStack {
+                    Spacer()
+                    Button("Cancel") { showingFolderEditor = false }
+                        .keyboardShortcut(.cancelAction)
+                    Button("Save") { saveFolder() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(folderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding(20)
+            .frame(width: 300)
+        }
         .modifier(WorkspaceScrollEdges())
     }
 
-    var projectCountText: String {
-        store.projects.count == 1 ? "1 project" : "\(store.projects.count) projects"
+    private func editFolder(_ folder: ProjectFolder? = nil, moving projectID: UUID? = nil) {
+        editingFolderID = folder?.id
+        movingProjectID = projectID
+        folderName = folder?.name ?? ""
+        showingFolderEditor = true
     }
+
+    private func saveFolder() {
+        let name = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        if let id = editingFolderID {
+            store.renameFolder(id, to: name)
+        } else {
+            let id = store.createFolder(named: name)
+            if let projectID = movingProjectID { store.moveProject(projectID, toFolder: id) }
+        }
+        showingFolderEditor = false
+    }
+
 }
 
 struct ProjectRow: View {
     let project: ProjectRecord
     let runningStage: Stage?
+    let summary: String
 
     var body: some View {
         HStack(spacing: 10) {
@@ -96,7 +130,7 @@ struct ProjectRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(project.name)
                     .lineLimit(1)
-                Text(ArtifactScanner.summary(for: project))
+                Text(summary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

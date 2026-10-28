@@ -5,27 +5,78 @@ import SceneKit.ModelIO
 import AppKit
 import UserNotifications
 
+private struct ActivityLogEntry {
+    var date: Date
+    var message: String
+    var key: String?
+}
+
+private struct PipelineRun {
+    let process: Process
+    let stage: Stage
+}
+
 final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
-    @Published var projects: [ProjectRecord]
+    @Published var folders: [ProjectFolder]
+    @Published var projects: [ProjectRecord] {
+        didSet {
+            scheduleProjectSummaryRefresh()
+            refreshArtifacts()
+        }
+    }
+    @Published private(set) var projectSummaries: [UUID: String] = [:]
     @Published var selectedProjectID: UUID?
+    @Published private(set) var technicalLogURLs: [UUID: URL] = [:]
+    @Published private(set) var environmentTechnicalLogURL: URL?
     @Published var environment: EnvironmentConfig
+    @Published var persistenceMessage: String?
+    @Published var registryRecoveryPresented = false
+    @Published var projectRevealToken = UUID()
+    @Published private var stoppingProjects = Set<UUID>()
     @Published var logText = ""
+    @Published var selectedPressure: URL?
     @Published var selectedMesh: URL?
     @Published var selectedImage: NSImage?
     @Published var selectedScene = SCNScene()
-    @Published var selectedCameraState: ViewerCameraState?
+    // Camera persistence is internal state; publishing each redraw invalidates the viewer layout.
+    var selectedCameraState: ViewerCameraState?
     @Published var microphonePlacementSide: EarSide?
     @Published var pendingMicrophonePosition: ManualMicrophonePosition?
     @Published var microphonePlacementError: String?
+    @Published var meshEditorRequest: MeshEditorRequest?
+    @Published var meshEditorError: String?
+    @Published var ppmFittingRequest: PPMFittingRequest?
+    @Published var ppmFittingError: String?
+    @Published var projectDuplicationRequest: ProjectDuplicationRequest?
     @Published var artifacts: [Artifact] = []
+    @Published private(set) var isCheckingProjectFiles = false
+    @Published private var projectStatus: ProjectStatusSnapshot?
+    private var artifactRefreshID = UUID()
+    private var artifactRefreshWorkItem: DispatchWorkItem?
+    private let artifactRefreshQueue = DispatchQueue(label: "Pinna2HRTF.ProjectStatusRefresh", qos: .userInitiated, attributes: .concurrent)
+    private let solverRefreshQueue = DispatchQueue(label: "Pinna2HRTF.SolverStatusRefresh", qos: .utility)
+    private var statusRefreshProgress: Progress?
+
+    var selectedProjectStatus: ProjectStatusSnapshot? {
+        guard let status = projectStatus, status.project == selectedProject,
+              status.environment == environment else { return nil }
+        return status
+    }
+
+    var selectedValidationIssues: [(id: String, message: String)] { selectedProjectStatus?.issues ?? [] }
+
     @Published var stageStates: [Stage: StageState] = Dictionary(uniqueKeysWithValues: Stage.allCases.map { ($0, .ready) })
-    @Published var runningProcesses: [UUID: Process] = [:]
-    @Published var runningStages: [UUID: Stage] = [:]
+    @Published private var runs: [UUID: PipelineRun] = [:]
+    var runningProcesses: [UUID: Process] { runs.mapValues(\.process) }
+    var runningStages: [UUID: Stage] { runs.mapValues(\.stage) }
+    @Published private(set) var liveLogStatusByProject: [UUID: String] = [:]
     @Published var outputOperations = Set<UUID>()
+    @Published private var projectsBeingRemoved = Set<UUID>()
+
     private var outputStores: [String: GeneratedOutputManifest] = [:]
     @Published var environmentProcess: Process?
     @Published var failedStagesByProject: [UUID: Set<Stage>] = [:]
-    private var logTextByProject: [UUID: String] = [:]
+    private var logEntriesByProject: [UUID: [ActivityLogEntry]] = [:]
     private var viewerStateByProject: [UUID: ProjectViewerState] = [:]
     private var selectedCameraCenter = SCNVector3Zero
     private var selectedCameraScale: Double = 1
@@ -61,15 +112,35 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         if Defaults.isPackagedApp {
             registry.environment = Defaults.environment(root: rootURL)
         }
+        for index in registry.projects.indices {
+            for (stage, outcome) in registry.projects[index].stageOutcomes ?? [:] where outcome == .running {
+                registry.projects[index].stageOutcomes?[stage] = .stopped
+            }
+        }
+        folders = registry.folders
         projects = registry.projects
         selectedProjectID = registry.selectedProjectID ?? registry.projects.first?.id
         environment = registry.environment
         viewerStateByProject = Self.loadViewerStates()
         super.init()
-        if let error = registryStore.migrationError { appendLog(error) }
-        registryStore.save(ProjectRegistry(projects: projects, selectedProjectID: selectedProjectID, environment: environment))
-        refreshArtifacts()
-        restoreViewer()
+        let startupProjects = projects
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let environmentLog = Self.latestEnvironmentTechnicalLogURL()
+            DispatchQueue.main.async { [weak self] in self?.environmentTechnicalLogURL = environmentLog }
+            for project in startupProjects {
+                let log = Self.latestTechnicalLogURL(for: project)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.projects.contains(where: { $0.id == project.id }), self.technicalLogURLs[project.id] == nil else { return }
+                    self.technicalLogURLs[project.id] = log
+                }
+            }
+        }
+        registryStore.save(registry)
+        persistenceMessage = registryStore.lastError ?? registryStore.recoveryMessage
+        registryRecoveryPresented = registryStore.savingBlocked
+        scheduleProjectSummaryRefresh()
+        refreshArtifacts(restoringViewer: true)
+
     }
 
     var selectedProject: ProjectRecord? {
@@ -82,7 +153,12 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     var selectedProjectIsRunning: Bool {
         guard let selectedProject else { return false }
-        return runningProcesses[selectedProject.id] != nil || outputOperations.contains(selectedProject.id)
+        return runningProcesses[selectedProject.id] != nil
+            || outputOperations.contains(selectedProject.id)
+            || stoppingProjects.contains(selectedProject.id)
+            || meshEditorRequest?.projectID == selectedProject.id
+            || ppmFittingRequest?.projectID == selectedProject.id
+            || projectsBeingRemoved.contains(selectedProject.id)
     }
 
     var selectedProjectIsManagingOutputs: Bool {
@@ -91,8 +167,13 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     var selectedProjectHasGeneratedOutputs: Bool {
         guard let selectedProject else { return false }
-        guard (!selectedProject.leftEar.isEmpty || !selectedProject.rightEar.isEmpty) && !selectedProject.saveLocation.isEmpty else { return false }
-        return (selectedProject.settings.inference.usePredictionsForPreprocessing && ArtifactScanner.stageIsComplete(.inference, project: selectedProject)) || ArtifactScanner.stageIsComplete(.preprocessing, project: selectedProject) || ArtifactScanner.stageIsComplete(.numcalc, project: selectedProject) || ArtifactScanner.stageIsComplete(.postprocessing, project: selectedProject)
+        let fitting = selectedProject.settings.manualPPMFitting
+        if [fitting.leftMeshPath, fitting.rightMeshPath, fitting.leftParametersPath, fitting.rightParametersPath,
+            fitting.leftBlendPath, fitting.rightBlendPath, selectedProject.scanPreparation.reviewedLeftPath,
+            selectedProject.scanPreparation.reviewedRightPath, selectedProject.scanPreparation.originalScanPath == nil
+                ? nil : selectedProject.scanPreparation.scanPath].compactMap({ $0 }).contains(where: { FileManager.default.fileExists(atPath: $0) }) { return true }
+        guard (!selectedProject.pipelineLeftEar.isEmpty || !selectedProject.pipelineRightEar.isEmpty) && !selectedProject.saveLocation.isEmpty else { return false }
+        return (selectedProject.scanPreparation.enabled && ArtifactScanner.stageIsComplete(.scanPreparation, project: selectedProject)) || (selectedProject.settings.inference.usePredictionsForPreprocessing && ArtifactScanner.stageIsComplete(.inference, project: selectedProject)) || ArtifactScanner.stageIsComplete(.preprocessing, project: selectedProject) || ArtifactScanner.stageIsComplete(.numcalc, project: selectedProject) || ArtifactScanner.stageIsComplete(.postprocessing, project: selectedProject)
     }
 
     var inferenceResourceURL: URL {
@@ -105,11 +186,91 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     var registry: ProjectRegistry {
-        ProjectRegistry(projects: projects, selectedProjectID: selectedProjectID, environment: environment)
+        ProjectRegistry(projects: projects, selectedProjectID: selectedProjectID, environment: environment, folders: folders)
     }
 
     func persist() {
+        let wasBlocked = registryStore.savingBlocked
         registryStore.save(registry)
+        persistenceMessage = registryStore.lastError
+        if !wasBlocked && registryStore.savingBlocked { registryRecoveryPresented = true }
+    }
+
+    private func scheduleProjectSummaryRefresh() {
+        projectSummaries = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, ProjectStatusSnapshot.savedSummary(for: $0)) })
+    }
+
+    func recoverProjectRegistry() {
+        if registryStore.recover(using: registry) { persistenceMessage = nil }
+        else { persistenceMessage = registryStore.lastError }
+    }
+
+    func canRemoveProject(_ id: UUID) -> Bool {
+        projects.contains { $0.id == id }
+            && runningProcesses[id] == nil
+            && !outputOperations.contains(id)
+            && !stoppingProjects.contains(id)
+            && meshEditorRequest?.projectID != id
+            && !projectsBeingRemoved.contains(id)
+    }
+    var canRemoveSelectedProject: Bool { selectedProjectID.map(canRemoveProject) ?? false }
+
+    func revealSelectedProject() {
+        guard let project = selectedProject else { return }
+        if let index = folders.firstIndex(where: { $0.id == project.folderID }) {
+            folders[index].isExpanded = true
+            persist()
+        }
+        projectRevealToken = UUID()
+    }
+
+    func setStageOutcome(_ stage: Stage, for id: UUID, to outcome: StageState) {
+        guard let index = projects.firstIndex(where: { $0.id == id }) else { return }
+        var outcomes = projects[index].stageOutcomes ?? [:]
+        outcomes[stage.rawValue] = outcome
+        projects[index].stageOutcomes = outcomes
+        if outcome == .failed { failedStagesByProject[id, default: []].insert(stage) }
+        else { failedStagesByProject[id, default: []].remove(stage) }
+        persist()
+    }
+
+    @discardableResult
+    func createFolder(named name: String) -> UUID {
+        let folder = ProjectFolder(name: name)
+        folders.append(folder)
+        persist()
+        return folder.id
+    }
+
+    func renameFolder(_ id: UUID, to name: String) {
+        guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
+        folders[index].name = name
+        persist()
+    }
+
+    func removeFolder(_ id: UUID) {
+        for index in projects.indices where projects[index].folderID == id {
+            projects[index].folderID = nil
+        }
+        folders.removeAll { $0.id == id }
+        persist()
+    }
+
+    func moveProject(_ id: UUID, toFolder folderID: UUID?, before destinationID: UUID? = nil) {
+        guard folderID == nil || folders.contains(where: { $0.id == folderID }),
+              let index = projects.firstIndex(where: { $0.id == id }) else { return }
+        projects[index].folderID = folderID
+        if let destinationID, destinationID != id,
+           projects.contains(where: { $0.id == destinationID && $0.folderID == folderID }) {
+            let project = projects.remove(at: index)
+            if let destinationIndex = projects.firstIndex(where: { $0.id == destinationID }) {
+                projects.insert(project, at: destinationIndex)
+            }
+        }
+        if let folderIndex = folders.firstIndex(where: { $0.id == folderID }) {
+            folders[folderIndex].isExpanded = true
+        }
+        persist()
     }
 
     func createProject() {
@@ -122,44 +283,31 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func duplicateSelectedProject() {
-        guard let selectedProject else { return }
-        var duplicate = selectedProject
-        duplicate.id = UUID()
-        duplicate.name = "\(selectedProject.name) Copy"
-        if !selectedProject.saveLocation.isEmpty {
-            let originalURL = URL(fileURLWithPath: selectedProject.saveLocation)
-            let baseName = originalURL.lastPathComponent.isEmpty ? "Project" : originalURL.lastPathComponent
-            var duplicateURL = originalURL.deletingLastPathComponent().appendingPathComponent("\(baseName) Copy", isDirectory: true)
-            var suffix = 2
-            while FileManager.default.fileExists(atPath: duplicateURL.path) {
-                duplicateURL = originalURL.deletingLastPathComponent().appendingPathComponent("\(baseName) Copy \(suffix)", isDirectory: true)
-                suffix += 1
-            }
-            duplicate.saveLocation = duplicateURL.path
-            if FileManager.default.fileExists(atPath: originalURL.path) {
-                do {
-                    try FileManager.default.copyItem(at: originalURL, to: duplicateURL)
-                    let originalPath = originalURL.standardizedFileURL.path
-                    let duplicatePath = duplicateURL.standardizedFileURL.path
-                    let relocated: (String) -> String = { path in
-                        let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
-                        guard normalized == originalPath || normalized.hasPrefix(originalPath + "/") else { return path }
-                        return duplicatePath + String(normalized.dropFirst(originalPath.count))
-                    }
-                    duplicate.leftEar = relocated(duplicate.leftEar)
-                    duplicate.rightEar = relocated(duplicate.rightEar)
-                    let settingsURL = duplicateURL.appendingPathComponent("Project Settings.yaml")
-                    if let settings = try? String(contentsOf: settingsURL, encoding: .utf8) {
-                        try? settings.replacingOccurrences(of: originalPath, with: duplicatePath).write(to: settingsURL, atomically: true, encoding: .utf8)
-                    }
-                } catch {
-                    appendLog("Could not duplicate project folder: \(error.localizedDescription)")
-                    return
-                }
-            }
+        guard let project = selectedProject, !selectedProjectIsRunning,
+              meshEditorRequest == nil, ppmFittingRequest == nil,
+              projectDuplicationRequest == nil else { return }
+        let parent = project.saveLocation.isEmpty
+            ? Defaults.appDataURL.appendingPathComponent("Projects", isDirectory: true)
+            : URL(fileURLWithPath: project.saveLocation).deletingLastPathComponent()
+        let baseName = "\(project.name) Copy"
+        var name = baseName
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: parent.appendingPathComponent(name).path) {
+            name = "\(baseName) \(suffix)"
+            suffix += 1
         }
-        duplicate.settings.preprocessing.sourcePositionInputLeft = nil
-        duplicate.settings.preprocessing.sourcePositionInputRight = nil
+        projectDuplicationRequest = ProjectDuplicationRequest(project: project, suggestedName: name, parentFolder: parent.path)
+    }
+
+    @MainActor
+    func duplicateProject(_ request: ProjectDuplicationRequest, name: String, parentFolder: String) async throws {
+        guard !registryStore.savingBlocked else {
+            throw ProjectValidation.Failure(message: "Restore the project list before adding a duplicate.")
+        }
+        let roots = projects.map(\.saveLocation)
+        let duplicate = try await Task.detached(priority: .userInitiated) {
+            try ProjectDuplicator.duplicate(request.project, name: name, parentFolder: parentFolder, projectRoots: roots)
+        }.value
         projects.append(duplicate)
         selectedProjectID = duplicate.id
         failedStagesByProject[duplicate.id] = []
@@ -179,12 +327,32 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func importProject(from folder: URL) {
+        if let existing = projects.first(where: {
+            URL(fileURLWithPath: $0.saveLocation).standardizedFileURL.resolvingSymlinksInPath() == folder.standardizedFileURL.resolvingSymlinksInPath()
+        }) {
+            selectedProjectID = existing.id
+            revealSelectedProject()
+            appendLog("This project is already in the sidebar.")
+            return
+        }
         var project = Defaults.newProject(packageRoot: packageURL, index: projects.count + 1)
         project.name = folder.lastPathComponent
         project.leftEar = importedMesh(in: folder, side: "Left")
         project.rightEar = importedMesh(in: folder, side: "Right")
         project.saveLocation = folder.path
         project.inputHandling = .reference
+        let configURL = ["Project Settings.yaml", ".pinna2hrtf_native_run.yaml", "pipeline.yaml"]
+            .map { folder.appendingPathComponent($0) }.first { FileManager.default.fileExists(atPath: $0.path) }
+        if let configURL {
+            do {
+                try readDistanceSettings(configURL, into: &project.settings.preprocessing)
+                let document = try ProjectConfigDocument.parse(String(contentsOf: configURL, encoding: .utf8))
+                project = try ProjectConfigDocument.restore(document, into: project, folder: folder, packageRoot: packageURL)
+            } catch {
+                persistenceMessage = "Project import failed. Its files were kept unchanged. \(error.localizedDescription)"
+                return
+            }
+        }
         let entries = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
         let legacyIntermediates = entries?.first(where: { $0.lastPathComponent == "intermediates" })
         let currentIntermediates = entries?.first(where: { $0.lastPathComponent == "Intermediates" })
@@ -193,23 +361,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             try? FileManager.default.moveItem(at: legacyIntermediates, to: migrationPath)
             try? FileManager.default.moveItem(at: migrationPath, to: folder.appendingPathComponent("Intermediates"))
         }
-        for configName in ["Project Settings.yaml", ".pinna2hrtf_native_run.yaml", "pipeline.yaml"] {
-            let configURL = folder.appendingPathComponent(configName)
-            guard let config = try? String(contentsOf: configURL, encoding: .utf8) else { continue }
-            do { try readDistanceSettings(configURL, into: &project.settings.preprocessing) }
-            catch { appendLog("Could not import geometry: \(error.localizedDescription)"); return }
-            var section = ""
-            for line in config.components(separatedBy: .newlines) {
-                if !line.hasPrefix(" "), line.hasSuffix(":") {
-                    section = String(line.dropLast())
-                }
-                let setting = line.trimmingCharacters(in: .whitespaces)
-                if section == "inference" && (setting == "enabled: false" || setting == "use_predictions_for_preprocessing: false") {
-                    project.settings.inference.usePredictionsForPreprocessing = false
-                }
-            }
-            break
-        }
+
         projects.append(project)
         selectedProjectID = project.id
         failedStagesByProject[project.id] = []
@@ -246,18 +398,95 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         return ""
     }
 
-    func forgetSelectedProject() {
-        guard let selectedProjectID else { return }
-        guard !outputOperations.contains(selectedProjectID) else { return }
-        runningProcesses[selectedProjectID]?.terminate()
-        runningProcesses[selectedProjectID] = nil
-        runningStages[selectedProjectID] = nil
-        failedStagesByProject[selectedProjectID] = nil
-        logTextByProject[selectedProjectID] = nil
-        projects.removeAll { $0.id == selectedProjectID }
-        self.selectedProjectID = projects.first?.id
+    func removeSelectedProject() {
+        guard let project = selectedProject else { return }
+        let projectID = project.id
+        guard canRemoveProject(projectID) else {
+            appendLog("Close the ear editor or wait for running tasks and output checks before moving this project to Trash.")
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Move \(project.name) to Trash?"
+        alert.informativeText = "This removes the project from Pinna2HRTF and moves its project folder and contents to Trash. You can restore the folder from Trash."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let location = project.saveLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !location.isEmpty else {
+            finishRemovingProject(projectID)
+            return
+        }
+
+        let projectFolder = URL(fileURLWithPath: location, isDirectory: true).standardizedFileURL
+        guard canTrashProjectFolder(projectFolder, for: project) else {
+            showProjectRemovalError("This folder is a protected app location or contains another project. Move the project to a separate folder before removing it.")
+            return
+        }
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: projectFolder.path, isDirectory: &isDirectory) else {
+            finishRemovingProject(projectID)
+            return
+        }
+        guard isDirectory.boolValue else {
+            showProjectRemovalError("The saved project location is not a folder, so it was left in place and the project remains in the app.")
+            return
+        }
+
+        projectsBeingRemoved.insert(projectID)
+        NSWorkspace.shared.recycle([projectFolder]) { [weak self] _, error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.projectsBeingRemoved.remove(projectID)
+                if let error {
+                    self.showProjectRemovalError("The project folder could not be moved to Trash. The project remains in the app. \(error.localizedDescription)")
+                    return
+                }
+                self.finishRemovingProject(projectID)
+            }
+        }
+    }
+
+    private func canTrashProjectFolder(_ folder: URL, for project: ProjectRecord) -> Bool {
+        let folderPath = folder.standardizedFileURL.path
+        guard folderPath != "/" else { return false }
+
+        let protectedFolders = [rootURL, packageURL, Defaults.appDataURL]
+        for protected in protectedFolders {
+            let protectedPath = protected.standardizedFileURL.path
+            if protectedPath == folderPath || protectedPath.hasPrefix(folderPath + "/") { return false }
+        }
+
+        for other in projects where other.id != project.id && !other.saveLocation.isEmpty {
+            let otherPath = URL(fileURLWithPath: other.saveLocation).standardizedFileURL.path
+            if otherPath == folderPath || otherPath.hasPrefix(folderPath + "/") { return false }
+        }
+        return true
+    }
+
+    private func finishRemovingProject(_ id: UUID) {
+        runs[id] = nil
+        failedStagesByProject[id] = nil
+        logEntriesByProject[id] = nil
+        liveLogStatusByProject[id] = nil
+        technicalLogURLs[id] = nil
+        viewerStateByProject[id] = nil
+        projects.removeAll { $0.id == id }
+        if selectedProjectID == id { selectedProjectID = projects.first?.id }
         persist()
         refreshArtifacts()
+    }
+
+    private func showProjectRemovalError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Could not move project to Trash"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     func updateSelectedProject(refresh: Bool = true, _ update: (inout ProjectRecord) -> Void) {
@@ -271,12 +500,23 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func setBezierPPM(_ enabled: Bool) {
-        updateSelectedProject { $0.settings.inference.usePredictionsForPreprocessing = enabled }
+        updateSelectedProject {
+            $0.settings.inference.usePredictionsForPreprocessing = enabled
+            if enabled { $0.settings.manualPPMFitting.useForPreprocessing = false }
+        }
+    }
+
+    func setManualPPMFitting(_ enabled: Bool) {
+        updateSelectedProject {
+            $0.settings.manualPPMFitting.useForPreprocessing = enabled
+            if enabled { $0.settings.inference.usePredictionsForPreprocessing = false }
+        }
     }
 
     func updateEnvironment(_ update: (inout EnvironmentConfig) -> Void) {
         update(&environment)
         persist()
+        refreshArtifacts()
     }
 
     func resourceOptions(extensions allowedExtensions: Set<String>) -> [String] {
@@ -305,19 +545,82 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         return stem.hasPrefix("Local ") ? String(stem.dropFirst("Local ".count)) : stem
     }
 
-    func refreshArtifacts() {
+    func refreshArtifacts(restoringViewer: Bool = false) {
         refreshGeometry()
-        guard let selectedProject else {
+        artifactRefreshWorkItem?.cancel()
+        statusRefreshProgress?.cancel()
+        let progress = Progress(totalUnitCount: 1)
+        statusRefreshProgress = progress
+        let refreshID = UUID()
+        artifactRefreshID = refreshID
+        guard let project = selectedProject else {
+
             artifacts = []
+            projectStatus = nil
+            isCheckingProjectFiles = false
             stageStates = Dictionary(uniqueKeysWithValues: Stage.allCases.map { ($0, .ready) })
             return
         }
-        recordInitialPreprocessingSignature(for: selectedProject)
-        artifacts = ArtifactScanner.artifacts(for: selectedProject)
-        var states = ArtifactScanner.stageStates(for: selectedProject, runningStage: runningStages[selectedProject.id], failedStages: failedStagesByProject[selectedProject.id] ?? [])
-        if preprocessingNeedsRerun(for: selectedProject), states[.preprocessing] == .done {
-            states[.preprocessing] = .ready
+        let changedProject = projectStatus?.project.id != project.id
+        if changedProject {
+            artifacts = ProjectStatusSnapshot.configuredPreviewArtifacts(for: project)
+            projectStatus = nil
+            resetViewer()
         }
+        let initialViewerLoadID = meshLoadID
+        let currentEnvironment = environment
+        let currentProjects = projects
+        let placingMicrophone = isPlacingMicrophone
+        isCheckingProjectFiles = true
+        let workItem = DispatchWorkItem { [weak self] in
+            guard !progress.isCancelled else { return }
+            // Imported projects handle legacy folder names at import time. Only
+            // migrate app-managed local projects here; listing a server root can stall.
+            if project.saveLocation.hasPrefix(Defaults.appDataURL.appendingPathComponent("Projects", isDirectory: true).path + "/") {
+                Self.migrateProjectDirectory(for: project)
+            }
+            let status = ProjectStatusSnapshot.load(project: project, environment: currentEnvironment,
+                                                    projects: currentProjects, placingMicrophone: placingMicrophone,
+                                                    includeSolverResults: false, isCancelled: { progress.isCancelled })
+            guard !progress.isCancelled else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.artifactRefreshID == refreshID,
+                      self.selectedProject == project, self.environment == currentEnvironment else { return }
+                self.applyProjectStatus(status)
+                self.isCheckingProjectFiles = false
+                self.artifactRefreshWorkItem = nil
+                if (restoringViewer || changedProject) && self.meshLoadID == initialViewerLoadID && self.selectedMesh == nil { self.restoreViewer() }
+                let restorationLoadID = self.meshLoadID
+                self.solverRefreshQueue.async { [weak self] in
+                    guard !progress.isCancelled else { return }
+                    let detailed = ProjectStatusSnapshot.load(project: project, environment: currentEnvironment,
+                                                              projects: currentProjects, placingMicrophone: placingMicrophone,
+                                                              isCancelled: { progress.isCancelled })
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, !progress.isCancelled, self.artifactRefreshID == refreshID,
+                              self.selectedProject == project, self.environment == currentEnvironment else { return }
+                        self.applyProjectStatus(detailed)
+                        if (restoringViewer || changedProject) && self.meshLoadID == restorationLoadID && self.selectedMesh == nil {
+                            self.restoreViewer()
+                        }
+                    }
+                }
+            }
+        }
+        artifactRefreshWorkItem = workItem
+        artifactRefreshQueue.asyncAfter(deadline: .now() + .milliseconds(150), execute: workItem)
+    }
+
+    private func applyProjectStatus(_ status: ProjectStatusSnapshot) {
+        projectStatus = status
+        artifacts = status.artifacts
+        projectSummaries[status.project.id] = status.summary
+        var states = status.states
+        for stage in Stage.allCases {
+            if failedStagesByProject[status.project.id]?.contains(stage) == true { states[stage] = .failed }
+            if runningStages[status.project.id] == stage { states[stage] = .running }
+        }
+        if status.preprocessingNeedsRerun, states[.preprocessing] == .done { states[.preprocessing] = .ready }
         stageStates = states
     }
 
@@ -331,6 +634,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func resetViewer() {
+        meshLoadID = UUID()
+        selectedPressure = nil
         selectedMesh = nil
         selectedImage = nil
         selectedScene = SCNScene()
@@ -340,13 +645,142 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func openArtifact(_ artifact: Artifact) {
-        if artifact.isMesh {
+        if artifact.isPressure {
+            clearMicrophonePlacementSession()
+            resetViewer()
+            selectedPressure = artifact.url
+            selectedMesh = artifact.url
+            rememberSelectedArtifact(artifact.url)
+        } else if artifact.isMesh {
             openMesh(artifact.url)
         } else if artifact.isImage {
             openImage(artifact.url)
         } else {
             appendLog("Could not open \(artifact.url.lastPathComponent).")
         }
+    }
+
+    func beginScanAlignment() {
+        guard let project = selectedProject, !selectedProjectIsRunning else { return }
+        let source = project.scanPreparation.originalScanPath ?? project.scanPreparation.scanPath
+        guard !source.isEmpty, FileManager.default.fileExists(atPath: source) else {
+            meshEditorError = "Choose a full-head scan first."; return
+        }
+        guard outputLocationConflict(for: project) == nil else {
+            meshEditorError = outputLocationConflict(for: project); return
+        }
+        let url = URL(fileURLWithPath: source)
+        meshEditorRequest = MeshEditorRequest(projectID: project.id, source: url, originalSource: url,
+            destination: URL(fileURLWithPath: project.saveLocation).appendingPathComponent("MeshEdits/AlignedScan.ply"),
+            side: nil, preparedGeneration: nil, preparedReport: nil)
+    }
+
+    func beginEarEditing(_ side: EarSide) {
+        guard let project = selectedProject, !selectedProjectIsRunning else { return }
+        guard ArtifactScanner.scanPreparationIsCurrent(project) else {
+            meshEditorError = "Run Scan Preparation successfully first."; return
+        }
+        let root = URL(fileURLWithPath: project.saveLocation)
+        let reportURL = root.appendingPathComponent("Prepared/mesh_preparation.json")
+        guard let data = try? Data(contentsOf: reportURL),
+              let report = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let generation = report["generation"] as? String else {
+            meshEditorError = "The scan preparation report is missing."; return
+        }
+        let base = root.appendingPathComponent("Prepared/\(side.title).stl")
+        let reviewed = side == .left ? project.scanPreparation.reviewedLeftPath : project.scanPreparation.reviewedRightPath
+        let source = ArtifactScanner.earReviewIsCurrent(project, side: side) ? reviewed.map { URL(fileURLWithPath: $0) } ?? base : base
+        meshEditorRequest = MeshEditorRequest(projectID: project.id, source: source, originalSource: base,
+            destination: root.appendingPathComponent("MeshEdits/\(side.title).stl"), side: side,
+            preparedGeneration: generation, preparedReport: reportURL)
+    }
+
+    func beginManualPPMFitting(_ side: EarSide) {
+        guard let project = selectedProject, !selectedProjectIsRunning else { return }
+        guard !project.saveLocation.isEmpty else {
+            ppmFittingError = "Choose a project save location first."; return
+        }
+        if project.scanPreparation.enabled && !ArtifactScanner.scanPreparationIsCurrent(project) {
+            ppmFittingError = "Run Scan Preparation successfully with the current scan settings first."; return
+        }
+        guard let target = ArtifactScanner.sourceEar(for: project, side: side),
+              FileManager.default.fileExists(atPath: target.path),
+              let identity = ArtifactScanner.meshIdentity(target) else {
+            ppmFittingError = "Choose or prepare a valid \(side.rawValue) ear mesh first."; return
+        }
+        guard ["stl", "ply"].contains(target.pathExtension.lowercased()) else {
+            ppmFittingError = "Manual PPM fitting requires an STL or PLY ear mesh."; return
+        }
+        if let conflict = outputLocationConflict(for: project) {
+            ppmFittingError = conflict; return
+        }
+        let folder = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("Manual PPM", isDirectory: true)
+        let desktopBlend = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop/PPM.blend")
+        let current = project.settings.manualPPMFitting
+        let savedParameters = current.parametersPath(for: side).map { URL(fileURLWithPath: $0) }
+        let template = current.templateBlendPath.map { URL(fileURLWithPath: $0) }
+        let initialTemplate = template.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+            ?? (FileManager.default.fileExists(atPath: desktopBlend.path) ? desktopBlend : nil)
+        ppmFittingRequest = PPMFittingRequest(
+            projectID: project.id,
+            side: side,
+            targetMesh: target,
+            sourceIdentity: identity,
+            destinationMesh: folder.appendingPathComponent("\(side.title).stl"),
+            destinationParameters: folder.appendingPathComponent("\(side.title).json"),
+            destinationBlend: folder.appendingPathComponent("\(side.title).blend"),
+            savedParameters: savedParameters.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil },
+            initialTemplateBlend: initialTemplate
+        )
+    }
+
+    func finishManualPPMFitting(_ request: PPMFittingRequest, templateBlendPath: String) {
+        guard let index = projects.firstIndex(where: { $0.id == request.projectID }) else { return }
+        guard let source = ArtifactScanner.sourceEar(for: projects[index], side: request.side),
+              ArtifactScanner.meshIdentity(source) == request.sourceIdentity else {
+            ppmFittingError = "The source ear changed before the fit could be saved. Reopen the fitting workspace for the current mesh."; return
+        }
+        var fitting = projects[index].settings.manualPPMFitting
+        fitting.setFit(meshPath: request.destinationMesh.path,
+                       parametersPath: request.destinationParameters.path,
+                       blendPath: request.destinationBlend.path,
+                       sourcePath: request.targetMesh.path,
+                       sourceIdentity: request.sourceIdentity,
+                       for: request.side)
+        if !templateBlendPath.isEmpty { fitting.templateBlendPath = templateBlendPath }
+        fitting.useForPreprocessing = true
+        projects[index].settings.manualPPMFitting = fitting
+        projects[index].settings.inference.usePredictionsForPreprocessing = false
+        recordEditorOutputs(for: projects[index], urls: [request.destinationMesh, request.destinationParameters,
+            request.destinationBlend] + (templateBlendPath.isEmpty ? [] : [URL(fileURLWithPath: templateBlendPath)]))
+        persist()
+        appendLog("Saved the manual \(request.side.rawValue) PPM fit. Preprocessing will use it until the source ear changes.", for: request.projectID)
+        refreshArtifacts()
+    }
+
+    func finishMeshEditing(_ request: MeshEditorRequest) {
+        guard let index = projects.firstIndex(where: { $0.id == request.projectID }) else { return }
+        var scan = projects[index].scanPreparation
+        if let side = request.side {
+            if side == .left { scan.reviewedLeftPath = request.destination.path }
+            else { scan.reviewedRightPath = request.destination.path }
+        } else {
+            scan.originalScanPath = request.originalSource.path
+            scan.scanPath = request.destination.path
+            scan.rotationDegrees = "0"
+            scan.reviewedLeftPath = nil; scan.reviewedRightPath = nil
+        }
+        projects[index].settings.scanPreparation = scan
+        recordEditorOutputs(for: projects[index], urls: [request.destination,
+            request.destination.deletingPathExtension().appendingPathExtension("json")])
+        projects[index].settings.preprocessing.sourcePositionInputLeft = nil
+        projects[index].settings.preprocessing.sourcePositionInputRight = nil
+        let resetStages = request.isAlignment ? Stage.allCases : Stage.allCases.filter { $0 != .scanPreparation }
+        for stage in resetStages { setStageOutcome(stage, for: request.projectID, to: .ready) }
+        persist()
+        appendLog("Saved \(request.isAlignment ? "nose-and-ear-aligned scan" : "reviewed ear"): \(request.destination.lastPathComponent)", for: request.projectID)
+        refreshArtifacts()
+        openMesh(request.destination, resetCamera: true)
     }
 
     func resetSelectedMeshView() {
@@ -357,6 +791,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func openMesh(_ url: URL, resetCamera: Bool = false) {
+        selectedPressure = nil
         guard FileManager.default.fileExists(atPath: url.path), ["stl", "ply"].contains(url.pathExtension.lowercased()) else {
             appendLog("Could not open \(url.lastPathComponent).")
             return
@@ -367,7 +802,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let microphone = microphonePosition(for: url)
         let loadID = UUID()
         meshLoadID = loadID
-        appendLog("Loading \(url.lastPathComponent)…")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
             let asset = MDLAsset(url: url)
@@ -397,6 +831,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             }
             let distance = max(maximumDimension * 1.7, 1)
             let targetNode = SCNNode()
+            targetNode.name = "cameraTarget"
             targetNode.position = center
             scene.rootNode.addChildNode(targetNode)
             let camera = SCNCamera()
@@ -445,7 +880,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                     self.viewerStateByProject[projectID, default: ProjectViewerState(selectedArtifactPath: url.path)].cameraByArtifact[url.path] = self.selectedCameraState
                 }
                 self.rememberSelectedArtifact(url)
-                self.appendLog("Loaded \(url.lastPathComponent).")
             }
         }
     }
@@ -494,8 +928,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func meshSide(for meshURL: URL, project: ProjectRecord) -> EarSide? {
         let path = meshURL.standardizedFileURL.path
-        if !project.leftEar.isEmpty && path == URL(fileURLWithPath: project.leftEar).standardizedFileURL.path { return .left }
-        if !project.rightEar.isEmpty && path == URL(fileURLWithPath: project.rightEar).standardizedFileURL.path { return .right }
+        if !project.pipelineLeftEar.isEmpty && path == URL(fileURLWithPath: project.pipelineLeftEar).standardizedFileURL.path { return .left }
+        if !project.pipelineRightEar.isEmpty && path == URL(fileURLWithPath: project.pipelineRightEar).standardizedFileURL.path { return .right }
         let output = URL(fileURLWithPath: project.saveLocation).standardizedFileURL
         let leftPrefixes = [
             output.appendingPathComponent("Intermediates/Left").path,
@@ -536,13 +970,13 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func beginMicrophonePlacement(_ side: EarSide) {
         guard let project = selectedProject else { return }
-        let sourcePath = side == .left ? project.leftEar : project.rightEar
+        let sourcePath = side == .left ? project.pipelineLeftEar : project.pipelineRightEar
         guard !sourcePath.isEmpty else {
             microphonePlacementError = "Select a \(side.rawValue) ear mesh before placing its microphone."
             return
         }
         guard let meshURL = ArtifactScanner.preprocessingMesh(for: project, side: side), let identity = ArtifactScanner.meshIdentity(meshURL) else {
-            let inferenceRequired = project.settings.inference.usePredictionsForPreprocessing && !project.leftEar.isEmpty && !project.rightEar.isEmpty
+            let inferenceRequired = project.settings.inference.usePredictionsForPreprocessing && !project.pipelineLeftEar.isEmpty && !project.pipelineRightEar.isEmpty
             microphonePlacementError = inferenceRequired ? "Run Mesh2PPM Inference before placing the \(side.rawValue) microphone." : "The \(side.rawValue) preprocessing mesh could not be opened."
             return
         }
@@ -714,6 +1148,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func openImage(_ url: URL) {
+        meshLoadID = UUID()
+        selectedPressure = nil
         guard FileManager.default.fileExists(atPath: url.path), let image = NSImage(contentsOf: url) else {
             appendLog("Could not open \(url.lastPathComponent).")
             return
@@ -752,67 +1188,61 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func runNextStage() {
-        guard let project = selectedProject else {
+        guard selectedProject != nil else {
             appendLog("Create or select a project before running.")
             return
         }
-        let stage = Stage.allCases.first { !ArtifactScanner.stageIsComplete($0, project: project) } ?? .postprocessing
-        run(stage: stage)
+        run(stage: nextStage ?? .postprocessing)
+    }
+
+    var nextStage: Stage? {
+        guard let project = selectedProject else { return nil }
+        return Stage.allCases.filter { $0 != .scanPreparation || project.scanPreparation.enabled }.first {
+            [.failed, .stopped].contains(project.stageOutcomes?[$0.rawValue] ?? .ready) || !(selectedProjectStatus?.completed.contains($0) ?? false)
+        }
     }
 
     func stageBlocked(_ stage: Stage) -> Bool {
         guard let project = selectedProject else { return false }
-        return stage == .preprocessing && project.settings.inference.usePredictionsForPreprocessing && !project.leftEar.isEmpty && !project.rightEar.isEmpty && !ArtifactScanner.stageIsComplete(.inference, project: project)
+        return stage == .preprocessing && project.settings.inference.usePredictionsForPreprocessing && !(selectedProjectStatus?.completed.contains(.inference) ?? false)
     }
 
-    func canRun(stage: Stage) -> Bool {
-        guard let project = selectedProject else { return false }
-        guard !outputOperations.contains(project.id) else { return false }
-        if runningStages[project.id] != nil, runningProcesses[project.id] != nil {
-            return false
-        }
-        guard environmentProcess == nil else { return false }
-        return stageCanRun(stage, project: project)
+    func canRun(stage: Stage) -> Bool { runUnavailableReason(stage: stage) == nil }
+
+    func runUnavailableReason(stage: Stage) -> String? {
+        guard let project = selectedProject else { return "Select a project first." }
+        if meshEditorRequest != nil || ppmFittingRequest != nil { return "Finish editing before running the pipeline." }
+        if selectedProjectIsRunning { return stoppingProjects.contains(project.id) ? "Waiting for the task to stop." : "Wait for the current task and output checks to finish." }
+        if environmentProcess != nil { return "Wait for dependency setup to finish." }
+        if stage == .preprocessing && isPlacingMicrophone { return "Finish microphone placement first." }
+        guard let status = selectedProjectStatus, !isCheckingProjectFiles else { return "Checking project files…" }
+        return status.unavailableReasons[stage]
     }
 
     func canRunNextStage() -> Bool {
         guard let project = selectedProject, runningProcesses[project.id] == nil else { return false }
-        guard let next = Stage.allCases.first(where: { !ArtifactScanner.stageIsComplete($0, project: project) }) else { return false }
+        guard let next = nextStage else { return false }
         return canRun(stage: next)
     }
 
-    func stageCanRun(_ stage: Stage, project: ProjectRecord) -> Bool {
-        guard (!project.leftEar.isEmpty || !project.rightEar.isEmpty), !project.saveLocation.isEmpty else { return false }
-        guard (project.leftEar.isEmpty || FileManager.default.fileExists(atPath: project.leftEar)), (project.rightEar.isEmpty || FileManager.default.fileExists(atPath: project.rightEar)) else { return false }
-        switch stage {
-        case .inference:
-            return project.settings.inference.usePredictionsForPreprocessing && FileManager.default.fileExists(atPath: project.settings.inference.modelConfig) && FileManager.default.fileExists(atPath: project.settings.inference.modelCheckpoint)
-        case .preprocessing:
-            guard !stageBlocked(stage), FileManager.default.fileExists(atPath: environment.meshGradingExecutable), FileManager.default.fileExists(atPath: environment.externalDir + "/src/Mesh2HRTF/mesh2hrtf"), !isPlacingMicrophone else { return false }
-            return true
-        case .numcalc:
-            return ArtifactScanner.stageIsComplete(.preprocessing, project: project) && FileManager.default.fileExists(atPath: environment.numcalcExecutable)
-        case .postprocessing:
-            return ArtifactScanner.stageIsComplete(.numcalc, project: project)
-        }
+    func stageCanRun(_ stage: Stage, project: ProjectRecord) -> Bool { stageUnavailableReason(stage, project: project) == nil }
+
+    func stageUnavailableReason(_ stage: Stage, project: ProjectRecord) -> String? {
+        ProjectStatusSnapshot.unavailableReason(stage, project: project, environment: environment,
+                                               projects: projects, placingMicrophone: isPlacingMicrophone)
+    }
+
+    func outputLocationConflict(for project: ProjectRecord) -> String? {
+        ProjectStatusSnapshot.outputLocationConflict(for: project, projects: projects)
     }
 
     func preprocessingNeedsRerun(for project: ProjectRecord) -> Bool {
-        guard ArtifactScanner.stageIsComplete(.preprocessing, project: project) else { return false }
-        let signatureURL = URL(fileURLWithPath: project.saveLocation).appendingPathComponent(".pinna2hrtf-preprocessing-signature")
-        guard let saved = try? String(contentsOf: signatureURL, encoding: .utf8) else { return false }
-        return saved != preprocessingSignature(for: project)
+        selectedProjectStatus?.project == project && selectedProjectStatus?.preprocessingNeedsRerun == true
     }
 
     func preprocessingSignature(for project: ProjectRecord) -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let inference = (try? encoder.encode(project.settings.inference)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        let geometrySettings = project.settings.preprocessing
-        let preprocessing = (try? encoder.encode(geometrySettings)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        let leftIdentity = project.leftEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: project.leftEar)) ?? "")
-        let rightIdentity = project.rightEar.isEmpty ? "" : (ArtifactScanner.meshIdentity(URL(fileURLWithPath: project.rightEar)) ?? "")
-        return [project.leftEar, project.rightEar, project.inputHandling.rawValue, leftIdentity, rightIdentity, inference, preprocessing].joined(separator: "\n")
+        ArtifactScanner.preprocessingSignature(for: project)
+
     }
 
     func recordInitialPreprocessingSignature(for project: ProjectRecord) {
@@ -834,8 +1264,12 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             appendLog("Create or select a project before running.")
             return
         }
-        guard runningProcesses[project.id] == nil, !outputOperations.contains(project.id) else {
+        guard runningProcesses[project.id] == nil, !outputOperations.contains(project.id), !stoppingProjects.contains(project.id) else {
             appendLog("A task is already running.")
+            return
+        }
+        guard environmentProcess == nil else {
+            appendLog("Wait for dependency setup to finish.")
             return
         }
         if stage == .numcalc, preprocessingNeedsRerun(for: project) {
@@ -851,12 +1285,12 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             appendLog("Finish microphone placement first.")
             return
         }
-        guard (!project.leftEar.isEmpty || !project.rightEar.isEmpty), !project.saveLocation.isEmpty else {
+        guard (!project.pipelineLeftEar.isEmpty || !project.pipelineRightEar.isEmpty), !project.saveLocation.isEmpty else {
             appendLog("Select an ear mesh and save location first.")
             return
         }
         guard stageCanRun(stage, project: project) else {
-            appendLog("\(stage.title) is not ready. Check the project inputs and previous stages.")
+            appendLog(stageUnavailableReason(stage, project: project) ?? "Check the project settings.")
             return
         }
         if stage == .preprocessing { checkEarDistanceAndRun(project); return }
@@ -865,11 +1299,14 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func prepareAndRun(stage: Stage, project: ProjectRecord) {
         do {
+            // Reject shared output locations before copying inputs or replacing settings.
+            _ = try outputsFor(project)
+            try ProjectValidation.validate(project)
             try prepareRuntimeProject()
             let configURL = try PipelineConfigWriter.prepare(project: project, environment: environment)
             startProcess(stage: stage, project: project, configURL: configURL)
         } catch {
-            failedStagesByProject[project.id, default: []].insert(stage)
+            setStageOutcome(stage, for: project.id, to: .failed)
             refreshArtifacts()
             appendLog("Could not prepare project: \(error.localizedDescription)")
         }
@@ -888,15 +1325,17 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                     }.value
                     await launchProcess(stage: stage, project: project, configURL: configURL, outputs: outputs)
                 } catch {
+                    setStageOutcome(stage, for: project.id, to: .failed)
                     appendLog("Could not track project outputs: \(error.localizedDescription)", for: project.id)
                 }
             }
         } catch {
+            setStageOutcome(stage, for: project.id, to: .failed)
             appendLog("Could not track project outputs: \(error.localizedDescription)", for: project.id)
         }
     }
 
-    func outputsFor(_ project: ProjectRecord) throws -> GeneratedOutputManifest {
+    func outputsFor(_ project: ProjectRecord, resettingOutputs: Bool = false) throws -> GeneratedOutputManifest {
         guard !project.saveLocation.isEmpty else { throw GeneratedOutputManifest.Failure.invalidRoot }
         let root = URL(fileURLWithPath: project.saveLocation).standardizedFileURL.resolvingSymlinksInPath().path
         for other in projects where other.id != project.id && !other.saveLocation.isEmpty {
@@ -905,13 +1344,24 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 throw GeneratedOutputManifest.Failure.invalidRoot
             }
         }
-        let inputs = projects.flatMap { [$0.leftEar, $0.rightEar, $0.settings.preprocessing.evaluationGrid ?? ""] }
-            .filter { !$0.isEmpty && $0 != "Default" }.sorted()
+        let inputs = projects.flatMap { $0.protectedOutputInputs(resettingProjectID: resettingOutputs ? project.id : nil) }.sorted()
         let key = project.saveLocation + "\n" + inputs.joined(separator: "\n")
         if let existing = outputStores[key] { return existing }
         let outputs = try GeneratedOutputManifest(projectRoot: project.saveLocation, inputs: inputs)
         outputStores[key] = outputs
         return outputs
+    }
+
+    private func recordEditorOutputs(for project: ProjectRecord, urls: [URL]) {
+        do {
+            let outputs = try outputsFor(project, resettingOutputs: true)
+            outputOperations.insert(project.id)
+            Task { @MainActor in
+                defer { outputOperations.remove(project.id); refreshArtifacts() }
+                do { try await Task.detached(priority: .userInitiated) { try outputs.recordGeneratedFiles(urls) }.value }
+                catch { appendLog("Could not record saved editor outputs: \(error.localizedDescription)", for: project.id) }
+            }
+        } catch { appendLog("Could not record saved editor outputs: \(error.localizedDescription)", for: project.id) }
     }
 
     @MainActor
@@ -928,57 +1378,99 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
         process.currentDirectoryURL = executionPackageURL
         process.environment = processEnvironment()
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        runningProcesses[project.id] = process
-        runningStages[project.id] = stage
-        failedStagesByProject[project.id, default: []].remove(stage)
-        refreshArtifacts()
-        appendLog("\(stage.title) started.")
-        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            guard let store = self else { return }
-            Task { @MainActor in store.appendLog(text.trimmingCharacters(in: .newlines), for: project.id) }
+        process.environment?["PINNA2HRTF_LIVE_EVENTS"] = "1"
+        let runID = UUID()
+        let startedAt = Date()
+        let logURL = Self.technicalLogURL(project: project, stage: stage, runID: runID, date: startedAt)
+        let capture: PipelineLogCapture?
+        do {
+            let header = [
+                "Pinna2HRTF technical output",
+                "Project: \(project.name)",
+                "Stage: \(stage.title)",
+                "Started: \(startedAt.formatted(date: .complete, time: .standard))",
+                "Command: \(process.executableURL?.path ?? "") \((process.arguments ?? []).joined(separator: " "))",
+                "",
+                "--- stdout and stderr ---",
+                ""
+            ].joined(separator: "\n")
+            capture = try PipelineLogCapture(fileURL: logURL, header: header, onEvent: { [weak self] event in
+                Task { @MainActor [weak self] in
+                    self?.recordPipelineEvent(event, stage: stage, projectID: project.id, runID: runID)
+                }
+            }, onFailure: { [weak self] message in
+                Task { @MainActor [weak self] in
+                    self?.appendLog("Could not save complete technical output: \(message)", for: project.id)
+                }
+            })
+            technicalLogURLs[project.id] = logURL
+        } catch {
+            capture = nil
+            appendLog("Could not create a technical log: \(error.localizedDescription)", for: project.id)
         }
-        process.terminationHandler = { [weak self] process in
+        runs[project.id] = PipelineRun(process: process, stage: stage)
+        liveLogStatusByProject[project.id] = "Running · \(stage.title)"
+        setStageOutcome(stage, for: project.id, to: .running)
+        refreshArtifacts()
+        let details = stageStartDetails(stage: stage, project: project)
+        appendLog("\(stage.title) started\(details.isEmpty ? "" : " · \(details)")", for: project.id)
+        let onExit: @Sendable (Process) -> Void = { [weak self] process in
             guard let store = self else { return }
             Task { @MainActor in
-                pipe.fileHandleForReading.readabilityHandler = nil
-                if process.terminationStatus != 0 {
-                    store.failedStagesByProject[project.id, default: []].insert(stage)
-                }
-                if process.terminationStatus == 0 {
-                    store.notifyStageCompletion(stage, project: project)
-                } else {
-                    store.notifyStageFailure(stage, project: project, status: process.terminationStatus)
-                }
-                store.appendLog(process.terminationStatus == 0 ? "\(stage.title) finished." : "\(stage.title) failed (status \(process.terminationStatus)).", for: project.id)
-                store.runningProcesses[project.id] = nil
-                store.runningStages[project.id] = nil
-                if stage == .inference, process.terminationStatus == 0 {
-                    store.clearStaleMicrophonePositions(for: project.id)
-                }
-                if stage == .preprocessing, process.terminationStatus == 0 {
-                    store.recordPreprocessingSignature(for: project)
-                }
                 store.outputOperations.insert(project.id)
+                store.runs[project.id] = nil
+                store.liveLogStatusByProject[project.id] = "Checking outputs · \(stage.title)"
+                let stopped = store.stoppingProjects.contains(project.id) || store.projects.first(where: { $0.id == project.id })?.stageOutcomes?[stage.rawValue] == .stopped
+                var outcome: StageState = stopped ? .stopped : .failed
+                var validationError: String?
+                if process.terminationStatus == 0 && !stopped {
+                    do {
+                        try await Task.detached(priority: .userInitiated) { try OutputValidation.validate(stage: stage, project: project) }.value
+                        outcome = .done
+                    } catch { validationError = error.localizedDescription }
+                }
+                if (stage == .scanPreparation || stage == .inference), outcome == .done { store.clearStaleMicrophonePositions(for: project.id) }
+                if stage == .scanPreparation, outcome == .done,
+                   let index = store.projects.firstIndex(where: { $0.id == project.id }) {
+                    var scan = store.projects[index].scanPreparation
+                    scan.reviewedLeftPath = nil
+                    scan.reviewedRightPath = nil
+                    store.projects[index].settings.scanPreparation = scan
+                    store.persist()
+                }
+                if stage == .preprocessing, outcome == .done { store.recordPreprocessingSignature(for: project) }
                 do {
                     try await Task.detached(priority: .userInitiated) { try outputs.complete() }.value
                 } catch {
                     store.appendLog("Output tracking is pending; it will be retried before reset.", for: project.id)
+                }
+                store.setStageOutcome(stage, for: project.id, to: outcome)
+                let elapsed = store.elapsedDescription(since: startedAt)
+                if outcome == .done {
+                    store.liveLogStatusByProject[project.id] = "Completed · \(stage.title)"
+                    store.notifyStageCompletion(stage, project: project)
+                    store.appendLog("\(stage.title) finished in \(elapsed) · outputs verified", for: project.id)
+                } else if outcome == .stopped {
+                    store.liveLogStatusByProject[project.id] = "Stopped · \(stage.title)"
+                    store.appendLog("\(stage.title) stopped after \(elapsed). Previous results may still be available.", for: project.id)
+                } else {
+                    store.liveLogStatusByProject[project.id] = "Failed · \(stage.title)"
+                    let cause = validationError ?? "Exit status \(process.terminationStatus)."
+                    let logHint = store.technicalLogURLs[project.id].map { "Technical output: \($0.lastPathComponent)." } ?? "Open the technical log for details."
+                    let detail = "\(cause) \(logHint)"
+                    store.sendNotification(title: "\(stage.title) failed", body: "\(project.name): \(detail)")
+                    store.appendLog("\(stage.title) failed after \(elapsed): \(detail) Previous results are not a successful rerun.", for: project.id)
                 }
                 store.outputOperations.remove(project.id)
                 store.refreshArtifacts()
             }
         }
         do {
-            try process.run()
+            try process.run(capturing: capture, onExit: onExit)
         } catch {
-            failedStagesByProject[project.id, default: []].insert(stage)
-            runningProcesses[project.id] = nil
-            runningStages[project.id] = nil
+            setStageOutcome(stage, for: project.id, to: .failed)
+            runs[project.id] = nil
+            liveLogStatusByProject[project.id] = "Could not start · \(stage.title)"
             refreshArtifacts()
             appendLog("Could not start \(stage.title): \(error.localizedDescription)", for: project.id)
             do { try await Task.detached { try outputs.complete() }.value }
@@ -1086,30 +1578,45 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         process.arguments = bundledUV ? ["sync", "--no-editable"] : ["uv", "sync", "--no-editable"]
         process.currentDirectoryURL = executionPackageURL
         process.environment = processEnvironment()
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+        process.environment?["PINNA2HRTF_LIVE_EVENTS"] = "1"
         environmentProcess = process
-        appendLog("Environment setup started.")
-        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            guard let store = self else { return }
-            Task { @MainActor in store.appendLog(text.trimmingCharacters(in: .newlines), for: logProjectID) }
+        let runID = UUID()
+        let projectForLog = logProjectID.flatMap { id in projects.first { $0.id == id } }
+        let logDirectory = projectForLog.flatMap(Self.projectLogDirectory(for:))
+            ?? Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
+        let logURL = logDirectory.appendingPathComponent("Environment-\(runID.uuidString).log")
+        let capture: PipelineLogCapture?
+        do {
+            capture = try PipelineLogCapture(fileURL: logURL, header: "Pinna2HRTF environment setup\nStarted: \(Date().formatted(date: .complete, time: .standard))\n\n--- stdout and stderr ---\n\n", onEvent: { _ in }, onFailure: { [weak self] message in
+                Task { @MainActor [weak self] in
+                    self?.appendLog("Could not save complete environment setup output: \(message)", for: logProjectID)
+                }
+            })
+            environmentTechnicalLogURL = logURL
+            if let logProjectID { technicalLogURLs[logProjectID] = logURL }
+        } catch {
+            capture = nil
+            appendLog("Could not create an environment setup log: \(error.localizedDescription)", for: logProjectID)
         }
-        process.terminationHandler = { [weak self] process in
+        appendLog("Environment setup started.", for: logProjectID)
+        if let logProjectID { liveLogStatusByProject[logProjectID] = "Setting up environment" }
+        let onExit: @Sendable (Process) -> Void = { [weak self] process in
             guard let store = self else { return }
             Task { @MainActor in
-                pipe.fileHandleForReading.readabilityHandler = nil
-                store.appendLog(process.terminationStatus == 0 ? "Environment setup finished." : "Environment setup failed (status \(process.terminationStatus)).", for: logProjectID)
+                let result = process.terminationStatus == 0 ? "Environment setup finished." : "Environment setup failed (status \(process.terminationStatus)). Technical output: \(logURL.lastPathComponent)."
+                store.appendLog(result, for: logProjectID)
+                if let logProjectID {
+                    store.liveLogStatusByProject[logProjectID] = process.terminationStatus == 0 ? "Environment ready" : "Environment setup failed"
+                }
                 store.environmentProcess = nil
                 store.refreshArtifacts()
             }
         }
         do {
-            try process.run()
+            try process.run(capturing: capture, onExit: onExit)
         } catch {
             environmentProcess = nil
+            if let logProjectID { liveLogStatusByProject[logProjectID] = "Could not start environment setup" }
             appendLog("Could not start environment setup: \(error.localizedDescription)")
         }
     }
@@ -1198,16 +1705,29 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func stopRunningProcess() {
-        guard let project = selectedProject else { return }
-        if let process = runningProcesses[project.id] {
-            let killer = Process()
-            killer.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-            killer.arguments = ["-TERM", "-P", String(process.processIdentifier)]
-            try? killer.run()
-            killer.waitUntilExit()
-            process.terminate()
+        guard let project = selectedProject, let process = runningProcesses[project.id], !stoppingProjects.contains(project.id) else { return }
+        stoppingProjects.insert(project.id)
+        if let stage = runningStages[project.id] { setStageOutcome(stage, for: project.id, to: .stopped) }
+        appendLog("Stopping task and its child processes.", for: project.id)
+        Task { @MainActor in
+            await Task.detached(priority: .userInitiated) { ProcessTreeTerminator.terminate(process) }.value
+            stoppingProjects.remove(project.id)
+            refreshArtifacts()
         }
-        appendLog("Stopping task.")
+    }
+
+    func stopAllRunningProcesses(completion: @escaping () -> Void) {
+        let processes = Array(runningProcesses.values) + (environmentProcess.map { [$0] } ?? [])
+        for (id, stage) in runningStages {
+            stoppingProjects.insert(id)
+            setStageOutcome(stage, for: id, to: .stopped)
+        }
+        Task { @MainActor in
+            await Task.detached(priority: .userInitiated) {
+                processes.forEach { ProcessTreeTerminator.terminate($0) }
+            }.value
+            completion()
+        }
     }
 
     func confirmResetSelectedProjectOutputs() {
@@ -1244,7 +1764,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     func confirmResetOutputs(for project: ProjectRecord) -> Bool {
         let alert = NSAlert()
         alert.messageText = "Reset pipeline outputs?"
-        alert.informativeText = "Remove generated outputs from all stages? Input meshes, microphone positions, settings, project logs, and modified or unrelated files will be kept."
+        alert.informativeText = "Remove all generated outputs, including saved manual PPM fits, parameters, Blender files, archived template copies, ear edits, and scan alignments? Original input meshes, microphone positions, other settings, project logs, and modified or unrelated files will be kept."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Reset Outputs")
         alert.addButton(withTitle: "Cancel")
@@ -1258,17 +1778,21 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             return
         }
         do {
-            let outputs = try outputsFor(project)
+            let outputs = try outputsFor(project, resettingOutputs: true)
             outputOperations.insert(project.id)
             if isPlacingMicrophone { cancelMicrophonePlacement() }
             Task { @MainActor in
                 let result = await Task.detached(priority: .userInitiated) { outputs.reset() }.value
                 outputOperations.remove(project.id)
-                if result.success { failedStagesByProject[project.id] = [] }
+                if let index = projects.firstIndex(where: { $0.id == project.id }) {
+                    projects[index].reconcileAfterOutputReset()
+                }
+                if result.success {
+                    failedStagesByProject[project.id] = []
+                    if let index = projects.firstIndex(where: { $0.id == project.id }) { projects[index].stageOutcomes = nil; persist() }
+                }
                 if selectedProjectID == project.id {
-                    selectedMesh = nil
-                    selectedImage = nil
-                    selectedScene = SCNScene()
+                    resetViewer()
                     refreshArtifacts()
                 }
                 appendLog(result.summary, for: project.id)
@@ -1281,38 +1805,177 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
     }
 
+    var selectedTechnicalLogURL: URL? {
+        selectedProjectID.flatMap { technicalLogURLs[$0] } ?? environmentTechnicalLogURL
+    }
+
+    func openTechnicalLog() {
+        guard let url = selectedTechnicalLogURL, FileManager.default.fileExists(atPath: url.path) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     func loadSelectedProjectLog() {
-        logText = selectedProjectID.flatMap { logTextByProject[$0] } ?? ""
+        guard let selectedProjectID else { logText = ""; return }
+        logText = renderedActivity(for: selectedProjectID)
+        if technicalLogURLs[selectedProjectID] == nil,
+           let project = projects.first(where: { $0.id == selectedProjectID }),
+           let url = Self.latestTechnicalLogURL(for: project) {
+            technicalLogURLs[selectedProjectID] = url
+        }
     }
 
     func clearSelectedProjectLog() {
         guard let selectedProjectID else { return }
-        logTextByProject[selectedProjectID] = ""
+        logEntriesByProject[selectedProjectID] = []
         logText = ""
     }
 
     func appendLog(_ text: String, for projectID: UUID? = nil) {
-        let compactText = text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { line in
-            guard !line.isEmpty else { return false }
-            let lower = line.lowercased()
-            if lower.hasPrefix("info: total files") && lower.contains("failed 0") { return false }
-            if lower.contains("error") || lower.contains("warning") || lower.contains("failed") || lower.contains("exception") || lower.contains("traceback") { return true }
-            let redundantPrefixes = ["using config:", "left input mesh:", "right input mesh:", "running inference in ", "running preprocessing into ", "running local numcalc with ", "local numcalc project root:", "running postprocessing into ", "started left, step ", "started right, step "]
-            return !redundantPrefixes.contains(where: { lower.hasPrefix($0) }) && !line.hasPrefix("/") && !(line.contains("Mem:") && line.contains("Time:")) && !line.hasPrefix("Fra:") && !lower.hasPrefix("blender ") && lower != "blender quit" && !lower.hasPrefix("read blend:") && !lower.hasPrefix("saved: '")
-        }.joined(separator: "\n")
-        guard !compactText.isEmpty else { return }
-        guard let projectID = projectID ?? selectedProjectID else { return }
-        let current = logTextByProject[projectID] ?? ""
-        let updated = current.isEmpty ? compactText : "\(current)\n\(compactText)"
-        logTextByProject[projectID] = updated
-        if projectID == selectedProjectID {
-            logText = updated
+        for line in text.components(separatedBy: .newlines) {
+            let message = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !message.isEmpty else { continue }
+            appendActivity(message, for: projectID)
         }
     }
+
+    private func recordPipelineEvent(_ event: PipelineLogEvent, stage: Stage, projectID: UUID, runID: UUID) {
+        let message: String
+        switch event.level?.lowercased() {
+        case "warning": message = "Warning · \(stage.title) · \(event.message)"
+        case "error": message = "Error · \(stage.title) · \(event.message)"
+        default: message = "\(stage.title) · \(event.message)"
+        }
+        let key = event.key.map { "\(runID.uuidString):\($0)" }
+        appendActivity(message, for: projectID, key: key)
+    }
+
+    private func appendActivity(_ message: String, for projectID: UUID?, key: String? = nil) {
+        guard let projectID = projectID ?? selectedProjectID else { return }
+        var entries = logEntriesByProject[projectID, default: []]
+        if let key, let existing = entries.lastIndex(where: { $0.key == key }) {
+            entries.remove(at: existing)
+        }
+        entries.append(ActivityLogEntry(date: Date(), message: message, key: key))
+        if entries.count > 400 { entries.removeFirst(entries.count - 400) }
+        logEntriesByProject[projectID] = entries
+        if projectID == selectedProjectID { logText = render(entries) }
+    }
+
+    private func renderedActivity(for projectID: UUID) -> String {
+        render(logEntriesByProject[projectID] ?? [])
+    }
+
+    private func render(_ entries: [ActivityLogEntry]) -> String {
+        entries.map { "[\($0.date.formatted(date: .omitted, time: .standard))] \($0.message)" }.joined(separator: "\n")
+    }
+
+    private func stageStartDetails(stage: Stage, project: ProjectRecord) -> String {
+        if stage == .scanPreparation {
+            let scan = URL(fileURLWithPath: project.scanPreparation.scanPath).lastPathComponent
+            let sides = [project.scanPreparation.prepareLeft ? "Left" : nil, project.scanPreparation.prepareRight ? "Right" : nil].compactMap { $0 }.joined(separator: " + ")
+            return "\(scan) · \(sides) ear\(sides.contains("+") ? "s" : "") · rotation \(project.scanPreparation.rotationDegrees)°"
+        }
+        if stage == .numcalc || stage == .postprocessing { return "Project output: \(URL(fileURLWithPath: project.saveLocation).lastPathComponent)" }
+        let inputs = [("Left", project.pipelineLeftEar), ("Right", project.pipelineRightEar)]
+            .filter { !$0.1.isEmpty }
+            .map { "\($0.0) \(URL(fileURLWithPath: $0.1).lastPathComponent)" }
+        return inputs.isEmpty ? "" : "Inputs: \(inputs.joined(separator: ", "))"
+    }
+
+    private func elapsedDescription(since start: Date) -> String {
+        let seconds = max(0, Int(Date().timeIntervalSince(start).rounded()))
+        if seconds < 60 { return "\(seconds)s" }
+        return "\(seconds / 60)m \(seconds % 60)s"
+    }
+
+    private static func technicalLogURL(project: ProjectRecord, stage: Stage, runID: UUID, date: Date) -> URL {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let filename = "\(formatter.string(from: date))-\(stage.rawValue)-\(runID.uuidString.prefix(8)).log"
+        return projectLogDirectory(for: project)?.appendingPathComponent(filename)
+            ?? Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
+                .appendingPathComponent(project.id.uuidString, isDirectory: true)
+                .appendingPathComponent(filename)
+    }
+
+    private static func latestTechnicalLogURL(for project: ProjectRecord) -> URL? {
+        guard let directory = projectLogDirectory(for: project) else { return nil }
+        migrateLegacyTechnicalLogs(for: project, to: directory)
+        return latestLog(in: directory)
+            ?? latestLog(in: Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
+                .appendingPathComponent(project.id.uuidString, isDirectory: true))
+    }
+
+    private static func projectLogDirectory(for project: ProjectRecord) -> URL? {
+        let location = project.saveLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !location.isEmpty else { return nil }
+        return URL(fileURLWithPath: location, isDirectory: true)
+            .appendingPathComponent("Logs", isDirectory: true)
+    }
+
+    private static func migrateLegacyTechnicalLogs(for project: ProjectRecord, to directory: URL) {
+        let legacyDirectory = Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
+            .appendingPathComponent(project.id.uuidString, isDirectory: true)
+        guard legacyDirectory.standardizedFileURL != directory.standardizedFileURL,
+              let files = try? FileManager.default.contentsOfDirectory(at: legacyDirectory, includingPropertiesForKeys: nil),
+              !files.isEmpty else { return }
+
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            for source in files where source.pathExtension == "log" {
+                var destination = directory.appendingPathComponent(source.lastPathComponent)
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    let suffix = UUID().uuidString.prefix(8)
+                    destination = directory.appendingPathComponent("\(source.deletingPathExtension().lastPathComponent)-\(suffix).log")
+                }
+                try FileManager.default.moveItem(at: source, to: destination)
+            }
+            if (try? FileManager.default.contentsOfDirectory(atPath: legacyDirectory.path).isEmpty) == true {
+                try? FileManager.default.removeItem(at: legacyDirectory)
+            }
+        } catch {
+            // Keep any logs that could not be moved in their legacy location; lookup falls back to it.
+        }
+    }
+
+    private static func latestLog(in directory: URL) -> URL? {
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey]) else { return nil }
+        return urls.filter { $0.pathExtension == "log" }.max {
+            let first = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let second = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return first < second
+        }
+    }
+
+    private static func latestEnvironmentTechnicalLogURL() -> URL? {
+        let directory = Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey]) else { return nil }
+        return urls.filter { $0.lastPathComponent.hasPrefix("Environment-") && $0.pathExtension == "log" }.max {
+            let first = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let second = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return first < second
+        }
+    }
+
+    private static func migrateProjectDirectory(for project: ProjectRecord) {
+        let projectFolder = URL(fileURLWithPath: project.saveLocation, isDirectory: true)
+        let entries = try? FileManager.default.contentsOfDirectory(at: projectFolder, includingPropertiesForKeys: nil)
+        let legacyIntermediates = entries?.first(where: { $0.lastPathComponent == "intermediates" })
+        let currentIntermediates = entries?.first(where: { $0.lastPathComponent == "Intermediates" })
+        if let legacyIntermediates, currentIntermediates == nil {
+            let migrationPath = projectFolder.appendingPathComponent(".pinna2hrtf-intermediates-migration")
+            try? FileManager.default.moveItem(at: legacyIntermediates, to: migrationPath)
+            try? FileManager.default.moveItem(at: migrationPath, to: projectFolder.appendingPathComponent("Intermediates"))
+        }
+    }
+
 
     static func migrated(_ registry: ProjectRegistry, rootURL: URL, packageURL: URL) -> ProjectRegistry {
         var next = registry
         let defaultEnvironment = Defaults.environment(root: rootURL)
+        if Defaults.isPackagedApp { next.environment = defaultEnvironment }
         let replacements: [(String, String)] = [
             (packageURL.appendingPathComponent("External").path, rootURL.appendingPathComponent("External").path),
             (packageURL.appendingPathComponent("Paper").path, rootURL.appendingPathComponent("Paper").path),
@@ -1343,15 +2006,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 let folderName = updated.name.replacingOccurrences(of: "/", with: "-")
                 updated.saveLocation = Defaults.appDataURL.appendingPathComponent("Projects/\(folderName)").path
             }
-            let projectFolder = URL(fileURLWithPath: updated.saveLocation)
-            let entries = try? FileManager.default.contentsOfDirectory(at: projectFolder, includingPropertiesForKeys: nil)
-            let legacyIntermediates = entries?.first(where: { $0.lastPathComponent == "intermediates" })
-            let currentIntermediates = entries?.first(where: { $0.lastPathComponent == "Intermediates" })
-            if let legacyIntermediates, currentIntermediates == nil {
-                let migrationPath = projectFolder.appendingPathComponent(".pinna2hrtf-intermediates-migration")
-                try? FileManager.default.moveItem(at: legacyIntermediates, to: migrationPath)
-                try? FileManager.default.moveItem(at: migrationPath, to: projectFolder.appendingPathComponent("Intermediates"))
-            }
             updated.settings.inference.modelConfig = migratedPath(updated.settings.inference.modelConfig, replacements: replacements)
             updated.settings.inference.modelCheckpoint = migratedPath(updated.settings.inference.modelCheckpoint, replacements: replacements)
             if updated.settings.inference.targetLeftFolder == "Target STL Left" { updated.settings.inference.targetLeftFolder = "Input/Left" }
@@ -1365,10 +2019,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 let resources = packageURL.appendingPathComponent("HRTFCalculation/Inference/resources", isDirectory: true)
                 let bundledConfig = resources.appendingPathComponent(URL(fileURLWithPath: updated.settings.inference.modelConfig).lastPathComponent)
                 let bundledCheckpoint = resources.appendingPathComponent(URL(fileURLWithPath: updated.settings.inference.modelCheckpoint).lastPathComponent)
-                if (updated.settings.inference.modelConfig.contains("HRTFCalculation/Inference/resources/") || !FileManager.default.fileExists(atPath: updated.settings.inference.modelConfig)), FileManager.default.fileExists(atPath: bundledConfig.path) {
+                if updated.settings.inference.modelConfig.contains("HRTFCalculation/Inference/resources/"), FileManager.default.fileExists(atPath: bundledConfig.path) {
                     updated.settings.inference.modelConfig = bundledConfig.path
                 }
-                if (updated.settings.inference.modelCheckpoint.contains("HRTFCalculation/Inference/resources/") || !FileManager.default.fileExists(atPath: updated.settings.inference.modelCheckpoint)), FileManager.default.fileExists(atPath: bundledCheckpoint.path) {
+                if updated.settings.inference.modelCheckpoint.contains("HRTFCalculation/Inference/resources/"), FileManager.default.fileExists(atPath: bundledCheckpoint.path) {
                     updated.settings.inference.modelCheckpoint = bundledCheckpoint.path
                 }
             }

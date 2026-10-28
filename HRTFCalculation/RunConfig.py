@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Callable, Iterable
 
 from .Config import PipelineConfig, load_config, save_config, template_config
+from .LiveEvents import emit_live_event
 
 
 Logger = Callable[[str], None]
@@ -19,16 +20,56 @@ def log_default(message: str) -> None:
     print(message, flush=True)
 
 
+def input_paths(config: PipelineConfig, validate: bool = False):
+    if not config.scan_preparation.enabled:
+        return config.paths.left_ear, config.paths.right_ear
+    settings = config.scan_preparation
+    if not settings.prepare_left and not settings.prepare_right:
+        raise ValueError("Select at least one ear to prepare.")
+    if validate:
+        from .ScanPreparation import validate_prepared
+        validate_prepared(config)
+    from .MeshEditing import reviewed_inputs
+    return reviewed_inputs(config, validate=validate)
+
+
+def run_scan_preparation(config, dry_run, logger, force=False):
+    settings = config.scan_preparation
+    if settings.scan_path is None or settings.rotation_degrees is None:
+        raise ValueError("Choose a full-head scan and an explicit crop rotation.")
+    if not force:
+        try:
+            from .ScanPreparation import validate_prepared
+            validate_prepared(config)
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        else:
+            emit_live_event("Prepared ears are current; reusing them")
+            logger(f"Scan preparation is current; reusing prepared ears in {config.paths.output_dir / 'Prepared'}")
+            return
+    emit_live_event(f"Preparing {Path(settings.scan_path).name} · crop rotation {settings.rotation_degrees:g}°")
+    logger(f"Preparing full-head scan {settings.scan_path} into {config.paths.output_dir / 'Prepared'}; crop rotation {settings.rotation_degrees} degrees")
+    if not dry_run:
+        from .ScanPreparation import prepare_scan
+        prepare_scan(config, logger)
+
+
 def project_dirs(config: PipelineConfig) -> list[Path]:
-    return [config.paths.output_dir / "Projects" / side for side, path in (("Left", config.paths.left_ear), ("Right", config.paths.right_ear)) if path is not None]
+    return [config.paths.output_dir / "Projects" / side for side, path in zip(("Left", "Right"), input_paths(config)) if path is not None]
 
 
 def run_from_config(config: PipelineConfig, stages: Iterable[str] | None = None, dry_run: bool = False, logger: Logger = log_default) -> None:
     selected = list(stages or ["all"])
     config = config.resolved()
     run_all = "all" in selected
+    if "scan-preparation" in selected:
+        run_scan_preparation(config, dry_run, logger, force=True)
+    elif run_all and config.scan_preparation.enabled:
+        run_scan_preparation(config, dry_run, logger)
     if "inference" in selected or (run_all and config.inference.enabled):
         run_inference(config, dry_run, logger)
+    if "preprocessing" in selected and config.scan_preparation.enabled and "scan-preparation" not in selected:
+        run_scan_preparation(config, dry_run, logger)
     if "preprocessing" in selected or (run_all and config.preprocessing.enabled):
         run_preprocessing(config, dry_run, logger)
     if "numcalc" in selected or (run_all and config.numcalc.enabled):
@@ -38,6 +79,8 @@ def run_from_config(config: PipelineConfig, stages: Iterable[str] | None = None,
 
 
 def run_inference(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
+    config = config.model_copy(deep=True)
+    config.paths.left_ear, config.paths.right_ear = input_paths(config, validate=not dry_run)
     logger(f"Running inference in {config.paths.output_dir}")
     if config.paths.left_ear is None and config.paths.right_ear is None:
         logger("No ear meshes were selected for inference.")
@@ -48,6 +91,7 @@ def run_inference(config: PipelineConfig, dry_run: bool, logger: Logger) -> None
         logger(f"Right input mesh: {config.paths.right_ear}")
     if dry_run:
         return
+    emit_live_event("Starting Mesh2PPM inference")
     config.paths.output_dir.mkdir(parents=True, exist_ok=True)
     from .Inference.inference_stl import main
     legacy_folders = [
@@ -60,17 +104,19 @@ def run_inference(config: PipelineConfig, dry_run: bool, logger: Logger) -> None
         "Intermediates/Prediction Parameters Left", "Intermediates/Prediction Parameters Right",
         "Intermediates/ICP STL Left", "Intermediates/ICP STL Right"
     ])
-    input_paths = [path.resolve() for path in (config.paths.left_ear, config.paths.right_ear) if path is not None]
+    selected_input_paths = [path.resolve() for path in (config.paths.left_ear, config.paths.right_ear) if path is not None]
     for name in legacy_folders:
         legacy_path = config.paths.output_dir / name
-        if legacy_path.is_dir() and not any(legacy_path.resolve() in path.parents for path in input_paths):
+        if legacy_path.is_dir() and not any(legacy_path.resolve() in path.parents for path in selected_input_paths):
             shutil.rmtree(legacy_path)
-        elif legacy_path.is_file() and legacy_path.resolve() not in input_paths:
+        elif legacy_path.is_file() and legacy_path.resolve() not in selected_input_paths:
             legacy_path.unlink()
     args = SimpleNamespace(
         configuration=str(config.inference.model_config_file),
         model_checkpoint=str(config.inference.model_checkpoint),
         data_dir=str(config.paths.output_dir),
+        target_left_file=config.paths.left_ear.name if config.paths.left_ear is not None else None,
+        target_right_file=config.paths.right_ear.name if config.paths.right_ear is not None else None,
         target_left_folder=str(config.paths.left_ear.parent) if config.paths.left_ear is not None else None,
         target_right_folder=str(config.paths.right_ear.parent) if config.paths.right_ear is not None else None,
         prediction_left_folder=config.inference.prediction_left_folder,
@@ -80,9 +126,18 @@ def run_inference(config: PipelineConfig, dry_run: bool, logger: Logger) -> None
         intermediates_folder="Intermediates",
     )
     main(args)
+    if config.scan_preparation.enabled:
+        from .ScanPreparation import record_stage
+        predictions = [predicted_stl(config.paths.output_dir / folder, source.stem)
+                       for source, folder in ((config.paths.left_ear, config.inference.prediction_left_folder),
+                                              (config.paths.right_ear, config.inference.prediction_right_folder)) if source is not None]
+        if any(path is None for path in predictions):
+            raise ValueError("Inference did not produce all selected prepared-ear predictions.")
+        record_stage(config, "inference", predictions)
 
 
 def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
+    emit_live_event("Preparing ear meshes and building the head model")
     logger(f"Running preprocessing into {config.paths.output_dir}")
     if dry_run:
         return
@@ -98,19 +153,31 @@ def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
         preprocessing=config.preprocessing,
         logger=logger,
     )
+    if config.scan_preparation.enabled:
+        from .ScanPreparation import record_stage
+        record_stage(config, "preprocessing", [path / "NumCalc/source_1/NC.inp" for path in project_dirs(config)])
 
 
 def preprocessing_input_paths(config: PipelineConfig, logger: Logger) -> tuple[Path | None, Path | None]:
+    left, right = input_paths(config, validate=True)
+    if config.scan_preparation.enabled and config.inference.use_predictions_for_preprocessing and not config.manual_ppm.enabled:
+        from .ScanPreparation import validate_stage
+        validate_stage(config, "inference")
     inputs = []
-    for side, source, folder_name in [
-        ("left", config.paths.left_ear, config.inference.prediction_left_folder),
-        ("right", config.paths.right_ear, config.inference.prediction_right_folder),
+    for side, source, folder_name, manual_path in [
+        ("left", left, config.inference.prediction_left_folder, config.manual_ppm.left_mesh),
+        ("right", right, config.inference.prediction_right_folder, config.manual_ppm.right_mesh),
     ]:
         if source is None:
             inputs.append(None)
             continue
         selected = source
-        if config.inference.use_predictions_for_preprocessing:
+        if config.manual_ppm.enabled and manual_path is not None:
+            if not manual_path.is_file():
+                raise FileNotFoundError(f"Saved manual {side} PPM fit is missing: {manual_path}")
+            selected = manual_path
+            logger(f"Using manually fitted {side} PPM for preprocessing: {manual_path}")
+        elif config.inference.use_predictions_for_preprocessing:
             predicted = predicted_stl(config.paths.output_dir / folder_name, source.stem)
             if predicted is not None:
                 selected = predicted
@@ -135,6 +202,10 @@ def predicted_stl(folder: Path, preferred_stem: str) -> Path | None:
 
 
 def run_numcalc(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
+    if config.scan_preparation.enabled and not dry_run:
+        input_paths(config, validate=True)
+        from .ScanPreparation import validate_stage
+        validate_stage(config, "preprocessing")
     if config.numcalc.mode == "slurm":
         run_numcalc_slurm(config, dry_run, logger)
     else:
@@ -142,6 +213,7 @@ def run_numcalc(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
 
 
 def run_numcalc_local(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
+    emit_live_event("Checking completed frequency steps")
     logger(f"Running local NumCalc with {config.paths.numcalc_executable}")
     projects_root = config.paths.output_dir / "Projects"
     projects = project_dirs(config)
@@ -215,35 +287,62 @@ def slurm_worker_text(config: PipelineConfig) -> str:
     ])
 
 
+def prepare_sofa_output(output_dir: Path, overwrite: bool) -> None:
+    if output_dir.exists() and overwrite:
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+
+def collect_sofa_files(projects: list[Path], output_dir: Path) -> None:
+    import mesh2hrtf as m2h
+    if len(projects) == 2:
+        m2h.merge_sofa_files([str(project) for project in projects], savedir=str(output_dir))
+    else:
+        for source in (projects[0] / "Output2HRTF").glob("*.sofa"):
+            shutil.copy2(source, output_dir / source.name)
+
+
+def inspect_sofa_files(output_dir: Path) -> None:
+    import mesh2hrtf as m2h
+    for plane in ["horizontal", "median"]:
+        m2h.inspect_sofa_files(str(output_dir), pattern="HRIR", plot="3D", plane=plane)
+
+
 def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
+    emit_live_event("Converting simulation results to SOFA")
     logger(f"Running postprocessing into {config.postprocessing.output_sofa_dir}")
     if dry_run:
         return
     import mesh2hrtf as m2h
     output_dir = config.postprocessing.output_sofa_dir
-    if output_dir.exists() and config.postprocessing.overwrite:
-        shutil.rmtree(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if config.postprocessing.spatial_upsampling:
+        from .Postprocessing.spatial_upsampling import resolve_dependencies
+        resolve_dependencies(config.postprocessing)
+    prepare_sofa_output(output_dir, config.postprocessing.overwrite)
     projects = project_dirs(config)
     for project in projects:
+        emit_live_event(f"Converting {project.name} results")
         m2h.output2hrtf(str(project))
     if config.postprocessing.resample_hrirs:
         from .Postprocessing.postprocessing import resample_hrir_files
         for project in projects:
+            emit_live_event(f"Resampling {project.name} HRIRs")
             resample_hrir_files(project / "Output2HRTF", config.postprocessing.sampling_rate)
     if config.postprocessing.normalize:
         from .Postprocessing.postprocessing import normalize_sofa_files
         for project in projects:
+            emit_live_event(f"Normalizing {project.name} SOFA files")
             normalize_sofa_files(project / "Output2HRTF", config.postprocessing.level_offset_db)
     if len(projects) == 2:
-        m2h.merge_sofa_files([str(project) for project in projects], savedir=str(output_dir))
-    else:
-        source_dir = projects[0] / "Output2HRTF"
-        for source in source_dir.glob("*.sofa"):
-            shutil.copy2(source, output_dir / source.name)
+        emit_live_event("Combining left and right results")
+    collect_sofa_files(projects, output_dir)
+    if config.postprocessing.spatial_upsampling:
+        from .Postprocessing.spatial_upsampling import upsample_hrtf_files
+        emit_live_event("Spatially upsampling HRTFs with LocaDyn")
+        upsample_hrtf_files(output_dir, config.postprocessing, logger)
     try:
-        for plane in ["horizontal", "median"]:
-            m2h.inspect_sofa_files(str(output_dir), pattern="HRIR", plot="3D", plane=plane)
+        emit_live_event("Creating SOFA inspection plots")
+        inspect_sofa_files(output_dir)
         logger(f"Wrote SOFA visualizations into {output_dir}")
     except Exception as error:
         logger(f"Could not write SOFA visualizations: {error}")
@@ -252,7 +351,7 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, help="Path to a pipeline YAML config file.")
-    parser.add_argument("--stage", action="append", choices=["all", "inference", "preprocessing", "numcalc", "postprocessing"], help="Stage to run. Can be supplied multiple times.")
+    parser.add_argument("--stage", action="append", choices=["all", "scan-preparation", "inference", "preprocessing", "numcalc", "postprocessing"], help="Stage to run. Can be supplied multiple times.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--write-template", type=str, help="Write a default config template and exit.")
     return parser.parse_args()
@@ -304,21 +403,14 @@ def sofa_cli() -> None:
     args = parse_sofa_args()
     import mesh2hrtf as m2h
     output_dir = Path(args.output_dir)
-    if output_dir.exists() and args.overwrite:
-        shutil.rmtree(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    projects = [project for project in (args.left_project, args.right_project) if project]
+    prepare_sofa_output(output_dir, args.overwrite)
+    projects = [Path(project) for project in (args.left_project, args.right_project) if project]
     if not projects:
         raise SystemExit("At least one project is required")
     for project in projects:
-        m2h.output2hrtf(project)
-    if len(projects) == 2:
-        m2h.merge_sofa_files(projects, savedir=str(output_dir))
-    else:
-        for source in Path(projects[0]).joinpath("Output2HRTF").glob("*.sofa"):
-            shutil.copy2(source, output_dir / source.name)
-    for plane in ["horizontal", "median"]:
-        m2h.inspect_sofa_files(str(output_dir), pattern="HRIR", plot="3D", plane=plane)
+        m2h.output2hrtf(str(project))
+    collect_sofa_files(projects, output_dir)
+    inspect_sofa_files(output_dir)
 
 
 def cli() -> None:
@@ -330,6 +422,14 @@ def cli() -> None:
     if not args.config:
         raise SystemExit("--config is required unless --write-template is used")
     run_from_config(load_config(args.config), stages=args.stage, dry_run=args.dry_run)
+
+
+def scan_preparation_cli():
+    parser = argparse.ArgumentParser(description="Crop and repair ears from a full-head scan using a project YAML.")
+    parser.add_argument("--config", required=True)
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+    run_scan_preparation(load_config(args.config), args.dry_run, log_default)
 
 
 if __name__ == "__main__":

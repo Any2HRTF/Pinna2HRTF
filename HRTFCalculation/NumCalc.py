@@ -13,12 +13,13 @@ from pathlib import Path
 
 import mesh2hrtf as m2h
 import psutil
+from .LiveEvents import emit_live_event
 
 
 def frequency_step_complete(source_dir: Path, step: int) -> bool:
     output_dir = source_dir / "be.out" / f"be.{step}"
     required_outputs = {"pBoundary", "pEvalGrid", "vBoundary", "vEvalGrid"}
-    if not output_dir.is_dir() or not required_outputs.issubset({path.name for path in output_dir.iterdir()}):
+    if not output_dir.is_dir() or not all((output_dir / name).is_file() and (output_dir / name).stat().st_size > 0 for name in required_outputs):
         return False
     log_path = source_dir / f"NC{step}-{step}_log.txt"
     if not log_path.is_file():
@@ -68,12 +69,18 @@ def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: f
             low_to_high = pending[::-1]
             pending = [item for pair in zip(pending, low_to_high) for item in pair]
             pending = list(dict.fromkeys(pending))
+        total_steps = len(pending)
         pending = deque(pending)
+        if total_steps:
+            emit_live_event(f"Running {total_steps} unfinished frequency steps", key="numcalc-overview")
+        else:
+            emit_live_event("All frequency steps are already complete")
         print(f"Running {len(pending)} unfinished frequency steps with adaptive FMM expansion length={adaptive_fmm_length}", flush=True)
         total_ram = psutil.virtual_memory().total / 1073741824
         ram_budget = max_ram_load_gb or total_ram
         warned_memory_steps: set[tuple[str, int, str]] = set()
         running = []
+        completed_steps = 0
         while pending or running:
             finished = []
             for item in running:
@@ -88,6 +95,12 @@ def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: f
                     finished.append(item)
             for item in finished:
                 running.remove(item)
+            if finished:
+                completed_steps += len(finished)
+                emit_live_event(
+                    f"Completed {completed_steps} of {total_steps} frequency steps",
+                    key="numcalc-progress",
+                )
             while pending and len(running) < max_instances:
                 ram, project, source_dir, step, frequency = pending[0]
                 required_ram = ram * ram_safety_factor
@@ -102,6 +115,10 @@ def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: f
                 warning_key = (project.name, step, str(source_dir))
                 if required_ram > safe_available_ram and warning_key not in warned_memory_steps:
                     warned_memory_steps.add(warning_key)
+                    emit_live_event(
+                        f"High memory demand for {project.name} at {frequency:g} Hz; see technical log",
+                        level="warning",
+                    )
                     print(
                         f"Warning: estimated RAM for {project.name}, {frequency:g} Hz is {required_ram:.2f} GB; "
                         f"only {available_ram:.2f} GB is currently available with a 10% safety margin.",

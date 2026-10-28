@@ -1,6 +1,7 @@
 import Foundation
 
 enum Stage: String, CaseIterable, Identifiable, Codable {
+    case scanPreparation = "scan-preparation"
     case inference
     case preprocessing
     case numcalc
@@ -10,6 +11,7 @@ enum Stage: String, CaseIterable, Identifiable, Codable {
 
     var title: String {
         switch self {
+        case .scanPreparation: "Scan Preparation"
         case .inference: "Mesh2PPM Inference"
         case .preprocessing: "Preprocessing"
         case .numcalc: "NumCalc"
@@ -19,6 +21,7 @@ enum Stage: String, CaseIterable, Identifiable, Codable {
 
     var systemImage: String {
         switch self {
+        case .scanPreparation: "bandage"
         case .inference: "wand.and.stars"
         case .preprocessing: "scissors"
         case .numcalc: "cpu"
@@ -33,6 +36,7 @@ enum StageState: String, Codable {
     case failed
     case done
     case skipped
+    case stopped
 }
 
 enum InputHandling: String, CaseIterable, Identifiable, Codable {
@@ -70,10 +74,12 @@ struct Artifact: Identifiable, Hashable {
     let url: URL
 
     var id: String { url.path }
-    var exists: Bool { FileManager.default.fileExists(atPath: url.path) }
+    var cachedExists: Bool? = nil
+    var exists: Bool { cachedExists ?? FileManager.default.fileExists(atPath: url.path) }
+    var isPressure: Bool { url.lastPathComponent == "NC.inp" }
     var isMesh: Bool { ["stl", "ply"].contains(url.pathExtension.lowercased()) }
     var isImage: Bool { ["jpeg", "jpg", "pdf", "png"].contains(url.pathExtension.lowercased()) }
-    var systemImage: String { isImage ? "photo" : "cube" }
+    var systemImage: String { isPressure ? "waveform.path" : isImage ? "photo" : "cube" }
 }
 
 struct ViewerCameraState: Codable, Equatable {
@@ -94,6 +100,23 @@ struct EnvironmentConfig: Codable, Equatable {
     var externalDir: String
 }
 
+struct ScanPreparationSettings: Codable, Equatable {
+    var enabled = false
+    var scanPath = ""
+    var rotationDegrees = "0"
+    var originalScanPath: String?
+    var requireManualReview: Bool?
+    var reviewedLeftPath: String?
+    var reviewedRightPath: String?
+    var prepareLeft = true
+    var prepareRight = true
+    var targetEdgeMM = "0.75"
+    var leftMarginMM = "20"
+    var rightMarginMM = "10"
+    var sideMinMM = "30"
+    var sideMaxMM = "110"
+}
+
 struct InferenceSettings: Codable, Equatable {
     var modelConfig: String
     var modelCheckpoint: String
@@ -101,7 +124,63 @@ struct InferenceSettings: Codable, Equatable {
     var targetRightFolder = "Input/Right"
     var predictionLeftFolder = "Intermediates/Left"
     var predictionRightFolder = "Intermediates/Right"
-    var usePredictionsForPreprocessing = true
+    var usePredictionsForPreprocessing = false
+}
+
+struct ManualPPMFittingSettings: Codable, Equatable {
+    var useForPreprocessing = false
+    var templateBlendPath: String?
+    var leftMeshPath: String?
+    var rightMeshPath: String?
+    var leftParametersPath: String?
+    var rightParametersPath: String?
+    var leftBlendPath: String?
+    var rightBlendPath: String?
+    var leftSourcePath: String?
+    var rightSourcePath: String?
+    var leftSourceIdentity: String?
+    var rightSourceIdentity: String?
+
+    func meshPath(for side: EarSide) -> String? { side == .left ? leftMeshPath : rightMeshPath }
+    func parametersPath(for side: EarSide) -> String? { side == .left ? leftParametersPath : rightParametersPath }
+    func blendPath(for side: EarSide) -> String? { side == .left ? leftBlendPath : rightBlendPath }
+    func sourcePath(for side: EarSide) -> String? { side == .left ? leftSourcePath : rightSourcePath }
+    func sourceIdentity(for side: EarSide) -> String? { side == .left ? leftSourceIdentity : rightSourceIdentity }
+
+    mutating func reconcileAfterOutputReset() {
+        for side in EarSide.allCases {
+            let files = [meshPath(for: side), parametersPath(for: side)]
+            guard files.contains(where: { $0.map { !FileManager.default.fileExists(atPath: $0) } ?? true }) else { continue }
+            if side == .left {
+                leftMeshPath = nil; leftParametersPath = nil; leftBlendPath = nil
+                leftSourcePath = nil; leftSourceIdentity = nil
+            } else {
+                rightMeshPath = nil; rightParametersPath = nil; rightBlendPath = nil
+                rightSourcePath = nil; rightSourceIdentity = nil
+            }
+        }
+        if leftMeshPath == nil && rightMeshPath == nil { useForPreprocessing = false }
+        if let templateBlendPath, !FileManager.default.fileExists(atPath: templateBlendPath) {
+            self.templateBlendPath = nil
+        }
+    }
+
+    mutating func setFit(meshPath: String, parametersPath: String, blendPath: String, sourcePath: String,
+                         sourceIdentity: String, for side: EarSide) {
+        if side == .left {
+            leftMeshPath = meshPath
+            leftParametersPath = parametersPath
+            leftBlendPath = blendPath
+            leftSourcePath = sourcePath
+            leftSourceIdentity = sourceIdentity
+        } else {
+            rightMeshPath = meshPath
+            rightParametersPath = parametersPath
+            rightBlendPath = blendPath
+            rightSourcePath = sourcePath
+            rightSourceIdentity = sourceIdentity
+        }
+    }
 }
 
 struct PreprocessingSettings: Codable, Equatable {
@@ -147,9 +226,16 @@ struct PostprocessingSettings: Codable, Equatable {
     var levelOffsetDB = "-30"
     var resampleHrirs = false
     var samplingRate = "48000"
+    var outputFolder: String?
+    var spatialUpsampling = false
+    var spatialSubdivisions = 3
+    var spatialNormalize = true
+    var matlabExecutable: String?
+    var amtPath: String?
 
     enum CodingKeys: String, CodingKey {
-        case normalize, levelOffsetDB, resampleHrirs, samplingRate
+        case normalize, levelOffsetDB, resampleHrirs, samplingRate, outputFolder
+        case spatialUpsampling, spatialSubdivisions, spatialNormalize, matlabExecutable, amtPath
     }
 
     init() {}
@@ -160,6 +246,12 @@ struct PostprocessingSettings: Codable, Equatable {
         levelOffsetDB = try values.decodeIfPresent(String.self, forKey: .levelOffsetDB) ?? "-30"
         resampleHrirs = try values.decodeIfPresent(Bool.self, forKey: .resampleHrirs) ?? false
         samplingRate = try values.decodeIfPresent(String.self, forKey: .samplingRate) ?? "48000"
+        outputFolder = try values.decodeIfPresent(String.self, forKey: .outputFolder)
+        spatialUpsampling = try values.decodeIfPresent(Bool.self, forKey: .spatialUpsampling) ?? false
+        spatialSubdivisions = try values.decodeIfPresent(Int.self, forKey: .spatialSubdivisions) ?? 3
+        spatialNormalize = try values.decodeIfPresent(Bool.self, forKey: .spatialNormalize) ?? true
+        matlabExecutable = try values.decodeIfPresent(String.self, forKey: .matlabExecutable)
+        amtPath = try values.decodeIfPresent(String.self, forKey: .amtPath)
     }
 
     var normalizedSamplingRate: Int {
@@ -170,9 +262,36 @@ struct PostprocessingSettings: Codable, Equatable {
 
 struct ProjectSettings: Codable, Equatable {
     var inference: InferenceSettings
+    var manualPPMFitting = ManualPPMFittingSettings()
+    var scanPreparation: ScanPreparationSettings?
     var preprocessing = PreprocessingSettings()
     var numcalc = NumCalcSettings()
     var postprocessing: PostprocessingSettings? = PostprocessingSettings()
+
+    private enum CodingKeys: String, CodingKey {
+        case inference, manualPPMFitting, scanPreparation, preprocessing, numcalc, postprocessing
+    }
+
+    init(inference: InferenceSettings, manualPPMFitting: ManualPPMFittingSettings = ManualPPMFittingSettings(),
+         scanPreparation: ScanPreparationSettings? = nil, preprocessing: PreprocessingSettings = PreprocessingSettings(),
+         numcalc: NumCalcSettings = NumCalcSettings(), postprocessing: PostprocessingSettings? = PostprocessingSettings()) {
+        self.inference = inference
+        self.manualPPMFitting = manualPPMFitting
+        self.scanPreparation = scanPreparation
+        self.preprocessing = preprocessing
+        self.numcalc = numcalc
+        self.postprocessing = postprocessing
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        inference = try values.decode(InferenceSettings.self, forKey: .inference)
+        manualPPMFitting = try values.decodeIfPresent(ManualPPMFittingSettings.self, forKey: .manualPPMFitting) ?? ManualPPMFittingSettings()
+        scanPreparation = try values.decodeIfPresent(ScanPreparationSettings.self, forKey: .scanPreparation)
+        preprocessing = try values.decodeIfPresent(PreprocessingSettings.self, forKey: .preprocessing) ?? PreprocessingSettings()
+        numcalc = try values.decodeIfPresent(NumCalcSettings.self, forKey: .numcalc) ?? NumCalcSettings()
+        postprocessing = try values.decodeIfPresent(PostprocessingSettings.self, forKey: .postprocessing) ?? PostprocessingSettings()
+    }
 }
 
 struct ProjectRecord: Identifiable, Codable, Equatable {
@@ -182,11 +301,90 @@ struct ProjectRecord: Identifiable, Codable, Equatable {
     var rightEar: String
     var saveLocation: String
     var inputHandling: InputHandling = .copy
+    var folderID: UUID?
+    var preservedConfigJSON: String?
+    var stageOutcomes: [String: StageState]?
     var settings: ProjectSettings
+}
+
+extension ProjectRecord {
+    func protectedOutputInputs(resettingProjectID: UUID? = nil) -> [String] {
+        let scan = scanPreparation
+        var paths = [leftEar, rightEar, scan.originalScanPath ?? "", settings.preprocessing.evaluationGrid ?? ""]
+        let alignedScan = URL(fileURLWithPath: saveLocation).appendingPathComponent("MeshEdits/AlignedScan.ply").standardizedFileURL.path
+        let canResetAlignment = id == resettingProjectID && !(scan.originalScanPath ?? "").isEmpty
+            && URL(fileURLWithPath: scan.scanPath).standardizedFileURL.path == alignedScan
+            && scan.originalScanPath != scan.scanPath
+        if !canResetAlignment { paths.append(scan.scanPath) }
+        // A project's saved fits are outputs when explicitly resetting that
+        // project; fits used by any other project remain protected inputs.
+        if id != resettingProjectID {
+            paths += [scan.reviewedLeftPath ?? "", scan.reviewedRightPath ?? ""]
+            let fitting = settings.manualPPMFitting
+            paths += [fitting.leftMeshPath ?? "", fitting.rightMeshPath ?? "",
+                      fitting.leftParametersPath ?? "", fitting.rightParametersPath ?? "",
+                      fitting.leftBlendPath ?? "", fitting.rightBlendPath ?? "", fitting.templateBlendPath ?? ""]
+        }
+        return paths.filter { !$0.isEmpty && $0 != "Default" }
+    }
+
+    mutating func reconcileAfterOutputReset() {
+        settings.manualPPMFitting.reconcileAfterOutputReset()
+        if var scan = settings.scanPreparation {
+            if let path = scan.reviewedLeftPath, !FileManager.default.fileExists(atPath: path) { scan.reviewedLeftPath = nil }
+            if let path = scan.reviewedRightPath, !FileManager.default.fileExists(atPath: path) { scan.reviewedRightPath = nil }
+            if !FileManager.default.fileExists(atPath: scan.scanPath), let original = scan.originalScanPath {
+                scan.scanPath = original
+                scan.originalScanPath = nil
+            }
+            settings.scanPreparation = scan
+        }
+    }
+
+    var scanPreparation: ScanPreparationSettings { settings.scanPreparation ?? ScanPreparationSettings() }
+    var pipelineLeftEar: String { pipelineEar(for: .left) }
+    var pipelineRightEar: String { pipelineEar(for: .right) }
+
+    func pipelineEar(for side: EarSide, inspection: ArtifactScanner.Inspection = .init()) -> String {
+        guard scanPreparation.enabled else { return side == .left ? leftEar : rightEar }
+        return ArtifactScanner.preparedEarURL(for: side, in: self, inspection: inspection)?.path ?? ""
+    }
+}
+
+struct ProjectFolder: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var name: String
+    var isExpanded = true
 }
 
 struct ProjectRegistry: Codable, Equatable {
     var projects: [ProjectRecord]
     var selectedProjectID: UUID?
     var environment: EnvironmentConfig
+    var folders: [ProjectFolder] = []
+
+    init(projects: [ProjectRecord], selectedProjectID: UUID?, environment: EnvironmentConfig, folders: [ProjectFolder] = []) {
+        self.projects = projects
+        self.selectedProjectID = selectedProjectID
+        self.environment = environment
+        self.folders = folders
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case projects, selectedProjectID, environment, folders
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        projects = try values.decode([ProjectRecord].self, forKey: .projects)
+        selectedProjectID = try values.decodeIfPresent(UUID.self, forKey: .selectedProjectID)
+        environment = try values.decode(EnvironmentConfig.self, forKey: .environment)
+        folders = try values.decodeIfPresent([ProjectFolder].self, forKey: .folders) ?? []
+        let folderIDs = Set(folders.map(\.id))
+        for index in projects.indices {
+            if let id = projects[index].folderID, !folderIDs.contains(id) {
+                projects[index].folderID = nil
+            }
+        }
+    }
 }

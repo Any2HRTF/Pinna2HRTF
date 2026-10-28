@@ -9,6 +9,7 @@ from typing import Any, Literal
 import yaml
 import warnings
 from .Compatibility import import_legacy_distance, read_settings, annotate_legacy_distance
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -55,6 +56,43 @@ class PathsConfig(BaseModel):
     evaluation_grid: str = "Default"
 
 
+class ScanPreparationConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    enabled: bool = False
+    scan_path: Path | None = None
+    rotation_degrees: float | None = None
+    require_manual_review: bool = False
+    reviewed_left: Path | None = None
+    reviewed_right: Path | None = None
+    prepare_left: bool = True
+    prepare_right: bool = True
+    target_edge_mm: float = Field(default=0.75, gt=0)
+    left_margin_mm: float = Field(default=20.0, ge=0)
+    right_margin_mm: float = Field(default=10.0, ge=0)
+    side_min_mm: float = Field(default=30.0, ge=0)
+    side_max_mm: float = Field(default=110.0, gt=0)
+    crop_polygon_xz: list[tuple[float, float]] = Field(default_factory=lambda: [
+        (-31, 48), (27, 48), (27, 8), (21, -25), (11, -38),
+        (-15, -34), (-31, -12), (-37, 15)])
+
+    @model_validator(mode="after")
+    def validate_crop(self):
+        if self.side_max_mm <= self.side_min_mm:
+            raise ValueError("side_max_mm must exceed side_min_mm")
+        if len(self.crop_polygon_xz) < 3:
+            raise ValueError("crop_polygon_xz requires at least three vertices")
+        # The archived half-plane crop requires a strictly convex polygon.
+        points = self.crop_polygon_xz
+        turns = []
+        for i in range(len(points)):
+            a, b, c = points[i-2], points[i-1], points[i]
+            turns.append((b[0]-a[0])*(c[1]-b[1]) - (b[1]-a[1])*(c[0]-b[0]))
+        if not (all(t > 0 for t in turns) or all(t < 0 for t in turns)):
+            raise ValueError("crop_polygon_xz must be strictly convex and ordered")
+        return self
+
+
 class InferenceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -67,7 +105,24 @@ class InferenceConfig(BaseModel):
     prediction_right_folder: str = "Intermediates/Right"
     prediction_parameters_left_folder: str = "Intermediates/Left"
     prediction_parameters_right_folder: str = "Intermediates/Right"
-    use_predictions_for_preprocessing: bool = True
+    use_predictions_for_preprocessing: bool = False
+
+
+class ManualPPMConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    left_mesh: Path | None = None
+    right_mesh: Path | None = None
+    left_parameters: Path | None = None
+    right_parameters: Path | None = None
+    left_blend: Path | None = None
+    right_blend: Path | None = None
+    left_source: Path | None = None
+    right_source: Path | None = None
+    left_source_identity: str | None = None
+    right_source_identity: str | None = None
+    template_blend: Path | None = None
 
 
 class PreprocessingConfig(BaseModel):
@@ -162,6 +217,11 @@ class PostprocessingConfig(BaseModel):
     sampling_rate: int = Field(default=48000, ge=2)
     normalize: bool = True
     level_offset_db: float = -30.0
+    spatial_upsampling: bool = False
+    spatial_subdivisions: int = Field(default=3, ge=0, le=5)
+    spatial_normalize: bool = True
+    matlab_executable: Path | None = None
+    amt_path: Path | None = None
 
     @field_validator("sampling_rate")
     @classmethod
@@ -184,7 +244,9 @@ class PipelineConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     paths: PathsConfig = Field(default_factory=PathsConfig)
+    scan_preparation: ScanPreparationConfig = Field(default_factory=ScanPreparationConfig)
     inference: InferenceConfig = Field(default_factory=InferenceConfig)
+    manual_ppm: ManualPPMConfig = Field(default_factory=ManualPPMConfig)
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
     numcalc: NumCalcConfig = Field(default_factory=NumCalcConfig)
     postprocessing: PostprocessingConfig = Field(default_factory=PostprocessingConfig)
@@ -193,12 +255,10 @@ class PipelineConfig(BaseModel):
     def resolved(self, base_dir: Path | None = None) -> "PipelineConfig":
         clone = self.model_copy(deep=True)
         base = Path(base_dir or Path.cwd()).resolve()
-        for section_name in ("paths", "inference", "postprocessing", "ui"):
+        for section_name in ("paths", "scan_preparation", "inference", "manual_ppm", "postprocessing", "ui"):
             section = getattr(clone, section_name)
             for name, value in section:
                 if isinstance(value, Path):
-                    setattr(section, name, resolve_path(value, base))
-                elif value is not None and name.endswith(("_file", "_checkpoint", "_dir", "_project", "_config")) and isinstance(value, Path):
                     setattr(section, name, resolve_path(value, base))
         inference_folder_replacements = {
             "Intermediates/Prediction STL Left": "Intermediates/Left",

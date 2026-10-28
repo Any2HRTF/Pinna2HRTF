@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 160" fill="none">
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <path d="M43 45c-14 14-14 36 0 50m-15-63c-21 21-21 55 0 76m109-63c14 14 14 36 0 50m15-63c21 21 21 55 0 76" stroke="#fff" stroke-width="16"/>
+    <path d="M43 45c-14 14-14 36 0 50m-15-63c-21 21-21 55 0 76m109-63c14 14 14 36 0 50m15-63c21 21 21 55 0 76" stroke="#9b67ff" stroke-width="5"/>
+    <circle cx="90" cy="69" r="43" fill="#ffcf3f" stroke="#fff" stroke-width="15"/>
+    <circle cx="90" cy="69" r="43" stroke="#29224c" stroke-width="5"/>
+    <path d="M90 27c-13 12-20 26-20 42s7 31 20 42m0-84c13 12 20 26 20 42s-7 31-20 42M49 69h82M57 48h66m-66 42h66" stroke="#51dcec" stroke-width="4"/>
+    <rect x="48" y="112" width="84" height="34" rx="17" fill="#ff658e" stroke="#fff" stroke-width="7"/>
+    <rect x="48" y="112" width="84" height="34" rx="17" stroke="#29224c" stroke-width="3"/>
+    <path d="m28 26 3-8 4 8 8 3-8 4-4 8-3-8-8-4 8-3Zm124 14 3-7 3 7 7 3-7 3-3 7-3-7-7-3 7-3Z" fill="#ffcf3f" stroke="#fff" stroke-width="4"/>
+  </g>
+  <text x="90" y="136" fill="#29224c" font-family="Arial, sans-serif" font-size="16" font-weight="900" letter-spacing="1.1" text-anchor="middle">HRTF!</text>
+</svg>

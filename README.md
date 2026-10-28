@@ -1,25 +1,173 @@
 <p align="center">
-  <img src="icon.png" alt="Pinna2HRTF icon" width="256">
+  <img src="icon.png" alt="Pinna2HRTF icon" width="192">
 </p>
 
 # Pinna2HRTF
 
-Calculate individualized head-related transfer functions (HRTFs) from one or two pinna meshes. Available as a CLI and macOS/Windows apps.
+Calculate individualized head-related transfer functions (HRTFs) and impulse responses (HRIRs) from one or two pinna meshes. Available as a macOS or Windows desktop app and a Python CLI.
 
-The pipeline runs optional Mesh2PPM inference, prepares the meshes, solves the acoustics with Mesh2HRTF/NumCalc, and exports HRTFs and HRIRs as SOFA files.
+The pipeline supports optional Mesh2PPM inference, full-head scan preparation and manual ear review, acoustic simulation with Mesh2HRTF and NumCalc, and SOFA export.
 
-## Desktop apps
+## Get the app
 
-- **macOS:** Apple Silicon, macOS 13 or later. Open the DMG and drag Pinna2HRTF to Applications.
-- **Windows:** x64 portable App, Windows 10 version 2004 or later.
+Download the latest published desktop installers and checksums from [GitHub Releases](https://github.com/Any2HRTF/Pinna2HRTF/releases).
 
-[Downloads available on the release page.](https://github.com/Any2HRTF/Pinna2HRTF/releases)
+## Documentation
 
-Packaged apps include Python, the models, and the simulation tools. They work offline without a separate Blender or `uv` installation.
+The [Pinna2HRTF user guide](https://any2hrtf.github.io/Pinna2HRTF/docs/) covers the desktop app, scan preparation and ear editing, CLI setup and YAML configuration, and building from source.
 
-Create or import a project, select at least one ear mesh, and choose a save folder. Enable **Use Mesh2PPM** for inference; disable it to use the original meshes. Run the stages in order. **Preview** shows meshes and plots; **Live Log** shows progress. **Place Left/Right Mic** lets you click a microphone position and confirm with **Done**. Drag to rotate; Escape cancels.
+Create or import a project, select at least one ear mesh, and choose a save folder. Enable **Use Mesh2PPM** for inference, or use the macOS **Manual PPM Fit** editor to fit a Bezier PPM by hand. Run the stages in order. **Preview** shows meshes and plots; **Live Log** shows progress. **Place Left/Right Mic** lets you click a microphone position and confirm with **Done**. Escape cancels microphone placement. All macOS 3D viewers share these controls:
 
-**Reset Outputs** removes generated results while keeping configured inputs and settings. Project files live in the chosen save folder; app settings and caches live in `~/Library/Application Support/Pinna2HRTF` on macOS or `%APPDATA%\Pinna2HRTF` on Windows.
+| Action | Trackpad | Mouse |
+| --- | --- | --- |
+| Rotate | Two-finger scroll | Right-drag |
+| Pan | Shift–two-finger scroll | Middle-drag or Shift–right-drag |
+| Zoom | Pinch or Command-scroll | Scroll wheel or Command-scroll |
+
+In the ear editor, left-click toggles a face and left-drag draws a lasso while
+**Select Faces** stays active. Camera gestures preserve the current selection.
+
+### Pressure fields (macOS)
+
+After NumCalc produces pressure results, choose **Left/Right pressure · Source N**
+from **Preview**. Select a calculated frequency and either **Boundary** (pressure
+on mesh faces) or **Evaluation Grid** (pressure at grid nodes). Magnitude, real,
+and imaginary components are in Pa; level is `20 log10(|p| / 20 µPa)` and phase
+is in radians. These are raw solver results, before SOFA normalization.
+
+The legend normally rescales for each frequency. Enable **Lock color scale** to
+compare frequencies using the same range. Zero pressure uses a −160 dB display
+floor; its phase is undefined and shown in gray. **Refresh** reloads results after
+additional frequency steps finish. Incomplete or inconsistent files display an
+error instead of filling missing values. This viewer reads `NC.inp`, its geometry
+files, and `pBoundary`/`pEvalGrid` directly; MATLAB and VTK export are not required.
+
+### Manual PPM fitting (macOS)
+
+Choose **Fit…** for an ear in the **Manual PPM Fit** project settings. The editor
+overlays the target mesh and BezierPPM so you can adjust the global transform,
+the local bendy-bone controls for convex regions, and shape keys for concave
+details. The 3D preview updates directly from the evaluated mesh as you move a
+control, without exporting an STL for each change. Nearest-vertex RMSE is reported
+in both directions and as a symmetric RMSE; mean, median, maximum, and minimum
+report PPM-to-target distances. Shape-key weights follow the published ranges:
+all keys allow −1 to 1 except Crus helicis–Upper dent and Crus helicis–Lower dent,
+which allow 0 to 1. The PPM is color-mapped by each vertex's nearest
+target-vertex distance on a fixed 0–3+ mm scale, and the colors update with the
+preview. The metric panel stays above the scrolling controls, with Undo and Redo
+for parameter edits. The Target opacity slider fades the scanned ear over the opaque PPM error map
+so the distance colors stay readable. At 0% the target is hidden; at 100% it is opaque. The editor uses
+`~/Desktop/PPM.blend` when available and otherwise uses the built-in BezierPPM
+defaults. The template source is preserved, and a copy plus the parameter
+values are saved with the project.
+Saving a fit selects manual preprocessing and turns off Mesh2PPM; an unfitted
+side keeps its current input mesh. The right-side preview and export mirror the
+template across Y. On macOS, Reset Outputs removes saved fits, their parameters,
+editable Blender files, and archived template copies.
+
+The fitting sequence follows the manual registration procedure in
+[Perfler et al. (2025)](https://doi.org/10.1016/j.compbiomed.2025.109817):
+align the whole model, adjust convex features, tune concave shape keys, then
+iterate as needed.
+
+**Reset Outputs** removes generated results while keeping original inputs and settings. On macOS this also clears saved manual PPM fits, ear edits, and scan alignments, restores the original scan, and clears references to removed fits and reviews. Files used as inputs by another project, externally modified files, logs, and unrelated files are preserved. Project files live in the chosen save folder; app settings and caches live in `~/Library/Application Support/Pinna2HRTF` on macOS or `%APPDATA%\Pinna2HRTF` on Windows.
+
+## Full-head scan preparation (pipeline and macOS)
+
+On macOS, enable **Prepare ears from a full-head scan**, choose an edited scan in
+millimeters, enter its temporary **Crop rotation**, and select the ears to prepare.
+Run **Scan Preparation** before Mesh2PPM Inference or Preprocessing. Preview the
+prepared ears before continuing. Existing projects with separate ear inputs
+keep their current workflow. The Windows app includes corresponding scan
+alignment, preparation, and ear-editing controls.
+
+The workflow uses convex ear cropping, cleanup and 0.75 mm isotropic remeshing
+(six iterations, capped at 150,000 faces),
+Screened Poisson reconstruction (depth 7, one worker), attachment-boundary
+restoration, and residual-hole closure. Each exported ear must have one connected
+surface, consistent winding, finite coordinates, positive volume, and exactly
+one simple open attachment boundary. Original scans are preserved. Only the
+validated STL files and provenance report are kept in `Prepared/`; intermediate
+geometry stays in temporary storage.
+
+The macOS preparation workspace also supports the manual steps around this stage:
+
+1. Before preparation, choose **Align Using Nose and Ears…**. Pick the nose tip,
+   the center of the left ear-canal entrance, then the right entrance. Left and
+   right refer to the person being scanned. Preview the rigid alignment and save.
+   The three points become horizontal; X points toward the nose, Y left, and Z
+   superior, with the ear midpoint at the origin. Saving selects the aligned copy and sets crop rotation
+   to zero; scans already aligned outside the app can skip this step.
+2. Run **Scan Preparation**.
+3. Use **Edit Left Ear…** / **Edit Right Ear…** to open the canal and trim the
+   attachment area. Draw a lasso or click faces, inspect the red selection, and
+   delete. Selection affects the visible surface by default; **Select through
+   mesh** explicitly includes occluded faces. **Cutting Plane** provides axis
+   presets, an arbitrary normal, offset, a kept-side switch, and an open cut.
+   The cyan preview fits the current mesh cross-section with a small margin;
+   it resizes as the plane moves or tilts. Turn off **Fit plane preview to mesh**
+   to set a custom width and height in millimeters. Preview size only changes the
+   cyan overlay; the cut extends through the mesh.
+4. Inspect the result, undo/redo as needed, and **Save Reviewed Ear**. Saved edits
+   feed the next pipeline stages automatically. **Require ear review before
+   continuing** is an optional pause; it is off by default.
+
+Working edits stay in a temporary workspace until Save. Originals and automatic
+prepared meshes remain intact. Saved manual geometry and provenance live in
+`MeshEdits/`; on macOS, Reset Outputs also removes these saved edits and alignments.
+
+The aligner’s **Show coordinate system** option displays world axes at the scan
+origin and a camera-linked X/Y/Z reference in the corner. After alignment, X
+points forward, Y left, and Z up; the ear-canal midpoint is the origin.
+
+The ear editor requires a connected, manifold surface with consistent winding and one simple
+attachment boundary, plus at most one canal opening. It does not fill the new
+opening. Later simulation preprocessing closes the canal and estimates its
+source landmark using the existing pipeline.
+
+This nose-and-ear reference plane differs from the anatomical Frankfort plane,
+which uses porion and orbitale landmarks (see this
+[cranial-orientation study](https://pmc.ncbi.nlm.nih.gov/articles/PMC8773378/)).
+Landmarks are picked by the user; the app does not infer anatomical landmarks.
+Saved alignment operations record the method, ordered landmark labels, picked
+coordinates, and rigid transform.
+
+The default crop polygon and margins are calibrated for edited, aligned scans.
+They are not an automatic anatomical locator, so check orientation and placement
+for each scan. Nose-and-ear alignment in the app sets crop rotation to zero;
+externally aligned scans may need a Z rotation of 90 or 270 degrees. The app does
+not infer rotation from a subject name. Prepared ears are exported in the crop
+frame (left +Y, right -Y). Crop margins, lateral limits, and remesh edge length
+are editable in the Mac app; YAML also exposes `crop_polygon_xz`.
+
+For YAML runs, add this section (use `null` for unused `paths.left_ear` and
+`paths.right_ear`; prepared inputs are routed automatically):
+
+```yaml
+scan_preparation:
+  enabled: true
+  scan_path: /path/to/edited-head.stl
+  rotation_degrees: 90
+  prepare_left: true
+  prepare_right: true
+  target_edge_mm: 0.75
+  require_manual_review: false
+  reviewed_left: null
+  reviewed_right: null
+```
+
+```sh
+uv run Pinna2HRTF scan-preparation --config pinna2hrtf.yaml
+uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage all
+```
+
+`all` runs enabled scan preparation before inference and simulation preprocessing.
+Changed scans or preparation settings require preparation again. Saved ear edits
+are checked against that preparation generation, and changed edits invalidate
+inference and simulation receipts without forcing automatic scan preparation again. Inference and
+simulation projects record their preparation generation so earlier geometry
+cannot silently feed a later stage. **Reset Outputs** includes generated prepared
+ears and receipts while protecting original input files.
 
 ## Install the CLI
 
@@ -154,9 +302,26 @@ Only preprocessing is enabled in the template. Explicitly selected stages ignore
 
 For Slurm, set `numcalc.mode: slurm` and fill in the cluster settings. The Slurm worker skips existing frequency output folders; remove incomplete step folders before resubmitting.
 
+## macOS window accessibility checks
+
+Alignment, ear editing, and PPM fitting share `EditorSheetLayout` and `EditorCameraControls`, presented through one project-attached sheet. Keep editor headers, preview/sidebar sizing, and Cancel/Save footers in this shared layout when adding editor features.
+
+The main workspace, nose-and-ear alignment, ear editor, and manual PPM fitting expose standard labelled controls. Fitting fields, sliders, and steppers include the region, transform, and axis in their accessibility names. The fitting sections use plain headings and rows: replacing them with SwiftUI `GroupBox` causes the Computer helper to crash while reading the fitting window on the tested macOS setup.
+
+After changing an editor or its window host, use the Computer tool to:
+
+1. Open nose-and-ear alignment, change camera views, expand Alignment Details, capture a screenshot, and cancel.
+2. Open an ear editor, change camera views, switch between Select Faces and Cutting Plane, inspect the plane fields, and cancel without applying a cut.
+3. Open both left and right manual fits. Read the Global controls and Distance Details, expand a Convex region, switch to Concave, and capture a screenshot.
+4. Change one fitting parameter, verify that its displayed value and distance metrics update, then Undo and verify restoration. Check the display menu, opacity, Help, and Cancel. Reopen the fit to verify that unsaved edits were discarded.
+
+Keep tests on existing copies and cancel rather than saving diagnostic edits. Successful compilation does not replace this window-readability check.
+
 ## Build the apps
 
 ### macOS
+
+The Mac app is currently **2.0 beta**. Its app version is set in `Scripts/build_release_app.sh`; the About panel shows the beta label, and installer filenames use `2.0-beta`.
 
 On Apple Silicon, with the Swift toolchain, Git, and `uv` installed:
 
@@ -196,3 +361,15 @@ The packaged app is written to `dist\windows\Pinna2HRTF`.
 ## License
 
 [European Union Public Licence 1.2](LICENSE). Bundled dependencies retain their own licences.
+
+### Optional spatial HRTF upsampling
+
+In the Mac app, open **Postprocessing** and enable **Spatially upsample HRTFs**. The Python translation of EvaPPM's ExpSuite/LocaDyn revision 1948 adds spatial source directions while preserving sampling rate and HRIR length. It runs with the app's bundled NumPy/SciPy runtime; MATLAB and AMT are not required. Both ears must be exported.
+
+Subdivision levels 0–5 are supported; the default is 3. Dense-only export, minimum-phase TOA removal, the original outlier settings, normalization order, MATLAB rounding behavior, VBAP interpolation and symmetric receiver metadata follow EvaPPM's experiment preparation. **Normalize upsampled HRTFs** defaults on and applies the script's frontal -40 dB reference. Dense SOFA files and reports are saved under `HRTF/Upsampled/HRIR_<name>/`, alongside the original exports. Reset Outputs includes these files. The original script's `Data.Delay` values in seconds are also preserved.
+
+The port is tested against outputs generated by the original MATLAB functions, including even/odd HRIR lengths, 44.1/48 kHz sampling rates, normalization on/off and subdivision levels 0/1. An existing 91-direction, 342-sample export was also compared at level 3 (5,762 output directions): maximum HRIR difference `9.6e-14`, position difference `1.2e-13` degrees, and TOA difference `3.7e-13` seconds. Results are numerically equivalent within floating-point precision, **not bitwise identical**: MATLAB and SciPy use different FFT and optimization implementations. No bitwise-equality guarantee is made for arbitrary inputs or nearly degenerate grids.
+
+The unchanged MATLAB implementation remains bundled as a reference, with its EUPL/BSD notices. AMT-derived model equations retain their GPL-3.0-or-later license (see `HRTFCalculation/Postprocessing/AMT-GPL-3.0.txt`).
+
+YAML options are `postprocessing.spatial_upsampling`, `spatial_subdivisions`, and `spatial_normalize`. Older `matlab_executable` and `amt_path` keys remain readable for compatibility and are ignored. Upsampling is off for existing projects unless explicitly enabled.

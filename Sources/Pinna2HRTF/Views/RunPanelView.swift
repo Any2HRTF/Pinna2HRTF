@@ -7,7 +7,7 @@ struct RunPanelView: View {
         TimelineView(.periodic(from: .now, by: 2)) { _ in
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Run")
+                Text("Pipeline")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 Text(summary)
@@ -16,7 +16,7 @@ struct RunPanelView: View {
                     .lineLimit(1)
             }
             if let project = store.selectedProject {
-                Text(ArtifactScanner.numcalcStatus(for: project))
+                Text(store.selectedProjectStatus?.numcalcStatus ?? "Checking project files…")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -27,39 +27,59 @@ struct RunPanelView: View {
                         .lineLimit(2)
                 }
             }
-            VStack(spacing: 6) {
-                ForEach(Stage.allCases) { stage in
-                    StageRunButton(stage: stage, state: store.stageStates[stage] ?? .ready, available: store.canRun(stage: stage)) {
+            VStack(spacing: 2) {
+                ForEach(Stage.allCases.filter { $0 != .scanPreparation || store.selectedProject?.scanPreparation.enabled == true }) { stage in
+                    StageRunButton(stage: stage, state: store.stageStates[stage] ?? .ready, available: store.canRun(stage: stage), unavailableReason: store.runUnavailableReason(stage: stage), previousResults: store.selectedProjectStatus?.completed.contains(stage) ?? false) {
                         store.run(stage: stage)
                     }
                 }
             }
-            Button {
-                store.stopRunningProcess()
-            } label: {
-                Label("Stop", systemImage: "stop.fill")
-                    .frame(maxWidth: .infinity)
+            HStack(spacing: 8) {
+                if store.selectedProjectIsRunning {
+                Button {
+                    store.stopRunningProcess()
+                } label: {
+                    Label("Stop", systemImage: "stop.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .tint(.red)
+                .disabled(store.selectedProject.map { store.runningProcesses[$0.id] == nil } ?? true)
+                } else {
+                    Button(store.isCheckingProjectFiles ? "Checking project files…" : store.nextStage.map { "Run \($0.title)" } ?? "Complete", systemImage: "play.fill") { store.runNextStage() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!store.canRunNextStage())
+                }
+                Spacer()
+                Menu {
+                Button("Reset Outputs…", role: .destructive) {
+                    store.confirmResetSelectedProjectOutputs()
+                }
+                .disabled(store.selectedProjectIsRunning)
+                } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Project actions")
             }
-            .tint(.red)
-            .disabled(store.selectedProject.map { store.runningProcesses[$0.id] == nil } ?? true)
-            Button(role: .destructive) {
-                store.confirmResetSelectedProjectOutputs()
-            } label: {
-                Label("Reset Outputs…", systemImage: "trash")
-                    .frame(maxWidth: .infinity)
-            }
-            .disabled(store.selectedProjectIsRunning)
         }
         }
         .buttonStyle(.bordered)
         .controlSize(.regular)
         .padding(.top, 2)
+        .task(id: store.selectedProjectID) {
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 5_000_000_000) }
+                catch { return }
+                if store.selectedProjectIsRunning && !store.isCheckingProjectFiles && store.selectedProjectStatus?.checkingSolverResults != true { store.refreshArtifacts() }
+            }
+        }
     }
 
     var summary: String {
+        if store.isCheckingProjectFiles { return "Checking files" }
         if store.selectedProjectIsManagingOutputs { return "Updating outputs" }
         if store.selectedProjectIsRunning { return "Running" }
-        if let project = store.selectedProject { return ArtifactScanner.summary(for: project) }
+        if let stage = store.nextStage { return store.canRun(stage: stage) ? "Ready" : "Action Required" }
+        if store.selectedProject != nil { return "Complete" }
         return "No project"
     }
 }
@@ -68,6 +88,8 @@ struct StageRunButton: View {
     let stage: Stage
     let state: StageState
     let available: Bool
+    let unavailableReason: String?
+    let previousResults: Bool
     let action: () -> Void
 
     var body: some View {
@@ -83,15 +105,17 @@ struct StageRunButton: View {
                     Text(stateLabel)
                         .font(.caption)
                         .foregroundStyle(stateColor)
-                        .lineLimit(2)
+                        .lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 4)
-            .padding(.vertical, 5)
+            .padding(.vertical, 2)
             .frame(maxWidth: .infinity)
+
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.plain)
+        .help(unavailableReason ?? stateLabel)
         .disabled(!available)
     }
 
@@ -101,11 +125,15 @@ struct StageRunButton: View {
         case .running: .orange
         case .failed: .red
         case .done: .green
-        case .skipped: .secondary
+        case .skipped, .stopped: .secondary
         }
     }
 
     var stateLabel: String {
-        state == .skipped && stage == .inference ? "Skipped · not run" : state.rawValue.capitalized
+        if [.failed, .stopped].contains(state) && previousResults { return "\(state.rawValue.capitalized) · previous results available" }
+        if state == .done { return "Complete" }
+        if state == .skipped { return "Not Used" }
+        if state == .ready { return available ? "Ready to Run" : "Waiting for Prerequisites" }
+        return state.rawValue.capitalized
     }
 }

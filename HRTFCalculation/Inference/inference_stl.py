@@ -14,6 +14,7 @@ import pandas as pd
 import bpy
 from bezierppm import BezierPPM
 from bezierppm.render_helpers import render
+from HRTFCalculation.LiveEvents import emit_live_event
 
 try:
     from .src.swin_transformer_v2 import SwinTransformerV2
@@ -35,51 +36,6 @@ def read_grayscale_image(path):
     with Image.open(path) as image:
         return np.asarray(image.convert("L"))
 
-def jaccard(P, Q, res=0.5):
-    """
-    A function to calculate the Jaccard similarity between two point clouds.
-    
-    Arguments
-    -------
-    P: np.array
-        An array where each entry stores an x, y, z coordinate of the point cloud
-    Q: np.array
-        An array where each entry stores an x, y, z coordinate of the point cloud
-    res: float
-        The resolution/step size of each voxel (default: 0.5)
-        
-    Return: float
-        The Jaccard similarity between point clouds P and Q
-    """
-    # Step 1: Generate meshgrid
-    x_min = min(min(P[:, 0]), min(Q[:, 0]))
-    x_max = max(max(P[:, 0]), max(Q[:, 0]))
-    y_min = min(min(P[:, 1]), min(Q[:, 1]))
-    y_max = max(max(P[:, 1]), max(Q[:, 1]))
-    z_min = min(min(P[:, 2]), min(Q[:, 2]))
-    z_max = max(max(P[:, 2]), max(Q[:, 2]))
-
-    xx = np.arange(x_min, x_max + res / 2 + np.finfo(np.float64).eps, res)
-    yy = np.arange(y_min, y_max + res / 2 + np.finfo(np.float64).eps, res)
-    zz = np.arange(z_min, z_max + res / 2 + np.finfo(np.float64).eps, res)
-
-    len_x = len(xx)
-    len_y = len(yy)
-
-    # Step 2: Binary mask indices for P and Q
-    def bin_mask_idx(points):
-        discret_x = np.round((points[:, 0] - x_min) / res)
-        discret_y = np.round((points[:, 1] - y_min) / res)
-        discret_z = np.round((points[:, 2] - z_min) / res)
-        return discret_x + discret_y * len_x + discret_z * len_x * len_y
-
-    bin_grid_p = bin_mask_idx(P)
-    bin_grid_q = bin_mask_idx(Q)
-
-    # Step 3: Compute Jaccard similarity
-    union = len(np.unique(np.append(bin_grid_p, bin_grid_q)))
-    intersection = len(np.intersect1d(bin_grid_p, bin_grid_q))
-    return intersection / union
 
 def minimal_distances(P, Q,) -> np.ndarray:
     """ Computes the minimal distances between two point clouds P and Q.
@@ -357,9 +313,13 @@ def main(args):
     for direction, data_dir in directions:
 
         for stl_file in sorted(os.listdir(data_dir)):
+            selected_file = getattr(args, f"target_{direction.lower()}_file", None)
+            if selected_file is not None and stl_file != selected_file:
+                continue
             if stl_file[-4:] != ".stl":
                 continue
             print(f"{data_dir}/{stl_file}")
+            emit_live_event(f"{direction} ear · Aligning input mesh")
 
             stem = stl_file[:-4]
             paired_alignment = None
@@ -385,6 +345,7 @@ def main(args):
             )
             target_cloud = np.array(trimesh.load_mesh(f"{data_dir}/{stl_file}").vertices)
 
+            emit_live_event(f"{direction} ear · Predicting ear shape")
             prediction_ppm = get_model_prediction(model, data)
 
             tempdir = tempfile.mkdtemp()
@@ -407,6 +368,7 @@ def main(args):
             if not os.path.isdir(prediction_stl_dir):
                 os.makedirs(prediction_stl_dir)
             predicted_cloud.export(f"{prediction_stl_dir}/Prediction_{stl_file[:-4]}.stl")
+            emit_live_event(f"{direction} ear · Prediction saved")
             predicted_cloud = np.array(predicted_cloud.vertices)
 
             minimal_distances_direction_1 = minimal_distances(predicted_cloud, target_cloud)

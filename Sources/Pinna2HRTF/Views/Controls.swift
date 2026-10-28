@@ -127,6 +127,7 @@ struct SettingToggle: View {
     var body: some View {
         HStack(spacing: 6) {
             Toggle(title, isOn: $isOn)
+                .toggleStyle(.checkbox)
             SettingHelpButton(helpID: helpID)
         }
     }
@@ -194,12 +195,14 @@ struct LabeledTextField: View {
     let helpID: String
     let fieldEnabled: Bool
     @Binding var text: String
+    var validationError: String?
 
-    init(_ title: String, helpID: String, text: Binding<String>, fieldEnabled: Bool = true) {
+    init(_ title: String, helpID: String, text: Binding<String>, fieldEnabled: Bool = true, validationError: String? = nil) {
         self.title = title
         self.helpID = helpID
         self.fieldEnabled = fieldEnabled
         self._text = text
+        self.validationError = validationError
     }
 
     var body: some View {
@@ -210,6 +213,9 @@ struct LabeledTextField: View {
                 .labelsHidden()
                 .disabled(!fieldEnabled)
                 .opacity(fieldEnabled ? 1 : 0.55)
+            if fieldEnabled, let error = validationError ?? ProjectValidation.fieldMessage(helpID, text: text) {
+                Text(error).font(.caption).foregroundStyle(.red)
+            }
         }
     }
 }
@@ -258,22 +264,33 @@ struct PathField: View {
     let helpID: String
     @Binding var text: String
     var mode: PathFieldMode = .any
+    var showsOpenButton = false
+    @State private var editingPath = false
+    @State private var folderExists = false
 
-    init(_ title: String, helpID: String, text: Binding<String>, mode: PathFieldMode = .any) {
+    init(_ title: String, helpID: String, text: Binding<String>, mode: PathFieldMode = .any, showsOpenButton: Bool = false) {
         self.title = title
         self.helpID = helpID
         self._text = text
         self.mode = mode
+        self.showsOpenButton = showsOpenButton
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             SettingLabel(title: title, helpID: helpID)
             HStack(spacing: 6) {
-                TextField(title, text: $text)
-                    .textFieldStyle(.roundedBorder)
-                    .labelsHidden()
-                Button("Choose") {
+                Text(text.isEmpty ? "No file selected" : URL(fileURLWithPath: text, isDirectory: mode == .directory).lastPathComponent)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(text)
+                    .contextMenu {
+                        Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
+                        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: text)]) }
+                            .disabled(text.isEmpty)
+                    }
+                Button("Choose…") {
                     let panel = NSOpenPanel()
                     panel.canChooseFiles = mode != .directory
                     panel.canChooseDirectories = mode != .file
@@ -281,7 +298,31 @@ struct PathField: View {
                         text = url.path
                     }
                 }
+                if showsOpenButton {
+                    Button("Open") {
+                        guard folderExists else { return }
+                        NSWorkspace.shared.open(URL(fileURLWithPath: text, isDirectory: true))
+                    }
+                    .accessibilityLabel("Open Save Location in Finder")
+                    .help(folderExists ? "Open this project folder in Finder" : "This folder does not exist yet")
+                    .disabled(!folderExists)
+                }
             }
+            DisclosureGroup("Path", isExpanded: $editingPath) {
+                TextField(title, text: $text).textFieldStyle(.roundedBorder).labelsHidden()
+            }
+            .font(.caption)
+        }
+        .task(id: text) {
+            guard showsOpenButton else { return }
+            let path = text
+            folderExists = false
+            let exists = await Task.detached(priority: .utility) {
+                var isDirectory: ObjCBool = false
+                return !path.isEmpty && FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+            }.value
+            guard !Task.isCancelled, text == path else { return }
+            folderExists = exists
         }
     }
 }
@@ -361,4 +402,14 @@ struct ModelPicker: View {
 
 extension UTType {
     static var yaml: UTType { UTType(filenameExtension: "yaml")! }
+}
+
+struct ViewportControlsMaterial: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
+        } else {
+            content.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
 }

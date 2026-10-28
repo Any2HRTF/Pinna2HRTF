@@ -1,0 +1,13 @@
+function pinna_upsample_batch(planFile)
+% Noninteractive bridge to the unchanged EvaPPM/ExpSuite LocaDyn implementation.
+plan = jsondecode(fileread(planFile));
+for k = 1:numel(plan.jobs)
+    job = plan.jobs(k);
+    fprintf('Spatially upsampling %d/%d: %s\n', k, numel(plan.jobs), job.input);
+    upsample_hrtf(job.input, job.output, ...
+        'Ndivide', plan.subdivisions, 'TOAremoval', 2, ...
+        'Normalize', logical(plan.normalize), 'Plot', false, ...
+        'SymmetricReceivers', true, 'DenseOnly', true, ...
+        'AMTPath', plan.amt_path, 'Overwrite', false);
+end
+end

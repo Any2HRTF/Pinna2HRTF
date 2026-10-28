@@ -81,6 +81,7 @@ class EarDistanceTests(unittest.TestCase):
             root=Path(folder);self.ears["left"].export(root/"ear.stl")
             predicted=root/"Intermediates/Left/Prediction_ear.stl";predicted.parent.mkdir(parents=True);ear_at(90).export(predicted)
             config=PipelineConfig();config.paths.output_dir=root;config.paths.left_ear=root/"ear.stl";config.paths.right_ear=None
+            config.inference.use_predictions_for_preprocessing=True
             selected,_=preprocessing_input_paths(config,lambda _:None)
             self.assertEqual(selected,predicted)
             self.assertEqual(resolve_geometry({"left":trimesh.load(selected)},config.preprocessing)["ear_distance"],90)

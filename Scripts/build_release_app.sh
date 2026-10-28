@@ -16,9 +16,17 @@ fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$ROOT/.." && pwd)"
-APP_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$ROOT/pyproject.toml" | head -n 1)"
-GIT_HEAD="$(git -C "$ROOT" rev-parse --short HEAD)"
-APP_BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD)"
+APP_VERSION="2.0"
+APP_RELEASE_CHANNEL="beta"
+APP_DISPLAY_VERSION="$APP_VERSION $APP_RELEASE_CHANNEL"
+APP_ARTIFACT_VERSION="$APP_VERSION-$APP_RELEASE_CHANNEL"
+if git -C "$ROOT" rev-parse --verify HEAD >/dev/null 2>&1; then
+  GIT_HEAD="$(git -C "$ROOT" rev-parse --short HEAD)"
+  APP_BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD)"
+else
+  GIT_HEAD="source-snapshot"
+  APP_BUILD_NUMBER="0"
+fi
 SCRATCH="/private/tmp/pinna2hrtf-swift-build"
 STAGE_ROOT="$(mktemp -d /private/tmp/pinna2hrtf-release-stage.XXXXXX)"
 CLEAN_ROOT="$(mktemp -d /private/tmp/pinna2hrtf-release-clean.XXXXXX)"
@@ -68,7 +76,7 @@ if [[ ! -f "$ROOT/uv.lock" ]]; then
   echo "uv.lock is required to build the release app"
   exit 1
 fi
-export UV_CACHE_DIR="/private/tmp/pinna2hrtf-uv-cache"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/pinna2hrtf-uv-cache}"
 SDK_PATH="$(xcrun --sdk "${PINNA2HRTF_MACOS_SDK:-macosx26.5}" --show-sdk-path)"
 SDK_VERSION="$(xcrun --sdk "$SDK_PATH" --show-sdk-version)"
 SDK_SWIFT_INTERFACE="$(find "$SDK_PATH/usr/lib/swift/Swift.swiftmodule" -name '*-apple-macos.swiftinterface' -print -quit)"
@@ -126,7 +134,7 @@ cd "$RESOURCES"
 GIT_CONFIG_COUNT=1 \
 GIT_CONFIG_KEY_0="url.https://github.com/.insteadOf" \
 GIT_CONFIG_VALUE_0="git@github.com:" \
-UV_CACHE_DIR="/private/tmp/pinna2hrtf-uv-cache" \
+UV_CACHE_DIR="$UV_CACHE_DIR" \
 "$UV_BIN" sync --locked --no-dev --no-install-project --managed-python --python 3.11
 cd "$ROOT"
 PYTHON_REALPATH="$("$RESOURCES/.venv/bin/python" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$RESOURCES/.venv/bin/python")"
@@ -157,6 +165,16 @@ path.write_text("\n".join(next_lines) + "\n")
 PY
 find "$RESOURCES/.venv/bin" -mindepth 1 -maxdepth 1 ! -name python ! -name python3 ! -name python3.11 -exec rm -rf {} +
 find "$RESOURCES" -type d -name __pycache__ -prune -exec rm -rf {} +
+# Blender can initialize Python with its own cache settings. Precompile its
+# bundled startup/add-on scripts so first launch cannot add sealed resources.
+PYTHONPYCACHEPREFIX="" "$RESOURCES/.venv/bin/python" - <<'PYBLENDERCACHE'
+import compileall
+from pathlib import Path
+import sysconfig
+for scripts in (Path(sysconfig.get_path("purelib")) / "bpy").glob("*/scripts"):
+    if not compileall.compile_dir(scripts, quiet=1, workers=1):
+        raise SystemExit("Could not prepare Blender's bundled bytecode cache")
+PYBLENDERCACHE
 find "$RESOURCES" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -181,6 +199,8 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <string>$APP_VERSION</string>
   <key>CFBundleVersion</key>
   <string>$APP_BUILD_NUMBER</string>
+  <key>Pinna2HRTFDisplayVersion</key>
+  <string>$APP_DISPLAY_VERSION</string>
   <key>Pinna2HRTFGitHead</key>
   <string>$GIT_HEAD</string>
   <key>LSMinimumSystemVersion</key>
@@ -201,6 +221,40 @@ PLIST
 chmod +x "$MACOS/Pinna2HRTF"
 ditto --norsrc --noextattr --noqtn "$APP_DIR" "$CLEAN_APP_DIR"
 xattr -cr "$CLEAN_APP_DIR"
+# Wheels flatten Qt's versioned framework symlinks. Restore the canonical
+# framework layout before signing; duplicate Resources/Info.plist copies make
+# codesign classify a framework as an ambiguous application bundle.
+"$CLEAN_APP_DIR/Contents/Resources/.venv/bin/python" - "$CLEAN_APP_DIR/Contents/Resources/.venv" <<'PYFRAMEWORK'
+from pathlib import Path
+import shutil
+import sys
+for framework in Path(sys.argv[1]).rglob("*.framework"):
+    versions = framework / "Versions"
+    if not versions.is_dir():
+        continue
+    candidates = sorted(p for p in versions.iterdir() if p.is_dir() and p.name != "Current")
+    if len(candidates) != 1:
+        continue
+    version = candidates[0]
+    current = versions / "Current"
+    if not current.is_symlink():
+        if current.is_dir():
+            shutil.rmtree(current)
+        elif current.exists():
+            current.unlink()
+        current.symlink_to(version.name)
+    for item in version.iterdir():
+        if item.name == "_CodeSignature":
+            continue
+        target = framework / item.name
+        if target.is_symlink():
+            continue
+        if target.is_dir():
+            shutil.rmtree(target)
+        elif target.exists():
+            target.unlink()
+        target.symlink_to(Path("Versions/Current") / item.name)
+PYFRAMEWORK
 while IFS= read -r -d '' candidate; do
   if file -b "$candidate" | grep -q "Mach-O"; then
     if ! lipo -archs "$candidate" | tr ' ' '\n' | grep -qx "arm64"; then
@@ -230,7 +284,7 @@ codesign --verify --deep --strict --verbose=2 "$CLEAN_APP_DIR"
 if [[ "$MODE" == "distribution" ]]; then
   APP_ARCHIVE="$STAGE_ROOT/Pinna2HRTF.zip"
   DMG_STAGE="$STAGE_ROOT/dmg"
-  DMG_PATH="$DIST_DIR/Pinna2HRTF-$APP_VERSION-macOS-arm64.dmg"
+  DMG_PATH="$DIST_DIR/Pinna2HRTF-$APP_ARTIFACT_VERSION-macOS-arm64.dmg"
   ditto -c -k --sequesterRsrc --keepParent "$CLEAN_APP_DIR" "$APP_ARCHIVE"
   xcrun notarytool submit "$APP_ARCHIVE" --keychain-profile "$NOTARY_PROFILE" --wait
   xcrun stapler staple "$CLEAN_APP_DIR"
@@ -240,7 +294,7 @@ if [[ "$MODE" == "distribution" ]]; then
   ditto --norsrc --noextattr --noqtn "$CLEAN_APP_DIR" "$DMG_STAGE/Pinna2HRTF.app"
   ln -s /Applications "$DMG_STAGE/Applications"
   rm -f "$DMG_PATH" "$DMG_PATH.sha256"
-  hdiutil create -volname "Pinna2HRTF $APP_VERSION" -srcfolder "$DMG_STAGE" -format UDZO -ov "$DMG_PATH"
+  hdiutil create -volname "Pinna2HRTF $APP_DISPLAY_VERSION" -srcfolder "$DMG_STAGE" -format UDZO -ov "$DMG_PATH"
   codesign --force --sign "$SIGNING_IDENTITY" --timestamp "$DMG_PATH"
   xcrun notarytool submit "$DMG_PATH" --keychain-profile "$NOTARY_PROFILE" --wait
   xcrun stapler staple "$DMG_PATH"
@@ -259,12 +313,12 @@ else
   codesign --verify --deep --verbose=2 "$FINAL_APP_DIR"
   if [[ "$MODE" == "installer" ]]; then
     DMG_STAGE="$STAGE_ROOT/dmg"
-    DMG_NAME="Pinna2HRTF-$APP_VERSION-macOS-arm64.dmg"
+    DMG_NAME="Pinna2HRTF-$APP_ARTIFACT_VERSION-macOS-arm64.dmg"
     DMG_PATH="$DIST_DIR/$DMG_NAME"
     mkdir -p "$DMG_STAGE" "$DIST_DIR"
     ditto --norsrc --noextattr --noqtn "$CLEAN_APP_DIR" "$DMG_STAGE/Pinna2HRTF.app"
     ln -s /Applications "$DMG_STAGE/Applications"
-    hdiutil create -volname "Pinna2HRTF $APP_VERSION" -srcfolder "$DMG_STAGE" -format UDZO -ov "$DMG_PATH"
+    hdiutil create -volname "Pinna2HRTF $APP_DISPLAY_VERSION" -srcfolder "$DMG_STAGE" -format UDZO -ov "$DMG_PATH"
     codesign --force --sign - "$DMG_PATH"
     hdiutil verify "$DMG_PATH"
     (cd "$DIST_DIR" && shasum -a 256 "$DMG_NAME" > "$DMG_NAME.sha256")

@@ -15,6 +15,7 @@ September 2024
 import argparse
 import numpy as np
 import trimesh
+from HRTFCalculation.LiveEvents import emit_live_event
 
 
 def head(left_ear, right_ear, export_path, radius_scale=1.01, width_scale=1.5, height_scale=1.5, y_deformation=0.0, adaptive_ovalness=True, ovalness_strength=0.08, min_width_scale=1.48, max_height_scale=1.53):
@@ -30,6 +31,7 @@ def head(left_ear, right_ear, export_path, radius_scale=1.01, width_scale=1.5, h
         outlines[side] = max((entity.discrete(ear.vertices) for entity in entities), key=len)
     radii = {side: np.abs(np.mean(outline, axis=0)[1]) for side, outline in outlines.items()}
     if len(radii) == 2 and np.abs(radii["left"] - radii["right"]) > 4:
+        emit_live_event("Left and right ear sizes differ substantially", level="warning")
         print("Warning: left and right ear radius are quite asymmetrical.")
     radius = np.mean(list(radii.values())) * radius_scale
     if adaptive_ovalness:

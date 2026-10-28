@@ -13,26 +13,8 @@ struct ProjectInspectorView: View {
             .padding(16)
             Divider()
             if store.selectedProject == nil {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("No project selected")
-                        .font(.title3.weight(.semibold))
-                    Text("Create or select a project in the sidebar to edit settings and run the pipeline.")
-                        .foregroundStyle(.secondary)
-                    HStack {
-                        Button {
-                            store.createProject()
-                        } label: {
-                            Label("New Project", systemImage: "plus")
-                        }
-                        Button {
-                            store.importProject()
-                        } label: {
-                            Label("Import Project…", systemImage: "folder.badge.plus")
-                        }
-                    }
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 settingsPanel
                     .frame(maxHeight: .infinity)
@@ -47,10 +29,24 @@ struct ProjectInspectorView: View {
     var settingsPanel: some View {
         ScrollViewReader { proxy in
         Form {
-            Section {
+            Section("Inputs") {
                 requiredPanel
             }
             Section {
+                manualPPMPanel
+            } header: {
+                Text("Manual PPM Fit")
+            }
+            Section("Processing") {
+                SettingsDisclosure("Scan Preparation", systemImage: "bandage") {
+                    LabeledTextField("Target edge (mm)", helpID: "scan.target_edge", text: scanTextBinding(\.targetEdgeMM))
+                    LabeledTextField("Left crop margin (mm)", helpID: "scan.left_margin", text: scanTextBinding(\.leftMarginMM))
+                    LabeledTextField("Right crop margin (mm)", helpID: "scan.right_margin", text: scanTextBinding(\.rightMarginMM))
+                    LabeledTextField("Inner crop limit (mm)", helpID: "scan.side_min", text: scanTextBinding(\.sideMinMM))
+                    LabeledTextField("Outer crop limit (mm)", helpID: "scan.side_max", text: scanTextBinding(\.sideMaxMM))
+                    Text("Crops ears, remeshes, closes defects with Screened Poisson, and preserves one attachment boundary per ear. Use an aligned scan in millimeters. Editing is optional; a saved current edit is used automatically, otherwise the prepared mesh is used.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 SettingsDisclosure("Mesh2PPM", systemImage: "wand.and.stars") {
                     ModelPicker(selection: modelNameBinding, options: store.modelOptions, helpID: "inference.model")
                 }
@@ -58,32 +54,38 @@ struct ProjectInspectorView: View {
                     PathField("Evaluation grid", helpID: "mesh2hrtf.evaluation_grid", text: optionalPreprocessingBinding(\.evaluationGrid), mode: .directory)
                     HeadGeometryControls(store: store)
                     LabeledTextField("Min frequency", helpID: "mesh2hrtf.min_frequency", text: preprocessingBinding(\.minFrequency))
-                    LabeledTextField("Max frequency", helpID: "mesh2hrtf.max_frequency", text: preprocessingBinding(\.maxFrequency))
-                    HStack {
-                        SettingLabel(title: "Frequency steps", helpID: "mesh2hrtf.frequency_steps")
-                        Spacer()
-                        TextField("Frequency steps", value: frequencyStepCountBinding, format: .number)
-                            .labelsHidden()
-                            .textFieldStyle(.roundedBorder)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 52)
-                        Stepper("", value: frequencyStepCountBinding, in: 2...10000)
-                            .labelsHidden()
-                            .fixedSize()
-                            .accessibilityLabel("Adjust Frequency steps")
+                    LabeledTextField("Max frequency", helpID: "mesh2hrtf.max_frequency", text: preprocessingBinding(\.maxFrequency), validationError: validationMessage("mesh2hrtf.max_frequency"))
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            SettingLabel(title: "Frequency steps", helpID: "mesh2hrtf.frequency_steps")
+                            Spacer()
+                            TextField("Frequency steps", text: preprocessingBinding(\.frequencyStepCount))
+                                .labelsHidden()
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 52)
+                            Stepper("", value: frequencyStepCountBinding, in: 2...10000)
+                                .labelsHidden()
+                                .fixedSize()
+                                .accessibilityLabel("Adjust Frequency steps")
+                        }
+                        if let error = validationMessage("mesh2hrtf.frequency_steps") { Text(error).font(.caption).foregroundStyle(.red) }
                     }
-                    HStack {
-                        SettingLabel(title: "Microphone faces", helpID: "mesh2hrtf.microphone_faces")
-                        Spacer()
-                        TextField("Microphone faces", value: sourceAssignmentFaceCountBinding, format: .number)
-                            .labelsHidden()
-                            .textFieldStyle(.roundedBorder)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 52)
-                        Stepper("", value: sourceAssignmentFaceCountBinding, in: 1...100)
-                            .labelsHidden()
-                            .fixedSize()
-                            .accessibilityLabel("Adjust Microphone faces")
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            SettingLabel(title: "Microphone faces", helpID: "mesh2hrtf.microphone_faces")
+                            Spacer()
+                            TextField("Microphone faces", text: optionalPreprocessingBinding(\.sourceAssignmentFaceCount))
+                                .labelsHidden()
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 52)
+                            Stepper("", value: sourceAssignmentFaceCountBinding, in: 1...100)
+                                .labelsHidden()
+                                .fixedSize()
+                                .accessibilityLabel("Adjust Microphone faces")
+                        }
+                        if let error = validationMessage("mesh2hrtf.microphone_faces") { Text(error).font(.caption).foregroundStyle(.red) }
                     }
                 }
                 SettingsDisclosure("Mesh Grading", systemImage: "ruler") {
@@ -91,7 +93,7 @@ struct ProjectInspectorView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     LabeledTextField("Min edge length", helpID: "mesh_grading.min_edge_length", text: preprocessingBinding(\.meshMinEdgeLength))
-                    LabeledTextField("Max edge length", helpID: "mesh_grading.max_edge_length", text: preprocessingBinding(\.meshMaxEdgeLength))
+                    LabeledTextField("Max edge length", helpID: "mesh_grading.max_edge_length", text: preprocessingBinding(\.meshMaxEdgeLength), validationError: validationMessage("mesh_grading.max_edge_length"))
                     LabeledTextField("Max error", helpID: "mesh_grading.max_error", text: preprocessingBinding(\.meshMaxError))
                     LabeledTextField("Gamma", helpID: "mesh_grading.gamma", text: preprocessingBinding(\.meshGamma))
                     LabeledTextField("Gamma opposite", helpID: "mesh_grading.gamma_opposite", text: preprocessingBinding(\.meshGammaOpposite))
@@ -101,14 +103,25 @@ struct ProjectInspectorView: View {
                     LabeledTextField("CPU limit (%)", helpID: "numcalc.cpu_limit", text: numcalcBinding(\.maxCPULoad))
                     SettingToggle(title: "Adaptive FMM expansion length", helpID: "numcalc.adaptive_fmm", isOn: numcalcBoolBinding(\.adaptiveFmmLength))
                 }
+            }
+            Section("Results") {
                 SettingsDisclosure("Postprocessing", systemImage: "slider.horizontal.3") {
+                    PathField("SOFA output folder (optional)", helpID: "postprocessing.output_folder", text: postprocessingOutputFolderBinding, mode: .directory)
                     SettingToggle(title: "Normalize HRTFs", helpID: "postprocessing.normalize", isOn: postprocessingNormalizeBinding)
                     LabeledTextField("Level offset (dB)", helpID: "postprocessing.level_offset", text: postprocessingLevelOffsetBinding, fieldEnabled: postprocessingNormalizeBinding.wrappedValue)
                     SettingToggle(title: "Resample HRIRs", helpID: "postprocessing.resample_hrirs", isOn: postprocessingResampleBinding)
                     LabeledTextField("Sampling rate (Hz)", helpID: "postprocessing.sampling_rate", text: postprocessingSamplingRateBinding, fieldEnabled: postprocessingResampleBinding.wrappedValue)
+                    SettingToggle(title: "Spatially upsample HRTFs", helpID: "postprocessing.spatial_upsampling", isOn: postprocessingValue(\.spatialUpsampling))
+                    if store.selectedProject?.settings.postprocessing?.spatialUpsampling == true {
+                        Stepper("Subdivision level: \(postprocessingValue(\.spatialSubdivisions).wrappedValue)", value: postprocessingValue(\.spatialSubdivisions), in: 0...5)
+                        SettingToggle(title: "Normalize upsampled HRTFs", helpID: "postprocessing.spatial_normalize", isOn: postprocessingValue(\.spatialNormalize))
+                        Text("Interpolates HRTFs at additional source directions while preserving direction-dependent arrival times. Sampling rate and HRIR length stay the same. Results are saved in the Upsampled subfolder.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
         }
+        .disabled(store.selectedProjectIsRunning)
         .formStyle(.grouped)
         .modifier(WorkspaceScrollEdges())
         .onChange(of: store.earDistanceFocusRequest) { value in
@@ -119,19 +132,106 @@ struct ProjectInspectorView: View {
         }
     }
 
+    func validationMessage(_ id: String) -> String? {
+        return store.selectedValidationIssues.first { $0.id == id }?.message
+    }
+
     var requiredPanel: some View {
         VStack(alignment: .leading, spacing: 9) {
             LabeledTextField("Project name", helpID: "project.name", text: projectStringBinding(\.name, refresh: false))
+            SettingToggle(title: "Prepare ears from a full-head scan", helpID: "scan.enabled", isOn: scanBoolBinding(\.enabled))
+            if store.selectedProject?.scanPreparation.enabled == true {
+                PathField("Full-head scan", helpID: "scan.path", text: scanTextBinding(\.scanPath), mode: .file)
+                Button("Align Using Nose and Ears…") { store.beginScanAlignment() }
+                    .disabled(store.selectedProjectIsRunning)
+                HStack {
+                    Toggle("Prepare left", isOn: scanBoolBinding(\.prepareLeft))
+                    Toggle("Prepare right", isOn: scanBoolBinding(\.prepareRight))
+                }
+            } else {
             PathField("Left ear (optional)", helpID: "project.left_ear", text: projectStringBinding(\.leftEar), mode: .file)
             PathField("Right ear (optional)", helpID: "project.right_ear", text: projectStringBinding(\.rightEar), mode: .file)
             Text("Choose at least one ear mesh.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            PathField("Save location", helpID: "project.save_location", text: projectStringBinding(\.saveLocation), mode: .directory)
+            }
+            PathField("Save location", helpID: "project.save_location", text: projectStringBinding(\.saveLocation), mode: .directory, showsOpenButton: true)
             SettingToggle(title: "Use Mesh2PPM", helpID: "project.use_bezierppm", isOn: bezierPPMBinding)
                 .padding(.top, 6)
                 .disabled(store.selectedProjectIsRunning)
         }
+    }
+
+    var manualPPMPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Fit a parametric model to either ear.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(EarSide.allCases) { side in
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(side.title) ear")
+                        Text(manualPPMStatus(for: side))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Fit…") { store.beginManualPPMFitting(side) }
+                        .disabled(!canFitManually(side))
+                }
+            }
+            Toggle("Use saved manual fits", isOn: manualPPMBinding)
+                .toggleStyle(.checkbox)
+                .help("Use the saved manual PPM mesh for each fitted side. Unfitted sides keep their current preprocessing source.")
+            if let issue = store.selectedValidationIssues.first(where: { $0.id.hasPrefix("manual_ppm") }) {
+                Text(issue.message)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    func canFitManually(_ side: EarSide) -> Bool {
+        (store.selectedProjectStatus?.fittableSides.contains(side) ?? false) && !store.selectedProjectIsRunning
+    }
+
+    func manualPPMStatus(for side: EarSide) -> String {
+        guard let project = store.selectedProject,
+              project.settings.manualPPMFitting.meshPath(for: side) != nil else { return "Not fitted" }
+        guard let status = store.selectedProjectStatus else { return "Checking saved fit…" }
+        return status.validFitSides.contains(side) ? "Saved fit available" : "Source changed; refit required"
+    }
+
+    var manualPPMBinding: Binding<Bool> {
+        Binding(
+            get: { store.selectedProject?.settings.manualPPMFitting.useForPreprocessing ?? false },
+            set: { store.setManualPPMFitting($0) }
+        )
+    }
+
+    func scanTextBinding(_ keyPath: WritableKeyPath<ScanPreparationSettings, String>) -> Binding<String> {
+        Binding(get: { store.selectedProject?.scanPreparation[keyPath: keyPath] ?? "" }, set: { value in
+            store.updateSelectedProject { project in
+                var scan = project.scanPreparation
+                scan[keyPath: keyPath] = value
+                if keyPath == \.scanPath {
+                    scan.originalScanPath = nil
+                    scan.rotationDegrees = "0"
+                    scan.reviewedLeftPath = nil; scan.reviewedRightPath = nil
+                }
+                project.settings.scanPreparation = scan
+            }
+        })
+    }
+
+    func scanBoolBinding(_ keyPath: WritableKeyPath<ScanPreparationSettings, Bool>) -> Binding<Bool> {
+        Binding(get: { store.selectedProject?.scanPreparation[keyPath: keyPath] ?? false }, set: { value in
+            store.updateSelectedProject { project in
+                var scan = project.scanPreparation
+                scan[keyPath: keyPath] = value
+                project.settings.scanPreparation = scan
+            }
+        })
     }
 
     var bezierPPMBinding: Binding<Bool> {
@@ -232,6 +332,37 @@ struct ProjectInspectorView: View {
             set: { value in
                 store.updateSelectedProject {
                     $0.settings.preprocessing.frequencyStepCount = "\(min(max(value, 2), 10000))"
+                }
+            }
+        )
+    }
+
+    func postprocessingValue<T>(_ keyPath: WritableKeyPath<PostprocessingSettings, T>) -> Binding<T> {
+        Binding(get: { (store.selectedProject?.settings.postprocessing ?? PostprocessingSettings())[keyPath: keyPath] }, set: { value in
+            store.updateSelectedProject {
+                var settings = $0.settings.postprocessing ?? PostprocessingSettings()
+                settings[keyPath: keyPath] = value
+                $0.settings.postprocessing = settings
+            }
+        })
+    }
+
+    func postprocessingOptionalPath(_ keyPath: WritableKeyPath<PostprocessingSettings, String?>) -> Binding<String> {
+        let value = postprocessingValue(keyPath)
+        return Binding(get: { value.wrappedValue ?? "" }, set: {
+            let path = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            value.wrappedValue = path.isEmpty ? nil : path
+        })
+    }
+
+    var postprocessingOutputFolderBinding: Binding<String> {
+        Binding(
+            get: { store.selectedProject?.settings.postprocessing?.outputFolder ?? "" },
+            set: { value in
+                store.updateSelectedProject {
+                    var settings = $0.settings.postprocessing ?? PostprocessingSettings()
+                    settings.outputFolder = value.isEmpty ? nil : value
+                    $0.settings.postprocessing = settings
                 }
             }
         )

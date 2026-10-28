@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 160" fill="none">
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <path d="M42 20h61l34 34v74H42V20Z" fill="#fff" stroke="#fff" stroke-width="16"/>
+    <path d="M42 20h61l34 34v74H42V20Z" fill="#f6f1ff" stroke="#29224c" stroke-width="5"/>
+    <path d="M103 20v34h34" fill="#ff6d95" stroke="#29224c" stroke-width="5"/>
+    <path d="M56 70h67" stroke="#5be0ee" stroke-width="7"/>
+    <path d="M56 85h54" stroke="#9c6bff" stroke-width="7"/>
+    <path d="M56 100h37" stroke="#ffbd37" stroke-width="7"/>
+    <path d="m22 69 4-10 5 10 10 4-10 4-5 10-4-10-10-4 10-4Z" fill="#ffcf3f" stroke="#fff" stroke-width="5"/>
+    <path d="m143 91 3-7 4 7 7 3-7 3-4 7-3-7-7-3 7-3Z" fill="#ff658e" stroke="#fff" stroke-width="4"/>
+    <rect x="52" y="110" width="86" height="34" rx="17" fill="#5be0ee" stroke="#fff" stroke-width="7"/>
+    <rect x="52" y="110" width="86" height="34" rx="17" stroke="#29224c" stroke-width="3"/>
+  </g>
+  <text x="95" y="134" fill="#29224c" font-family="Arial, sans-serif" font-size="17" font-weight="900" letter-spacing="1" text-anchor="middle">SOFA!</text>
+  <circle cx="34" cy="111" r="5" fill="#9c6bff" stroke="#fff" stroke-width="4"/>
+  <circle cx="145" cy="38" r="5" fill="#ffcf3f" stroke="#fff" stroke-width="4"/>
+</svg>

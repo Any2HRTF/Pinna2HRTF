@@ -7,7 +7,7 @@ extension AppStore {
         var arguments = ["-m", "HRTFCalculation.Geometry"]
         var stamps = [project.id.uuidString]
         for side in EarSide.allCases {
-            let path = side == .left ? project.leftEar : project.rightEar
+            let path = project.pipelineEar(for: side)
             guard !path.isEmpty else { continue }
             let selected = ArtifactScanner.preprocessingMesh(for: project, side: side)
             let mesh = selected ?? URL(fileURLWithPath: path)
@@ -120,7 +120,7 @@ extension AppStore {
     func inspectEarDistance(_ project: ProjectRecord) async throws -> GeometryValues {
         var arguments = ["-m", "HRTFCalculation.Geometry"]
         for side in EarSide.allCases {
-            let path = side == .left ? project.leftEar : project.rightEar
+            let path = project.pipelineEar(for: side)
             guard !path.isEmpty else { continue }
             let mesh = ArtifactScanner.preprocessingMesh(for: project, side: side) ?? URL(fileURLWithPath: path)
             arguments += [side == .left ? "--left" : "--right", mesh.path]

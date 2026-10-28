@@ -13,6 +13,8 @@ dependencies = [
     "matplotlib>=3.10.0",
     "numpy<2.0",
     "pandas>=2.2.3",
+    "networkx>=3",
+    "pymeshlab==2025.7.post1",
     "pillow>=11.1.0",
     "pydantic>=2.10.0",
     "pyyaml>=6.0.2",
@@ -36,3 +38,5 @@ include = ["HRTFCalculation*"]
 
 [tool.setuptools.package-data]
 "HRTFCalculation.Inference" = ["resources/*.csv", "resources/*.pth", "resources/*.stl", "resources/*.yaml"]
+
+"HRTFCalculation.Postprocessing" = ["*.m", "*.txt"]

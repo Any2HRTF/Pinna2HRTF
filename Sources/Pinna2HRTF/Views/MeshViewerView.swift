@@ -45,7 +45,9 @@ struct MeshViewerView: View {
         ZStack {
             Rectangle()
                 .fill(colorScheme == .dark ? Color(nsColor: NSColor(calibratedWhite: 0.12, alpha: 1)) : Color(nsColor: NSColor(calibratedWhite: 0.93, alpha: 1)))
-            if let image = store.selectedImage {
+            if let source = store.selectedPressure {
+                PressureFieldView(source: source).id(source)
+            } else if let image = store.selectedImage {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
@@ -74,15 +76,26 @@ struct MeshViewerView: View {
         }
         .frame(maxHeight: .infinity)
         .overlay(alignment: .topTrailing) {
-            if store.selectedMesh != nil && store.selectedImage == nil {
-                Button(action: store.resetSelectedMeshView) {
-                    Label("Reset view", systemImage: "arrow.counterclockwise")
+            VStack(alignment: .trailing, spacing: 8) {
+                if let project = store.selectedProject,
+                   let mesh = store.selectedMesh,
+                   let side = ArtifactScanner.preparedEarSide(for: mesh, in: project) {
+                    Button("Edit \(side.title) Ear…") { store.beginEarEditing(side) }
+                        .modifier(ViewerGlassButtonStyle())
+                        .controlSize(.regular)
+                        .help("Edit the selected prepared ear")
+                        .disabled(store.selectedProjectIsRunning)
                 }
-                .modifier(ViewerGlassButtonStyle())
-                .controlSize(.regular)
-                .help("Restore the default view of this mesh")
-                .padding(16)
+                if store.selectedMesh != nil && store.selectedImage == nil && store.selectedPressure == nil {
+                    Button(action: store.resetSelectedMeshView) {
+                        Label("Reset view", systemImage: "arrow.counterclockwise")
+                    }
+                    .modifier(ViewerGlassButtonStyle())
+                    .controlSize(.regular)
+                    .help("Restore the default view of this mesh")
+                }
             }
+            .padding(16)
         }
         .overlay(alignment: .bottom) {
             if let side = store.microphonePlacementSide {
@@ -143,7 +156,7 @@ struct MeshViewerView: View {
                         logExpanded.toggle()
                     }
                 } label: {
-                    Label("Live Log", systemImage: logExpanded ? "chevron.down" : "chevron.right")
+                    Label("Activity", systemImage: logExpanded ? "chevron.down" : "chevron.right")
                 }
                 .buttonStyle(.plain)
                 .font(.headline)
@@ -152,9 +165,21 @@ struct MeshViewerView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Button("Clear") { store.clearSelectedProjectLog() }
+                if logExpanded {
+                Button {
+                    store.openTechnicalLog()
+                } label: {
+                    Label("Technical Log", systemImage: "doc.text.magnifyingglass")
+                }
+                .buttonStyle(.borderless)
+                .help("Open the complete technical output for this project")
+                .accessibilityLabel("Open Technical Log")
+                .disabled(store.selectedTechnicalLogURL == nil)
+                Button("Clear Activity") { store.clearSelectedProjectLog() }
                     .buttonStyle(.borderless)
                     .disabled(store.logText.isEmpty)
+                    .help("Clear the activity timeline. Technical logs remain available.")
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -180,9 +205,12 @@ struct MeshViewerView: View {
     }
 
     var logSummary: String {
-        if store.selectedProjectIsRunning || store.environmentProcess != nil { return "Running" }
-        if store.logText.isEmpty { return "No output yet" }
-        return store.logText.split(separator: "\n").last.map(String.init) ?? "Ready"
+        if store.environmentProcess != nil { return "Setting up environment" }
+        if let project = store.selectedProject, let stage = store.runningStages[project.id] { return "\(stage.title) running" }
+        if store.selectedProjectIsRunning { return "Checking outputs" }
+        if let project = store.selectedProject, let status = store.liveLogStatusByProject[project.id] { return status }
+        if store.logText.isEmpty { return store.selectedTechnicalLogURL == nil ? "No activity yet" : "Technical log available" }
+        return "Ready"
     }
 
     var microphoneCoordinates: String {
@@ -230,35 +258,53 @@ struct PersistentSceneView: NSViewRepresentable {
         Coordinator(placementMode: placementMode, cameraPositionChanged: cameraPositionChanged, surfaceSelected: surfaceSelected)
     }
 
-    func makeNSView(context: Context) -> SCNView {
-        let view = SCNView()
+    func makeNSView(context: Context) -> MeshSceneViewport {
+        let viewport = MeshSceneViewport(frame: .zero)
+        let view = viewport.sceneView
         view.scene = scene
-        view.pointOfView = scene.rootNode.childNodes.first { $0.camera != nil }
+        view.configureNavigation(camera: scene.rootNode.childNodes.first { $0.camera != nil })
         view.allowsCameraControl = true
         view.autoenablesDefaultLighting = false
         view.backgroundColor = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
-        view.delegate = context.coordinator
         view.addGestureRecognizer(NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.selectSurface(_:))))
-        return view
+        context.coordinator.observeCamera(in: viewport)
+        return viewport
     }
 
-    func updateNSView(_ view: SCNView, context: Context) {
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: MeshSceneViewport, context: Context) -> CGSize? {
+        // Never derive minimum/ideal sizes from the last rendered frame.
+        let width = proposal.width.flatMap { $0.isFinite ? max(0, $0) : nil } ?? 0
+        let height = proposal.height.flatMap { $0.isFinite ? max(0, $0) : nil } ?? 0
+        return CGSize(width: width, height: height)
+    }
+
+    func updateNSView(_ viewport: MeshSceneViewport, context: Context) {
+        let view = viewport.sceneView
         context.coordinator.placementMode = placementMode
         context.coordinator.cameraPositionChanged = cameraPositionChanged
         context.coordinator.surfaceSelected = surfaceSelected
-        view.allowsCameraControl = true
         if view.scene !== scene {
             view.scene = scene
+            view.configureNavigation(camera: scene.rootNode.childNodes.first { $0.camera != nil })
             context.coordinator.lastPosition = nil
         }
-        view.backgroundColor = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
+        let background = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
+        if view.backgroundColor != background { view.backgroundColor = background }
     }
 
-    final class Coordinator: NSObject, SCNSceneRendererDelegate {
+    static func dismantleNSView(_ viewport: MeshSceneViewport, coordinator: Coordinator) {
+        coordinator.cameraTimer?.invalidate()
+        coordinator.cameraTimer = nil
+        viewport.finishResizing()
+        viewport.sceneView.scene = nil
+    }
+
+    final class Coordinator: NSObject {
         var placementMode: Bool
         var cameraPositionChanged: (SCNVector3) -> Void
         var surfaceSelected: (SCNVector3) -> Void
         var lastPosition: SCNVector3?
+        var cameraTimer: Timer?
 
         init(placementMode: Bool, cameraPositionChanged: @escaping (SCNVector3) -> Void, surfaceSelected: @escaping (SCNVector3) -> Void) {
             self.placementMode = placementMode
@@ -273,13 +319,19 @@ struct PersistentSceneView: NSViewRepresentable {
             surfaceSelected(hit.worldCoordinates)
         }
 
-        func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {
-            guard let position = renderer.pointOfView?.presentation.position else { return }
-            if let lastPosition, abs(lastPosition.x - position.x) < 0.001, abs(lastPosition.y - position.y) < 0.001, abs(lastPosition.z - position.z) < 0.001 { return }
-            lastPosition = position
-            DispatchQueue.main.async { [weak self] in
-                self?.cameraPositionChanged(position)
+        func observeCamera(in viewport: MeshSceneViewport) {
+            cameraTimer?.invalidate()
+            // Read and persist camera state on the main thread, outside renderer/layout callbacks.
+            let timer = Timer(timeInterval: 1.0 / 15, repeats: true) { [weak self, weak viewport] _ in
+                guard let self, let viewport, viewport.window != nil, !viewport.inLiveResize,
+                      let position = viewport.sceneView.pointOfView?.presentation.position,
+                      position.x.isFinite, position.y.isFinite, position.z.isFinite else { return }
+                if let last = self.lastPosition, abs(last.x - position.x) < 0.001, abs(last.y - position.y) < 0.001, abs(last.z - position.z) < 0.001 { return }
+                self.lastPosition = position
+                self.cameraPositionChanged(position)
             }
+            cameraTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
         }
     }
 }
