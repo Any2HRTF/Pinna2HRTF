@@ -321,7 +321,7 @@ Keep tests on existing copies and cancel rather than saving diagnostic edits. Su
 
 ### macOS
 
-The Mac app is currently **2.0 beta**. Its app version is set in `Scripts/build_release_app.sh`; the About panel shows the beta label, and installer filenames use `2.0-beta`.
+The Mac app is **2.0**. Its app version is set in `Scripts/build_release_app.sh`; the About panel and installer filenames use `2.0`.
 
 On Apple Silicon, with the Swift toolchain, Git, and `uv` installed:
 

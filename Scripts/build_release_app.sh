@@ -17,9 +17,8 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$ROOT/.." && pwd)"
 APP_VERSION="2.0"
-APP_RELEASE_CHANNEL="beta"
-APP_DISPLAY_VERSION="$APP_VERSION $APP_RELEASE_CHANNEL"
-APP_ARTIFACT_VERSION="$APP_VERSION-$APP_RELEASE_CHANNEL"
+APP_DISPLAY_VERSION="$APP_VERSION"
+APP_ARTIFACT_VERSION="$APP_VERSION"
 if git -C "$ROOT" rev-parse --verify HEAD >/dev/null 2>&1; then
   GIT_HEAD="$(git -C "$ROOT" rev-parse --short HEAD)"
   APP_BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD)"
@@ -175,7 +174,6 @@ for scripts in (Path(sysconfig.get_path("purelib")) / "bpy").glob("*/scripts"):
     if not compileall.compile_dir(scripts, quiet=1, workers=1):
         raise SystemExit("Could not prepare Blender's bundled bytecode cache")
 PYBLENDERCACHE
-find "$RESOURCES" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
