@@ -97,27 +97,26 @@ struct PPMFittingView: View {
     }
 
     private var fittingActions: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Picker("Display", selection: $displayMode) {
-                ForEach(["Overlay", "Target", "Error Map", "Hidden"], id: \.self) { Text($0).tag($0) }
-            }
-            .fixedSize()
-            .onChange(of: displayMode) { mode in
-                model.showTarget = mode == "Overlay" || mode == "Target"
-                model.showPPM = mode == "Overlay" || mode == "Error Map"
-            }
-            Toggle("Show Blender skeleton", isOn: $model.showSkeleton)
-                .accessibilityIdentifier("ppm.showSkeleton")
-                .help("Overlay the posed Blender bones, including curved Bendy bones, through the PPM surface.")
-            Menu {
-                Button("Reset to Template") { Task { await model.resetControls() } }
-                    .disabled(model.busy || model.isUpdatingPreview)
-            } label: { Text("Fitting actions") }
-            .accessibilityLabel("Fitting actions")
-            .fixedSize()
-            .help("Fitting actions")
-            Button("Help", systemImage: "questionmark.circle") { showingHelp.toggle() }
-                .labelStyle(.iconOnly)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Display")
+                    .font(.caption.weight(.medium))
+                    .frame(width: 48, alignment: .leading)
+                Picker("Display", selection: $displayMode) {
+                    ForEach(["Overlay", "Target", "Error Map", "Hidden"], id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+                .onChange(of: displayMode) { mode in
+                    model.showTarget = mode == "Overlay" || mode == "Target"
+                    model.showPPM = mode == "Overlay" || mode == "Error Map"
+                }
+                Button { showingHelp.toggle() } label: {
+                    Image(systemName: "questionmark.circle")
+                        .frame(width: 20, height: 20)
+                }
+                .accessibilityLabel("Manual fitting help")
+                .help("Manual fitting help")
                 .popover(isPresented: $showingHelp) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Manual Fitting").font(.headline)
@@ -126,7 +125,24 @@ struct PPMFittingView: View {
                         Link("Fitting workflow · Perfler et al. (2025)", destination: URL(string: "https://doi.org/10.1016/j.compbiomed.2025.109817")!)
                     }.padding().frame(width: 320)
                 }
+            }
+            HStack(spacing: 8) {
+                Toggle("Show Blender skeleton", isOn: $model.showSkeleton)
+                    .toggleStyle(.checkbox)
+                    .font(.caption)
+                    .accessibilityIdentifier("ppm.showSkeleton")
+                    .help("Overlay the posed Blender bones, including curved Bendy bones, through the PPM surface.")
+                Spacer(minLength: 0)
+                Button("Reset to Template") { Task { await model.resetControls() } }
+                    .font(.caption)
+                    .fixedSize()
+                    .disabled(model.busy || model.isUpdatingPreview)
+                    .help("Restore the starting PPM parameters. Undo is available.")
+            }
+            targetOpacityControl.disabled(!model.showTarget)
         }
+        .controlSize(.small)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var historyControls: some View {
@@ -155,7 +171,6 @@ struct PPMFittingView: View {
                 }.pickerStyle(.segmented)
                     .labelsHidden()
                     .accessibilityLabel("Fitting section")
-                targetOpacityControl.disabled(!model.showTarget)
                 Divider()
                 // Plain headings preserve Computer access; GroupBox crashes the helper here.
                 if selectedSection == "Global" {
