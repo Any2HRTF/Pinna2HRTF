@@ -83,6 +83,8 @@ struct Artifact: Identifiable, Hashable {
 }
 
 struct ViewerCameraState: Codable, Equatable {
+    var target: [Double]? = nil
+    var orientation: [Double]? = nil
     var x: Double
     var y: Double
     var z: Double

@@ -5,6 +5,9 @@ import json
 import platform
 import subprocess
 import shutil
+import hashlib
+import tempfile
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable, Iterable
@@ -288,8 +291,7 @@ def slurm_worker_text(config: PipelineConfig) -> str:
 
 
 def prepare_sofa_output(output_dir: Path, overwrite: bool) -> None:
-    if output_dir.exists() and overwrite:
-        shutil.rmtree(output_dir)
+    # Export must never recursively delete an arbitrary user-selected directory.
     output_dir.mkdir(parents=True, exist_ok=True)
 
 
@@ -318,7 +320,67 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
     if config.postprocessing.spatial_upsampling:
         from .Postprocessing.spatial_upsampling import resolve_dependencies
         resolve_dependencies(config.postprocessing)
-    prepare_sofa_output(output_dir, config.postprocessing.overwrite)
+    root = config.paths.output_dir.resolve()
+    destination = output_dir.resolve()
+    protected = [root / name for name in ("Input", "Projects", "Intermediates", "Prepared", "Manual PPM", "MeshEdits", "Logs", ".pinna2hrtf")]
+    protected += [p.resolve() for p in (config.paths.left_ear, config.paths.right_ear, config.scan_preparation.scan_path) if p is not None]
+    if root not in destination.parents or any(p == destination or p in destination.parents or destination in p.parents for p in protected):
+        raise ValueError("Choose a separate SOFA output subfolder without inputs or project work.")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".pinna-export-", dir=destination.parent))
+    published = False
+    try:
+        _export_postprocessing(config, staging, logger)
+        _publish_export(staging, destination, config.postprocessing.overwrite, root)
+        published = True
+    finally:
+        backups = staging / ".backups"
+        # A failed server rollback must keep the recovery copies for the user.
+        if published or not backups.exists() or not any(p.is_file() for p in backups.rglob("*")):
+            shutil.rmtree(staging, ignore_errors=True)
+        else:
+            logger(f"Recovery copies retained in {staging}")
+
+
+def _publish_export(staging, destination, overwrite, project_root=None):
+    destination.mkdir(parents=True, exist_ok=True)
+    backups = staging / ".backups"
+    backups.mkdir()
+    installed = []
+    try:
+        for source in list(staging.rglob("*")):
+            if not source.is_file() or backups in source.parents:
+                continue
+            relative = source.relative_to(staging)
+            target = destination / relative
+            if target.is_symlink() or any(p.is_symlink() for p in target.parents):
+                raise ValueError("Linked export paths are not supported.")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            backup = backups / relative
+            if target.exists():
+                if not overwrite:
+                    raise FileExistsError(target)
+                if project_root is not None:
+                    manifest = project_root / ".pinna2hrtf/generated-output-manifest.json"
+                    owned = json.loads(manifest.read_text())["Files"].get(str(target.relative_to(project_root)))
+                    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+                    if not owned or digest.lower() != owned["Sha256"].lower():
+                        raise ValueError(f"Keeping modified or untracked output: {target}")
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(target, backup)
+            installed.append((target, backup))
+            source.replace(target)
+    except BaseException:
+        for target, backup in reversed(installed):
+            if backup.exists():
+                backup.replace(target)
+            else:
+                target.unlink(missing_ok=True)
+        raise
+
+
+def _export_postprocessing(config, output_dir, logger):
+    import mesh2hrtf as m2h
     projects = project_dirs(config)
     for project in projects:
         emit_live_event(f"Converting {project.name} results")

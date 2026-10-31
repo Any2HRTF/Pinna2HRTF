@@ -22,7 +22,7 @@ enum ProjectValidation {
         return number > 0 ? nil : "Use a number greater than 0."
     }
 
-    static func issues(for project: ProjectRecord, inspection: ArtifactScanner.Inspection = .init()) -> [(id: String, message: String)] {
+    static func issues(for project: ProjectRecord, stage: Stage? = nil, inspection: ArtifactScanner.Inspection = .init()) -> [(id: String, message: String)] {
         let pre = project.settings.preprocessing
         let post = project.settings.postprocessing ?? PostprocessingSettings()
         var fields: [(String, String)] = [
@@ -77,7 +77,16 @@ enum ProjectValidation {
                 errors.append(("scan.side_max", "Outer crop limit must exceed inner crop limit."))
             }
         }
-        return errors
+        guard let stage else { return errors }
+        return errors.filter { issue in
+            switch stage {
+            case .scanPreparation: return issue.id.hasPrefix("scan.")
+            case .inference: return issue.id.hasPrefix("scan.")
+            case .preprocessing: return !issue.id.hasPrefix("postprocessing.") && !issue.id.hasPrefix("numcalc.")
+            case .numcalc: return issue.id.hasPrefix("numcalc.")
+            case .postprocessing: return issue.id.hasPrefix("postprocessing.")
+            }
+        }
     }
 
     static func validate(_ project: ProjectRecord) throws {

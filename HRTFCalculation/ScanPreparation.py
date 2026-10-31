@@ -436,7 +436,7 @@ def restore_attachment_boundary(poisson, planes, rotation_degrees, output, targe
 
 def preparation_signature(settings):
     source = Path(settings.scan_path)
-    return {"settings": settings.model_dump(mode="json", exclude={"require_manual_review", "reviewed_left", "reviewed_right"}), "source_sha256": sha256(source)}
+    return {"settings": settings.model_dump(mode="json", exclude={"require_manual_review", "reviewed_left", "reviewed_right", "original_scan_path"}), "source_sha256": sha256(source)}
 
 
 def prepared_paths(config):

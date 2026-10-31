@@ -72,13 +72,16 @@ struct ProjectStatusSnapshot {
                     try? signature.write(to: signatureURL, atomically: true, encoding: .utf8)
                 }
             } else if !FileManager.default.fileExists(atPath: signatureURL.path) {
-                try? signature.write(to: signatureURL, atomically: true, encoding: .utf8)
+                needsRerun = true
             }
         }
         var reasons: [Stage: String] = [:]
         for stage in Stage.allCases {
             reasons[stage] = unavailableReason(stage, project: project, environment: environment, projects: projects,
                                                placingMicrophone: placingMicrophone, inspection: inspection, completed: completed, resolveOutputLocations: false)
+        }
+        if needsRerun {
+            for stage in [Stage.numcalc, .postprocessing] { reasons[stage] = "Run preprocessing with the current settings first." }
         }
         if !includeSolverResults { reasons[.postprocessing] = "Checking solver results…" }
         let pipelineSides = Set(EarSide.allCases.filter { !project.pipelineEar(for: $0, inspection: inspection).isEmpty })
@@ -116,7 +119,7 @@ struct ProjectStatusSnapshot {
         for path in requiredInputs where !path.isEmpty {
             if !FileManager.default.fileExists(atPath: path) { return "Input mesh is missing: \(URL(fileURLWithPath: path).lastPathComponent)" }
         }
-        if let issue = ProjectValidation.issues(for: project, inspection: inspection).first { return "Fix \(issue.id.split(separator: ".").last?.replacingOccurrences(of: "_", with: " ") ?? "settings"): \(issue.message)" }
+        if let issue = ProjectValidation.issues(for: project, stage: stage, inspection: inspection).first { return "Fix \(issue.id.split(separator: ".").last?.replacingOccurrences(of: "_", with: " ") ?? "settings"): \(issue.message)" }
         if let conflict = outputLocationConflict(for: project, projects: projects, resolvingSymlinks: resolveOutputLocations) { return conflict }
         switch stage {
         case .scanPreparation:
@@ -146,6 +149,10 @@ struct ProjectStatusSnapshot {
             let output = (resolveOutputLocations ? outputURL.resolvingSymlinksInPath() : outputURL).path
             let root = (resolveOutputLocations ? rootURL.resolvingSymlinksInPath() : rootURL).path
             if !output.hasPrefix(root + "/") { return "Choose a SOFA output subfolder inside this project folder." }
+            let protected = ["Input", "Projects", "Intermediates", "Prepared", "Manual PPM", "MeshEdits", "Logs", ".pinna2hrtf"].map { root + "/" + $0 } + project.protectedOutputInputs()
+            if protected.contains(where: { path in output == path || output.hasPrefix(path + "/") || path.hasPrefix(output + "/") }) {
+                return "Choose a separate SOFA folder that does not contain inputs or project work."
+            }
             if !isComplete(.numcalc) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.numcalc.rawValue] ?? .ready) { return "Finish NumCalc successfully first." }
         }
         return nil

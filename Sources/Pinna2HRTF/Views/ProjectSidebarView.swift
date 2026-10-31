@@ -66,7 +66,7 @@ struct ProjectSidebarView: View {
                         .frame(width: 28, height: 28)
                 }
                 .help("Duplicate the selected project, including its results")
-                .disabled(store.selectedProject == nil)
+                .disabled(store.selectedProject == nil || store.selectedProjectIsRunning)
                 Spacer(minLength: 0)
             }
             .buttonStyle(.borderless)

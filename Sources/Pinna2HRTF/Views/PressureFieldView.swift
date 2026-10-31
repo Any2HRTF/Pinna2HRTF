@@ -17,7 +17,7 @@ struct PressureFieldView: View {
             Divider()
             ZStack(alignment: .bottomLeading) {
                 PersistentSceneView(scene: model.scene, darkMode: colorScheme == .dark,
-                    placementMode: false, cameraPositionChanged: { _ in }, surfaceSelected: { _ in })
+                    placementMode: false, cameraPositionChanged: { _, _, _ in }, surfaceSelected: { _ in })
                     .id(model.cameraRevision)
                     .opacity(model.loading ? 0.3 : 1)
                 if model.error == nil && !model.loading {

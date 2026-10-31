@@ -69,7 +69,7 @@ enum ProjectConfigDocument {
             throw ProjectValidation.Failure(message: "The imported settings snapshot is unreadable.")
         }
         let editable: [String: [String]] = [
-            "scan_preparation": ["enabled", "scan_path", "rotation_degrees", "prepare_left", "prepare_right", "target_edge_mm", "left_margin_mm", "right_margin_mm", "side_min_mm", "side_max_mm", "require_manual_review", "reviewed_left", "reviewed_right"],
+            "scan_preparation": ["enabled", "scan_path", "original_scan_path", "rotation_degrees", "prepare_left", "prepare_right", "target_edge_mm", "left_margin_mm", "right_margin_mm", "side_min_mm", "side_max_mm", "require_manual_review", "reviewed_left", "reviewed_right"],
             "paths": ["left_ear", "right_ear", "output_dir", "external_deps_dir", "numcalc_executable", "mesh_grading_executable", "evaluation_grid"],
             "inference": ["model_config_file", "model_checkpoint", "target_left_folder", "target_right_folder", "prediction_left_folder", "prediction_right_folder", "use_predictions_for_preprocessing"],
             "manual_ppm": ["enabled", "left_mesh", "right_mesh", "left_parameters", "right_parameters", "left_blend", "right_blend", "left_source", "right_source", "left_source_identity", "right_source_identity", "template_blend"],
@@ -121,6 +121,7 @@ enum ProjectConfigDocument {
         var restoredScan = ScanPreparationSettings()
         restoredScan.enabled = bool(scan, "enabled") ?? false
         restoredScan.scanPath = text(scan, "scan_path").map(relocated) ?? ""
+        restoredScan.originalScanPath = text(scan, "original_scan_path").map(relocated)
         restoredScan.rotationDegrees = text(scan, "rotation_degrees") ?? "0"
         restoredScan.requireManualReview = bool(scan, "require_manual_review") ?? false
         restoredScan.reviewedLeftPath = text(scan, "reviewed_left").map(relocated)

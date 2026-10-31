@@ -2,7 +2,7 @@ import Foundation
 
 enum OutputValidation {
     static func validate(stage: Stage, project: ProjectRecord) throws {
-        guard ArtifactScanner.stageIsComplete(stage, project: project) else {
+        guard ArtifactScanner.stageIsComplete(stage, project: project, validateReceipt: false) else {
             throw ProjectValidation.Failure(message: "The task exited successfully, but its expected output files are missing, empty, or incomplete.")
         }
         if stage == .scanPreparation {

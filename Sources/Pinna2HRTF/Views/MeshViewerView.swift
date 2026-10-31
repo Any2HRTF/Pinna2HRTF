@@ -61,9 +61,9 @@ struct MeshViewerView: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                PersistentSceneView(scene: store.selectedScene, darkMode: colorScheme == .dark, placementMode: store.isPlacingMicrophone, cameraPositionChanged: { [scene = store.selectedScene] position in
+                PersistentSceneView(scene: store.selectedScene, darkMode: colorScheme == .dark, placementMode: store.isPlacingMicrophone, cameraPositionChanged: { [scene = store.selectedScene] position, target, orientation in
                     guard store.selectedScene === scene else { return }
-                    store.updateCameraPosition(position)
+                    store.updateCameraPosition(position, target: target, orientation: orientation)
                 }, surfaceSelected: store.previewMicrophonePosition)
                     .id(ObjectIdentifier(store.selectedScene))
                     .onAppear {
@@ -114,7 +114,7 @@ struct MeshViewerView: View {
                     HStack(spacing: 10) {
                         Button("Use Automatic Position") {
                             store.useAutomaticMicrophonePosition(side)
-                        }
+                        }.disabled(store.isCalculatingAutomaticMicrophone)
                         if store.isCalculatingAutomaticMicrophone {
                             HStack(spacing: 6) {
                                 ProgressView()
@@ -251,7 +251,7 @@ struct PersistentSceneView: NSViewRepresentable {
     let scene: SCNScene
     let darkMode: Bool
     let placementMode: Bool
-    let cameraPositionChanged: (SCNVector3) -> Void
+    let cameraPositionChanged: (SCNVector3, SCNVector3, SCNQuaternion) -> Void
     let surfaceSelected: (SCNVector3) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -301,12 +301,12 @@ struct PersistentSceneView: NSViewRepresentable {
 
     final class Coordinator: NSObject {
         var placementMode: Bool
-        var cameraPositionChanged: (SCNVector3) -> Void
+        var cameraPositionChanged: (SCNVector3, SCNVector3, SCNQuaternion) -> Void
         var surfaceSelected: (SCNVector3) -> Void
         var lastPosition: SCNVector3?
         var cameraTimer: Timer?
 
-        init(placementMode: Bool, cameraPositionChanged: @escaping (SCNVector3) -> Void, surfaceSelected: @escaping (SCNVector3) -> Void) {
+        init(placementMode: Bool, cameraPositionChanged: @escaping (SCNVector3, SCNVector3, SCNQuaternion) -> Void, surfaceSelected: @escaping (SCNVector3) -> Void) {
             self.placementMode = placementMode
             self.cameraPositionChanged = cameraPositionChanged
             self.surfaceSelected = surfaceSelected
@@ -328,7 +328,7 @@ struct PersistentSceneView: NSViewRepresentable {
                       position.x.isFinite, position.y.isFinite, position.z.isFinite else { return }
                 if let last = self.lastPosition, abs(last.x - position.x) < 0.001, abs(last.y - position.y) < 0.001, abs(last.z - position.z) < 0.001 { return }
                 self.lastPosition = position
-                self.cameraPositionChanged(position)
+                self.cameraPositionChanged(position, viewport.sceneView.defaultCameraController.target, viewport.sceneView.pointOfView?.orientation ?? SCNQuaternion(0,0,0,1))
             }
             cameraTimer = timer
             RunLoop.main.add(timer, forMode: .common)

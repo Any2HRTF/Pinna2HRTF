@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Keeps Blender and BezierPPM loaded while the user adjusts the fitting controls.
 final class PPMFittingPythonWorker: @unchecked Sendable {
@@ -35,7 +36,15 @@ final class PPMFittingPythonWorker: @unchecked Sendable {
         try inputPipe.fileHandleForWriting.write(contentsOf: line)
 
         var response = Data()
+        let deadline = Date().addingTimeInterval(120)
         while true {
+            var descriptor = pollfd(fd: outputPipe.fileHandleForReading.fileDescriptor, events: Int16(POLLIN), revents: 0)
+            let ready = poll(&descriptor, 1, 250)
+            if ready < 0 || Date() > deadline || !process.isRunning {
+                cancel()
+                throw ProjectValidation.Failure(message: "The fitting worker stopped or timed out. Reopen the editor to retry.")
+            }
+            if ready == 0 { continue }
             let chunk = outputPipe.fileHandleForReading.availableData
             guard !chunk.isEmpty else {
                 throw ProjectValidation.Failure(message: "The PPM fitting worker closed its output unexpectedly.")
@@ -48,11 +57,8 @@ final class PPMFittingPythonWorker: @unchecked Sendable {
         }
     }
 
-    deinit {
-        try? inputPipe.fileHandleForWriting.close()
-        if process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
-        }
+    func cancel() {
+        if process.isRunning { Darwin.kill(process.processIdentifier, SIGKILL) }
     }
+    deinit { cancel(); try? inputPipe.fileHandleForWriting.close() }
 }

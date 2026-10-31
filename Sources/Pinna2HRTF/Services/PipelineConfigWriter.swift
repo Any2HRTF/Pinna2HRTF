@@ -1,9 +1,9 @@
 import Foundation
 
 enum PipelineConfigWriter {
-    static func prepare(project: ProjectRecord, environment: EnvironmentConfig) throws -> URL {
+    static func prepare(project: ProjectRecord, environment: EnvironmentConfig, stage: Stage? = nil) throws -> URL {
         try HeadGeometrySettings.validate(project.settings.preprocessing)
-        try ProjectValidation.validate(project)
+        if let issue = ProjectValidation.issues(for: project, stage: stage).first { throw ProjectValidation.Failure(message: issue.message) }
 
         let output = URL(fileURLWithPath: project.saveLocation)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
@@ -39,10 +39,7 @@ enum PipelineConfigWriter {
         if source.standardizedFileURL.path == target.standardizedFileURL.path {
             return source.path
         }
-        if FileManager.default.fileExists(atPath: target.path) {
-            try FileManager.default.removeItem(at: target)
-        }
-        try FileManager.default.copyItem(at: source, to: target)
+        try FilePublication.publish([(source, target)])
         return target.path
     }
 
@@ -86,7 +83,7 @@ enum PipelineConfigWriter {
                 "evaluation_grid": grid.isEmpty ? "Default" : grid
             ],
             "scan_preparation": [
-                "enabled": scan.enabled, "scan_path": path(scan.scanPath),
+                "enabled": scan.enabled, "scan_path": path(scan.scanPath), "original_scan_path": nullable(scan.originalScanPath),
                 "rotation_degrees": number(scan.rotationDegrees), "require_manual_review": false,
                 "reviewed_left": nullable(scan.reviewedLeftPath), "reviewed_right": nullable(scan.reviewedRightPath),
                 "prepare_left": scan.prepareLeft, "prepare_right": scan.prepareRight,

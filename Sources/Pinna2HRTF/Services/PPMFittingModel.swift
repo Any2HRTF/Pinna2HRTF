@@ -14,6 +14,7 @@ final class PPMFittingModel: ObservableObject {
     @Published var controls: [PPMFittingControl] = []
     @Published private(set) var metrics: [PPMFittingMetric] = []
     @Published var busy = false
+    @Published private(set) var isSaving = false
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
     @Published var message = "Preparing the PPM fit…"
@@ -48,6 +49,8 @@ final class PPMFittingModel: ObservableObject {
     }
 
     deinit { try? FileManager.default.removeItem(at: workspace) }
+
+    func cancel() { previewWorkerTask?.cancel(); pythonWorker?.cancel() }
 
     var canSave: Bool { !busy && !isUpdatingPreview && !controls.isEmpty && !parameters.isEmpty }
 
@@ -179,6 +182,8 @@ final class PPMFittingModel: ObservableObject {
 
     func save() async -> Bool {
         guard canSave else { return false }
+        isSaving = true
+        defer { isSaving = false }
         guard ArtifactScanner.meshIdentity(request.targetMesh) == request.sourceIdentity else {
             error = "The target ear changed while it was being fitted. Close this workspace and reopen it to use the current mesh."
             return false
@@ -203,14 +208,6 @@ final class PPMFittingModel: ObservableObject {
             guard FileManager.default.fileExists(atPath: generatedBlend.path) else {
                 throw ProjectValidation.Failure(message: "The PPM fitting engine did not produce an editable Blender file.")
             }
-            if FileManager.default.fileExists(atPath: request.destinationMesh.path) {
-                try FileManager.default.removeItem(at: request.destinationMesh)
-            }
-            try FileManager.default.copyItem(at: generated, to: request.destinationMesh)
-            if FileManager.default.fileExists(atPath: request.destinationBlend.path) {
-                try FileManager.default.removeItem(at: request.destinationBlend)
-            }
-            try FileManager.default.copyItem(at: generatedBlend, to: request.destinationBlend)
             let archivedTemplate = try archiveTemplateIfNeeded()
             if let archivedTemplate { templateBlendPath = archivedTemplate.path }
             let document: [String: Any] = [
@@ -219,7 +216,11 @@ final class PPMFittingModel: ObservableObject {
                 "parameters": parameters
             ]
             let data = try JSONSerialization.data(withJSONObject: document, options: [.sortedKeys, .prettyPrinted])
-            try data.write(to: request.destinationParameters, options: .atomic)
+            let generatedParameters = workspace.appendingPathComponent("saved-fit.json")
+            try data.write(to: generatedParameters, options: .atomic)
+            try await Task.detached(priority: .userInitiated) { [request] in
+                try FilePublication.publish([(generated, request.destinationMesh), (generatedBlend, request.destinationBlend), (generatedParameters, request.destinationParameters)])
+            }.value
             try installPPM(at: generated, isAlreadyMirrored: request.side == .right)
             message = "Saved the fitted PPM for the \(request.side.rawValue) ear."
             return true

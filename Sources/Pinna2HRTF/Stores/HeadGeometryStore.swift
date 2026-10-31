@@ -4,6 +4,10 @@ import AppKit
 extension AppStore {
     func refreshGeometry() {
         guard let project = selectedProject else { geometryValues = nil; return }
+        let generation = UUID().uuidString
+        geometryKey = generation
+        Task { @MainActor in
+            let discovered = await Task.detached(priority: .utility) { () -> ([String], [String]) in
         var arguments = ["-m", "HRTFCalculation.Geometry"]
         var stamps = [project.id.uuidString]
         for side in EarSide.allCases {
@@ -15,6 +19,14 @@ extension AppStore {
             arguments += [side == .left ? "--left" : "--right", mesh.path]
             stamps.append(mesh.standardizedFileURL.path + "|" + identity)
         }
+                return (arguments, stamps)
+            }.value
+            guard self.geometryKey == generation, self.selectedProject == project else { return }
+            self.applyGeometryDiscovery(project, arguments: discovered.0, stamps: discovered.1)
+        }
+    }
+
+    private func applyGeometryDiscovery(_ project: ProjectRecord, arguments: [String], stamps: [String]) {
         let key = stamps.joined(separator: "|")
         geometryKey = key
         guard stamps.count > 1 else { geometryValues = nil; geometryMessage = "Load an ear mesh to calculate geometry."; return }

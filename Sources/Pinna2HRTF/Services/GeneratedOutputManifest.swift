@@ -52,18 +52,22 @@ final class GeneratedOutputManifest {
     }
     private let root: URL
     private let inputs: [String]
+    private let outputPrefix: String?
     private let gate = NSLock()
     private var runLock: Int32?
     private let fm = FileManager.default
     private var metadata: URL { root.appendingPathComponent(".pinna2hrtf") }
     private var manifest: URL { metadata.appendingPathComponent("generated-output-manifest.json") }
 
-    init(projectRoot: String, inputs: [String]) throws {
+    init(projectRoot: String, inputs: [String], outputFolder: String? = nil) throws {
         guard !projectRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Failure.invalidRoot }
         // standardizedFileURL rewrites /private/tmp through the /tmp symlink.
         // Keep the caller's path so link checks inspect the actual output root.
         root = URL(fileURLWithPath: projectRoot)
         guard root.path != "/" else { throw Failure.invalidRoot }
+        if let outputFolder, outputFolder.hasPrefix(root.path + "/") {
+            outputPrefix = String(outputFolder.dropFirst(root.path.count + 1))
+        } else { outputPrefix = nil }
         self.inputs = inputs.filter { !$0.isEmpty }.map { Self.canonicalPath($0).lowercased() }
     }
     deinit { if let fd = runLock { close(fd) } }
@@ -102,7 +106,7 @@ final class GeneratedOutputManifest {
         try capture(&doc)
         for url in urls where url.path.hasPrefix(root.path + "/") {
             let relative = String(url.path.dropFirst(root.path.count + 1))
-            guard let stage = Self.classify(relative), let safe = safePath(relative),
+            guard let stage = classifyOutput(relative), let safe = safePath(relative),
                   fm.fileExists(atPath: safe.path) else { continue }
             // Archived templates are copied once and then reused as sources.
             // A later fit save must not claim external changes to that copy.
@@ -146,9 +150,9 @@ final class GeneratedOutputManifest {
                     result.deleted += 1
                 } catch { result.errors += 1 }
             }
-            let directories = Set(doc.Directories.keys).union(try scan().directories.filter { Self.classifyEmptyDirectory($0) != nil })
+            let directories = Set(doc.Directories.keys).union(try scan().directories.filter { classifyDirectory($0) != nil })
             for relative in directories.sorted(by: { $0.count > $1.count }) {
-                if let from, let stage = doc.Directories[relative] ?? Self.classifyEmptyDirectory(relative), stage.order < from.order { continue }
+                if let from, let stage = doc.Directories[relative] ?? classifyDirectory(relative), stage.order < from.order { continue }
                 guard let url = safePath(relative, protectingInputs: false) else { result.errors += 1; continue }
                 guard safePath(relative) != nil else { result.nonEmpty += 1; continue }
 
@@ -173,14 +177,14 @@ final class GeneratedOutputManifest {
                 if before.Size == entry.Size && before.ModifiedUtcTicks == entry.ModifiedUtcTicks { continue }
                 guard let owned = doc.Files[relative], owned.Size == before.Size, owned.ModifiedUtcTicks == before.ModifiedUtcTicks else { continue }
             }
-            guard let stage = Self.classify(relative), let url = safePath(relative) else { continue }
+            guard let stage = classifyOutput(relative), let url = safePath(relative) else { continue }
             if pending.Stage == .scanPreparation && stage != .scanPreparation { continue }
             if pending.Stage == .inference && stage != .inference { continue }
             if pending.Stage == .postprocessing && stage != .postprocessing { continue }
             var owned = try fingerprint(url); owned.Stage = stage
             doc.Files[relative] = owned
         }
-        for relative in after.directories.subtracting(pending.Directories) where Self.directoryCanBeCreated(relative, by: pending.Stage) {
+        for relative in after.directories.subtracting(pending.Directories) where Self.directoryCanBeCreated(normalizedOutput(relative), by: pending.Stage) {
             if doc.Directories[relative] == nil { doc.Directories[relative] = pending.Stage }
         }
         removeMissing(&doc)
@@ -191,7 +195,7 @@ final class GeneratedOutputManifest {
     private func reconcile(_ doc: inout Document) throws {
         let current = try scan()
         for relative in current.files.keys {
-            guard doc.Files[relative] == nil, let stage = Self.classify(relative), let url = safePath(relative) else { continue }
+            guard doc.Files[relative] == nil, let stage = classifyOutput(relative), let url = safePath(relative) else { continue }
             var entry = try fingerprint(url); entry.Stage = stage
             doc.Files[relative] = entry
         }
@@ -211,7 +215,7 @@ final class GeneratedOutputManifest {
             let stages = doc.Files.filter { $0.key.hasPrefix(relative + "/") }.map { $0.value.Stage }
             if let first = stages.min(by: { $0.order < $1.order }) {
                 if doc.Directories[relative] == nil || first.order < doc.Directories[relative]!.order { doc.Directories[relative] = first }
-            } else if doc.Directories[relative] == nil, let stage = Self.classifyEmptyDirectory(relative), let url = safePath(relative), try fm.contentsOfDirectory(atPath: url.path).isEmpty {
+            } else if doc.Directories[relative] == nil, let stage = classifyDirectory(relative), let url = safePath(relative), try fm.contentsOfDirectory(atPath: url.path).isEmpty {
                 doc.Directories[relative] = stage
             }
         }
@@ -221,6 +225,7 @@ final class GeneratedOutputManifest {
         path.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
     }
     static func classify(_ path: String) -> OutputStage? {
+        if match(path, #"^\.pinna2hrtf-(inference|postprocessing)-receipt\.json$"#) { return path.contains("inference") ? .inference : .postprocessing }
         if match(path, #"^HRTF/Upsampled/HRIR_[^/]+/(hrtf_Nd=[0-5](_dense)?\.sofa|upsampling_report\.(txt|mat)|upsampling\.json)$"#) { return .postprocessing }
         if match(path, #"^HRTF/\.pinna2hrtf-upsampling-[a-z0-9_]{8}/(plan\.json|Upsampled/HRIR_[^/]+/(hrtf_Nd=[0-5](_dense)?\.sofa|upsampling_report\.(txt|mat)|upsampling\.json))$"#) { return .postprocessing }
         if match(path, #"^Manual PPM/((Left|Right)\.(stl|json|blend[0-9]*)|PPM\.blend[0-9]*|Templates/[0-9a-f-]{36}-PPM\.blend[0-9]*)$"#) { return .preprocessing }
@@ -260,10 +265,16 @@ final class GeneratedOutputManifest {
         case .postprocessing: return match(path, #"^HRTF(/.*)?$"#) || match(path, #"^Projects/(Left|Right)/Output2HRTF(/.*)?$"#)
         }
     }
+    private func normalizedOutput(_ path: String) -> String {
+        guard let outputPrefix, path == outputPrefix || path.hasPrefix(outputPrefix + "/") else { return path }
+        return "HRTF" + String(path.dropFirst(outputPrefix.count))
+    }
+    private func classifyOutput(_ path: String) -> OutputStage? { Self.classify(normalizedOutput(path)) }
+    private func classifyDirectory(_ path: String) -> OutputStage? { Self.classifyEmptyDirectory(normalizedOutput(path)) }
     private func safePath(_ relative: String, protectingInputs: Bool = true) -> URL? {
         let parts = relative.split(separator: "/", omittingEmptySubsequences: false)
         guard !relative.contains(":"), !relative.contains("\\"), !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." || $0.hasSuffix(" ") || $0.hasSuffix(".") }),
-            Self.match(relative, #"^(Prepared|Intermediates|Projects|HRTF|Manual PPM|MeshEdits)(/|$)|^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)(/|$)|^Results Inference\.csv$|^\.pinna2hrtf(-preprocessing-signature|_native_run\.yaml)$"#) else { return nil }
+            (outputPrefix?.hasPrefix(relative + "/") == true || Self.match(normalizedOutput(relative), #"^(Prepared|Intermediates|Projects|HRTF|Manual PPM|MeshEdits)(/|$)|^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)(/|$)|^Results Inference\.csv$|^\.pinna2hrtf(-preprocessing-signature|_native_run\.yaml|-(inference|postprocessing)-receipt\.json)$"#)) else { return nil }
         let url = root.appendingPathComponent(relative)
         let candidate = Self.canonicalPath(url.path).lowercased()
         guard url.path.hasPrefix(root.path + "/"),
@@ -326,6 +337,17 @@ final class GeneratedOutputManifest {
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { close(fd); throw Failure.busy }
         return fd
     }
+    static func rebaseOwnership(in root: URL, unchanged: Set<String>) throws {
+        let store = try GeneratedOutputManifest(projectRoot: root.path, inputs: [])
+        guard FileManager.default.fileExists(atPath: store.manifest.path) else { return }
+        var doc = try store.load()
+        for (path, old) in doc.Files where unchanged.contains(path) && ["json", "yaml", "yml"].contains(URL(fileURLWithPath: path).pathExtension) {
+            guard let url = store.safePath(path), FileManager.default.fileExists(atPath: url.path) else { continue }
+            var entry = try store.fingerprint(url); entry.Stage = old.Stage; doc.Files[path] = entry
+        }
+        try store.save(doc)
+    }
+
     private func load() throws -> Document {
         guard !hasLinkedAncestor(manifest) else { throw Failure.unsafePath }
         guard fm.fileExists(atPath: manifest.path) else { return Document() }

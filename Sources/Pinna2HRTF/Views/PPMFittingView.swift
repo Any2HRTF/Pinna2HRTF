@@ -16,6 +16,7 @@ struct PPMFittingView: View {
     }
 
     private func closeEditor() {
+        model.cancel()
         dismiss()
     }
 
@@ -244,7 +245,7 @@ struct PPMFittingView: View {
             Spacer()
             Button("Cancel") { closeEditor() }
                 .keyboardShortcut(.cancelAction)
-                .disabled(model.busy || model.isUpdatingPreview)
+                .disabled(model.isSaving)
             Button("Save Manual Fit") {
                 Task {
                     if await model.save() {

@@ -81,6 +81,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     private var selectedCameraCenter = SCNVector3Zero
     private var selectedCameraScale: Double = 1
     private var meshLoadID = UUID()
+    private var microphonePlacementSession = UUID()
     private var microphonePlacementMeshURL: URL?
     private var automaticMicrophonePositionsByMesh: [String: ManualMicrophonePosition] = [:]
     @Published private var automaticMicrophoneProcesses: [String: Process] = [:]
@@ -211,6 +212,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             && !outputOperations.contains(id)
             && !stoppingProjects.contains(id)
             && meshEditorRequest?.projectID != id
+            && ppmFittingRequest?.projectID != id
             && !projectsBeingRemoved.contains(id)
     }
     var canRemoveSelectedProject: Bool { selectedProjectID.map(canRemoveProject) ?? false }
@@ -335,22 +337,26 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             appendLog("This project is already in the sidebar.")
             return
         }
-        var project = Defaults.newProject(packageRoot: packageURL, index: projects.count + 1)
+        let index = projects.count + 1
+        let root = packageURL
+        Task { @MainActor in
+          do {
+            let project = try await Task.detached(priority: .userInitiated) { () throws -> ProjectRecord in
+        var project = Defaults.newProject(packageRoot: root, index: index)
         project.name = folder.lastPathComponent
-        project.leftEar = importedMesh(in: folder, side: "Left")
-        project.rightEar = importedMesh(in: folder, side: "Right")
+        project.leftEar = self.importedMesh(in: folder, side: "Left")
+        project.rightEar = self.importedMesh(in: folder, side: "Right")
         project.saveLocation = folder.path
         project.inputHandling = .reference
         let configURL = ["Project Settings.yaml", ".pinna2hrtf_native_run.yaml", "pipeline.yaml"]
             .map { folder.appendingPathComponent($0) }.first { FileManager.default.fileExists(atPath: $0.path) }
         if let configURL {
             do {
-                try readDistanceSettings(configURL, into: &project.settings.preprocessing)
+                // ProjectConfigDocument restores legacy geometry fields.
                 let document = try ProjectConfigDocument.parse(String(contentsOf: configURL, encoding: .utf8))
-                project = try ProjectConfigDocument.restore(document, into: project, folder: folder, packageRoot: packageURL)
+                project = try ProjectConfigDocument.restore(document, into: project, folder: folder, packageRoot: root)
             } catch {
-                persistenceMessage = "Project import failed. Its files were kept unchanged. \(error.localizedDescription)"
-                return
+                throw error
             }
         }
         let entries = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
@@ -362,14 +368,17 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             try? FileManager.default.moveItem(at: migrationPath, to: folder.appendingPathComponent("Intermediates"))
         }
 
+                return project
+            }.value
+
         projects.append(project)
         selectedProjectID = project.id
         failedStagesByProject[project.id] = []
         persist()
         refreshArtifacts()
-        let completed = ArtifactScanner.stageStates(for: project, runningStage: nil, failedStages: []).filter { $0.value == .done }.map { $0.key.title }
-        let completedText = completed.isEmpty ? "none detected" : completed.joined(separator: ", ")
-        appendLog("Imported. Completed: \(completedText).")
+        appendLog("Imported. Checking project files…")
+          } catch { persistenceMessage = "Project import failed. Files were kept unchanged. \(error.localizedDescription)" }
+        }
     }
 
     func importedMesh(in folder: URL, side: String) -> String {
@@ -494,9 +503,6 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         guard !selectedProjectIsRunning else { return }
         update(&projects[index])
         persist()
-        if refresh {
-            refreshArtifacts()
-        }
     }
 
     func setBezierPPM(_ enabled: Bool) {
@@ -570,7 +576,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let initialViewerLoadID = meshLoadID
         let currentEnvironment = environment
         let currentProjects = projects
-        let placingMicrophone = isPlacingMicrophone
+        let placingMicrophone = false
         isCheckingProjectFiles = true
         let workItem = DispatchWorkItem { [weak self] in
             guard !progress.isCancelled else { return }
@@ -799,11 +805,12 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let darkMode = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let projectID = selectedProjectID
         let savedCamera = resetCamera ? nil : projectID.flatMap { viewerStateByProject[$0]?.cameraByArtifact[url.path] }
-        let microphone = microphonePosition(for: url)
+        let microphonePreview = selectedProject.map { MicrophonePreview(project: $0, microphonePlacementMeshURL: microphonePlacementMeshURL, pendingMicrophonePosition: pendingMicrophonePosition, automaticMicrophonePositionsByMesh: automaticMicrophonePositionsByMesh) }
         let loadID = UUID()
         meshLoadID = loadID
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
+            let microphone = microphonePreview?.microphonePosition(for: url)
             let asset = MDLAsset(url: url)
             guard asset.count > 0 else {
                 DispatchQueue.main.async { [weak self] in
@@ -832,7 +839,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             let distance = max(maximumDimension * 1.7, 1)
             let targetNode = SCNNode()
             targetNode.name = "cameraTarget"
-            targetNode.position = center
+            targetNode.position = savedCamera?.target.flatMap { $0.count == 3 ? SCNVector3($0[0], $0[1], $0[2]) : nil } ?? center
             scene.rootNode.addChildNode(targetNode)
             let camera = SCNCamera()
             camera.zFar = 10_000
@@ -853,6 +860,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             cameraConstraint.isGimbalLockEnabled = true
             cameraConstraint.worldUp = SCNVector3(0, 0, 1)
             cameraNode.constraints = [cameraConstraint]
+            if let q = savedCamera?.orientation, q.count == 4 {
+                cameraNode.constraints = nil
+                cameraNode.orientation = SCNQuaternion(q[0], q[1], q[2], q[3])
+            }
             scene.rootNode.addChildNode(cameraNode)
             let light = SCNLight()
             light.type = .directional
@@ -969,7 +980,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func beginMicrophonePlacement(_ side: EarSide) {
-        guard let project = selectedProject else { return }
+        guard let project = selectedProject, !selectedProjectIsRunning else { return }
+        microphonePlacementSession = UUID()
         let sourcePath = side == .left ? project.pipelineLeftEar : project.pipelineRightEar
         guard !sourcePath.isEmpty else {
             microphonePlacementError = "Select a \(side.rawValue) ear mesh before placing its microphone."
@@ -1003,6 +1015,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             microphonePlacementError = "Click the mesh surface to choose a valid microphone position."
             return
         }
+        guard let project = selectedProject, !selectedProjectIsRunning,
+              ArtifactScanner.preprocessingMesh(for: project, side: side)?.standardizedFileURL == meshURL.standardizedFileURL else { return }
+        clearMicrophonePlacementSession()
         updateSelectedProject(refresh: false) { project in
             if side == .left {
                 project.settings.preprocessing.sourcePositionInputLeft = placement
@@ -1026,6 +1041,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     func useAutomaticMicrophonePosition(_ side: EarSide) {
         guard let project = selectedProject else { return }
         let meshURL = ArtifactScanner.preprocessingMesh(for: project, side: side)
+        guard !selectedProjectIsRunning, !isCalculatingAutomaticMicrophone else { return }
+        let session = microphonePlacementSession
         let keepingPlacement = microphonePlacementSide == side
         if keepingPlacement {
             pendingMicrophonePosition = nil
@@ -1049,7 +1066,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
         appendLog(keepingPlacement ? "Calculating \(side.rawValue) mic. Press Done to save." : "Calculating \(side.rawValue) mic.")
         calculateAutomaticMicrophonePosition(for: meshURL, side: side) { [weak self] position in
-            guard let self else { return }
+            guard let self, self.selectedProjectID == project.id, self.microphonePlacementSession == session,
+                  !keepingPlacement || self.microphonePlacementSide == side else { return }
             if let position {
                 self.automaticMicrophonePositionsByMesh[position.meshIdentity] = position
                 if keepingPlacement {
@@ -1110,6 +1128,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func clearMicrophonePlacementSession() {
+        microphonePlacementSession = UUID()
         microphonePlacementSide = nil
         pendingMicrophonePosition = nil
         microphonePlacementMeshURL = nil
@@ -1161,9 +1180,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         rememberSelectedArtifact(url)
     }
 
-    func updateCameraPosition(_ position: SCNVector3) {
+    func updateCameraPosition(_ position: SCNVector3, target: SCNVector3, orientation: SCNQuaternion) {
         guard let projectID = selectedProjectID, let selectedMesh, selectedMesh.isFileURL, ["stl", "ply"].contains(selectedMesh.pathExtension.lowercased()), selectedCameraScale > 0 else { return }
-        let state = ViewerCameraState(x: (Double(position.x) - Double(selectedCameraCenter.x)) / selectedCameraScale, y: (Double(position.y) - Double(selectedCameraCenter.y)) / selectedCameraScale, z: (Double(position.z) - Double(selectedCameraCenter.z)) / selectedCameraScale)
+        let state = ViewerCameraState(target: [Double(target.x), Double(target.y), Double(target.z)], orientation: [Double(orientation.x), Double(orientation.y), Double(orientation.z), Double(orientation.w)], x: (Double(position.x) - Double(selectedCameraCenter.x)) / selectedCameraScale, y: (Double(position.y) - Double(selectedCameraCenter.y)) / selectedCameraScale, z: (Double(position.z) - Double(selectedCameraCenter.z)) / selectedCameraScale)
         guard state != selectedCameraState else { return }
         selectedCameraState = state
         viewerStateByProject[projectID, default: ProjectViewerState(selectedArtifactPath: selectedMesh.path)].cameraByArtifact[selectedMesh.path] = state
@@ -1176,9 +1195,14 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         saveViewerStates()
     }
 
+    private var viewerSaveWork: DispatchWorkItem?
     private func saveViewerStates() {
+        viewerSaveWork?.cancel()
         guard let data = try? JSONEncoder.pretty.encode(viewerStateByProject) else { return }
-        try? data.write(to: Defaults.appDataURL.appendingPathComponent("viewer-state.json"), options: .atomic)
+        let destination = Defaults.appDataURL.appendingPathComponent("viewer-state.json")
+        let work = DispatchWorkItem { try? data.write(to: destination, options: .atomic) }
+        viewerSaveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 
     private static func loadViewerStates() -> [UUID: ProjectViewerState] {
@@ -1197,8 +1221,8 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     var nextStage: Stage? {
         guard let project = selectedProject else { return nil }
-        return Stage.allCases.filter { $0 != .scanPreparation || project.scanPreparation.enabled }.first {
-            [.failed, .stopped].contains(project.stageOutcomes?[$0.rawValue] ?? .ready) || !(selectedProjectStatus?.completed.contains($0) ?? false)
+        return Stage.allCases.filter { ($0 != .scanPreparation || project.scanPreparation.enabled) && ($0 != .inference || project.settings.inference.usePredictionsForPreprocessing) }.first {
+            ($0 == .preprocessing && preprocessingNeedsRerun(for: project)) || [.failed, .stopped].contains(project.stageOutcomes?[$0.rawValue] ?? .ready) || !(selectedProjectStatus?.completed.contains($0) ?? false)
         }
     }
 
@@ -1272,7 +1296,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             appendLog("Wait for dependency setup to finish.")
             return
         }
-        if stage == .numcalc, preprocessingNeedsRerun(for: project) {
+        if [.numcalc, .postprocessing].contains(stage), preprocessingNeedsRerun(for: project) {
             guard confirmRerunPreprocessing(for: project) else { return }
             run(stage: .preprocessing)
             return
@@ -1298,17 +1322,25 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func prepareAndRun(stage: Stage, project: ProjectRecord) {
-        do {
-            // Reject shared output locations before copying inputs or replacing settings.
-            _ = try outputsFor(project)
-            try ProjectValidation.validate(project)
-            try prepareRuntimeProject()
-            let configURL = try PipelineConfigWriter.prepare(project: project, environment: environment)
-            startProcess(stage: stage, project: project, configURL: configURL)
-        } catch {
-            setStageOutcome(stage, for: project.id, to: .failed)
-            refreshArtifacts()
-            appendLog("Could not prepare project: \(error.localizedDescription)")
+        guard !outputOperations.contains(project.id), runningProcesses[project.id] == nil else { return }
+        outputOperations.insert(project.id)
+        let env = environment
+        Task { @MainActor in
+            do {
+                _ = try outputsFor(project)
+                try prepareRuntimeProject()
+                let configURL = try await Task.detached(priority: .userInitiated) {
+                    try PipelineConfigWriter.prepare(project: project, environment: env, stage: stage)
+                }.value
+                outputOperations.remove(project.id)
+                guard projects.contains(where: { $0.id == project.id }) else { return }
+                startProcess(stage: stage, project: project, configURL: configURL)
+            } catch {
+                outputOperations.remove(project.id)
+                setStageOutcome(stage, for: project.id, to: .failed)
+                refreshArtifacts()
+                appendLog("Could not prepare project: \(error.localizedDescription)", for: project.id)
+            }
         }
     }
 
@@ -1345,9 +1377,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             }
         }
         let inputs = projects.flatMap { $0.protectedOutputInputs(resettingProjectID: resettingOutputs ? project.id : nil) }.sorted()
-        let key = project.saveLocation + "\n" + inputs.joined(separator: "\n")
+        let key = project.saveLocation + "\n" + (project.settings.postprocessing?.outputFolder ?? "") + "\n" + inputs.joined(separator: "\n")
         if let existing = outputStores[key] { return existing }
-        let outputs = try GeneratedOutputManifest(projectRoot: project.saveLocation, inputs: inputs)
+        let outputs = try GeneratedOutputManifest(projectRoot: project.saveLocation, inputs: inputs, outputFolder: project.settings.postprocessing?.outputFolder)
         outputStores[key] = outputs
         return outputs
     }
@@ -1426,6 +1458,9 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 if process.terminationStatus == 0 && !stopped {
                     do {
                         try await Task.detached(priority: .userInitiated) { try OutputValidation.validate(stage: stage, project: project) }.value
+                        if [.inference, .postprocessing].contains(stage) {
+                            try await Task.detached { try StageReceipt.record(stage, project) }.value
+                        }
                         outcome = .done
                     } catch { validationError = error.localizedDescription }
                 }
@@ -1717,7 +1752,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
     }
 
     func stopAllRunningProcesses(completion: @escaping () -> Void) {
-        let processes = Array(runningProcesses.values) + (environmentProcess.map { [$0] } ?? [])
+        let processes = Array(runningProcesses.values) + Array(automaticMicrophoneProcesses.values) + (environmentProcess.map { [$0] } ?? [])
         for (id, stage) in runningStages {
             stoppingProjects.insert(id)
             setStageOutcome(stage, for: id, to: .stopped)

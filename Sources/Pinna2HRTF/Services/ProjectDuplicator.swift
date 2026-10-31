@@ -89,9 +89,15 @@ enum ProjectDuplicator {
         duplicate.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         duplicate.saveLocation = destination.path
         duplicate.stageOutcomes = nil
-        duplicate.settings.preprocessing.sourcePositionInputLeft = nil
-        duplicate.settings.preprocessing.sourcePositionInputRight = nil
 
+        var unchangedOwned = Set<String>()
+        let manifestURL = staging.appendingPathComponent(".pinna2hrtf/generated-output-manifest.json")
+        if let data = try? Data(contentsOf: manifestURL), let doc = try? JSONDecoder().decode(GeneratedOutputManifest.Document.self, from: data) {
+            for (path, entry) in doc.Files {
+                let digest = PreprocessingSignature.fileFingerprint(staging.appendingPathComponent(path).path)
+                if digest.lowercased() == "sha256:" + entry.Sha256.lowercased() { unchangedOwned.insert(path) }
+            }
+        }
         // Rebase structured metadata, including wrapped YAML paths, fitting templates,
         // prepared-ear provenance and output ownership. Never edit geometry or logs.
         var metadata: [URL] = []
@@ -122,14 +128,13 @@ enum ProjectDuplicator {
                     if url.lastPathComponent == "Project Settings.yaml" || url.lastPathComponent == "pipeline.yaml" || url.lastPathComponent == ".pinna2hrtf_native_run.yaml" {
                         var pre = object["preprocessing"] as? [String: Any] ?? [:]
                         pre["title"] = duplicate.name
-                        pre.removeValue(forKey: "source_position_input_left")
-                        pre.removeValue(forKey: "source_position_input_right")
                         object["preprocessing"] = pre
                     }
                     try ProjectConfigDocument.encode(object).write(to: url, atomically: true, encoding: .utf8)
                 }
             }
         }
+        try GeneratedOutputManifest.rebaseOwnership(in: staging, unchanged: unchangedOwned)
         // moveItem refuses an existing destination, including a folder created
         // during the copy. An unsuccessful copy never appears in the project list.
         try fm.moveItem(at: staging, to: destination)

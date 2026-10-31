@@ -207,7 +207,7 @@ enum ArtifactScanner {
         return sides.isEmpty ? "NumCalc: no ear selected" : "NumCalc: " + sides.joined(separator: " · ")
     }
 
-    static func stageIsComplete(_ stage: Stage, project: ProjectRecord, inspection: Inspection = Inspection()) -> Bool {
+    static func stageIsComplete(_ stage: Stage, project: ProjectRecord, inspection: Inspection = Inspection(), validateReceipt: Bool = true) -> Bool {
         let output = URL(fileURLWithPath: project.saveLocation, isDirectory: true)
         let settings = project.settings.inference
         if stage == .inference && !settings.usePredictionsForPreprocessing { return true }
@@ -221,9 +221,10 @@ enum ArtifactScanner {
         case .scanPreparation:
             return !project.scanPreparation.enabled || scanPreparationIsCurrent(project, inspection: inspection)
         case .inference:
+            if validateReceipt && !StageReceipt.current(stage, project) { return false }
             return !sides.isEmpty && sides.allSatisfy { side in
-                let folder = side == .left ? settings.predictionLeftFolder : settings.predictionRightFolder
-                return containsMesh(output.appendingPathComponent(folder), inspection: inspection)
+                guard let prediction = preprocessingMesh(for: project, side: side, inspection: inspection) else { return false }
+                return fileHasData(prediction, inspection: inspection)
             }
         case .preprocessing:
             return !sides.isEmpty && sides.allSatisfy { side in
@@ -240,6 +241,7 @@ enum ArtifactScanner {
                     || numcalcIsComplete(folder, inspection: inspection)
             }
         case .postprocessing:
+            if validateReceipt && !StageReceipt.current(stage, project) { return false }
             let folder = postprocessingDirectory(for: project)
             return containsSOFA(folder, inspection: inspection) && spatialUpsamplingIsCurrent(project, inspection: inspection)
         }
@@ -601,6 +603,7 @@ enum PreprocessingSignature {
             ? Defaults.pipelineRoot.appendingPathComponent("HRTFCalculation/Preprocessing/Resources/ARIGrid").path : value
     }
 
+    static func fileFingerprint(_ path: String) -> String { fingerprint(path, inspection: .init()) }
     private static func fingerprint(_ path: String, inspection: ArtifactScanner.Inspection) -> String {
         if path.isEmpty { return "" }
         let url = URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath()

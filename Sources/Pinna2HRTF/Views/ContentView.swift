@@ -40,7 +40,7 @@ struct ContentView: View {
                     }
                     .labelStyle(.titleAndIcon)
                     .help("Place \(side.title) Microphone")
-                    .disabled(store.isPlacingMicrophone || !(store.selectedProjectStatus?.pipelineSides.contains(side) ?? false))
+                    .disabled(store.selectedProjectIsRunning || store.isPlacingMicrophone || !(store.selectedProjectStatus?.pipelineSides.contains(side) ?? false))
                 }
                 } label: { Label("Microphone", systemImage: "scope") }
                 .accessibilityLabel("Microphone")
@@ -151,7 +151,7 @@ struct ContentView: View {
         let selectedProjectIsRunning = selectedProject.map { store.runningProcesses[$0.id] != nil } ?? false
         return PipelineCommandContext(
             canRemoveProject: store.canRemoveSelectedProject,
-            canDuplicateProject: selectedProject != nil,
+            canDuplicateProject: selectedProject != nil && !store.selectedProjectIsRunning,
             canRunProject: store.canRunNextStage(),
             canRunStage: { stage in store.canRun(stage: stage) },
             canStopProject: selectedProjectIsRunning,
@@ -160,7 +160,7 @@ struct ContentView: View {
             selectedArtifactURL: store.selectedMesh,
             canPreview: selectedProject != nil && !store.isPlacingMicrophone,
             canPlaceMicrophone: { side in
-                !store.isPlacingMicrophone && (store.selectedProjectStatus?.pipelineSides.contains(side) ?? false)
+                !store.selectedProjectIsRunning && !store.isPlacingMicrophone && (store.selectedProjectStatus?.pipelineSides.contains(side) ?? false)
             },
             isLogExpanded: logExpanded,
             isInspectorPresented: inspectorPresented,

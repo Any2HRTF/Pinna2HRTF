@@ -61,6 +61,7 @@ class ScanPreparationConfig(BaseModel):
 
     enabled: bool = False
     scan_path: Path | None = None
+    original_scan_path: Path | None = None
     rotation_degrees: float | None = None
     require_manual_review: bool = False
     reviewed_left: Path | None = None

@@ -47,7 +47,18 @@ final class Pinna2HRTFAppDelegate: NSObject, NSApplicationDelegate {
     var store: AppStore?
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let store, !store.runningProcesses.isEmpty || store.environmentProcess != nil else { return .terminateNow }
+        guard let store else { return .terminateNow }
+        if !store.outputOperations.isEmpty || store.geometryEditing || store.projectDuplicationRequest != nil {
+            let alert = NSAlert(); alert.messageText = "Project files are being updated"
+            alert.informativeText = "Wait for the operation to finish before quitting."; alert.addButton(withTitle: "OK"); alert.runModal()
+            return .terminateCancel
+        }
+        if store.meshEditorRequest != nil || store.ppmFittingRequest != nil {
+            let alert = NSAlert(); alert.messageText = "Close the editor before quitting"
+            alert.informativeText = "Save your changes or cancel editing, then quit."; alert.addButton(withTitle: "OK"); alert.runModal()
+            return .terminateCancel
+        }
+        guard !store.runningProcesses.isEmpty || store.environmentProcess != nil || store.isCalculatingAutomaticMicrophone else { return .terminateNow }
         let alert = NSAlert()
         alert.messageText = "A pipeline task is still running"
         alert.informativeText = "Quitting will stop the task and may leave incomplete outputs. Do you want to quit anyway?"
