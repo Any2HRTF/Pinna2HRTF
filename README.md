@@ -6,6 +6,17 @@ Calculate individualized HRTFs and HRIRs from pinna meshes and export them as SO
 
 ## Citation
 
-Perfler, F., Thalhammer, L., & Majdak, P. (2026). [Pinna2HRTF: A Pipeline for Automatic Calculation of Head-Related Transfer Functions from Pinna Meshes](https://dael.euracoustics.org/confs/fa2026/data/articles/000324.pdf). Forum Acusticum 2026, Graz, Austria.
+If you find our work valuable, please cite:
+
+```bibtex
+@inproceedings{PerflerPinna2HRTF2026,
+  title={{Pinna2HRTF}: A Pipeline for Automatic Calculation of Head-Related Transfer Functions from Pinna Meshes},
+  author={Perfler, Felix and Thalhammer, Lukas and Majdak, Piotr},
+  booktitle={Proceedings of Forum Acusticum 2026},
+  year={2026},
+  address={Graz, Austria},
+  url={https://dael.euracoustics.org/confs/fa2026/data/articles/000324.pdf}
+}
+```
 
 [European Union Public Licence 1.2](LICENSE). Bundled dependencies retain their own licences.
