@@ -28,6 +28,7 @@ struct MeshEditorView: View {
             }
         } viewport: {
             EditorSceneView(model: model)
+                .overlay(alignment: .bottomTrailing) { NavigationHelpButton().padding(12) }
                 .overlay(alignment: .topTrailing) {
                     EditorCameraControls(fit: model.resetCamera, direction: model.setCameraView)
                         .padding(12)
@@ -128,8 +129,6 @@ struct MeshEditorView: View {
     var selectionControls: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Draw around faces to select them, or click a face to toggle it. Selected faces are red.")
-                .font(.caption).foregroundStyle(.secondary)
-            Text(NavigableSCNView.navigationHelp)
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Select through mesh", isOn: $model.throughSelection)
                 .help("Include hidden and back-facing faces. Turn off to select only visible front faces.")

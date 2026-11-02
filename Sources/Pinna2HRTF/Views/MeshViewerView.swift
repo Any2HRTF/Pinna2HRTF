@@ -75,6 +75,11 @@ struct MeshViewerView: View {
             }
         }
         .frame(maxHeight: .infinity)
+        .overlay(alignment: .bottomTrailing) {
+            if store.selectedMesh != nil && store.selectedImage == nil && store.selectedPressure == nil {
+                NavigationHelpButton().padding(16)
+            }
+        }
         .overlay(alignment: .topTrailing) {
             VStack(alignment: .trailing, spacing: 8) {
                 if let project = store.selectedProject,

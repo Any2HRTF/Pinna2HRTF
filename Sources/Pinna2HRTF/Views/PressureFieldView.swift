@@ -38,6 +38,7 @@ struct PressureFieldView: View {
                 }
             }
         }
+        .overlay(alignment: .bottomTrailing) { NavigationHelpButton().padding(12) }
         .task { await model.open() }
         .task(id: model.selection) { await model.load() }
         .onChange(of: model.quantity) { _ in model.changeQuantity() }

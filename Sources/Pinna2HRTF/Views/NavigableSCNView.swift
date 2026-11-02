@@ -26,7 +26,6 @@ class NavigableSCNView: SCNView {
         controller.interactionMode = .orbitTurntable
         navigationSpan = span ?? max(Double(simd_distance(camera.simdWorldPosition,
             SIMD3(Float(target.x), Float(target.y), Float(target.z)))) / 1.4, 0.001)
-        toolTip = Self.navigationHelp
     }
 
     func navigationWillBegin() {}

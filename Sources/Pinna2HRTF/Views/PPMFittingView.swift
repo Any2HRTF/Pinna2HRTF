@@ -29,6 +29,7 @@ struct PPMFittingView: View {
                 .accessibilityLabel("Target ear and fitted PPM 3D preview")
                 .accessibilityAddTraits(.isImage)
                 .overlay(alignment: .bottomLeading) { legend }
+                .overlay(alignment: .bottomTrailing) { NavigationHelpButton().padding(12) }
                 .overlay(alignment: .topTrailing) {
                     EditorCameraControls(fit: model.resetCamera, direction: model.setCameraView).padding(12)
                 }

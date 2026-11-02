@@ -71,3 +71,25 @@ struct EditorCameraControls: View {
         .modifier(ViewportControlsMaterial())
     }
 }
+
+struct NavigationHelpButton: View {
+    @State private var showing = false
+
+    var body: some View {
+        Button { showing.toggle() } label: {
+            Label("Navigation", systemImage: "questionmark.circle")
+        }
+        .modifier(ViewerGlassButtonStyle())
+        .popover(isPresented: $showing) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Navigation").font(.headline)
+                Text("Trackpad: Two-finger scroll to rotate, pinch to zoom, Shift-scroll to pan.")
+                Text("Mouse: Right-drag to rotate, Shift-right-drag or middle-drag to pan, wheel to zoom.")
+                Text("Command-scroll also zooms.")
+            }
+            .font(.callout)
+            .frame(width: 290, alignment: .leading)
+            .padding(16)
+        }
+    }
+}
