@@ -74,7 +74,7 @@ class NavigableSCNView: SCNView {
             if event.modifierFlags.contains(.shift) {
                 panCamera(x: Float(event.scrollingDeltaX), y: Float(event.scrollingDeltaY))
             } else {
-                orbitCamera(x: Float(event.scrollingDeltaX) * 0.5, y: Float(event.scrollingDeltaY) * 0.5)
+                orbitCamera(x: -Float(event.scrollingDeltaX) * 0.5, y: -Float(event.scrollingDeltaY) * 0.5)
             }
             needsDisplay = true
         } else {
