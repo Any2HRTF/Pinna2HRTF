@@ -21,7 +21,7 @@ struct RunPanelView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 if store.preprocessingNeedsRerun(for: project) {
-                    Text("Settings changed · rerun preprocessing before NumCalc")
+                    Text("Inputs or settings changed · rerun preprocessing")
                         .font(.caption)
                         .foregroundStyle(.orange)
                         .lineLimit(2)
@@ -45,13 +45,13 @@ struct RunPanelView: View {
                 .tint(.red)
                 .disabled(store.selectedProject.map { store.runningProcesses[$0.id] == nil } ?? true)
                 } else {
-                    Button(store.isCheckingProjectFiles ? "Checking project files…" : store.nextStage.map { "Run \($0.title)" } ?? "Complete", systemImage: "play.fill") { store.runNextStage() }
+                    Button(store.isCheckingProjectFiles ? "Checking project files…" : store.nextStage.map { "Run \($0.title)" } ?? "All steps complete", systemImage: "play.fill") { store.runNextStage() }
                         .buttonStyle(.borderedProminent)
                         .disabled(!store.canRunNextStage())
                 }
                 Spacer()
                 Menu {
-                Button("Reset Outputs…", role: .destructive) {
+                Button("Reset outputs…", role: .destructive) {
                     store.confirmResetSelectedProjectOutputs()
                 }
                 .disabled(store.selectedProjectIsRunning)
@@ -77,9 +77,10 @@ struct RunPanelView: View {
     var summary: String {
         if store.isCheckingProjectFiles { return "Checking files" }
         if store.selectedProjectIsManagingOutputs { return "Updating outputs" }
-        if store.selectedProjectIsRunning { return "Running" }
-        if let stage = store.nextStage { return store.canRun(stage: stage) ? "Ready" : "Action Required" }
-        if store.selectedProject != nil { return "Complete" }
+        if let id = store.selectedProjectID, store.runningProcesses[id] != nil { return "Running" }
+        if store.selectedProjectIsRunning { return "Updating project" }
+        if let stage = store.nextStage { return store.canRun(stage: stage) ? "Ready" : "Action needed" }
+        if store.selectedProject != nil { return "All steps complete" }
         return "No project"
     }
 }
@@ -105,7 +106,8 @@ struct StageRunButton: View {
                     Text(stateLabel)
                         .font(.caption)
                         .foregroundStyle(stateColor)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
             }
@@ -132,8 +134,8 @@ struct StageRunButton: View {
     var stateLabel: String {
         if [.failed, .stopped].contains(state) && previousResults { return "\(state.rawValue.capitalized) · previous results available" }
         if state == .done { return "Complete" }
-        if state == .skipped { return "Not Used" }
-        if state == .ready { return available ? "Ready to Run" : "Waiting for Prerequisites" }
+        if state == .skipped { return "Not used" }
+        if state == .ready { return available ? "Ready to run" : (unavailableReason ?? "Check requirements") }
         return state.rawValue.capitalized
     }
 }

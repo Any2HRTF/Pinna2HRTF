@@ -334,7 +334,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }) {
             selectedProjectID = existing.id
             revealSelectedProject()
-            appendLog("This project is already in the sidebar.")
+            appendLog("This project is already in the list.")
             return
         }
         let index = projects.count + 1
@@ -417,7 +417,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
         let alert = NSAlert()
         alert.messageText = "Move \(project.name) to Trash?"
-        alert.informativeText = "This removes the project from Pinna2HRTF and moves its project folder and contents to Trash. You can restore the folder from Trash."
+        alert.informativeText = "The project folder and its contents will move to Trash, and the project will be removed from the list."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Move to Trash")
         alert.addButton(withTitle: "Cancel")
@@ -1000,7 +1000,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func completeMicrophonePlacement() {
         guard let side = microphonePlacementSide, let placement = pendingMicrophonePosition, let meshURL = microphonePlacementMeshURL, placement.meshPath == meshURL.standardizedFileURL.path, placement.meshIdentity == ArtifactScanner.meshIdentity(meshURL) else {
-            microphonePlacementError = "Click the mesh surface to choose a valid microphone position."
+            microphonePlacementError = "Click the mesh or find an automatic position first."
             return
         }
         guard let project = selectedProject, !selectedProjectIsRunning,
@@ -1014,7 +1014,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             }
         }
         clearMicrophonePlacementSession()
-        appendLog("\(side.title) mic saved.")
+        appendLog("\(side.title) microphone saved.")
     }
 
     func cancelMicrophonePlacement() {
@@ -1049,10 +1049,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
             openMesh(meshURL)
         }
         guard let meshURL else {
-            appendLog("\(side.title) mic mesh unavailable.")
+            appendLog("\(side.title) microphone mesh unavailable.")
             return
         }
-        appendLog(keepingPlacement ? "Calculating \(side.rawValue) mic. Press Done to save." : "Calculating \(side.rawValue) mic.")
+        appendLog(keepingPlacement ? "Finding \(side.rawValue) microphone position. Select Done to save." : "Finding \(side.rawValue) microphone position.")
         calculateAutomaticMicrophonePosition(for: meshURL, side: side) { [weak self] position in
             guard let self, self.selectedProjectID == project.id, self.microphonePlacementSession == session,
                   !keepingPlacement || self.microphonePlacementSide == side else { return }
@@ -1065,9 +1065,10 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 } else if self.selectedMesh?.standardizedFileURL.path == meshURL.standardizedFileURL.path {
                     self.openMesh(meshURL)
                 }
-                self.appendLog("\(side.title) mic: [\(String(format: "%.3f", position.x)), \(String(format: "%.3f", position.y)), \(String(format: "%.3f", position.z))] mm.")
+                if keepingPlacement { self.appendLog("Position found. Select Done to save.", for: project.id) }
+                self.appendLog("\(side.title) microphone: [\(String(format: "%.3f", position.x)), \(String(format: "%.3f", position.y)), \(String(format: "%.3f", position.z))] mm.")
             } else {
-                self.appendLog("\(side.title) mic calculation failed.")
+                self.appendLog("\(side.title) microphone calculation failed.")
             }
         }
     }
@@ -1515,7 +1516,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
         if changed {
             persist()
-            appendLog("Previous mic positions cleared.", for: projectID)
+            appendLog("Previous microphone positions cleared.", for: projectID)
         }
     }
 
@@ -1776,20 +1777,20 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     func confirmRerunPreprocessing(for project: ProjectRecord) -> Bool {
         let alert = NSAlert()
-        alert.messageText = "Preprocessing must be rerun"
-        alert.informativeText = "Project settings changed after preprocessing. Run preprocessing again before NumCalc?"
+        alert.messageText = "Preprocessing is out of date"
+        alert.informativeText = "Run preprocessing again before continuing?"
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Run preprocessing")
         alert.addButton(withTitle: "Cancel")
         return alert.runModal() == .alertFirstButtonReturn
     }
 
     func confirmResetOutputs(for project: ProjectRecord) -> Bool {
         let alert = NSAlert()
-        alert.messageText = "Reset pipeline outputs?"
-        alert.informativeText = "Remove all generated outputs, including saved manual PPM fits, parameters, Blender files, archived template copies, ear edits, and scan alignments? Original input meshes, microphone positions, other settings, project logs, and modified or unrelated files will be kept."
+        alert.messageText = "Reset generated outputs?"
+        alert.informativeText = "Remove generated results, manual PPM fits and their parameters, Blender files and archived templates, ear edits, and scan alignments? Original inputs, microphone positions, settings, logs, and modified or unrelated files are kept."
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Reset Outputs")
+        alert.addButton(withTitle: "Reset outputs")
         alert.addButton(withTitle: "Cancel")
         return alert.runModal() == .alertFirstButtonReturn
     }

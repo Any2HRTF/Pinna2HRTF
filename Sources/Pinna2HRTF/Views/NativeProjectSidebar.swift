@@ -250,16 +250,16 @@ struct NativeProjectSidebar: NSViewRepresentable {
             menu.autoenablesItems = false
             switch node.kind {
             case .root:
-                add("New Project", to: menu) { self.parent.store.createProject() }
-                add("New Folder…", to: menu) { self.parent.editFolder(nil, nil) }
+                add("New project", to: menu) { self.parent.store.createProject() }
+                add("New folder…", to: menu) { self.parent.editFolder(nil, nil) }
             case let .folder(id):
                 guard let folder = parent.store.folders.first(where: { $0.id == id }) else { return nil }
-                add("Rename Folder…", to: menu) { self.parent.editFolder(folder, nil) }
+                add("Rename folder…", to: menu) { self.parent.editFolder(folder, nil) }
                 add("New Project in Folder", to: menu) {
                     self.parent.store.createProject()
                     if let projectID = self.parent.store.selectedProjectID { self.parent.store.moveProject(projectID, toFolder: id) }
                 }
-                add("Remove Folder", to: menu) {
+                add("Remove folder", to: menu) {
                     if self.parent.selectedFolderID == id { self.parent.selectedFolderID = nil }
                     self.parent.store.removeFolder(id)
                 }
@@ -272,11 +272,11 @@ struct NativeProjectSidebar: NSViewRepresentable {
                     add(folder.name, to: submenu) { self.parent.store.moveProject(id, toFolder: folder.id) }
                 }
                 submenu.addItem(.separator())
-                add("New Folder…", to: submenu) { self.parent.editFolder(nil, id) }
+                add("New folder…", to: submenu) { self.parent.editFolder(nil, id) }
                 move.submenu = submenu
                 menu.addItem(move)
-                add("Duplicate Project", to: menu) { self.parent.store.selectedProjectID = id; self.parent.store.duplicateSelectedProject() }
-                add("Remove Project", to: menu, enabled: parent.store.canRemoveProject(id)) { self.parent.store.selectedProjectID = id; self.parent.store.removeSelectedProject() }
+                add("Duplicate project", to: menu) { self.parent.store.selectedProjectID = id; self.parent.store.duplicateSelectedProject() }
+                add("Remove project", to: menu, enabled: parent.store.canRemoveProject(id)) { self.parent.store.selectedProjectID = id; self.parent.store.removeSelectedProject() }
             }
             return menu
         }

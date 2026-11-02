@@ -55,7 +55,7 @@ struct PressureFieldView: View {
         Picker("Quantity", selection: $model.quantity) {
             ForEach(PressureQuantity.allCases) { Text($0.rawValue).tag($0) }
         }
-        Button("Reset View", systemImage: "arrow.counterclockwise", action: model.resetCamera)
+        Button("Reset view", systemImage: "arrow.counterclockwise", action: model.resetCamera)
             .labelStyle(.iconOnly)
             .help("Reset pressure view")
         Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.open(); await model.load() } }

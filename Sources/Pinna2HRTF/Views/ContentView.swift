@@ -53,15 +53,15 @@ struct ContentView: View {
                 Button {
                     withAnimation { logExpanded.toggle() }
                 } label: {
-                    Label(logExpanded ? "Hide Live Log" : "Show Live Log", systemImage: "terminal")
+                    Label(logExpanded ? "Hide activity" : "Show activity", systemImage: "terminal")
                 }
-                .help(logExpanded ? "Hide Live Log" : "Show Live Log")
+                .help(logExpanded ? "Hide activity" : "Show activity")
                 Button {
                     withAnimation { inspectorPresented.toggle() }
                 } label: {
-                    Label(inspectorPresented ? "Hide Project Settings" : "Show Project Settings", systemImage: "sidebar.right")
+                    Label(inspectorPresented ? "Hide project settings" : "Show project settings", systemImage: "sidebar.right")
                 }
-                .help(inspectorPresented ? "Hide Project Settings" : "Show Project Settings")
+                .help(inspectorPresented ? "Hide project settings" : "Show project settings")
             }
         }
         .alert("Project list recovery", isPresented: $store.registryRecoveryPresented) {

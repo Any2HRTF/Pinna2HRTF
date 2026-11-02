@@ -55,8 +55,8 @@ struct MeshEditorView: View {
                     }
                     if !model.request.isAlignment {
                         Menu("Mesh Cleanup") {
-                        Button("Keep Largest Component") { Task { await model.edit("largest") } }
-                            .help("Remove disconnected fragments from this working copy. Undo is available.")
+                        Button("Keep largest component") { Task { await model.edit("largest") } }
+                            .help("Remove disconnected fragments. You can undo this.")
                         }
                     }
                     Text(model.message).font(.caption).foregroundStyle(.secondary)
@@ -68,11 +68,11 @@ struct MeshEditorView: View {
             .disabled(model.busy)
         } footer: {
             HStack {
-                Text(model.request.isAlignment ? "Preview a rigid alignment before saving." : "Cuts remain open. Saving checks the attachment boundary and ear-canal opening.")
+                Text(model.request.isAlignment ? "Preview a rigid alignment before saving." : "Cuts stay open. Saving checks the attachment boundary and ear-canal opening.")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Cancel") { closeEditor() }.keyboardShortcut(.cancelAction).disabled(model.busy)
-                Button(model.request.isAlignment ? "Save Aligned Scan" : "Save Ear") {
+                Button(model.request.isAlignment ? "Save aligned scan" : "Save ear") {
                     Task {
                         if await model.save() { saved(model.request); closeEditor() }
                     }
@@ -92,7 +92,7 @@ struct MeshEditorView: View {
             Toggle("Show coordinate system", isOn: $model.showCoordinateSystem)
             Text(model.hasAlignment ? "Aligned coordinates (mm): X forward · Y left · Z up. Origin: midpoint between the ear canals." : "Showing the scan’s current axes and origin. Preview Alignment sets X forward, Y left, Z up, with the ear midpoint at the origin.")
                 .font(.caption).foregroundStyle(.secondary)
-            Text(model.landmarks.count == 3 ? "All landmarks placed. Preview the alignment, or select a row to replace a point." : "\(model.landmarks.count + 1) of 3 — Select \(["the nose tip", "the left ear-canal entrance", "the right ear-canal entrance"][min(model.landmarkSlot, 2)]).")
+            Text(model.landmarks.count == 3 ? "All points placed. Preview the alignment or select a point to replace it." : "\(model.landmarks.count + 1) of 3 — Select \(["the nose tip", "the left ear-canal entrance", "the right ear-canal entrance"][min(model.landmarkSlot, 2)]).")
                 .font(.caption).foregroundStyle(.secondary)
             ForEach(Array(["Nose tip", "Left ear-canal entrance", "Right ear-canal entrance"].enumerated()), id: \.offset) { index, name in
                 Button {
@@ -111,13 +111,13 @@ struct MeshEditorView: View {
                 .disabled(index > model.landmarks.count)
             }
             DisclosureGroup("Alignment Details") {
-            Text("Pick the tip of the nose and the center of each ear-canal entrance. Their plane becomes horizontal, with the ear midpoint at the origin, X toward the nose, Y left, and Z up. Left and right refer to the person being scanned.")
+            Text("Select the nose tip, left ear-canal entrance, then right ear-canal entrance. The ear midpoint becomes the origin: X forward, Y left, Z up. Left and right are the listener’s.")
                 .font(.caption).foregroundStyle(.secondary)
             }
             if model.landmarks.count != 3 {
                 Text("Place all three landmarks to preview.").font(.caption).foregroundStyle(.secondary)
             }
-            Button("Preview Alignment") {
+            Button("Preview alignment") {
                 let points = model.landmarks.map { [Double($0.x), Double($0.y), Double($0.z)] }
                 Task { await model.edit("align", arguments: ["points": points]) }
             }
@@ -127,21 +127,21 @@ struct MeshEditorView: View {
 
     var selectionControls: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Draw a closed lasso around the faces to remove. A click toggles one face. Red faces are selected.")
+            Text("Draw around faces to select them, or click a face to toggle it. Selected faces are red.")
                 .font(.caption).foregroundStyle(.secondary)
             Text(NavigableSCNView.navigationHelp)
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Select through mesh", isOn: $model.throughSelection)
-                .help("Include occluded and back-facing faces. With this off, select only the visible front surface.")
+                .help("Include hidden and back-facing faces. Turn off to select only visible front faces.")
             Toggle("Add to current selection", isOn: $model.addToSelection)
             Text("\(model.selectedFaces.count) faces selected").font(.caption.monospacedDigit())
-            Button("Delete Selected Faces") {
+            Button("Delete selected faces") {
                 Task { await model.edit("delete", arguments: ["faces": model.selectedFaces.sorted()]) }
             }.disabled(model.selectedFaces.isEmpty)
             HStack {
-            Button("Invert Selection") { model.invertSelection() }
+            Button("Invert selection") { model.invertSelection() }
                 .disabled(model.faces.isEmpty)
-            Button("Clear Selection") { model.selectedFaces.removeAll(); model.refreshOverlays() }
+            Button("Clear selection") { model.selectedFaces.removeAll(); model.refreshOverlays() }
                 .disabled(model.selectedFaces.isEmpty)
             }
         }
@@ -149,7 +149,7 @@ struct MeshEditorView: View {
 
     var planeControls: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Move or angle the cyan plane. Choose automatic fitting or set a smaller preview size below. The cut extends through the mesh; red marks the side to remove. Apply to preview the open boundary before saving.")
+            Text("Position the plane, then apply the cut. Red marks the side to remove; the cut extends through the mesh and stays open.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 ForEach(["X", "Y", "Z"], id: \.self) { axis in
@@ -177,7 +177,7 @@ struct MeshEditorView: View {
             Slider(value: $model.planeOffset, in: -model.span/2...model.span/2)
                 .accessibilityLabel("Cutting plane offset")
             Toggle("Fit plane preview to mesh", isOn: $model.fitPlanePreview)
-                .help("Resize the cyan preview automatically to fit the mesh at the cut. Turn off to set its width and height.")
+                .help("Fit the preview to the mesh, or turn off to set its width and height. The cut still extends through the mesh.")
             if !model.fitPlanePreview {
                 VStack(spacing: 6) {
                     HStack {
@@ -197,7 +197,7 @@ struct MeshEditorView: View {
                 }
             }
             Toggle("Flip kept side", isOn: $model.flipPlane)
-            Button("Apply Open Cut") {
+            Button("Apply cut") {
                 guard let normal = model.normal else { return }
                 let origin = model.planeOrigin
                 Task { await model.edit("cut", arguments: ["normal": [normal.x, normal.y, normal.z], "origin": [origin.x, origin.y, origin.z]]) }

@@ -11,8 +11,8 @@ enum Stage: String, CaseIterable, Identifiable, Codable {
 
     var title: String {
         switch self {
-        case .scanPreparation: "Scan Preparation"
-        case .inference: "Mesh2PPM Inference"
+        case .scanPreparation: "Scan preparation"
+        case .inference: "Mesh2PPM inference"
         case .preprocessing: "Preprocessing"
         case .numcalc: "NumCalc"
         case .postprocessing: "Postprocess"

@@ -40,9 +40,9 @@ struct ProjectStatusSnapshot {
     var summary: String {
         if project.stageOutcomes?.values.contains(.failed) == true { return "Latest run failed · previous results may remain" }
         if project.stageOutcomes?.values.contains(.stopped) == true { return "Task stopped · previous results may remain" }
-        if completed.contains(.postprocessing) { return "Postprocessed" }
-        if completed.contains(.numcalc) { return "Solved" }
-        if completed.contains(.preprocessing) { return "Projects ready" }
+        if completed.contains(.postprocessing) { return "HRTFs ready" }
+        if completed.contains(.numcalc) { return "Simulation complete" }
+        if completed.contains(.preprocessing) { return "Simulation ready" }
         if project.settings.inference.usePredictionsForPreprocessing && completed.contains(.inference) { return "Mesh2PPM Inference ready" }
         return Self.savedSummary(for: project)
     }
@@ -50,9 +50,9 @@ struct ProjectStatusSnapshot {
     static func savedSummary(for project: ProjectRecord) -> String {
         if project.stageOutcomes?.values.contains(.failed) == true { return "Latest run failed · previous results may remain" }
         if project.stageOutcomes?.values.contains(.stopped) == true { return "Task stopped · previous results may remain" }
-        if project.stageOutcomes?[Stage.postprocessing.rawValue] == .done { return "Postprocessed" }
-        if project.stageOutcomes?[Stage.numcalc.rawValue] == .done { return "Solved" }
-        if project.stageOutcomes?[Stage.preprocessing.rawValue] == .done { return "Projects ready" }
+        if project.stageOutcomes?[Stage.postprocessing.rawValue] == .done { return "HRTFs ready" }
+        if project.stageOutcomes?[Stage.numcalc.rawValue] == .done { return "Simulation complete" }
+        if project.stageOutcomes?[Stage.preprocessing.rawValue] == .done { return "Simulation ready" }
         return URL(fileURLWithPath: project.saveLocation, isDirectory: true).lastPathComponent
     }
 
@@ -117,7 +117,7 @@ struct ProjectStatusSnapshot {
         }
         let requiredInputs = project.scanPreparation.enabled ? [project.scanPreparation.scanPath] : [project.leftEar, project.rightEar]
         for path in requiredInputs where !path.isEmpty {
-            if !FileManager.default.fileExists(atPath: path) { return "Input mesh is missing: \(URL(fileURLWithPath: path).lastPathComponent)" }
+            if !FileManager.default.fileExists(atPath: path) { return "Input not found: \(URL(fileURLWithPath: path).lastPathComponent). Choose the file again." }
         }
         if let issue = ProjectValidation.issues(for: project, stage: stage, inspection: inspection).first { return "Fix \(issue.id.split(separator: ".").last?.replacingOccurrences(of: "_", with: " ") ?? "settings"): \(issue.message)" }
         if let conflict = outputLocationConflict(for: project, projects: projects, resolvingSymlinks: resolveOutputLocations) { return conflict }
@@ -138,11 +138,11 @@ struct ProjectStatusSnapshot {
                 }
             }
             if placingMicrophone { return "Finish microphone placement first." }
-            if !FileManager.default.isExecutableFile(atPath: environment.meshGradingExecutable) { return "The mesh-grading tool is unavailable." }
+            if !FileManager.default.isExecutableFile(atPath: environment.meshGradingExecutable) { return Defaults.isPackagedApp ? "Mesh grading tool not found. Reinstall the app." : "Mesh grading tool not found. Check the tool path." }
             if !FileManager.default.fileExists(atPath: environment.externalDir + "/src/Mesh2HRTF/mesh2hrtf") { return "Mesh2HRTF dependencies are unavailable." }
         case .numcalc:
             if !isComplete(.preprocessing) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.preprocessing.rawValue] ?? .ready) { return "Run preprocessing successfully first." }
-            if !FileManager.default.isExecutableFile(atPath: environment.numcalcExecutable) { return "The NumCalc tool is unavailable." }
+            if !FileManager.default.isExecutableFile(atPath: environment.numcalcExecutable) { return Defaults.isPackagedApp ? "NumCalc not found. Reinstall the app." : "NumCalc not found. Check the tool path." }
         case .postprocessing:
             let outputURL = ArtifactScanner.postprocessingDirectory(for: project).standardizedFileURL
             let rootURL = URL(fileURLWithPath: project.saveLocation, isDirectory: true).standardizedFileURL

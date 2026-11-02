@@ -33,23 +33,23 @@ struct PipelineCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Project") {
+            Button("New project") {
                 commands?.createProject()
             }
             .keyboardShortcut("n", modifiers: [.command])
-            Button("Import Project…") {
+            Button("Import project…") {
                 commands?.importProject()
             }
             .keyboardShortcut("o", modifiers: [.command, .shift])
         }
         CommandGroup(after: .newItem) {
-            Button("Duplicate Project") {
+            Button("Duplicate project") {
                 commands?.duplicateProject()
             }
             .keyboardShortcut("d", modifiers: [.command])
             .disabled(commands?.canDuplicateProject != true)
 
-            Button("Remove Project") {
+            Button("Remove project") {
                 commands?.removeProject()
             }
             .keyboardShortcut(.delete, modifiers: [.command])
@@ -67,7 +67,7 @@ struct PipelineCommands: Commands {
             }
             .disabled(commands?.canPreview != true || commands?.artifacts.isEmpty != false)
 
-            Button(commands?.isLogExpanded == true ? "Hide Live Log" : "Show Live Log") {
+            Button(commands?.isLogExpanded == true ? "Hide activity" : "Show activity") {
                 commands?.toggleLog()
             }
         }
@@ -81,13 +81,13 @@ struct PipelineCommands: Commands {
 
             Divider()
 
-            Button("Run Next Step") {
+            Button("Run next step") {
                 commands?.runNextStage()
             }
             .keyboardShortcut("r", modifiers: [.command])
             .disabled(commands?.canRunProject != true)
 
-            Menu("Run Stage") {
+            Menu("Run stage") {
                 ForEach(Stage.allCases) { stage in
                     Button(stage.title) {
                     commands?.runStage(stage)
@@ -104,14 +104,14 @@ struct PipelineCommands: Commands {
             .keyboardShortcut(".", modifiers: [.command])
             .disabled(commands?.canStopProject != true)
 
-            Button("Reset Outputs") {
+            Button("Reset outputs") {
                 commands?.resetProject()
             }
             .disabled(commands?.canResetProject != true)
 
             Divider()
 
-            Button("Refresh Project Files") {
+            Button("Refresh project files") {
                 commands?.refreshArtifacts()
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])

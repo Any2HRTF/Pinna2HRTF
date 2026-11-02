@@ -48,7 +48,7 @@ struct PPMFittingView: View {
         VStack(alignment: .leading, spacing: 6) {
             Label("Target ear", systemImage: "circle.fill")
                 .foregroundStyle(Color.gray)
-            Label("PPM · distance error", systemImage: "circle.fill")
+            Label("PPM · distance to target", systemImage: "circle.fill")
                 .foregroundStyle(.primary)
             HStack(spacing: 6) {
                 Text("0")
@@ -74,7 +74,7 @@ struct PPMFittingView: View {
                 Label("Blender skeleton", systemImage: "line.diagonal")
                     .foregroundStyle(.cyan)
             }
-            Text("Drag to rotate · Scroll to zoom")
+            Text("Trackpad: scroll to rotate · pinch to zoom\nMouse: right-drag to rotate · scroll to zoom")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -103,13 +103,13 @@ struct PPMFittingView: View {
                     .font(.caption.weight(.medium))
                     .frame(width: 48, alignment: .leading)
                 Picker("Display", selection: $displayMode) {
-                    ForEach(["Overlay", "Target", "Error Map", "Hidden"], id: \.self) { Text($0).tag($0) }
+                    ForEach(["Overlay", "Target", "Error map", "Hidden"], id: \.self) { Text($0).tag($0) }
                 }
                 .labelsHidden()
                 .frame(maxWidth: .infinity)
                 .onChange(of: displayMode) { mode in
                     model.showTarget = mode == "Overlay" || mode == "Target"
-                    model.showPPM = mode == "Overlay" || mode == "Error Map"
+                    model.showPPM = mode == "Overlay" || mode == "Error map"
                 }
                 Button { showingHelp.toggle() } label: {
                     Image(systemName: "questionmark.circle")
@@ -120,24 +120,24 @@ struct PPMFittingView: View {
                 .popover(isPresented: $showingHelp) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Manual Fitting").font(.headline)
-                        Text("Fit the whole model first, then local bone controls, then shape keys. Changes update the preview automatically.")
+                        Text("Fit global shape first, then local controls and shape keys. The preview updates automatically.")
                         Text("For a right ear, the model is mirrored across Y; control axes follow the template.")
                         Link("Fitting workflow · Perfler et al. (2025)", destination: URL(string: "https://doi.org/10.1016/j.compbiomed.2025.109817")!)
                     }.padding().frame(width: 320)
                 }
             }
             HStack(spacing: 8) {
-                Toggle("Show Blender skeleton", isOn: $model.showSkeleton)
+                Toggle("Show skeleton", isOn: $model.showSkeleton)
                     .toggleStyle(.checkbox)
                     .font(.caption)
                     .accessibilityIdentifier("ppm.showSkeleton")
-                    .help("Overlay the posed Blender bones, including curved Bendy bones, through the PPM surface.")
+                    .help("Show the posed Blender bones through the PPM surface.")
                 Spacer(minLength: 0)
-                Button("Reset to Template") { Task { await model.resetControls() } }
+                Button("Reset fit") { Task { await model.resetControls() } }
                     .font(.caption)
                     .fixedSize()
                     .disabled(model.busy || model.isUpdatingPreview)
-                    .help("Restore the starting PPM parameters. Undo is available.")
+                    .help("Restore the starting fit. You can undo this.")
             }
             targetOpacityControl.disabled(!model.showTarget)
         }
@@ -167,7 +167,7 @@ struct PPMFittingView: View {
                 VStack(alignment: .leading, spacing: 14) {
                 fittingActions
                 Picker("Fitting section", selection: $selectedSection) {
-                    ForEach(["Global", "Local", "Shape Keys"], id: \.self) { Text($0).tag($0) }
+                    ForEach(["Global", "Local", "Shape keys"], id: \.self) { Text($0).tag($0) }
                 }.pickerStyle(.segmented)
                     .labelsHidden()
                     .accessibilityLabel("Fitting section")
@@ -237,9 +237,9 @@ struct PPMFittingView: View {
             } else {
                 Text("Calculating mesh distances…").foregroundStyle(.secondary)
             }
-            DisclosureGroup("Distance Details") {
+            DisclosureGroup("Distance details") {
                 VStack(alignment: .leading, spacing: 7) {
-                    Text("Nearest-vertex RMSE both ways; summary statistics use PPM → target.")
+                    Text("Nearest-vertex RMSE in both directions. Other statistics are PPM → target.")
                         .foregroundStyle(.secondary)
                     ForEach(model.metrics) { metric in
                         HStack {
@@ -261,7 +261,7 @@ struct PPMFittingView: View {
             Button("Cancel") { closeEditor() }
                 .keyboardShortcut(.cancelAction)
                 .disabled(model.isSaving)
-            Button("Save Manual Fit") {
+            Button("Save manual fit") {
                 Task {
                     if await model.save() {
                         saved(model.request, model.templateBlendPath)

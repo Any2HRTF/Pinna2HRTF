@@ -6,7 +6,7 @@ struct ProjectInspectorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Project Settings")
+                Text("Project settings")
                     .font(.headline)
                 Spacer()
             }
@@ -35,16 +35,16 @@ struct ProjectInspectorView: View {
             Section {
                 manualPPMPanel
             } header: {
-                Text("Manual PPM Fit")
+                Text("Manual PPM fit")
             }
             Section("Processing") {
-                SettingsDisclosure("Scan Preparation", systemImage: "bandage") {
+                SettingsDisclosure("Scan preparation", systemImage: "bandage") {
                     LabeledTextField("Target edge (mm)", helpID: "scan.target_edge", text: scanTextBinding(\.targetEdgeMM))
                     LabeledTextField("Left crop margin (mm)", helpID: "scan.left_margin", text: scanTextBinding(\.leftMarginMM))
                     LabeledTextField("Right crop margin (mm)", helpID: "scan.right_margin", text: scanTextBinding(\.rightMarginMM))
                     LabeledTextField("Inner crop limit (mm)", helpID: "scan.side_min", text: scanTextBinding(\.sideMinMM))
                     LabeledTextField("Outer crop limit (mm)", helpID: "scan.side_max", text: scanTextBinding(\.sideMaxMM))
-                    Text("Crops ears, remeshes, closes defects with Screened Poisson, and preserves one attachment boundary per ear. Use an aligned scan in millimeters. Editing is optional; a saved current edit is used automatically, otherwise the prepared mesh is used.")
+                    Text("Use an aligned scan in mm. Ears are cropped, remeshed, and repaired. A saved, current ear edit is used automatically.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 SettingsDisclosure("Mesh2PPM", systemImage: "wand.and.stars") {
@@ -88,7 +88,7 @@ struct ProjectInspectorView: View {
                         if let error = validationMessage("mesh2hrtf.microphone_faces") { Text(error).font(.caption).foregroundStyle(.red) }
                     }
                 }
-                SettingsDisclosure("Mesh Grading", systemImage: "ruler") {
+                SettingsDisclosure("Mesh grading", systemImage: "ruler") {
                     Text("Required safety step")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -107,15 +107,15 @@ struct ProjectInspectorView: View {
             Section("Results") {
                 SettingsDisclosure("Postprocessing", systemImage: "slider.horizontal.3") {
                     PathField("SOFA output folder (optional)", helpID: "postprocessing.output_folder", text: postprocessingOutputFolderBinding, mode: .directory)
-                    SettingToggle(title: "Normalize HRTFs", helpID: "postprocessing.normalize", isOn: postprocessingNormalizeBinding)
+                    SettingToggle(title: "Apply level offset", helpID: "postprocessing.normalize", isOn: postprocessingNormalizeBinding)
                     LabeledTextField("Level offset (dB)", helpID: "postprocessing.level_offset", text: postprocessingLevelOffsetBinding, fieldEnabled: postprocessingNormalizeBinding.wrappedValue)
                     SettingToggle(title: "Resample HRIRs", helpID: "postprocessing.resample_hrirs", isOn: postprocessingResampleBinding)
                     LabeledTextField("Sampling rate (Hz)", helpID: "postprocessing.sampling_rate", text: postprocessingSamplingRateBinding, fieldEnabled: postprocessingResampleBinding.wrappedValue)
                     SettingToggle(title: "Spatially upsample HRTFs", helpID: "postprocessing.spatial_upsampling", isOn: postprocessingValue(\.spatialUpsampling))
                     if store.selectedProject?.settings.postprocessing?.spatialUpsampling == true {
                         Stepper("Subdivision level: \(postprocessingValue(\.spatialSubdivisions).wrappedValue)", value: postprocessingValue(\.spatialSubdivisions), in: 0...5)
-                        SettingToggle(title: "Normalize upsampled HRTFs", helpID: "postprocessing.spatial_normalize", isOn: postprocessingValue(\.spatialNormalize))
-                        Text("Interpolates HRTFs at additional source directions while preserving direction-dependent arrival times. Sampling rate and HRIR length stay the same. Results are saved in the Upsampled subfolder.")
+                        SettingToggle(title: "Normalize to frontal reference", helpID: "postprocessing.spatial_normalize", isOn: postprocessingValue(\.spatialNormalize))
+                        Text("Adds source directions while preserving arrival times. Results are saved in Upsampled; originals are kept.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -139,18 +139,18 @@ struct ProjectInspectorView: View {
     var requiredPanel: some View {
         VStack(alignment: .leading, spacing: 9) {
             LabeledTextField("Project name", helpID: "project.name", text: projectStringBinding(\.name, refresh: false))
-            SettingToggle(title: "Prepare ears from a full-head scan", helpID: "scan.enabled", isOn: scanBoolBinding(\.enabled))
+            SettingToggle(title: "Prepare ears from a head scan", helpID: "scan.enabled", isOn: scanBoolBinding(\.enabled))
             if store.selectedProject?.scanPreparation.enabled == true {
                 PathField("Full-head scan", helpID: "scan.path", text: scanTextBinding(\.scanPath), mode: .file)
-                Button("Align Using Nose and Ears…") { store.beginScanAlignment() }
+                Button("Align scan…") { store.beginScanAlignment() }
                     .disabled(store.selectedProjectIsRunning)
                 HStack {
                     Toggle("Prepare left", isOn: scanBoolBinding(\.prepareLeft))
                     Toggle("Prepare right", isOn: scanBoolBinding(\.prepareRight))
                 }
             } else {
-            PathField("Left ear (optional)", helpID: "project.left_ear", text: projectStringBinding(\.leftEar), mode: .file)
-            PathField("Right ear (optional)", helpID: "project.right_ear", text: projectStringBinding(\.rightEar), mode: .file)
+            PathField("Left ear", helpID: "project.left_ear", text: projectStringBinding(\.leftEar), mode: .file)
+            PathField("Right ear", helpID: "project.right_ear", text: projectStringBinding(\.rightEar), mode: .file)
             Text("Choose at least one ear mesh.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -164,7 +164,7 @@ struct ProjectInspectorView: View {
 
     var manualPPMPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Fit a parametric model to either ear.")
+            Text("Fit a PPM to either ear.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             ForEach(EarSide.allCases) { side in
@@ -182,7 +182,7 @@ struct ProjectInspectorView: View {
             }
             Toggle("Use saved manual fits", isOn: manualPPMBinding)
                 .toggleStyle(.checkbox)
-                .help("Use the saved manual PPM mesh for each fitted side. Unfitted sides keep their current preprocessing source.")
+                .help("Use saved fits for fitted ears. Other ears use their current preprocessing input.")
             if let issue = store.selectedValidationIssues.first(where: { $0.id.hasPrefix("manual_ppm") }) {
                 Text(issue.message)
                     .font(.caption)
@@ -199,7 +199,7 @@ struct ProjectInspectorView: View {
         guard let project = store.selectedProject,
               project.settings.manualPPMFitting.meshPath(for: side) != nil else { return "Not fitted" }
         guard let status = store.selectedProjectStatus else { return "Checking saved fit…" }
-        return status.validFitSides.contains(side) ? "Saved fit available" : "Source changed; refit required"
+        return status.validFitSides.contains(side) ? "Saved fit" : "Source changed · refit needed"
     }
 
     var manualPPMBinding: Binding<Bool> {

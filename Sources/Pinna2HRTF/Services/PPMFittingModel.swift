@@ -185,7 +185,7 @@ final class PPMFittingModel: ObservableObject {
         isSaving = true
         defer { isSaving = false }
         guard ArtifactScanner.meshIdentity(request.targetMesh) == request.sourceIdentity else {
-            error = "The target ear changed while it was being fitted. Close this workspace and reopen it to use the current mesh."
+            error = "The ear mesh changed. Close and reopen fitting before saving."
             return false
         }
         busy = true
@@ -200,7 +200,7 @@ final class PPMFittingModel: ObservableObject {
                 "mirror_y": request.side == .right])
             install(result)
             guard ArtifactScanner.meshIdentity(request.targetMesh) == request.sourceIdentity else {
-                throw ProjectValidation.Failure(message: "The target ear changed while the fit was being saved. The existing fit was preserved.")
+                throw ProjectValidation.Failure(message: "The ear mesh changed. The previous fit was preserved. Reopen fitting before saving.")
             }
             guard FileManager.default.fileExists(atPath: generated.path) else {
                 throw ProjectValidation.Failure(message: "The PPM fitting engine did not produce a mesh.")

@@ -192,9 +192,9 @@ enum ArtifactScanner {
         if project.stageOutcomes?.values.contains(.failed) == true { return "Latest run failed · previous results may remain" }
         if project.stageOutcomes?.values.contains(.stopped) == true { return "Task stopped · previous results may remain" }
         if project.pipelineEar(for: .left, inspection: inspection).isEmpty && project.pipelineEar(for: .right, inspection: inspection).isEmpty { return "Not configured" }
-        if stageIsComplete(.postprocessing, project: project, inspection: inspection) { return "Postprocessed" }
-        if stageIsComplete(.numcalc, project: project, inspection: inspection) { return "Solved" }
-        if stageIsComplete(.preprocessing, project: project, inspection: inspection) { return "Projects ready" }
+        if stageIsComplete(.postprocessing, project: project, inspection: inspection) { return "HRTFs ready" }
+        if stageIsComplete(.numcalc, project: project, inspection: inspection) { return "Simulation complete" }
+        if stageIsComplete(.preprocessing, project: project, inspection: inspection) { return "Simulation ready" }
         if project.settings.inference.usePredictionsForPreprocessing && stageIsComplete(.inference, project: project, inspection: inspection) { return "Mesh2PPM Inference ready" }
         return URL(fileURLWithPath: project.saveLocation, isDirectory: true).lastPathComponent
     }

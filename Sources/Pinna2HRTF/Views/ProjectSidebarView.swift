@@ -31,7 +31,7 @@ struct ProjectSidebarView: View {
                 Button {
                     store.createProject()
                 } label: {
-                    Label("New Project", systemImage: "plus")
+                    Label("New project", systemImage: "plus")
                         .frame(width: 28, height: 28)
                 }
                 .help("Create a new empty project")
@@ -43,13 +43,13 @@ struct ProjectSidebarView: View {
                         store.removeSelectedProject()
                     }
                 } label: {
-                    Label(selectedFolderID == nil ? "Remove Project" : "Remove Folder", systemImage: "minus")
+                    Label(selectedFolderID == nil ? "Remove project" : "Remove folder", systemImage: "minus")
                         .frame(width: 28, height: 28)
                 }
                 .help(selectedFolderID == nil ? "Move the selected project folder to Trash" : "Remove the selected folder and keep its projects")
                 .disabled(selectedFolderID == nil && !store.canRemoveSelectedProject)
                 Button { editFolder() } label: {
-                    Label("New Folder", systemImage: "folder.badge.plus").frame(width: 28, height: 28)
+                    Label("New folder", systemImage: "folder.badge.plus").frame(width: 28, height: 28)
                 }
                 .help("Create a folder to organize projects")
                 Button {
@@ -62,7 +62,7 @@ struct ProjectSidebarView: View {
                 Button {
                     store.duplicateSelectedProject()
                 } label: {
-                    Label("Duplicate Project", systemImage: "plus.square.on.square")
+                    Label("Duplicate project", systemImage: "plus.square.on.square")
                         .frame(width: 28, height: 28)
                 }
                 .help("Duplicate the selected project, including its results")
@@ -77,7 +77,7 @@ struct ProjectSidebarView: View {
         }
         .sheet(isPresented: $showingFolderEditor) {
             VStack(alignment: .leading, spacing: 16) {
-                Text(editingFolderID == nil ? "New Folder" : "Rename Folder")
+                Text(editingFolderID == nil ? "New folder" : "Rename Folder")
                     .font(.headline)
                 TextField("Folder name", text: $folderName)
                     .onSubmit { saveFolder() }

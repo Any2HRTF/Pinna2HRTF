@@ -94,8 +94,8 @@ extension AppStore {
             let hasOutputs = ["Intermediates/dummy_head.stl", "Intermediates/Left/graded_head.ply", "Intermediates/Right/graded_head.ply", "Projects/Left", "Projects/Right"].contains { FileManager.default.fileExists(atPath: output.appendingPathComponent($0).path) }
             if !hasOutputs { apply(); return }
             let alert = NSAlert()
-            alert.messageText = "Reset pipeline outputs?"
-            alert.informativeText = "Changing geometry resets Preprocessing and all following outputs. Inferred ears, inputs, and modified files will be kept."
+            alert.messageText = "Reset generated outputs?"
+            alert.informativeText = "Changing ear distance resets preprocessing and later results. Inputs, predicted ears, and modified files are kept."
             alert.addButton(withTitle: "Reset and apply"); alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
             let outputs = try outputsFor(project)
@@ -186,9 +186,9 @@ extension AppStore {
                 if HeadGeometrySettings.needsWarning(values.distance) {
                     let alert = NSAlert()
                     alert.messageText = "Ear meshes are close to the head center"
-                    alert.informativeText = "The ear distance from the head center is \(values.distance) mm. This will produce a very small head. You can proceed anyway or cancel to adjust the distance."
-                    alert.addButton(withTitle: "Cancel and adjust")
-                    alert.addButton(withTitle: "Proceed anyway")
+                    alert.informativeText = "Ear distance: \(values.distance) mm. This creates a very small head. Continue or adjust the distance?"
+                    alert.addButton(withTitle: "Adjust distance")
+                    alert.addButton(withTitle: "Continue")
                     guard alert.runModal() == .alertSecondButtonReturn else {
                         earDistanceFocusRequest = UUID()
                         return

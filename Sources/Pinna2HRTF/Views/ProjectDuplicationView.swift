@@ -22,8 +22,8 @@ struct ProjectDuplicationView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Duplicate Project").font(.headline)
-            Text("Create a copy of \(request.project.name), including its saved meshes and fits.")
+            Text("Duplicate project").font(.headline)
+            Text("Copy \(request.project.name), including saved meshes, fits, and results.")
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 6) {
                 Text("Project name").font(.subheadline.weight(.medium))
@@ -51,7 +51,7 @@ struct ProjectDuplicationView: View {
                     }
                     .accessibilityLabel("Choose save location")
                 }
-                Text("A project folder will be created here. Missing parent folders will also be created.")
+                Text("A project folder and any missing parent folders will be created here.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 4) {

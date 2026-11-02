@@ -14,13 +14,13 @@ struct MeshViewerView: View {
                     Image(systemName: "folder")
                         .font(.system(size: 44))
                         .foregroundStyle(.secondary)
-                    Text("No Project Selected")
+                    Text("No project selected")
                         .font(.title2.weight(.semibold))
-                    Text("Create or select a project to inspect meshes and logs.")
+                    Text("Create or import a project.")
                         .foregroundStyle(.secondary)
                     HStack {
-                        Button("New Project", action: store.createProject)
-                        Button("Import Project…", action: store.importProject)
+                        Button("New project", action: store.createProject)
+                        Button("Import project…", action: store.importProject)
                     }
                     .buttonStyle(.bordered)
                 }
@@ -104,7 +104,7 @@ struct MeshViewerView: View {
                         Label("Place \(side.title) Microphone", systemImage: "scope")
                             .font(.callout.weight(.semibold))
                         Spacer()
-                        Text("Drag to rotate · Click to place")
+                        Text("Click the mesh to place the microphone")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -112,14 +112,14 @@ struct MeshViewerView: View {
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                     HStack(spacing: 10) {
-                        Button("Use Automatic Position") {
+                        Button("Find automatic position") {
                             store.useAutomaticMicrophonePosition(side)
                         }.disabled(store.isCalculatingAutomaticMicrophone)
                         if store.isCalculatingAutomaticMicrophone {
                             HStack(spacing: 6) {
                                 ProgressView()
                                     .controlSize(.small)
-                                Text("Searching…")
+                                Text("Finding position…")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -169,13 +169,13 @@ struct MeshViewerView: View {
                 Button {
                     store.openTechnicalLog()
                 } label: {
-                    Label("Technical Log", systemImage: "doc.text.magnifyingglass")
+                    Label("Technical log", systemImage: "doc.text.magnifyingglass")
                 }
                 .buttonStyle(.borderless)
                 .help("Open the complete technical output for this project")
                 .accessibilityLabel("Open Technical Log")
                 .disabled(store.selectedTechnicalLogURL == nil)
-                Button("Clear Activity") { store.clearSelectedProjectLog() }
+                Button("Clear activity") { store.clearSelectedProjectLog() }
                     .buttonStyle(.borderless)
                     .disabled(store.logText.isEmpty)
                     .help("Clear the activity timeline. Technical logs remain available.")
@@ -187,7 +187,7 @@ struct MeshViewerView: View {
                 Divider()
                 ScrollViewReader { proxy in
                     ScrollView {
-                        Text(store.logText.isEmpty ? "Waiting for output..." : store.logText)
+                        Text(store.logText.isEmpty ? "No activity yet" : store.logText)
                             .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading)
