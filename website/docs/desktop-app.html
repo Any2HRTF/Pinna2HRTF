@@ -24,7 +24,7 @@
 <figure><img src="../assets/screenshots/desktop-workspace.jpg" alt="Pinna2HRTF showing a left ear mesh, project settings, and completed simulation stages, with standard macOS window controls" width="2022" height="1245" loading="lazy"><figcaption>The project workspace: ear geometry in the center, input settings and pipeline progress on the right.</figcaption></figure>
       <h2 id="choose-output-processing">Choose output processing</h2>
       <p><strong>Resampling</strong> changes the HRIR sample rate. <strong>Spatial HRTF upsampling</strong> adds source directions by interpolating between the simulated directions; it does not change the sample rate or HRIR length. Upsampled files are saved separately in <code>Upsampled/</code>, and the original exports are kept.</p>
-      <p>Spatial upsampling has its own optional frontal level normalization. Check this separately from the normal postprocessing level offset when comparing output levels.</p>
+      <p>Spatially upsampled HRIRs keep the level of the exported HRIRs. The optional frontal normalization (off by default) replaces that level with a −40 dB frontal reference.</p>
       <h2 id="if-a-run-does-not-finish">If a run does not finish</h2>
       <dl class="troubleshooting">
         <dt>Prepared ears look misplaced or incomplete</dt><dd>Check scan orientation, selected sides, crop rotation, and crop placement. Review the ear meshes before continuing to preprocessing.</dd>
