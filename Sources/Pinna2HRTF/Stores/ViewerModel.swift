@@ -193,7 +193,7 @@ final class ViewerModel: ObservableObject {
             cameraNode.orientation = SCNQuaternion(q[0], q[1], q[2], q[3])
         }
         scene.rootNode.addChildNode(cameraNode)
-        EvenMeshLighting.install(in: scene)
+        EvenMeshLighting.install(in: scene, camera: cameraNode)
         return LoadedScene(scene: scene, center: center, maximumDimension: maximumDimension, cameraPosition: cameraPosition)
     }
 

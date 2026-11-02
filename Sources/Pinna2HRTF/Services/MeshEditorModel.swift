@@ -280,7 +280,7 @@ final class MeshEditorModel: ObservableObject {
         camera.zNear = 0.05; camera.zFar = max(span * 30, 10000); camera.fieldOfView = 38
         node.camera = camera
         scene.rootNode.addChildNode(node); cameraNode = node
-        EvenMeshLighting.install(in: scene)
+        EvenMeshLighting.install(in: scene, camera: node)
         resetCamera()
     }
 

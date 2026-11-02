@@ -650,7 +650,7 @@ final class PPMFittingModel: ObservableObject {
         scene.rootNode.addChildNode(node)
         cameraNode = node
         cameraRevision += 1
-        EvenMeshLighting.install(in: scene)
+        EvenMeshLighting.install(in: scene, camera: node)
     }
 
     private func archiveTemplateIfNeeded() throws -> URL? {
