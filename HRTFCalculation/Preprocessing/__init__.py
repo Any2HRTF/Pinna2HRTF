@@ -1,10 +1,14 @@
 import argparse
+import hashlib
 import json
 import os
+import re
+import sys
 import trimesh
 import tempfile
 import subprocess
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 from .src.create_head import head
@@ -28,36 +32,184 @@ def _is_generated_project(path, protected_paths):
     return path.is_dir() and (path / "parameters.json").is_file()
 
 
-def _publish_export_projects(staged, destinations, protected_paths):
-    """Swap freshly generated projects into place; stale generated projects are replaced.
+EXPORT_RECORD = ".pinna2hrtf-export.json"
+# Files Mesh2HRTF's solver and Output2HRTF add to a project after export.
+_SOLVER_OUTPUT = re.compile(
+    r"^(NumCalc/source_\d+/(be\.out/.+|NC[^/]*\.(txt|out)|Memory\.txt|[^/]*_log\.txt)"
+    r"|Output2HRTF/.+\.(sofa|pdf|png|txt|csv|json|mat|vtk|vtu))$"
+)
 
-    Anything at a destination that does not look like a generated Mesh2HRTF
-    project (or that contains an input mesh) is left untouched and reported.
+
+def _project_files(root):
+    """Relative POSIX paths of everything below root; links and special files are reported as such."""
+    files, other = [], []
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in dirnames + filenames:
+            path = Path(dirpath) / name
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                other.append(relative)
+            elif name in filenames:
+                (files if path.is_file() else other).append(relative)
+        dirnames[:] = [name for name in dirnames if not (Path(dirpath) / name).is_symlink()]
+    return files, other
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as file:
+        for block in iter(lambda: file.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _write_export_record(project):
+    """Record every file of a freshly generated project so a later backup can be checked for changes."""
+    files, _ = _project_files(project)
+    record = {"version": 1, "files": {name: _sha256(project / name) for name in sorted(files) if name != EXPORT_RECORD}}
+    temporary = project / (EXPORT_RECORD + ".tmp")
+    temporary.write_text(json.dumps(record, indent=1), encoding="utf-8")
+    os.replace(temporary, project / EXPORT_RECORD)
+
+
+def previous_backup_path(destination):
+    return Path(f"{destination}.previous")
+
+
+def _folder_size(root):
+    total = 0
+    for dirpath, _, filenames in os.walk(root):
+        for name in filenames:
+            try:
+                total += (Path(dirpath) / name).lstat().st_size
+            except OSError:
+                pass
+    return total
+
+
+def _format_size(size):
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+
+
+def inspect_previous_backup(backup, protected_paths=()):
+    """Whether an older export backup holds only unchanged generated files and may be deleted.
+
+    Returns (deletable, reason). Unknown files, changed or missing recorded files,
+    links, a missing record, or an input mesh inside the folder all keep it.
+    """
+    backup = Path(backup)
+    if backup.is_symlink() or not backup.is_dir():
+        return False, "it is not a regular folder"
+    resolved = backup.resolve()
+    if any(resolved == path or resolved in path.parents for path in protected_paths):
+        return False, "it contains an input mesh"
+    try:
+        recorded = json.loads((backup / EXPORT_RECORD).read_text(encoding="utf-8"))["files"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return False, "it has no Pinna2HRTF export record"
+    files, other = _project_files(backup)
+    if other:
+        return False, f"it contains links or special files ({other[0]})"
+    present = set(files) - {EXPORT_RECORD}
+    for name, digest in recorded.items():
+        if name not in present:
+            return False, f"a generated file was removed ({name})"
+        if _sha256(backup / name) != digest:
+            return False, f"a generated file was changed ({name})"
+    unknown = sorted(name for name in present - set(recorded) if not _SOLVER_OUTPUT.match(name))
+    if unknown:
+        return False, f"it contains files Pinna2HRTF did not generate ({unknown[0]})"
+    return True, "only unchanged generated files"
+
+
+def _kept_backup_path(destination):
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    candidate = Path(f"{destination}.previous-{stamp}")
+    counter = 1
+    while candidate.exists() or candidate.is_symlink():
+        counter += 1
+        candidate = Path(f"{destination}.previous-{stamp}-{counter}")
+    return candidate
+
+
+def plan_export_backups(destinations, protected_paths, logger=print):
+    """Describe what publishing will do with existing backups, before any work starts.
+
+    Returns the backups that will be deleted (path, size); the caller must confirm those.
+    """
+    replace = []
+    for destination in destinations.values():
+        for old in sorted(destination.parent.glob(f".{destination.name}.pinna2hrtf-backup-*")):
+            logger(f"Note: an export backup from an earlier version is kept at {old}. Remove it yourself when it is no longer needed.")
+        if not destination.exists():
+            continue
+        backup = previous_backup_path(destination)
+        if not (backup.exists() or backup.is_symlink()):
+            logger(f"The current project {destination} will be kept as {backup}.")
+            continue
+        deletable, reason = inspect_previous_backup(backup, protected_paths)
+        if deletable:
+            replace.append((backup, _folder_size(backup)))
+        else:
+            logger(f"Warning: the older backup {backup} will be kept because {reason}. "
+                   f"It will be moved to {destination}.previous-<date> so the current project can become the new backup.")
+    return replace
+
+
+def _publish_export_projects(staged, destinations, protected_paths, logger=print):
+    """Swap freshly generated projects into place, keeping one previous export per ear.
+
+    Each replaced project becomes <destination>.previous. An older .previous is
+    deleted only if it still holds just unchanged generated files; otherwise it is
+    kept as <destination>.previous-<date>. If any move fails, every move is undone,
+    so both ears stay on the same export.
     """
     for destination in destinations.values():
         if destination.exists() and not _is_generated_project(destination, protected_paths):
             raise FileExistsError(f"Refusing to replace {destination}: it is not a Mesh2HRTF project generated by Pinna2HRTF or it contains input files.")
-    backups = {}
-    installed = []
+    moves = []
+    retired = {}
+
+    def move(source, target):
+        source.rename(target)
+        moves.append((source, target))
+
     try:
         for side, destination in destinations.items():
             source = staged.get(side)
             if destination.exists():
-                backup_dir = Path(tempfile.mkdtemp(prefix=f".{destination.name}.pinna2hrtf-backup-", dir=destination.parent))
-                backup = backup_dir / destination.name
-                destination.rename(backup)
-                backups[side] = backup
+                backup = previous_backup_path(destination)
+                if backup.exists() or backup.is_symlink():
+                    holder = Path(tempfile.mkdtemp(prefix=f".{backup.name}-retiring-", dir=backup.parent))
+                    retired[side] = holder / backup.name
+                    move(backup, retired[side])
+                move(destination, backup)
             if source is not None:
-                source.rename(destination)
-                installed.append(destination)
+                move(source, destination)
     except BaseException:
-        for destination in reversed(installed):
-            shutil.rmtree(destination)
-        for side, backup in backups.items():
-            backup.rename(destinations[side])
-            backup.parent.rmdir()
+        for source, target in reversed(moves):
+            target.rename(source)
+        for retiring in retired.values():
+            try:
+                retiring.parent.rmdir()
+            except OSError:
+                pass
         raise
-    # Keep prior projects intact: they may contain user files or solver results.
+    for side, retiring in retired.items():
+        destination = destinations[side]
+        # Check again: the folder may have changed while the projects were built.
+        deletable, reason = inspect_previous_backup(retiring, protected_paths)
+        if deletable:
+            shutil.rmtree(retiring.parent)
+            logger(f"Deleted the older backup of {destination}; {previous_backup_path(destination)} now holds the previous export.")
+        else:
+            kept = _kept_backup_path(destination)
+            retiring.rename(kept)
+            retiring.parent.rmdir()
+            logger(f"Warning: kept the older backup at {kept} because {reason}.")
 
 
 def reposition_ears_laterally(ears, translations):
@@ -66,7 +218,7 @@ def reposition_ears_laterally(ears, translations):
             ear.apply_translation(translations[side])
 
 
-def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, mesh2hrtf_path, evaluation_grid, preprocessing=None, output_dir=None, export_path=None, logger=print):
+def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, mesh2hrtf_path, evaluation_grid, preprocessing=None, output_dir=None, export_path=None, logger=print, confirm_replace_previous=None):
     settings = preprocessing or PreprocessingConfig()
     if output_dir is None and export_path is None:
         raise ValueError("output_dir or export_path is required")
@@ -108,6 +260,15 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
         for project in (left_project, right_project):
             if project.exists() and not _is_generated_project(project, protected):
                 raise FileExistsError(f"Refusing to replace {project}: it is not a Mesh2HRTF project generated by Pinna2HRTF or it contains input files.")
+        to_replace = plan_export_backups({"left": left_project, "right": right_project}, protected, logger)
+        if to_replace:
+            listing = "\n".join(f"  {path} ({_format_size(size)})" for path, size in to_replace)
+            question = ("Only one previous export is kept per ear. These older backups hold only unchanged "
+                        f"generated files and will be deleted after the new export succeeds:\n{listing}")
+            if confirm_replace_previous is None:
+                raise FileExistsError(question + "\nCopy anything you need, then rerun with --replace-previous-backup.")
+            if not confirm_replace_previous(question):
+                raise RuntimeError("Cancelled: the older export backups were left unchanged.")
     side_dirs = {"left": intermediates / "Left", "right": intermediates / "Right"}
     for name in ["Prediction STL Left", "Prediction STL Right", "Prediction Parameters Left", "Prediction Parameters Right", "ICP STL Left", "ICP STL Right"]:
         legacy_path = intermediates / name
@@ -275,7 +436,10 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
                 logger(f"Set {side} receiver position exactly to {parameters['sourceCenter']} m")
         if export_staging is not None:
             protected = [path.resolve() for path in (left_path, right_path) if path is not None]
-            _publish_export_projects({side: projects[side] for side, ear in ears.items() if ear is not None}, export_destinations, protected)
+            for side, ear in ears.items():
+                if ear is not None:
+                    _write_export_record(projects[side])
+            _publish_export_projects({side: projects[side] for side, ear in ears.items() if ear is not None}, export_destinations, protected, logger)
             projects = export_destinations
         emit_live_event("Mesh2HRTF projects are ready")
         logger(f"Preprocessing completed: {', '.join(str(projects[side]) for side, ear in ears.items() if ear is not None)}")
@@ -303,6 +467,8 @@ def preprocess():
     parser.add_argument('--max-frequency', type=int, default=24000)
     parser.add_argument('--frequency-step-count', type=int, default=129)
     parser.add_argument('--source-face-count', type=int, default=6)
+    parser.add_argument('--replace-previous-backup', action='store_true',
+                        help='Allow deleting an older export backup that holds only unchanged generated files. Without it you are asked interactively.')
     args = parser.parse_args()
     if args.head_radius is not None and args.ear_distance is not None:
         parser.error('--head-radius cannot be combined with --ear-distance.')
@@ -329,4 +495,17 @@ def preprocess():
         mesh2hrtf_path=args.Mesh2HRTF_path,
         evaluation_grid=args.Mesh2HRTF_Evaluation_Grid,
         preprocessing=settings,
+        confirm_replace_previous=_cli_confirmation(args.replace_previous_backup),
     )
+
+
+def _cli_confirmation(preapproved):
+    if preapproved:
+        return lambda question: True
+    if not sys.stdin.isatty():
+        return None
+
+    def ask(question):
+        print(question)
+        return input("Delete these older backups? [y/N] ").strip().lower() in {"y", "yes"}
+    return ask

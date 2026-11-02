@@ -55,6 +55,7 @@ uv run Pinna2HRTF numcalc --config pinna2hrtf.yaml</code></pre>
 uv run Pinna2HRTF preprocessing --help
 uv run Pinna2HRTF numcalc --help</code></pre>
       <p>Keep a separate output folder for each experiment and inspect the geometry and source placement after preprocessing before starting a long simulation.</p>
+      <p>Standalone preprocessing with <code>--export-path</code> keeps one previous export per ear: a replaced project moves to <code>&lt;name&gt;-Left.previous</code> (or <code>-Right</code>). An older backup is deleted only after you confirm, and only when it holds unchanged generated files and solver output. Backups with your own or changed files are kept as <code>.previous-&lt;date&gt;</code>. Pass <code>--replace-previous-backup</code> to confirm in scripts.</p>
     </main></div>
   <footer class="docs-footer"><small>Individualized HRTFs from pinna meshes</small><nav aria-label="Footer"><a href="index.html">Documentation home</a><a href="../#downloads">Downloads</a><a href="https://github.com/Any2HRTF/Pinna2HRTF">GitHub</a></nav></footer>
 </div></body></html>
