@@ -83,6 +83,21 @@ def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: f
         projects = [project_path] if (project_path / "parameters.json").exists() else [path for path in project_path.iterdir() if (path / "parameters.json").exists()]
         if not projects:
             raise FileNotFoundError(f"No Mesh2HRTF projects found at {project_path}")
+        # Snapshot existing names before NumCalc runs. Only newly produced files
+        # can be claimed; pre-existing unrecorded files remain protected.
+        from .Preprocessing import _project_files, _sha256, _is_solver_output, EXPORT_RECORD
+        import json
+        ownership = {}
+        for project in projects:
+            record_path = project / EXPORT_RECORD
+            if not record_path.is_file():
+                continue
+            try:
+                record = json.loads(record_path.read_text(encoding="utf-8"))
+                existing, _ = _project_files(project)
+                ownership[project] = (record, set(existing))
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
         pending = []
         for project in projects:
             source_dirs = sorted(project.glob("NumCalc/source_*"))
@@ -175,6 +190,16 @@ def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: f
             if pending or running:
                 # Completion is polled every second; wait_time only throttles new starts.
                 time.sleep(1)
+        for project, (record, existing) in ownership.items():
+            recorded = record.get("files", {})
+            grids = {name.split("/")[1] for name in recorded if name.startswith("EvaluationGrids/") and name.count("/") >= 2}
+            files, _ = _project_files(project)
+            for name in files:
+                if name not in existing and _is_solver_output(name, grids):
+                    recorded[name] = _sha256(project / name)
+            temporary = project / (EXPORT_RECORD + ".tmp")
+            temporary.write_text(json.dumps(record, indent=1), encoding="utf-8")
+            os.replace(temporary, project / EXPORT_RECORD)
     finally:
         for process, log_file, _, _, _, _, _ in running:
             _terminate(process)

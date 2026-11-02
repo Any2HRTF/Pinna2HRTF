@@ -147,8 +147,7 @@ def inspect_previous_backup(backup, protected_paths=()):
             return False, f"a generated file was removed ({name})"
         if _sha256(backup / name) != digest:
             return False, f"a generated file was changed ({name})"
-    grids = {name.split("/")[1] for name in recorded if name.startswith("EvaluationGrids/") and name.count("/") >= 2}
-    unknown = sorted(name for name in present - set(recorded) if not _is_solver_output(name, grids))
+    unknown = sorted(present - set(recorded))
     if unknown:
         return False, f"it contains files Pinna2HRTF did not generate ({unknown[0]})"
     return True, "only unchanged generated files"
