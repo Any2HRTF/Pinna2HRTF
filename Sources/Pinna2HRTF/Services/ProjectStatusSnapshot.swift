@@ -56,7 +56,7 @@ struct ProjectStatusSnapshot {
         return URL(fileURLWithPath: project.saveLocation, isDirectory: true).lastPathComponent
     }
 
-    static func load(project: ProjectRecord, environment: EnvironmentConfig, projects: [ProjectRecord], placingMicrophone: Bool,
+    static func load(project: ProjectRecord, environment: EnvironmentConfig, projects: [ProjectRecord],
                      includeSolverResults: Bool = true, isCancelled: @escaping () -> Bool = { false }) -> Self {
         let inspection = ArtifactScanner.Inspection(isCancelled: isCancelled)
         let completed = Set(Stage.allCases.filter { (includeSolverResults || $0 != .numcalc) && !isCancelled() && ArtifactScanner.stageIsComplete($0, project: project, inspection: inspection) })
@@ -78,7 +78,8 @@ struct ProjectStatusSnapshot {
         var reasons: [Stage: String] = [:]
         for stage in Stage.allCases {
             reasons[stage] = unavailableReason(stage, project: project, environment: environment, projects: projects,
-                                               placingMicrophone: placingMicrophone, inspection: inspection, completed: completed, resolveOutputLocations: false)
+                                               // Microphone placement is checked live by the run controls, not cached here.
+                                               placingMicrophone: false, inspection: inspection, completed: completed, resolveOutputLocations: false)
         }
         if needsRerun {
             for stage in [Stage.numcalc, .postprocessing] { reasons[stage] = "Run preprocessing with the current settings first." }

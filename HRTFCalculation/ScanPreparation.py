@@ -5,7 +5,8 @@ Crop rotations are explicit per project; there is no subject-name calibration.
 """
 from pathlib import Path
 from .LiveEvents import emit_live_event
-from .FileIdentity import sha256, file_identity
+from .FileIdentity import cached_sha256, sha256, file_identity
+from .Geometry import boundary_graph, load_mesh as _load_mesh
 import json
 import shutil
 import tempfile
@@ -20,25 +21,22 @@ POISSON = dict(depth=7, fulldepth=5, scale=1.1, samplespernode=3.0,
                pointweight=1.0, iters=8, threads=1)
 
 def load_mesh(path, process=False):
-    mesh = trimesh.load_mesh(path, process=process)
-    if isinstance(mesh, trimesh.Scene):
-        mesh = trimesh.util.concatenate(tuple(mesh.geometry.values()))
-    mesh.merge_vertices()
-    mesh.remove_unreferenced_vertices()
-    return mesh
+    return _load_mesh(path, process=process, merge=True)
+
+
+def z_rotation(degrees):
+    """Homogeneous rotation about +Z by degrees."""
+    angle = np.deg2rad(degrees)
+    transform = np.eye(4)
+    transform[:3, :3] = np.array(
+        [[np.cos(angle), -np.sin(angle), 0],
+         [np.sin(angle), np.cos(angle), 0], [0, 0, 1]], dtype=float
+    )
+    return transform
 
 
 def mesh_metrics(mesh):
-    edges = np.asarray(mesh.edges_sorted)
-    if len(edges):
-        unique_edges, counts = np.unique(edges, axis=0, return_counts=True)
-        boundary_edges = unique_edges[counts == 1]
-        boundary_components = nx.number_connected_components(
-            nx.Graph(boundary_edges.tolist())
-        ) if len(boundary_edges) else 0
-    else:
-        boundary_edges = []
-        boundary_components = 0
+    _, graph = boundary_graph(mesh)
     return {
         "vertices": int(len(mesh.vertices)),
         "faces": int(len(mesh.faces)),
@@ -49,31 +47,19 @@ def mesh_metrics(mesh):
         "finite": bool(np.isfinite(mesh.vertices).all()),
         "positive_volume": bool(mesh.volume > 0),
         "euler_number": int(mesh.euler_number),
-        "boundary_edges": int(len(boundary_edges)),
-        "boundary_components": int(boundary_components),
+        "boundary_edges": int(graph.number_of_edges()),
+        "boundary_components": int(nx.number_connected_components(graph)),
     }
 
 
 def boundary_loop_sizes(mesh):
-    edges = np.asarray(mesh.edges_sorted)
-    if not len(edges):
-        return []
-    unique_edges, counts = np.unique(edges, axis=0, return_counts=True)
-    boundary_edges = unique_edges[counts == 1]
-    if not len(boundary_edges):
-        return []
-    graph = nx.Graph(boundary_edges.tolist())
+    _, graph = boundary_graph(mesh)
     return sorted((len(component) for component in nx.connected_components(graph)), reverse=True)
 
 
 def cap_non_attachment_boundaries(mesh):
     """Fan-cap residual small loops while preserving the largest outer loop."""
-    edges = np.asarray(mesh.edges_sorted)
-    unique_edges, counts = np.unique(edges, axis=0, return_counts=True)
-    boundary_edges = unique_edges[counts == 1]
-    if not len(boundary_edges):
-        return mesh
-    graph = nx.Graph(boundary_edges.tolist())
+    _, graph = boundary_graph(mesh)
     loops = sorted(nx.connected_components(graph), key=len, reverse=True)
     if len(loops) <= 1:
         return mesh
@@ -149,14 +135,9 @@ def close_non_attachment_boundaries(mesh):
 
 
 def attachment_boundary_is_simple(mesh):
-    edges = np.asarray(mesh.edges_sorted)
-    if not len(edges):
+    _, graph = boundary_graph(mesh)
+    if not graph.number_of_nodes():
         return False
-    unique_edges, counts = np.unique(edges, axis=0, return_counts=True)
-    boundary_edges = unique_edges[counts == 1]
-    if not len(boundary_edges):
-        return False
-    graph = nx.Graph(boundary_edges.tolist())
     outer = max(nx.connected_components(graph), key=len)
     return all(graph.degree(vertex) == 2 for vertex in outer)
 
@@ -240,13 +221,7 @@ def clip_mesh_to_plane(mesh, normal, origin):
 
 def rotated_scan(path, degrees):
     mesh = load_mesh(path)
-    angle = np.deg2rad(degrees)
-    transform = np.eye(4)
-    transform[:3, :3] = np.array(
-        [[np.cos(angle), -np.sin(angle), 0],
-         [np.sin(angle), np.cos(angle), 0], [0, 0, 1]], dtype=float
-    )
-    mesh.apply_transform(transform)
+    mesh.apply_transform(z_rotation(degrees))
     mesh.apply_translation([0.0, -float((mesh.bounds[0, 1] + mesh.bounds[1, 1]) / 2), 0.0])
     return mesh, degrees
 
@@ -289,13 +264,7 @@ def cut_side(mesh, side, settings):
 
 
 def inverse_rotate(mesh, degrees):
-    angle = np.deg2rad(-degrees)
-    transform = np.eye(4)
-    transform[:3, :3] = np.array(
-        [[np.cos(angle), -np.sin(angle), 0],
-         [np.sin(angle), np.cos(angle), 0], [0, 0, 1]], dtype=float
-    )
-    mesh.apply_transform(transform)
+    mesh.apply_transform(z_rotation(-degrees))
     return mesh
 
 
@@ -361,13 +330,7 @@ def screened_poisson(mesh, output):
 
 def restore_attachment_boundary(poisson, planes, rotation_degrees, output, target_edge_mm):
     """Trim Poisson's exterior domain and restore the pinna/head cut boundary."""
-    angle = np.deg2rad(rotation_degrees)
-    transform = np.eye(4)
-    transform[:3, :3] = np.array(
-        [[np.cos(angle), -np.sin(angle), 0],
-         [np.sin(angle), np.cos(angle), 0], [0, 0, 1]], dtype=float
-    )
-    poisson.apply_transform(transform)
+    poisson.apply_transform(z_rotation(rotation_degrees))
     vertices = np.asarray(poisson.vertices)
     faces = np.asarray(poisson.faces)
     trimmed = None
@@ -434,9 +397,14 @@ def restore_attachment_boundary(poisson, planes, rotation_degrees, output, targe
     return verified, crop_offset_mm
 
 
-def preparation_signature(settings):
+def preparation_signature(settings, cached=True):
     source = Path(settings.scan_path)
-    return {"settings": settings.model_dump(mode="json", exclude={"require_manual_review", "reviewed_left", "reviewed_right", "original_scan_path"}), "source_sha256": sha256(source)}
+    digest = cached_sha256(source) if cached else sha256(source)
+    return {"settings": settings.model_dump(mode="json", exclude={"require_manual_review", "reviewed_left", "reviewed_right", "original_scan_path"}), "source_sha256": digest}
+
+
+# Prepared-ear digests whose serialized topology already passed in this process.
+_validated_prepared_ears = set()
 
 
 def prepared_paths(config):
@@ -455,12 +423,16 @@ def validate_prepared(config):
     for side, path in zip(("left", "right"), prepared_paths(config)):
         if path is None:
             continue
-        if report["ears"][side]["sha256"] != sha256(path):
+        digest = cached_sha256(path)
+        if report["ears"][side]["sha256"] != digest:
             raise ValueError(f"Prepared {side} ear was changed; run Scan Preparation again.")
+        if digest in _validated_prepared_ears:
+            continue
         mesh = load_mesh(path, process=True)
         checks = mesh_metrics(mesh)
         if not all(checks[k] for k in ("finite", "winding_consistent", "positive_volume")) or checks["components"] != 1 or checks["boundary_components"] != 1 or not attachment_boundary_is_simple(mesh):
             raise ValueError(f"Prepared {side} ear is unsuitable for stitching: {checks}")
+        _validated_prepared_ears.add(digest)
     return report
 
 
@@ -475,7 +447,7 @@ def prepare_scan(config, logger=print):
     # Never overwrite an input even if a project has been pointed at generated output.
     if source.resolve() == output.resolve() or output.resolve() in source.resolve().parents:
         raise ValueError("The source scan must be outside the generated Prepared folder.")
-    signature = preparation_signature(settings)
+    signature = preparation_signature(settings, cached=False)
     report = {"status": "completed", "generation": uuid.uuid4().hex, "source_identity": file_identity(source), "signature": signature, "poisson": POISSON,
               "method_source": "EvaPPM/Scripts/_support/prepare_meshes.py", "ears": {}}
     with tempfile.TemporaryDirectory(prefix="pinna-scan-") as temporary:
@@ -501,7 +473,7 @@ def prepare_scan(config, logger=print):
                 raise ValueError(f"Prepared {side} ear is on the wrong side. Review the scan's crop rotation and alignment.")
             report["ears"][side] = {"sha256": sha256(ready_path), "identity": file_identity(ready_path), "crop_boundary_inset_mm": inset,
                                     "metrics": mesh_metrics(ready)}
-        if signature != preparation_signature(settings):
+        if signature != preparation_signature(settings, cached=False):
             raise ValueError("The source scan changed during preparation; outputs were not published.")
         # No prepared meshes are published until all selected ears pass validation.
         output.mkdir(parents=True, exist_ok=True)

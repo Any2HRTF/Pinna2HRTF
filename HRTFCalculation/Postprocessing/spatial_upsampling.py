@@ -1,7 +1,8 @@
-"""Spatial HRTF upsampling using the bundled Python LocaDyn translation.
+"""Spatial HRTF upsampling using the bundled Python LocaDyn translation (locadyn.py).
 
-The original MATLAB reference and its license notices remain bundled for
-reproducible comparisons. No MATLAB or AMT installation is used at runtime.
+upsample_hrtf.m (with its helper experiment_general_fir.m) is shipped only as
+the reference implementation and license record for that translation; it is
+never executed. No MATLAB or AMT installation is used at runtime.
 """
 from __future__ import annotations
 
@@ -11,10 +12,15 @@ import tempfile
 
 
 def resolve_dependencies(settings):
-    """Check bundled Python dependencies before replacing existing exports."""
-    import numpy
-    import scipy
-    import sofar
+    """Check the Python dependencies and upsampling settings before any export work starts."""
+    import numpy  # noqa: F401
+    import scipy  # noqa: F401
+    import sofar  # noqa: F401
+    subdivisions = settings.spatial_subdivisions
+    if isinstance(subdivisions, bool) or not isinstance(subdivisions, int) or not 0 <= subdivisions <= 5:
+        raise ValueError(f"spatial_subdivisions must be an integer from 0 to 5, got {subdivisions!r}.")
+    if not isinstance(settings.spatial_normalize, bool):
+        raise ValueError(f"spatial_normalize must be true or false, got {settings.spatial_normalize!r}.")
 
 
 def dense_name(subdivisions):
@@ -33,7 +39,9 @@ def upsample_hrtf_files(output_dir, settings, logger=print):
         raise ValueError("Spatial upsampling requires at least one exported HRIR SOFA file.")
     destination = root / "Upsampled"
     if destination.exists():
-        raise FileExistsError(f"Spatial upsampling output already exists: {destination}. Enable overwrite or choose another output folder.")
+        # The pipeline always passes a fresh staging folder; overwrite handling
+        # happens when that folder is published (RunConfig._publish_export).
+        raise FileExistsError(f"Spatial upsampling expects a fresh export folder, but {destination} already exists.")
     originals = []
     for path in sources:
         sofa = sf.read_sofa(str(path))
@@ -134,6 +142,9 @@ def upsample_file(source, folder, subdivisions=3, normalize=True, logger=print):
     original = sf.read_sofa(str(source))
     ir, positions, fs, receivers = validate_input(original)
     values, positions, delays, diagnostics = interpolate(ir, positions, fs, subdivisions, normalize, logger)
+    # With normalize=False the dense set keeps the level of the HRIR export
+    # (normalize/level_offset_db); with normalize=True LocaDyn's frontal
+    # normalisation (frontal RMS 0.01) is applied on purpose.
     output = sf.Sofa('SimpleFreeFieldHRIR', version='1.0')
     # Preserve descriptive metadata; convention-specific fields use HRIR defaults.
     for name, value in vars(original).items():
@@ -141,11 +152,17 @@ def upsample_file(source, folder, subdivisions=3, normalize=True, logger=print):
             setattr(output, name, value)
     output.Data_IR = values
     output.Data_SamplingRate = fs
-    output.Data_Delay = delays  # Original LocaDyn convention: TOA in seconds, unchanged.
+    # The interpolated IRs already contain the modelled TOA. SOFA Data.Delay is
+    # an additional delay in samples, so it must be zero here; the TOA (seconds)
+    # is kept in upsampling_report.mat as 'toa_seconds'.
+    output.Data_Delay = np.zeros((1, values.shape[1]))
     output.SourcePosition = positions
     distance = np.mean(np.abs(receivers[:, 1]))
     output.ReceiverPosition = np.array([[0,distance,0],[0,-distance,0]])
     output.GLOBAL_History = original.GLOBAL_History + ' Python translation of ExpSuite LocaDyn revision 1948.'
+    note = ('Spatially upsampled with LocaDyn; IRs contain the time of arrival, Data.Delay is zero; '
+            'level matches the input HRIRs.')
+    output.GLOBAL_Comment = f"{original.GLOBAL_Comment} {note}".strip() if getattr(original, 'GLOBAL_Comment', '') else note
     folder = Path(folder)
     folder.mkdir(parents=True)
     target = folder / dense_name(subdivisions)
@@ -156,7 +173,7 @@ def upsample_file(source, folder, subdivisions=3, normalize=True, logger=print):
               "inputDirections": len(ir), "outputDirections": len(values),
               "samplingRate": fs, "irSamples": ir.shape[-1],
               "normalizationGain": diagnostics['normalization_gain']}
-    savemat(folder / 'upsampling_report.mat', dict(result=report, **diagnostics))
+    savemat(folder / 'upsampling_report.mat', dict(result=report, toa_seconds=delays, **diagnostics))
     (folder / 'upsampling_report.txt').write_text(
         '\n'.join(f'{key}: {value}' for key, value in report.items()) + '\n', encoding='utf-8')
     return target

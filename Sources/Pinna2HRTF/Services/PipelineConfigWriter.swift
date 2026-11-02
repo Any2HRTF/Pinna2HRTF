@@ -120,8 +120,9 @@ enum PipelineConfigWriter {
                 "normalize": post.normalize, "level_offset_db": number(post.levelOffsetDB, fallback: -30),
                 "resample_hrirs": post.resampleHrirs, "sampling_rate": post.normalizedSamplingRate,
                 "spatial_upsampling": post.spatialUpsampling, "spatial_subdivisions": post.spatialSubdivisions,
-                "spatial_normalize": post.spatialNormalize,
-                "matlab_executable": nullable(post.matlabExecutable), "amt_path": nullable(post.amtPath)
+                "spatial_normalize": post.spatialNormalize
+                // matlab_executable and amt_path are deprecated: Python still accepts
+                // them in old configs but no longer uses them, so they are not written.
             ]
         ]
     }

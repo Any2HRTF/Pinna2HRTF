@@ -46,7 +46,7 @@ struct ProjectSidebarView: View {
                     Label(selectedFolderID == nil ? "Remove project" : "Remove folder", systemImage: "minus")
                         .frame(width: 28, height: 28)
                 }
-                .help(selectedFolderID == nil ? "Move the selected project folder to Trash" : "Remove the selected folder and keep its projects")
+                .help(selectedFolderID == nil ? "Remove the selected project (its folder moves to Trash only if the app created it)" : "Remove the selected folder and keep its projects")
                 .disabled(selectedFolderID == nil && !store.canRemoveSelectedProject)
                 Button { editFolder() } label: {
                     Label("New folder", systemImage: "folder.badge.plus").frame(width: 28, height: 28)

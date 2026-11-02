@@ -1,12 +1,34 @@
 import Foundation
 
-final class ProjectRegistryStore {
+/// Reads and writes `projects.json`.
+///
+/// Writes run on a private serial queue and are atomic. The bytes last known to be
+/// on disk are kept in memory, so a save only needs to decode the file on disk when
+/// someone else changed it. Status properties are safe to read from any thread.
+final class ProjectRegistryStore: @unchecked Sendable {
     let url: URL
     let rootURL: URL
     let packageURL: URL
-    private(set) var recoveryMessage: String?
-    private(set) var savingBlocked = false
-    private(set) var lastError: String?
+    private let ioQueue = DispatchQueue(label: "Pinna2HRTF.ProjectRegistry", qos: .utility)
+    private let stateLock = NSLock()
+    private var _recoveryMessage: String?
+    private var _savingBlocked = false
+    private var _lastError: String?
+    /// Bytes most recently read from or written to `url` (ioQueue only, or before first save).
+    private var lastGoodData: Data?
+
+    private(set) var recoveryMessage: String? {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _recoveryMessage }
+        set { stateLock.lock(); _recoveryMessage = newValue; stateLock.unlock() }
+    }
+    private(set) var savingBlocked: Bool {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _savingBlocked }
+        set { stateLock.lock(); _savingBlocked = newValue; stateLock.unlock() }
+    }
+    private(set) var lastError: String? {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _lastError }
+        set { stateLock.lock(); _lastError = newValue; stateLock.unlock() }
+    }
     var backupURL: URL { url.deletingPathExtension().appendingPathExtension("backup.json") }
 
 
@@ -26,6 +48,7 @@ final class ProjectRegistryStore {
 
     func load() -> ProjectRegistry {
         if let data = try? Data(contentsOf: url), let registry = decode(data) {
+            lastGoodData = data
             // Preserve the exact original before geometry migration is persisted.
             if let object = try? JSONSerialization.jsonObject(with: data),
                let geometry = try? HeadGeometrySettings.migrateRegistry(object),
@@ -54,6 +77,10 @@ final class ProjectRegistryStore {
 
     @discardableResult
     func recover(using registry: ProjectRegistry) -> Bool {
+        ioQueue.sync { recoverOnQueue(using: registry) }
+    }
+
+    private func recoverOnQueue(using registry: ProjectRegistry) -> Bool {
         do {
             if FileManager.default.fileExists(atPath: url.path) {
                 let preserved = url.deletingLastPathComponent().appendingPathComponent("projects-unreadable-\(UUID().uuidString).json")
@@ -63,7 +90,9 @@ final class ProjectRegistryStore {
                 let preserved = url.deletingLastPathComponent().appendingPathComponent("projects-backup-unreadable-\(UUID().uuidString).json")
                 try FileManager.default.copyItem(at: backupURL, to: preserved)
             }
-            try JSONEncoder.pretty.encode(registry).write(to: url, options: .atomic)
+            let data = try JSONEncoder.pretty.encode(registry)
+            try data.write(to: url, options: .atomic)
+            lastGoodData = data
             savingBlocked = false
             recoveryMessage = nil
             lastError = nil
@@ -96,11 +125,28 @@ final class ProjectRegistryStore {
         return value
     }
 
+    /// Saves synchronously (start-up and quit).
     @discardableResult
     func save(_ registry: ProjectRegistry) -> Bool {
+        ioQueue.sync { write(registry) }
+    }
+
+    /// Saves on the background queue; `completion` runs on the main queue.
+    func saveInBackground(_ registry: ProjectRegistry, completion: @escaping @Sendable (Bool) -> Void) {
+        ioQueue.async { [self] in
+            let saved = write(registry)
+            DispatchQueue.main.async { completion(saved) }
+        }
+    }
+
+    /// Waits for queued background saves to finish.
+    func waitForPendingSaves() { ioQueue.sync {} }
+
+    private func write(_ registry: ProjectRegistry) -> Bool {
         guard !savingBlocked else { lastError = recoveryMessage; return false }
 
         do {
+            let data = try JSONEncoder.pretty.encode(registry)
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             // Keep the last readable version before replacing the primary file.
             if FileManager.default.fileExists(atPath: url.path) {
@@ -110,7 +156,9 @@ final class ProjectRegistryStore {
                     lastError = recoveryMessage
                     return false
                 }
-                guard decode(previous) != nil else {
+                if previous == data { lastGoodData = data; lastError = nil; return true }
+                // Only a file someone else changed needs a full decode.
+                guard previous == lastGoodData || decode(previous) != nil else {
                     savingBlocked = true
                     recoveryMessage = "The project list on disk became unreadable. It has been preserved. Restore the in-memory project list to continue saving changes."
                     lastError = recoveryMessage
@@ -118,7 +166,8 @@ final class ProjectRegistryStore {
                 }
                 try previous.write(to: backupURL, options: .atomic)
             }
-            try JSONEncoder.pretty.encode(registry).write(to: url, options: .atomic)
+            try data.write(to: url, options: .atomic)
+            lastGoodData = data
             lastError = nil
             return true
         } catch {

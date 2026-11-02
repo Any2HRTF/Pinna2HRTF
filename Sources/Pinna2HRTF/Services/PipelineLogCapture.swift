@@ -81,31 +81,45 @@ final class PipelineLogCapture: @unchecked Sendable {
 }
 
 // Both pipeline runs and environment setup must drain their final bytes before completing.
+// A grandchild (for example a detached NumCalc) can inherit the pipe and keep it
+// open after the direct child exits, so the final drain is non-blocking and bounded.
 extension Process {
-    func run(capturing capture: PipelineLogCapture?, onExit: @escaping @Sendable (Process) -> Void) throws {
+    func run(capturing capture: PipelineLogCapture?, drainTimeout: TimeInterval = 2,
+             onExit: @escaping @Sendable (Process) -> Void) throws {
         let pipe = Pipe()
+        let reader = pipe.fileHandleForReading
+        // Guards reads against the final drain and the close that follows it.
         let readLock = NSLock()
+        let state = LockedValue(false) // true once the handle is being drained or closed
         standardOutput = pipe
         standardError = pipe
-        pipe.fileHandleForReading.readabilityHandler = { handle in
+        reader.readabilityHandler = { handle in
             readLock.lock()
             defer { readLock.unlock() }
+            guard !state.value else { return }
             let data = handle.availableData
+            if data.isEmpty {
+                // EOF: nobody holds the write end any more.
+                handle.readabilityHandler = nil
+                return
+            }
             capture?.append(data)
         }
         terminationHandler = { process in
-            pipe.fileHandleForReading.readabilityHandler = nil
+            reader.readabilityHandler = nil
             readLock.lock()
-            let remaining = pipe.fileHandleForReading.readDataToEndOfFile()
+            state.value = true
+            let remaining = ProcessLauncher.drain(reader.fileDescriptor, deadline: Date().addingTimeInterval(drainTimeout))
             capture?.append(remaining)
             capture?.finish()
+            try? reader.close()
             readLock.unlock()
             onExit(process)
         }
         do {
             try run()
         } catch {
-            pipe.fileHandleForReading.readabilityHandler = nil
+            reader.readabilityHandler = nil
             terminationHandler = nil
             capture?.finish()
             throw error

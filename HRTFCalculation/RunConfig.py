@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import argparse
-import json
-import platform
-import subprocess
-import shutil
 import hashlib
+import json
+import os
+import shlex
+import shutil
+import subprocess
 import tempfile
 import uuid
-from pathlib import Path
+from contextlib import contextmanager
+from datetime import datetime
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from typing import Callable, Iterable
 
@@ -49,12 +52,26 @@ def run_scan_preparation(config, dry_run, logger, force=False):
         else:
             emit_live_event("Prepared ears are current; reusing them")
             logger(f"Scan preparation is current; reusing prepared ears in {config.paths.output_dir / 'Prepared'}")
-            return
+            return False
     emit_live_event(f"Preparing {Path(settings.scan_path).name} · crop rotation {settings.rotation_degrees:g}°")
     logger(f"Preparing full-head scan {settings.scan_path} into {config.paths.output_dir / 'Prepared'}; crop rotation {settings.rotation_degrees} degrees")
-    if not dry_run:
-        from .ScanPreparation import prepare_scan
-        prepare_scan(config, logger)
+    if dry_run:
+        return False
+    from .ScanPreparation import prepare_scan
+    prepare_scan(config, logger)
+    return True
+
+
+def forget_ear_reviews(config: PipelineConfig, logger: Logger) -> None:
+    """Fresh prepared ears supersede earlier manual edits for the rest of this run.
+
+    Only this run's working copy changes (the desktop apps clear the saved
+    project settings themselves).
+    """
+    settings = config.scan_preparation
+    if settings.reviewed_left is not None or settings.reviewed_right is not None:
+        logger("Scan preparation produced new ears; earlier manual ear edits are not used in this run.")
+        settings.reviewed_left = settings.reviewed_right = None
 
 
 def project_dirs(config: PipelineConfig) -> list[Path]:
@@ -65,14 +82,23 @@ def run_from_config(config: PipelineConfig, stages: Iterable[str] | None = None,
     selected = list(stages or ["all"])
     config = config.resolved()
     run_all = "all" in selected
+    ear_stages = [name for name in ("inference", "preprocessing", "numcalc", "postprocessing")
+                  if name in selected or (run_all and getattr(config, name).enabled)]
+    if ear_stages and not config.scan_preparation.enabled and config.paths.left_ear is None and config.paths.right_ear is None:
+        raise ValueError("Set paths.left_ear and/or paths.right_ear, or enable scan_preparation.")
+    prepared = False
     if "scan-preparation" in selected:
-        run_scan_preparation(config, dry_run, logger, force=True)
+        prepared = run_scan_preparation(config, dry_run, logger, force=True)
     elif run_all and config.scan_preparation.enabled:
-        run_scan_preparation(config, dry_run, logger)
+        prepared = run_scan_preparation(config, dry_run, logger)
+    if prepared:
+        forget_ear_reviews(config, logger)
     if "inference" in selected or (run_all and config.inference.enabled):
         run_inference(config, dry_run, logger)
     if "preprocessing" in selected and config.scan_preparation.enabled and "scan-preparation" not in selected:
-        run_scan_preparation(config, dry_run, logger)
+        prepared = run_scan_preparation(config, dry_run, logger) or prepared
+        if prepared:
+            forget_ear_reviews(config, logger)
     if "preprocessing" in selected or (run_all and config.preprocessing.enabled):
         run_preprocessing(config, dry_run, logger)
     if "numcalc" in selected or (run_all and config.numcalc.enabled):
@@ -107,13 +133,8 @@ def run_inference(config: PipelineConfig, dry_run: bool, logger: Logger) -> None
         "Intermediates/Prediction Parameters Left", "Intermediates/Prediction Parameters Right",
         "Intermediates/ICP STL Left", "Intermediates/ICP STL Right"
     ])
-    selected_input_paths = [path.resolve() for path in (config.paths.left_ear, config.paths.right_ear) if path is not None]
-    for name in legacy_folders:
-        legacy_path = config.paths.output_dir / name
-        if legacy_path.is_dir() and not any(legacy_path.resolve() in path.parents for path in selected_input_paths):
-            shutil.rmtree(legacy_path)
-        elif legacy_path.is_file() and legacy_path.resolve() not in selected_input_paths:
-            legacy_path.unlink()
+    archive_legacy_outputs(config.paths.output_dir, legacy_folders,
+                           [path for path in (config.paths.left_ear, config.paths.right_ear) if path is not None], logger)
     args = SimpleNamespace(
         configuration=str(config.inference.model_config_file),
         model_checkpoint=str(config.inference.model_checkpoint),
@@ -137,6 +158,31 @@ def run_inference(config: PipelineConfig, dry_run: bool, logger: Logger) -> None
         if any(path is None for path in predictions):
             raise ValueError("Inference did not produce all selected prepared-ear predictions.")
         record_stage(config, "inference", predictions)
+
+
+def archive_legacy_outputs(output_dir: Path, names: Iterable[str], inputs: Iterable[Path], logger: Logger) -> Path | None:
+    """Move outputs of older folder layouts aside; never delete them.
+
+    They may contain user data, so they go to a timestamped backup under
+    <output>/.pinna2hrtf/backups/ that the user can inspect or remove.
+    """
+    selected = [Path(path).resolve() for path in inputs]
+    backup_root = None
+    for name in names:
+        legacy_path = output_dir / name
+        if not legacy_path.exists() or legacy_path.is_symlink():
+            continue
+        resolved = legacy_path.resolve()
+        if any(resolved == path or resolved in path.parents for path in selected):
+            continue
+        if backup_root is None:
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup_root = output_dir / ".pinna2hrtf" / "backups" / f"legacy-inference-{stamp}-{uuid.uuid4().hex[:6]}"
+        target = backup_root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(legacy_path), str(target))
+        logger(f"Moved legacy output {legacy_path} to {target}")
+    return backup_root
 
 
 def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
@@ -223,16 +269,11 @@ def run_numcalc_local(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
     for project_dir in projects:
         if not (project_dir / "parameters.json").exists():
             raise FileNotFoundError(f"Missing Mesh2HRTF project: {project_dir}")
-    if not config.paths.numcalc_executable.exists():
-        raise FileNotFoundError(f"Missing NumCalc executable: {config.paths.numcalc_executable}")
-    numcalc_path = config.paths.numcalc_executable
-    if platform.system() == "Windows" and numcalc_path.is_file():
-        numcalc_path = numcalc_path.parent
-        logger(f"Using Windows NumCalc runtime folder: {numcalc_path}")
+    from .NumCalc import resolve_numcalc_executable, run_local_numcalc
+    numcalc_path = resolve_numcalc_executable(config.paths.numcalc_executable)
     logger(f"Local NumCalc project root: {projects_root}")
     if dry_run:
         return
-    from .NumCalc import run_local_numcalc
     run_local_numcalc(
         project_path=projects_root,
         numcalc_path=numcalc_path,
@@ -266,33 +307,41 @@ def run_numcalc_slurm(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
             f"--array=1-{steps}%{config.numcalc.array_concurrency}",
             f"--output={config.paths.output_dir}/slurm-%x-%A_%a.out",
             "--wrap",
-            f"bash '{worker}' '{project_dir}'",
+            f"bash {shlex.quote(str(worker))} {shlex.quote(str(project_dir))}",
         ]
-        logger(" ".join(command))
+        logger(shlex.join(command))
         if not dry_run:
             subprocess.run(command, check=True)
 
 
 def slurm_worker_text(config: PipelineConfig) -> str:
-    adaptive_flag = "-adapt_fmmlength" if config.numcalc.adaptive_fmm_length else ""
+    # Mirrors NumCalc.frequency_step_complete: all four outputs are non-empty and
+    # the step log contains NumCalc's end marker.
+    adaptive_flag = " -adapt_fmmlength" if config.numcalc.adaptive_fmm_length else ""
     return "\n".join([
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         "PROJECT_DIR=\"${1:?missing project dir}\"",
         "STEP=\"${SLURM_ARRAY_TASK_ID:?missing array step}\"",
-        f"NUMCALC_EXE=\"{config.paths.numcalc_executable}\"",
-        "SOURCE_DIR=\"$PROJECT_DIR/NumCalc/source_1\"",
-        "OUTPUT_DIR=\"$SOURCE_DIR/be.out/be.$STEP\"",
-        "if [[ -d \"$OUTPUT_DIR\" ]]; then exit 0; fi",
-        "cd \"$SOURCE_DIR\"",
-        f"\"$NUMCALC_EXE\" {adaptive_flag} -istart \"$STEP\" -iend \"$STEP\" > \"NC${{STEP}}-${{STEP}}_log.txt\"",
+        f"NUMCALC_EXE={shlex.quote(str(config.paths.numcalc_executable))}",
+        "step_complete() {",
+        "    local source_dir=\"$1\" name",
+        "    for name in pBoundary pEvalGrid vBoundary vEvalGrid; do",
+        "        [[ -f \"$source_dir/be.out/be.$STEP/$name\" && -s \"$source_dir/be.out/be.$STEP/$name\" ]] || return 1",
+        "    done",
+        "    [[ -f \"$source_dir/NC${STEP}-${STEP}_log.txt\" ]] && grep -qF -- '---------- NumCalc ended:' \"$source_dir/NC${STEP}-${STEP}_log.txt\"",
+        "}",
+        "shopt -s nullglob",
+        "SOURCE_DIRS=(\"$PROJECT_DIR\"/NumCalc/source_*/)",
+        "if (( ${#SOURCE_DIRS[@]} == 0 )); then echo \"No NumCalc source folders in $PROJECT_DIR\" >&2; exit 1; fi",
+        "for SOURCE_DIR in \"${SOURCE_DIRS[@]}\"; do",
+        "    SOURCE_DIR=\"${SOURCE_DIR%/}\"",
+        "    if step_complete \"$SOURCE_DIR\"; then echo \"Step $STEP already complete in $SOURCE_DIR\"; continue; fi",
+        "    (cd \"$SOURCE_DIR\" && \"$NUMCALC_EXE\"" + adaptive_flag + " -istart \"$STEP\" -iend \"$STEP\" > \"NC${STEP}-${STEP}_log.txt\" 2>&1)",
+        "    if ! step_complete \"$SOURCE_DIR\"; then echo \"NumCalc produced incomplete output for step $STEP in $SOURCE_DIR\" >&2; exit 1; fi",
+        "done",
         "",
     ])
-
-
-def prepare_sofa_output(output_dir: Path, overwrite: bool) -> None:
-    # Export must never recursively delete an arbitrary user-selected directory.
-    output_dir.mkdir(parents=True, exist_ok=True)
 
 
 def collect_sofa_files(projects: list[Path], output_dir: Path) -> None:
@@ -331,7 +380,12 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
     published = False
     try:
         _export_postprocessing(config, staging, logger)
-        _publish_export(staging, destination, config.postprocessing.overwrite, root)
+        with _output_manifest_lock(root) as can_record:
+            published_files = _publish_export(staging, destination, config.postprocessing.overwrite, root)
+            if can_record:
+                _record_published_outputs(root, published_files, logger)
+            else:
+                logger("Generated-output manifest is held by the desktop app; it records the published files.")
         published = True
     finally:
         backups = staging / ".backups"
@@ -342,11 +396,121 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
             logger(f"Recovery copies retained in {staging}")
 
 
-def _publish_export(staging, destination, overwrite, project_root=None):
+MANIFEST_RELATIVE = Path(".pinna2hrtf") / "generated-output-manifest.json"
+_DOTNET_EPOCH_TICKS = 621355968000000000
+
+
+def _read_output_manifest(project_root: Path) -> dict:
+    """Read the generated-output manifest shared with the desktop apps (schema v1).
+
+    A missing manifest is an empty one: nothing is owned yet.
+    """
+    path = project_root / MANIFEST_RELATIVE
+    if not path.is_file():
+        return {"Version": 1, "Files": {}, "Directories": {}}
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict) or document.get("Version") != 1 or not isinstance(document.get("Files", {}), dict) \
+            or not isinstance(document.get("Directories", {}), dict):
+        raise ValueError(f"Unsupported generated-output manifest: {path}")
+    document.setdefault("Files", {})
+    document.setdefault("Directories", {})
+    return document
+
+
+def _manifest_key(mapping: dict, relative: str) -> str | None:
+    # The Windows app compares manifest paths case-insensitively.
+    if relative in mapping:
+        return relative
+    folded = relative.casefold()
+    return next((key for key in mapping if key.casefold() == folded), None)
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+@contextmanager
+def _output_manifest_lock(project_root: Path):
+    """Take the apps' .pinna2hrtf/outputs.lock without blocking.
+
+    Yields False while a desktop app holds it (it runs this stage and captures
+    the published outputs itself when the run completes).
+    """
+    metadata = project_root / ".pinna2hrtf"
+    metadata.mkdir(parents=True, exist_ok=True)
+    try:
+        handle = (metadata / "outputs.lock").open("a+b")
+    except OSError:
+        yield False
+        return
+    try:
+        if os.name == "nt":
+            import msvcrt
+            try:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                yield False
+                return
+            try:
+                yield True
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                yield False
+                return
+            try:
+                yield True
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        handle.close()
+
+
+def _record_published_outputs(project_root: Path, files: list[Path], logger: Logger) -> None:
+    """Record published files in the manifest, using the Swift/Windows entry format."""
+    document = _read_output_manifest(project_root)
+    for path in files:
+        relative = path.relative_to(project_root).as_posix()
+        # Whole-second mtimes give identical .NET ticks in Python, Swift and C#.
+        info = path.stat()
+        os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns - info.st_mtime_ns % 1_000_000_000))
+        info = path.stat()
+        entry = {"Stage": "Postprocessing", "Size": info.st_size,
+                 "ModifiedUtcTicks": info.st_mtime_ns // 100 + _DOTNET_EPOCH_TICKS,
+                 "Sha256": _file_sha256(path).upper()}
+        document["Files"][_manifest_key(document["Files"], relative) or relative] = entry
+        parent = PurePosixPath(relative).parent
+        while str(parent) != ".":
+            if _manifest_key(document["Directories"], str(parent)) is None:
+                document["Directories"][str(parent)] = "Postprocessing"
+            parent = parent.parent
+    manifest = project_root / MANIFEST_RELATIVE
+    temporary = manifest.with_name(f"{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(temporary, manifest)
+    finally:
+        temporary.unlink(missing_ok=True)
+    logger(f"Recorded {len(files)} published files in {manifest}")
+
+
+def _publish_export(staging, destination, overwrite, project_root=None) -> list[Path]:
     destination.mkdir(parents=True, exist_ok=True)
     backups = staging / ".backups"
     backups.mkdir()
     installed = []
+    # Read once: only files whose current hash matches a manifest entry may be replaced.
+    owned_files = _read_output_manifest(project_root)["Files"] if project_root is not None else {}
     try:
         for source in list(staging.rglob("*")):
             if not source.is_file() or backups in source.parents:
@@ -361,11 +525,10 @@ def _publish_export(staging, destination, overwrite, project_root=None):
                 if not overwrite:
                     raise FileExistsError(target)
                 if project_root is not None:
-                    manifest = project_root / ".pinna2hrtf/generated-output-manifest.json"
-                    owned = json.loads(manifest.read_text())["Files"].get(str(target.relative_to(project_root)))
-                    digest = hashlib.sha256(target.read_bytes()).hexdigest()
-                    if not owned or digest.lower() != owned["Sha256"].lower():
-                        raise ValueError(f"Keeping modified or untracked output: {target}")
+                    key = _manifest_key(owned_files, target.relative_to(project_root).as_posix())
+                    owned = owned_files.get(key) if key is not None else None
+                    if not isinstance(owned, dict) or _file_sha256(target).lower() != str(owned.get("Sha256", "")).lower():
+                        raise ValueError(f"Keeping modified or untracked output: {target}. Move it away, then export again.")
                 backup.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(target, backup)
             installed.append((target, backup))
@@ -377,6 +540,7 @@ def _publish_export(staging, destination, overwrite, project_root=None):
             else:
                 target.unlink(missing_ok=True)
         raise
+    return [target for target, _ in installed]
 
 
 def _export_postprocessing(config, output_dir, logger):
@@ -435,13 +599,10 @@ def parse_numcalc_args() -> argparse.Namespace:
 
 def numcalc_cli() -> None:
     args = parse_numcalc_args()
-    numcalc_path = Path(args.numcalc_path).expanduser().resolve()
-    if platform.system() == "Windows" and numcalc_path.is_file():
-        numcalc_path = numcalc_path.parent
     from .NumCalc import run_local_numcalc
     run_local_numcalc(
         project_path=Path(args.project_path).expanduser().resolve(),
-        numcalc_path=numcalc_path,
+        numcalc_path=Path(args.numcalc_path),
         max_ram_load_gb=args.max_ram_load_gb,
         ram_safety_factor=args.ram_safety_factor,
         max_instances=args.max_instances,
@@ -457,7 +618,6 @@ def parse_sofa_args() -> argparse.Namespace:
     parser.add_argument("--left-project")
     parser.add_argument("--right-project")
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
 
 
@@ -465,7 +625,8 @@ def sofa_cli() -> None:
     args = parse_sofa_args()
     import mesh2hrtf as m2h
     output_dir = Path(args.output_dir)
-    prepare_sofa_output(output_dir, args.overwrite)
+    # Export never deletes anything in a user-selected directory.
+    output_dir.mkdir(parents=True, exist_ok=True)
     projects = [Path(project) for project in (args.left_project, args.right_project) if project]
     if not projects:
         raise SystemExit("At least one project is required")

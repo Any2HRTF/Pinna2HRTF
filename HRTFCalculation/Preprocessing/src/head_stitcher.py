@@ -12,6 +12,7 @@ September 2024
 
 import argparse
 import os
+import sys
 import bpy
 import bmesh
 import trimesh
@@ -55,6 +56,12 @@ def boundary_components(bm):
 
 
 def fill_boundaries(seam_smoothing_iterations=0, seam_smoothing_factor=0.35):
+    """Bridge the ear to the head and fill remaining holes.
+
+    Returns a list of human-readable descriptions of bmesh operations that failed,
+    so callers can report them if the result is not a single connected mesh.
+    """
+    failures = []
     obj = bpy.context.active_object
     if obj.type != 'MESH':
         raise TypeError("Active object is not a mesh")
@@ -68,8 +75,14 @@ def fill_boundaries(seam_smoothing_iterations=0, seam_smoothing_factor=0.35):
         try:
             result = bmesh.ops.bridge_loops(bm, edges=components[0] + components[1])
             bridge_faces = [face for face in result.get('faces', []) if isinstance(face, bmesh.types.BMFace)]
-        except Exception:
-            pass
+        except Exception as error:
+            message = f"bridge_loops between the two largest boundary loops failed: {error}"
+            print(f"head_stitcher: {message}", file=sys.stderr)
+            failures.append(message)
+    else:
+        message = f"expected at least two boundary loops to bridge, found {len(components)}"
+        print(f"head_stitcher: {message}", file=sys.stderr)
+        failures.append(message)
 
     if bridge_faces and seam_smoothing_iterations > 0:
         seam_verts = sorted({vert for face in bridge_faces for vert in face.verts}, key=lambda vert: vert.index)
@@ -80,8 +93,10 @@ def fill_boundaries(seam_smoothing_iterations=0, seam_smoothing_factor=0.35):
     for component in components:
         try:
             bmesh.ops.holes_fill(bm, edges=component, sides=0)
-        except Exception:
-            pass
+        except Exception as error:
+            message = f"holes_fill failed for a boundary loop with {len(component)} edges: {error}"
+            print(f"head_stitcher: {message}", file=sys.stderr)
+            failures.append(message)
 
     loose = [vert for vert in bm.verts if len(vert.link_faces) == 0]
     if len(loose) > 0:
@@ -91,6 +106,7 @@ def fill_boundaries(seam_smoothing_iterations=0, seam_smoothing_factor=0.35):
 
     bmesh.update_edit_mesh(obj.data)
     bpy.ops.object.mode_set(mode='OBJECT')
+    return failures
 
 
 def head_stitcher(head_path, ear_path, export_path, seam_smoothing_iterations=0, seam_smoothing_factor=0.35):
@@ -98,10 +114,10 @@ def head_stitcher(head_path, ear_path, export_path, seam_smoothing_iterations=0,
     head = load_stl(head_path, 'head')
     ear = load_stl(ear_path, 'ear')
     join_meshes([head, ear])
-    fill_boundaries(seam_smoothing_iterations=seam_smoothing_iterations, seam_smoothing_factor=seam_smoothing_factor)
+    failures = fill_boundaries(seam_smoothing_iterations=seam_smoothing_iterations, seam_smoothing_factor=seam_smoothing_factor)
     bpy.ops.wm.stl_export(filepath=export_path)
 
-    mesh = trimesh.load(export_path)
+    mesh = trimesh.load(export_path, force="mesh")
     components = mesh.split(only_watertight=False)
     if len(components) > 1:
         largest = max(components, key=lambda component: len(component.faces))
@@ -111,7 +127,8 @@ def head_stitcher(head_path, ear_path, export_path, seam_smoothing_iterations=0,
         else:
             if os.path.exists(export_path):
                 os.remove(export_path)
-            raise RuntimeError(f"Stitching failed: expected a single connected component, found {len(components)}.")
+            cause = f" Possible cause: {'; '.join(failures)}." if failures else ""
+            raise RuntimeError(f"Stitching failed: expected a single connected component, found {len(components)}.{cause}")
     mesh.remove_unreferenced_vertices()
     mesh.export(export_path)
 

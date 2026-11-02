@@ -8,7 +8,9 @@ reconstruction runs after a manual edit.
 """
 from __future__ import annotations
 
-from .FileIdentity import sha256 as digest, file_identity as identity
+from .FileIdentity import cached_sha256, sha256 as digest, file_identity as identity
+from .Geometry import boundary_graph, load_mesh
+from .LiveEvents import emit_live_event
 import json
 from pathlib import Path
 import uuid
@@ -19,15 +21,7 @@ import trimesh
 
 
 def load(path, merge=False):
-    mesh = trimesh.load_mesh(path, process=False)
-    if isinstance(mesh, trimesh.Scene):
-        mesh = trimesh.util.concatenate(tuple(mesh.geometry.values()))
-    if merge:
-        mesh.merge_vertices()
-        mesh.remove_unreferenced_vertices()
-    if not len(mesh.faces) or not np.isfinite(mesh.vertices).all():
-        raise ValueError('The mesh must contain finite, nonempty triangle geometry.')
-    return mesh
+    return load_mesh(path, process=False, merge=merge, validate=True)
 
 
 def nose_ear_transform(points):
@@ -79,8 +73,7 @@ def delete_faces(mesh, indices):
 
 
 def topology(mesh):
-    edges, counts = np.unique(mesh.edges_sorted, axis=0, return_counts=True)
-    boundary = nx.Graph(edges[counts == 1].tolist())
+    counts, boundary = boundary_graph(mesh)
     loops = list(nx.connected_components(boundary))
     return dict(vertices=len(mesh.vertices), faces=len(mesh.faces),
                 components=len(mesh.split(only_watertight=False, repair=False)),
@@ -183,8 +176,16 @@ def execute(request):
     return result
 
 
+class StaleEarReview(ValueError):
+    """A saved manual ear edit no longer matches the current prepared ear."""
+
+
 def reviewed_inputs(config, validate=True):
-    """Use current manual ear edits when available; otherwise use prepared meshes."""
+    """Use manual ear edits when selected, otherwise the prepared meshes.
+
+    A stale edit is an error rather than a silent fallback: the user must
+    review the ear again or clear the saved review. The config is not changed.
+    """
     folder = config.paths.output_dir / 'Prepared'
     settings = config.scan_preparation
     report = None
@@ -209,15 +210,16 @@ def reviewed_inputs(config, validate=True):
                 receipt = json.loads(path.with_suffix('.json').read_text())
                 current = (receipt.get('kind') == 'ear' and receipt.get('side') == side and
                            receipt.get('generation') == report['generation'] and
-                           receipt.get('source_sha256') == digest(base) and
-                           receipt.get('output_sha256') == digest(path))
+                           receipt.get('source_sha256') == cached_sha256(base) and
+                           receipt.get('output_sha256') == cached_sha256(path))
             except (OSError, ValueError, KeyError, TypeError):
                 current = False
             if not current:
-                print(f'Saved {side} ear review is out of date; using the current prepared mesh.', flush=True)
-                setattr(settings, reviewed_attr, None)
-                results.append(base)
-                continue
+                emit_live_event(f'Saved {side} ear edit is out of date; review the {side} ear again', level='warning')
+                raise StaleEarReview(
+                    f'The saved {side} ear edit ({path}) no longer matches the current prepared ear. '
+                    f'Review the {side} ear again in the mesh editor, or clear scan_preparation.{reviewed_attr} '
+                    'to use the prepared mesh.')
             validate_ear(load(path, merge=True))
         results.append(path)
     return tuple(results)

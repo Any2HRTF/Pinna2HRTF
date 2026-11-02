@@ -294,9 +294,13 @@ final class PPMFittingModel: ObservableObject {
     private func execute(_ command: [String: Any]) async throws -> [String: Any] {
         let input = try JSONSerialization.data(withJSONObject: command, options: [.sortedKeys])
         let worker: PPMFittingPythonWorker
-        if let pythonWorker {
+        if let pythonWorker, pythonWorker.isRunning {
             worker = pythonWorker
         } else {
+            // A worker that died keeps no fitting state; only a fresh "initialize" can use a new one.
+            if pythonWorker != nil, command["action"] as? String != "initialize" {
+                throw ProjectValidation.Failure(message: "The PPM fitting worker stopped unexpectedly. Reopen the editor to retry.")
+            }
             guard let pythonURL = ProjectConfigDocument.pythonURL else {
                 throw ProjectValidation.Failure(message: "The bundled Python runtime is unavailable.")
             }

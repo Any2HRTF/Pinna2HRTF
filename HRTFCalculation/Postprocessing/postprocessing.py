@@ -1,17 +1,9 @@
-import os
-import shutil
-import argparse
 import glob
-import logging
 from pathlib import Path
 
-import pandas as pd
 import mesh2hrtf as m2h
 import numpy as np
 import sofar as sf
-
-
-logger = logging.getLogger(__name__)
 
 
 def resample_hrir_files(output_dir, sampling_rate=48000):
@@ -46,120 +38,15 @@ def normalize_sofa_files(output_dir, level_offset_db):
         sf.write_sofa(sofa_path, sofa)
 
 
-def main(args):
-    print(f"------------------------------------------------------------------------------")
-    print(f"\nRunning postprocessing.py for data in: {args.data_dir}\n")
-    print(f"------------------------------------------------------------------------------")
-
-
-    if not os.path.isdir(f"{args.data_dir}/Target HRTF/"):
-        os.mkdir(f"{args.data_dir}/Target HRTF/")
-    else:
-        shutil.rmtree(f"{args.data_dir}/Target HRTF/")
-        os.mkdir(f"{args.data_dir}/Target HRTF/")
-
-    if not os.path.isdir(f"{args.data_dir}/Prediction HRTF/"):
-        os.mkdir(f"{args.data_dir}/Prediction HRTF/")
-    else:
-        shutil.rmtree(f"{args.data_dir}/Prediction HRTF/")
-        os.mkdir(f"{args.data_dir}/Prediction HRTF/")
-
-    ids = [
-        entry for entry in os.listdir(f"{args.data_dir}/Target Left/")
-        if os.path.isdir(f"{args.data_dir}/Target Left/{entry}")
-    ]
-
-    failed_ids = []
-    all_ids = []
-
-    for id in ids:
-        all_ids.append(id)
-        for scan_type in ["Target", "Prediction"]:
-            direction_failed = False
-            try:
-                for direction in ["Left", "Right"]:
-                    print(f"-------------------------------")
-                    print(f"Processing {direction} for {id} of {scan_type}")
-                    print(f"-------------------------------")
-                    try:
-                        path = f"{args.data_dir}/{scan_type} {direction}"
-                        project_path = f"{path}/{id}"
-                        m2h.output2hrtf(project_path)
-                        if args.resample_hrirs:
-                            resample_hrir_files(f"{project_path}/Output2HRTF", args.sampling_rate)
-                        if args.normalize:
-                            normalize_sofa_files(f"{path}/{id}/Output2HRTF", args.level_offset_db)
-                        if os.path.isfile(f'{path}/{id}/Output2HRTF/report_issues.txt'):
-                            direction_failed = True
-                            failed_ids.append(
-                                {
-                                    "id": id,
-                                    "direction": direction,
-                                    "scan_type": scan_type,
-                                    "reason": "NumCalc non convergence"
-                                }
-                            )
-                    except Exception as exc:
-                        direction_failed = True
-                        logger.exception("%s for %s (%s) could not be calculated", direction, id, scan_type)
-                        failed_ids.append(
-                            {
-                                "id": id,
-                                "direction": direction,
-                                "scan_type": scan_type,
-                                "reason": f"{type(exc).__name__}: {exc}"
-                            }
-                        )
-                if direction_failed:
-                    continue
-
-                export_dir = f"{args.data_dir}/{scan_type} HRTF/{id}"
-                os.mkdir(export_dir)
-                m2h.merge_sofa_files(
-                        [f"{args.data_dir}/{scan_type} Left/{id}", f"{args.data_dir}/{scan_type} Right/{id}"],
-                        savedir=export_dir
-                    )
-                for plane in ["horizontal", "median"]:
-                    m2h.inspect_sofa_files(export_dir, pattern="HRIR", plot="3D", plane=plane)
-            except Exception as exc:
-                logger.exception("ID %s (%s) could not be merged", id, scan_type)
-                failed_ids.append(
-                    {
-                        "id": id,
-                        "direction": "Binaural",
-                        "scan_type": scan_type,
-                        "reason": f"{type(exc).__name__}: {exc}"
-                    }
-                )
-
-    failed_ids_df = pd.DataFrame(failed_ids)
-    failed_ids_df.to_csv(f"{args.data_dir}/failed.csv")
-
-    successfull_ids = []
-    failed_ids = set(failed_ids_df["id"]) if not failed_ids_df.empty else set()
-    for id in all_ids:
-        if id in failed_ids:
-            continue
-        else:
-            successfull_ids.append({"id": id})
-
-    pd.DataFrame(successfull_ids).to_csv(f"{args.data_dir}/successfull.csv")
-    print(f"------------------------------------------------------------------------------")
-    print(f"\nPostprocessing completed for data in: {args.data_dir}\n")
-    print(f"------------------------------------------------------------------------------")
-
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', required=True)
-    parser.add_argument('--normalize', action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument('--level-offset-db', type=float, default=-30)
-    parser.add_argument('--resample-hrirs', action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument('--sampling-rate', type=int, default=48000)
-    return parser.parse_args()
-
 def cli():
-    args = parse_args()
-    main(args)
+    """Postprocessing runs only from a pipeline YAML (RunConfig).
+
+    The former standalone mode for the research folder layout
+    ("Target Left"/"Prediction Left", deleting "Target HRTF"/"Prediction HRTF")
+    was removed; it had no remaining caller.
+    """
+    raise SystemExit("Use `Pinna2HRTF postprocessing --config <pipeline.yaml>` (or `Pinna2HRTF sofa --config ...`).")
+
 
 if __name__ == '__main__':
     cli()

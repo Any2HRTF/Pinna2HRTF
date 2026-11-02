@@ -138,7 +138,7 @@ struct ProjectInspectorView: View {
 
     var requiredPanel: some View {
         VStack(alignment: .leading, spacing: 9) {
-            LabeledTextField("Project name", helpID: "project.name", text: projectStringBinding(\.name, refresh: false))
+            LabeledTextField("Project name", helpID: "project.name", text: projectStringBinding(\.name))
             SettingToggle(title: "Prepare ears from a head scan", helpID: "scan.enabled", isOn: scanBoolBinding(\.enabled))
             if store.selectedProject?.scanPreparation.enabled == true {
                 PathField("Full-head scan", helpID: "scan.path", text: scanTextBinding(\.scanPath), mode: .file)
@@ -246,10 +246,10 @@ struct ProjectInspectorView: View {
         )
     }
 
-    func projectStringBinding(_ keyPath: WritableKeyPath<ProjectRecord, String>, refresh: Bool = true) -> Binding<String> {
+    func projectStringBinding(_ keyPath: WritableKeyPath<ProjectRecord, String>) -> Binding<String> {
         Binding(
             get: { store.selectedProject?[keyPath: keyPath] ?? "" },
-            set: { value in store.updateSelectedProject(refresh: refresh) { $0[keyPath: keyPath] = value } }
+            set: { value in store.updateSelectedProject { $0[keyPath: keyPath] = value } }
         )
     }
 

@@ -26,7 +26,7 @@ else
   GIT_HEAD="source-snapshot"
   APP_BUILD_NUMBER="0"
 fi
-SCRATCH="/private/tmp/pinna2hrtf-swift-build"
+SCRATCH="${PINNA2HRTF_SWIFT_SCRATCH:-/private/tmp/pinna2hrtf-swift-build-$(id -u)}"
 STAGE_ROOT="$(mktemp -d /private/tmp/pinna2hrtf-release-stage.XXXXXX)"
 CLEAN_ROOT="$(mktemp -d /private/tmp/pinna2hrtf-release-clean.XXXXXX)"
 trap 'rm -rf "$STAGE_ROOT" "$CLEAN_ROOT"' EXIT
@@ -76,7 +76,11 @@ if [[ ! -f "$ROOT/uv.lock" ]]; then
   exit 1
 fi
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/pinna2hrtf-uv-cache}"
-SDK_PATH="$(xcrun --sdk "${PINNA2HRTF_MACOS_SDK:-macosx26.5}" --show-sdk-path)"
+MACOS_SDK="${PINNA2HRTF_MACOS_SDK:-macosx26.5}"
+if ! SDK_PATH="$(xcrun --sdk "$MACOS_SDK" --show-sdk-path 2>/dev/null)"; then
+  echo "warning: SDK $MACOS_SDK not found, using the default macOS SDK" >&2
+  SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+fi
 SDK_VERSION="$(xcrun --sdk "$SDK_PATH" --show-sdk-version)"
 SDK_SWIFT_INTERFACE="$(find "$SDK_PATH/usr/lib/swift/Swift.swiftmodule" -name '*-apple-macos.swiftinterface' -print -quit)"
 SDK_SWIFT_VERSION="$(sed -n 's|// swift-compiler-version: Apple Swift version \([^ ]*\).*|\1|p' "$SDK_SWIFT_INTERFACE")"

@@ -19,13 +19,22 @@ struct EnvironmentPanelView: View {
             ToolStatusRow("NumCalc", path: store.environment.numcalcExecutable)
             ToolStatusRow("Mesh grading", path: store.environment.meshGradingExecutable)
             if !Defaults.isPackagedApp {
-                Button {
-                    store.setupEnvironment()
-                } label: {
-                    Label(allToolsReady ? "Set Up Python" : "Install Missing", systemImage: "arrow.down.circle")
-                        .frame(maxWidth: .infinity)
+                if store.environmentProcess != nil {
+                    Button {
+                        store.cancelEnvironmentSetup()
+                    } label: {
+                        Label("Cancel Setup", systemImage: "xmark.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .help("Stop uv sync and its child processes")
+                } else {
+                    Button {
+                        store.setupEnvironment()
+                    } label: {
+                        Label(allToolsReady ? "Set Up Python" : "Install Missing", systemImage: "arrow.down.circle")
+                            .frame(maxWidth: .infinity)
+                    }
                 }
-                .disabled(store.environmentProcess != nil)
             } else {
                 Text("Bundled runtime")
                     .font(.caption2.weight(.semibold))

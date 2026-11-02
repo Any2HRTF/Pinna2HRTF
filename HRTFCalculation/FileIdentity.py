@@ -11,6 +11,19 @@ def sha256(path):
     return digest.hexdigest()
 
 
+_sha256_cache = {}
+
+
+def cached_sha256(path):
+    """sha256 reused within this process while path, size and mtime are unchanged."""
+    resolved = Path(path).resolve()
+    stat = resolved.stat()
+    key = (str(resolved), stat.st_size, stat.st_mtime_ns)
+    if key not in _sha256_cache:
+        _sha256_cache[key] = sha256(resolved)
+    return _sha256_cache[key]
+
+
 def file_identity(path):
     stat = Path(path).stat()
     return {"size": stat.st_size, "mtime": stat.st_mtime}

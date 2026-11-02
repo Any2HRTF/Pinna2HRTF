@@ -46,8 +46,10 @@ def executable_name(name: str) -> str:
 class PathsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    left_ear: Path | None = Field(default_factory=lambda: worktree_root() / "Data" / "03 Automatic Stitching" / "Input" / "Target STL Left" / "NH130.stl")
-    right_ear: Path | None = Field(default_factory=lambda: worktree_root() / "Data" / "03 Automatic Stitching" / "Input" / "Target STL Right" / "NH130.stl")
+    # No implicit demo ears: a one-ear project saved with exclude_none must
+    # reload as a one-ear project.
+    left_ear: Path | None = None
+    right_ear: Path | None = None
     output_dir: Path = Field(default_factory=lambda: worktree_root() / "Data" / "temp" / "GuiRun")
     external_deps_dir: Path = Field(default_factory=lambda: worktree_root() / "External")
     mesh2hrtf_path: Path | None = None
@@ -220,9 +222,11 @@ class PostprocessingConfig(BaseModel):
     level_offset_db: float = -30.0
     spatial_upsampling: bool = False
     spatial_subdivisions: int = Field(default=3, ge=0, le=5)
-    spatial_normalize: bool = True
-    matlab_executable: Path | None = None
-    amt_path: Path | None = None
+    spatial_normalize: bool = False
+    # Deprecated and ignored: spatial upsampling runs in Python. Still accepted
+    # because the desktop apps write these keys and extra fields are forbidden.
+    matlab_executable: Path | None = Field(default=None, deprecated="Ignored; spatial upsampling no longer uses MATLAB.")
+    amt_path: Path | None = Field(default=None, deprecated="Ignored; spatial upsampling no longer uses the AMT.")
 
     @field_validator("sampling_rate")
     @classmethod

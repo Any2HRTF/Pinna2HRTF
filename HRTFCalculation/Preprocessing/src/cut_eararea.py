@@ -56,6 +56,9 @@ def cut_eararea(head, ear, ear_cut_clearance_scale=1.3, side='auto', mode='ellip
 def _ellipse_cut(head, ear, ear_cut_clearance_scale, side):
     """Original behaviour: remove faces inside an axis-aligned elliptical cylinder."""
     a = ( np.abs(np.max(ear.vertices[:,2]) - np.min(ear.vertices[:,2])) / 2 ) * ear_cut_clearance_scale
+    # NOTE: the x semi-axis applies the clearance scale twice (scale**2) while
+    # z applies it once. This asymmetry is the original behaviour and the
+    # meshes/HRTFs produced so far depend on it, so it is intentionally kept.
     b = ( np.abs(np.max(ear.vertices[:,0]) - np.min(ear.vertices[:,0])) / 2 ) * ear_cut_clearance_scale*ear_cut_clearance_scale
 
     # compute center of the ear
@@ -85,7 +88,8 @@ def _ellipse_cut(head, ear, ear_cut_clearance_scale, side):
     return head
 
 
-def cut_eararea_projected_footprint(head, ear, ear_cut_clearance_scale=1.3, projected_cut_margin=10.0, side='auto'):
+def cut_eararea_projected_footprint(head, ear, projected_cut_margin=10.0, side='auto'):
+    """Remove head faces inside the ear's x/z bounding box plus projected_cut_margin (mm)."""
     if side == 'auto':
         side = 'left' if np.mean(ear.vertices[:, 1]) >= 0 else 'right'
     elif side not in ('left', 'right'):
@@ -143,7 +147,7 @@ def elliptical_cylinder_mask(mesh, a, b, offset, side='left'):
     if side == 'left':  # if ear is on left side
         y_condition = (mesh.vertices[:, 1] >= 0)
     elif side == 'right':  # right side
-        y_condition = (mesh.vertices[:, 1] <= 0) 
+        y_condition = (mesh.vertices[:, 1] <= 0)
     else:
         raise Exception('Inconclusive side parameter. Please use \'left\' or \'right\'.')
 
@@ -170,11 +174,11 @@ if __name__ == "__main__":
     ear_cut_clearance_scale = args.spazi if args.spazi is not None else args.ear_cut_clearance_scale
 
     # File loadup and function call
-    head = trimesh.load(head_path)
-    ear = trimesh.load(ear_path)
+    head = trimesh.load(head_path, force="mesh")
+    ear = trimesh.load(ear_path, force="mesh")
 
     if args.cut_mode == 'projected_footprint':
-        head = cut_eararea_projected_footprint(head, ear, ear_cut_clearance_scale=ear_cut_clearance_scale, projected_cut_margin=args.projected_cut_margin)
+        head = cut_eararea_projected_footprint(head, ear, projected_cut_margin=args.projected_cut_margin)
     else:
         head = cut_eararea(head, ear, ear_cut_clearance_scale=ear_cut_clearance_scale)
 

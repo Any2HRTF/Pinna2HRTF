@@ -61,10 +61,14 @@ enum ProjectDuplicator {
             try fm.copyItem(at: source.resolvingSymlinksInPath(), to: staging)
         }
 
+        // Spellings of the original root, without trailing slashes, longest first.
+        let oldRoots: [String] = original.saveLocation.isEmpty ? [] : Array(Set(
+            [original.saveLocation, source.path, source.resolvingSymlinksInPath().path].map(Self.withoutTrailingSlash)
+        ).filter { !$0.isEmpty && $0 != "/" }).sorted { $0.count > $1.count }
         func relocated(_ value: Any) throws -> Any {
             if let text = value as? String {
-                if !original.saveLocation.isEmpty {
-                    for oldPath in [original.saveLocation, source.path, source.resolvingSymlinksInPath().path] {
+                if !oldRoots.isEmpty {
+                    for oldPath in oldRoots {
                         if text == oldPath || text.hasPrefix(oldPath + "/") {
                             return destination.path + String(text.dropFirst(oldPath.count))
                         }
@@ -99,7 +103,9 @@ enum ProjectDuplicator {
             }
         }
         // Rebase structured metadata, including wrapped YAML paths, fitting templates,
-        // prepared-ear provenance and output ownership. Never edit geometry or logs.
+        // prepared-ear provenance and output ownership. Never edit geometry, logs or
+        // user files: only app-produced metadata (known output names or the project
+        // configuration) is considered, and only rewritten when relocation changed it.
         var metadata: [URL] = []
         var enumerationError: Error?
         if let entries = fm.enumerator(at: staging, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
@@ -107,7 +113,8 @@ enum ProjectDuplicator {
             for case let url as URL in entries {
                 let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
                 if values.isSymbolicLink == true { entries.skipDescendants(); continue }
-                if values.isRegularFile == true, ["json", "yaml", "yml"].contains(url.pathExtension.lowercased()) {
+                if values.isRegularFile == true, ["json", "yaml", "yml"].contains(url.pathExtension.lowercased()),
+                   Self.isKnownMetadata(String(url.path.dropFirst(staging.path.count + 1))) {
                     metadata.append(url)
                 }
             }
@@ -120,18 +127,18 @@ enum ProjectDuplicator {
             if isJSON {
                 guard let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else { continue }
                 let updated = try relocated(object)
+                guard !Self.sameJSON(object, updated) else { continue }
                 try JSONSerialization.data(withJSONObject: updated, options: [.prettyPrinted, .sortedKeys, .fragmentsAllowed]).write(to: url, options: .atomic)
             } else {
-                var object = try ProjectConfigDocument.parse(String(decoding: data, as: UTF8.self))
-                if let updated = try relocated(object) as? [String: Any] {
-                    object = updated
-                    if url.lastPathComponent == "Project Settings.yaml" || url.lastPathComponent == "pipeline.yaml" || url.lastPathComponent == ".pinna2hrtf_native_run.yaml" {
-                        var pre = object["preprocessing"] as? [String: Any] ?? [:]
-                        pre["title"] = duplicate.name
-                        object["preprocessing"] = pre
-                    }
-                    try ProjectConfigDocument.encode(object).write(to: url, atomically: true, encoding: .utf8)
+                let object = try ProjectConfigDocument.parse(String(decoding: data, as: UTF8.self))
+                guard var updated = try relocated(object) as? [String: Any] else { continue }
+                if Self.configurationNames.contains(url.lastPathComponent) {
+                    var pre = updated["preprocessing"] as? [String: Any] ?? [:]
+                    pre["title"] = duplicate.name
+                    updated["preprocessing"] = pre
                 }
+                guard !Self.sameJSON(object, updated) else { continue }
+                try ProjectConfigDocument.encode(updated).write(to: url, atomically: true, encoding: .utf8)
             }
         }
         try GeneratedOutputManifest.rebaseOwnership(in: staging, unchanged: unchangedOwned)
@@ -139,5 +146,26 @@ enum ProjectDuplicator {
         // during the copy. An unsuccessful copy never appears in the project list.
         try fm.moveItem(at: staging, to: destination)
         return duplicate
+    }
+
+    private static let configurationNames: Set<String> = ["Project Settings.yaml", "pipeline.yaml", ".pinna2hrtf_native_run.yaml"]
+
+    /// App-written metadata that may hold absolute project paths.
+    static func isKnownMetadata(_ relative: String) -> Bool {
+        if configurationNames.contains(relative) { return true }
+        if relative == ".pinna2hrtf/generated-output-manifest.json" { return true }
+        return GeneratedOutputManifest.classify(relative) != nil
+    }
+
+    static func withoutTrailingSlash(_ path: String) -> String {
+        var path = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        while path.count > 1 && path.hasSuffix("/") { path.removeLast() }
+        return path
+    }
+
+    private static func sameJSON(_ first: Any, _ second: Any) -> Bool {
+        guard let a = try? JSONSerialization.data(withJSONObject: first, options: [.sortedKeys, .fragmentsAllowed]),
+              let b = try? JSONSerialization.data(withJSONObject: second, options: [.sortedKeys, .fragmentsAllowed]) else { return false }
+        return a == b
     }
 }

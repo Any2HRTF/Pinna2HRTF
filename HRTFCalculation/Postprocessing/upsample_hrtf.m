@@ -1,6 +1,6 @@
 function result = upsample_hrtf(inputFile, outputDir, varargin)
 % Single-file local runner for original ExpSuite LocaDyn processing.
-% Usage: addpath('/Users/felixperfler/Documents/EvaPPM/Scripts/_support'); upsample_hrtf
+% Usage: upsample_hrtf  (with AMT on the MATLAB path, or pass 'AMTPath')
 % Or: result=upsample_hrtf('/path/input.sofa','/path/output');
 % All LocaDyn helpers are local functions below; AMT/SOFA remain dependencies.
 % Original normalization and Data.Delay behavior are preserved.
@@ -43,14 +43,14 @@ addParameter(p, 'Plot', false, @(x) islogical(x) && isscalar(x));
 addParameter(p, 'Overwrite', false, @(x) islogical(x) && isscalar(x));
 addParameter(p, 'SymmetricReceivers', true, @(x) islogical(x) && isscalar(x));
 addParameter(p, 'DenseOnly', false, @(x) islogical(x) && isscalar(x));
-addParameter(p, 'AMTPath', fullfile(getenv('HOME'),'Documents','Uni','MATLAB','amtoolbox'), @(x) ischar(x) || isstring(x));
+addParameter(p, 'AMTPath', '', @(x) ischar(x) || isstring(x));
 parse(p, varargin{:}); opt = p.Results;
 
 required = {'SOFAload','SOFAsave','SOFAupdateDimensions','SOFAaddVariable', ...
     'SOFAremoveVariable','ziegelwanger2014_onaxis','ziegelwanger2014_offaxis', ...
     'ltfatarghelper','deleteoutliers','hilbert','xcorr','lsqcurvefit','tinv'};
 if any(cellfun(@(f) isempty(which(f)), required))
-    if ~isfile(fullfile(opt.AMTPath,'amt_start.m'))
+    if strlength(string(opt.AMTPath)) == 0 || ~isfile(fullfile(opt.AMTPath,'amt_start.m'))
         error('HRTFUpsampling:AMT', 'AMT was not found. Supply ''AMTPath'', ''/path/to/amtoolbox''.');
     end
     oldFolder = pwd; restoreFolder = onCleanup(@() cd(oldFolder));

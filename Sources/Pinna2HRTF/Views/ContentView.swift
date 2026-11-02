@@ -89,11 +89,6 @@ struct ContentView: View {
             Button("OK") { store.ppmFittingError = nil }
         } message: { Text(store.ppmFittingError ?? "") }
         .focusedSceneValue(\.pipelineCommands, commandContext)
-        .onChange(of: store.selectedProjectID) { _ in
-            store.persist()
-            store.loadSelectedProjectLog()
-            store.refreshArtifacts(restoringViewer: true)
-        }
     }
 
     private var editorPresentation: Binding<ProjectEditorPresentation?> {

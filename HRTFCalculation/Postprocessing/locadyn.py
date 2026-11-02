@@ -160,6 +160,12 @@ def fit_toa(ir, positions, fs):
     estimated = estimate_toa(ir)
     x = positions[:, :2]*np.pi/180
     initial = fit_onaxis(estimated, positions, fs)
+    # NOTE (kept on purpose, scientific decision): alpha = number of directions
+    # mirrors upsample_hrtf.m:633, where LocaDyn calls ziegelwanger2014 with
+    # outlierDetection=1 so deleteoutliers gets alpha = 1*M (AMT's default is
+    # prod([0.05;0.01])*M). With alpha/(2n) >= 0.5 the Grubbs critical value is
+    # ~0, so roughly half of the directions are excluded from the TOA fits even
+    # for Gaussian residuals. Do not change without re-validating against MATLAB.
     excluded = np.column_stack([outlier_mask(estimated[:,ch]-onaxis(initial[ch],x)*fs, len(ir))
                                 for ch in range(2)])
     on = []

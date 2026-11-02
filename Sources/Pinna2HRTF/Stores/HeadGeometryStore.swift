@@ -41,37 +41,29 @@ extension AppStore {
         geometryMessage = "Calculating ear distance…"
         guard !geometryRequests.contains(key) else { return }
         geometryRequests.insert(key)
-        let process = Process()
-        if Defaults.isPackagedApp {
-            process.executableURL = runtimePythonURL; process.arguments = arguments
-        } else {
-            let bundled = FileManager.default.isExecutableFile(atPath: environment.uvExecutable)
-            process.executableURL = bundled ? URL(fileURLWithPath: environment.uvExecutable) : URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = (bundled ? [] : ["uv"]) + ["run", "--no-sync", "python"] + arguments
-        }
-        process.currentDirectoryURL = executionPackageURL; process.environment = processEnvironment()
-        let pipe = Pipe(); process.standardOutput = pipe; process.standardError = pipe
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        let environment = environment
+        Task { @MainActor [weak self] in
             let result: Result<GeometryValues, Error>
-            do {
-                try process.run()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                guard process.terminationStatus == 0 else { throw HeadGeometrySettings.error(String(data: data, encoding: .utf8) ?? "Geometry inspection failed.") }
-                result = .success(try JSONDecoder().decode(GeometryValues.self, from: data))
-            } catch { result = .failure(error) }
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.geometryRequests.remove(key)
-                switch result {
-                case .success(let values):
-                    self.geometryCache[key] = values
-                    if self.geometryKey == key { self.refreshGeometry() }
-                case .failure(let error):
-                    if self.geometryKey == key { self.geometryValues = nil; self.geometryMessage = error.localizedDescription }
-                }
+            do { result = .success(try await Self.measureGeometry(arguments, environment: environment, failure: "Geometry inspection failed.")) }
+            catch { result = .failure(error) }
+            guard let self else { return }
+            self.geometryRequests.remove(key)
+            switch result {
+            case .success(let values):
+                self.geometryCache[key] = values
+                if self.geometryKey == key { self.refreshGeometry() }
+            case .failure(let error):
+                if self.geometryKey == key { self.geometryValues = nil; self.geometryMessage = error.localizedDescription }
             }
         }
+    }
+
+    /// Runs `HRTFCalculation.Geometry` through the shared launcher (registered, cancellable on quit, time-limited).
+    private static func measureGeometry(_ arguments: [String], environment: EnvironmentConfig, failure: String) async throws -> GeometryValues {
+        let process = try ProcessLauncher.shared.makeProcess(.python(arguments), environment: environment)
+        let result = try await ProcessLauncher.shared.runHelperAsync(process, timeout: 180)
+        guard result.status == 0 else { throw HeadGeometrySettings.error(result.text.isEmpty ? failure : result.text) }
+        return try JSONDecoder().decode(GeometryValues.self, from: result.output)
     }
 
     func editGeometry(ear: Bool, text: String, reset: Bool = false) {
@@ -98,35 +90,22 @@ extension AppStore {
             alert.informativeText = "Changing ear distance resets preprocessing and later results. Inputs, predicted ears, and modified files are kept."
             alert.addButton(withTitle: "Reset and apply"); alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
-            let outputs = try outputsFor(project)
+            let outputs = try runner.outputsFor(project)
             geometryEditing = true
-            outputOperations.insert(project.id)
+            runner.beginOutputOperation(project.id)
             Task { @MainActor in
                 let result = await Task.detached(priority: .userInitiated) { outputs.reset(from: .preprocessing) }.value
-                self.outputOperations.remove(project.id)
+                self.runner.endOutputOperation(project.id)
                 self.geometryEditing = false
                 if result.success {
-                    self.failedStagesByProject[project.id]?.subtract([.preprocessing, .numcalc, .postprocessing])
-                    if let mesh = self.selectedMesh, !FileManager.default.fileExists(atPath: mesh.path) { self.resetViewer() }
+                    self.runner.failedStagesByProject[project.id]?.subtract([.preprocessing, .numcalc, .postprocessing])
+                    if let mesh = self.selectedMesh, !FileManager.default.fileExists(atPath: mesh.path) { self.viewer.resetViewer() }
                     apply()
                 }
                 self.appendLog(result.summary, for: project.id)
                 self.refreshArtifacts()
             }
         } catch { geometryMessage = error.localizedDescription; appendLog("Geometry: \(error.localizedDescription)") }
-    }
-
-    func geometryProcess(_ arguments: [String]) -> Process {
-        let process = Process()
-        if Defaults.isPackagedApp { process.executableURL = runtimePythonURL; process.arguments = arguments }
-        else {
-            let bundled = FileManager.default.isExecutableFile(atPath: environment.uvExecutable)
-            process.executableURL = bundled ? URL(fileURLWithPath: environment.uvExecutable) : URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = (bundled ? [] : ["uv"]) + ["run", "--no-sync", "python"] + arguments
-        }
-        process.currentDirectoryURL = executionPackageURL
-        process.environment = processEnvironment()
-        return process
     }
 
     func inspectEarDistance(_ project: ProjectRecord) async throws -> GeometryValues {
@@ -137,41 +116,16 @@ extension AppStore {
             let mesh = ArtifactScanner.preprocessingMesh(for: project, side: side) ?? URL(fileURLWithPath: path)
             arguments += [side == .left ? "--left" : "--right", mesh.path]
         }
-        let process = geometryProcess(arguments)
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    let pipe = Pipe(); process.standardOutput = pipe; process.standardError = pipe
-                    try process.run()
-                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                    process.waitUntilExit()
-                    guard process.terminationStatus == 0 else { throw HeadGeometrySettings.error(String(data: data, encoding: .utf8) ?? "Distance measurement failed.") }
-                    continuation.resume(returning: try JSONDecoder().decode(GeometryValues.self, from: data))
-                } catch { continuation.resume(throwing: error) }
-            }
-        }
-    }
-
-    func readDistanceSettings(_ url: URL, into settings: inout PreprocessingSettings) throws {
-        // Version compatibility only; remove with v2.0.0.
-        let process = geometryProcess(["-m", "HRTFCalculation.Compatibility", url.path])
-        let pipe = Pipe(); process.standardOutput = pipe; process.standardError = pipe
-        try process.run()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { throw HeadGeometrySettings.error(String(data: data, encoding: .utf8) ?? "Could not load settings.") }
-        guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw HeadGeometrySettings.error("Could not read ear distance.") }
-        settings.earDistance = (result["ear_distance"] as? NSNumber).map { $0.stringValue }
-        for warning in result["warnings"] as? [String] ?? [] { appendLog(warning) }
+        return try await Self.measureGeometry(arguments, environment: environment, failure: "Distance measurement failed.")
     }
 
     func checkEarDistanceAndRun(_ project: ProjectRecord) {
-        outputOperations.insert(project.id)
+        runner.beginOutputOperation(project.id)
         geometryEditing = true
         Task { @MainActor in
             var ownsPreflightGuard = true
             defer {
-                if ownsPreflightGuard { outputOperations.remove(project.id) }
+                if ownsPreflightGuard { runner.endOutputOperation(project.id) }
                 geometryEditing = false
                 refreshArtifacts()
             }
@@ -194,10 +148,10 @@ extension AppStore {
                         return
                     }
                 }
-                outputOperations.remove(project.id)
+                runner.endOutputOperation(project.id)
                 ownsPreflightGuard = false
                 geometryEditing = false
-                prepareAndRun(stage: .preprocessing, project: project)
+                runner.prepareAndRun(stage: .preprocessing, project: project)
             } catch { appendLog("Could not measure ear distance: \(error.localizedDescription)", for: project.id) }
         }
     }

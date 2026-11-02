@@ -8,6 +8,7 @@ September 2024
 """
 
 import argparse
+import os
 import bpy
 import bmesh # type: ignore
 import numpy as np
@@ -30,7 +31,6 @@ def check_addon():
 def install_addon(path):
     bpy.ops.preferences.addon_install(filepath=path)
     bpy.ops.preferences.addon_enable(module='mesh2input')
-    bpy.ops.wm.save_userpref()
 
 
 def main(head, source_type=None, filepath=None, mesh2hrtf_path=None,
@@ -53,7 +53,9 @@ def main(head, source_type=None, filepath=None, mesh2hrtf_path=None,
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
     if not check_addon():
-        install_addon(mesh2hrtf_path+"/Mesh2Input/mesh2input.py")
+        if not mesh2hrtf_path:
+            raise ValueError("The Blender mesh2input add-on is not enabled and no Mesh2HRTF path was given to install it from. Set paths.mesh2hrtf_path.")
+        install_addon(os.path.join(str(mesh2hrtf_path), "Mesh2Input", "mesh2input.py"))
 
     bpy.ops.wm.ply_import(filepath=head)
 
@@ -80,11 +82,12 @@ def main(head, source_type=None, filepath=None, mesh2hrtf_path=None,
         source_position = np.asarray(source_position, dtype=float)
         distances = np.linalg.norm(centers - source_position, axis=1)
         indices = np.argsort(distances, kind="stable")[:source_face_count]
-        material_index = 1 if source_type == "Left ear" or source_position[1] >= 0 else 2
         if source_type == "Left ear":
             material_index = 1
         elif source_type == "Right ear":
             material_index = 2
+        else:
+            material_index = 1 if source_position[1] >= 0 else 2
         for index in indices:
             bm.faces[int(index)].material_index = material_index
         print(f"assigned {source_type} source by landmark at faces {[int(index) for index in indices]}, maximum distance {float(distances[indices].max()):.3f} mm")

@@ -231,7 +231,7 @@ struct PostprocessingSettings: Codable, Equatable {
     var outputFolder: String?
     var spatialUpsampling = false
     var spatialSubdivisions = 3
-    var spatialNormalize = true
+    var spatialNormalize = false
     var matlabExecutable: String?
     var amtPath: String?
 
@@ -251,7 +251,7 @@ struct PostprocessingSettings: Codable, Equatable {
         outputFolder = try values.decodeIfPresent(String.self, forKey: .outputFolder)
         spatialUpsampling = try values.decodeIfPresent(Bool.self, forKey: .spatialUpsampling) ?? false
         spatialSubdivisions = try values.decodeIfPresent(Int.self, forKey: .spatialSubdivisions) ?? 3
-        spatialNormalize = try values.decodeIfPresent(Bool.self, forKey: .spatialNormalize) ?? true
+        spatialNormalize = try values.decodeIfPresent(Bool.self, forKey: .spatialNormalize) ?? false
         matlabExecutable = try values.decodeIfPresent(String.self, forKey: .matlabExecutable)
         amtPath = try values.decodeIfPresent(String.self, forKey: .amtPath)
     }

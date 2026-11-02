@@ -49,6 +49,7 @@ struct NativeProjectSidebar: NSViewRepresentable {
         init(_ kind: Kind) { self.kind = kind }
     }
 
+    @MainActor
     final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
         static let projectType = NSPasteboard.PasteboardType("at.ac.vbc.cbe.Pinna2HRTF.sidebar-project")
         static let folderType = NSPasteboard.PasteboardType("at.ac.vbc.cbe.Pinna2HRTF.sidebar-folder")

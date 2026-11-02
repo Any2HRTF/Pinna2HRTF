@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import struct
 import sys
-from contextlib import redirect_stdout
 from pathlib import Path
 
 from bezierppm import BezierPPM
@@ -124,10 +124,9 @@ def _controls_from_parameters(parameters: dict[str, float]) -> list[dict]:
             controls.append(_control(f"{bone}|{point}|Location|{axis}", section, group,
                                      f"{point} · {axis}", value_mm, -extent, extent, "mm"))
         elif kind == "Scale":
-            extent = (0.5, 1.5) if bone == "Parent" else (0.5, 1.5)
             label = f"Scale {axis}" if bone == "Parent" else "Scale"
             controls.append(_control(f"{bone}|{point}|Scale|{axis}", section, group, label,
-                                     value, extent[0], extent[1], "×"))
+                                     value, 0.5, 1.5, "×"))
         elif kind == "Rotation" and axis in {"W", "X", "Y", "Z"}:
             rotation_key = (bone, point, section)
             rotations.setdefault(rotation_key, {})[axis] = value
@@ -353,27 +352,50 @@ def execute(command: dict) -> dict:
         blend_output = command.get("blend_output")
         if blend_output:
             _prepare_model(model)
-            if command.get("mirror_y", False):
-                bpy.data.objects["Mesh"].scale.y *= -1
-            model.export_blend(file=blend_output)
+            mesh_object = bpy.data.objects["Mesh"]
+            original_scale_y = mesh_object.scale.y
+            try:
+                if command.get("mirror_y", False):
+                    mesh_object.scale.y = -original_scale_y
+                model.export_blend(file=blend_output)
+            finally:
+                # The warm scene is reused by later previews and exports.
+                mesh_object.scale.y = original_scale_y
         return {"parameters": parameters, "controls": _controls_from_parameters(parameters),
                 "template_blend": template_blend or ""}
 
     raise ValueError(f"Unknown manual PPM action: {action}")
 
 
+def _private_reply_stream():
+    """Reserve the original stdout for replies and send fd 1 to stderr.
+
+    Blender and other C-level code print straight to file descriptor 1; after
+    this, such output lands on stderr and cannot corrupt the JSON protocol.
+    """
+    sys.stdout.flush()
+    reply_fd = os.dup(1)
+    os.dup2(2, 1)
+    sys.stdout = sys.stderr
+    return os.fdopen(reply_fd, "w", encoding="utf-8", buffering=1)
+
+
 def serve() -> None:
-    """Serve line-delimited preview commands without restarting Blender."""
-    response_stream = sys.stdout
-    for line in sys.stdin:
-        try:
-            command = json.loads(line)
-            if command.get("action") == "shutdown":
-                return
-            with redirect_stdout(sys.stderr):
-                result = execute(command)
-            response = result
-        except Exception as error:
-            response = {"error": str(error)}
-        response_stream.write(json.dumps(response, allow_nan=False) + "\n")
+    """Serve line-delimited JSON commands without restarting Blender.
+
+    Exactly one JSON reply line is written per request, on the original stdout.
+    """
+    response_stream = _private_reply_stream()
+    try:
+        for line in sys.stdin:
+            try:
+                command = json.loads(line)
+                if command.get("action") == "shutdown":
+                    return
+                reply = json.dumps(execute(command), allow_nan=False)
+            except Exception as error:
+                reply = json.dumps({"error": str(error) or type(error).__name__})
+            response_stream.write(reply + "\n")
+            response_stream.flush()
+    finally:
         response_stream.flush()

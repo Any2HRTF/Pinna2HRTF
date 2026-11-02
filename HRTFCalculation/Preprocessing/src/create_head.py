@@ -65,8 +65,8 @@ if __name__ == "__main__":
 
     if not args.left_path and not args.right_path:
         parser.error('At least one ear mesh path is required')
-    left_ear = trimesh.load(args.left_path) if args.left_path else None
-    right_ear = trimesh.load(args.right_path) if args.right_path else None
+    left_ear = trimesh.load(args.left_path, force="mesh") if args.left_path else None
+    right_ear = trimesh.load(args.right_path, force="mesh") if args.right_path else None
     export_path = args.export_path
 
     radius = head(left_ear, right_ear, export_path)

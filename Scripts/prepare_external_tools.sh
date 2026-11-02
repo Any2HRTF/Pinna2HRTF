@@ -8,6 +8,7 @@ SRC="$EXTERNAL_ROOT/src"
 NCPU="$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
 PMP_COMMIT="58283eee4749553345bf4eed74c87c889b03e06c"
 MESH2HRTF_COMMIT="e45d0436a6fbeca3db13828cbae23ca109225be3"
+GRADING_COMMIT="0bebaaeaf2785ab823dff65523712ceba042e8c0"
 
 mkdir -p "$BIN" "$SRC"
 
@@ -29,21 +30,30 @@ if [[ "$NUMCALC_NEEDS_BUILD" == true ]]; then
     git -C "$MESH2HRTF_SRC" fetch --depth 1 origin "$MESH2HRTF_COMMIT"
   fi
   git -C "$MESH2HRTF_SRC" checkout --detach "$MESH2HRTF_COMMIT"
-  if [[ ! -x "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/bin/NumCalc" ]]; then
-    mkdir -p "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/bin"
-    make -C "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/src" clean || true
-    make -C "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/src"
-  fi
+  # Always rebuild: an untracked binary from an older commit survives the checkout.
+  rm -f "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/bin/NumCalc"
+  mkdir -p "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/bin"
+  make -C "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/src" clean || true
+  make -C "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/src"
   cp "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/bin/NumCalc" "$BIN/NumCalc"
   chmod +x "$BIN/NumCalc"
   printf "%s\n" "$MESH2HRTF_COMMIT" > "$BIN/NumCalc.source-commit"
 fi
 
-if [[ ! -x "$BIN/hrtf_mesh_grading" ]]; then
+GRADING_NEEDS_BUILD=true
+if [[ -x "$BIN/hrtf_mesh_grading" ]] && [[ -f "$BIN/hrtf_mesh_grading.source-commit" ]] && grep -q -- "$GRADING_COMMIT $PMP_COMMIT" "$BIN/hrtf_mesh_grading.source-commit"; then
+  GRADING_NEEDS_BUILD=false
+fi
+
+if [[ "$GRADING_NEEDS_BUILD" == true ]]; then
   GRADING_SRC="$SRC/hrtf_mesh_grading"
   if [[ ! -d "$GRADING_SRC" ]]; then
-    git clone --depth 1 https://github.com/cg-tub/hrtf_mesh_grading.git "$GRADING_SRC"
+    git clone https://github.com/cg-tub/hrtf_mesh_grading.git "$GRADING_SRC"
   fi
+  if ! git -C "$GRADING_SRC" cat-file -e "$GRADING_COMMIT^{commit}" 2>/dev/null; then
+    git -C "$GRADING_SRC" fetch origin "$GRADING_COMMIT"
+  fi
+  git -C "$GRADING_SRC" checkout --detach "$GRADING_COMMIT"
   PMP_DIR="$GRADING_SRC/pmp-library"
   if [[ ! -f "$PMP_DIR/CMakeLists.txt" ]]; then
     rm -rf "$PMP_DIR"
@@ -73,10 +83,15 @@ if [[ ! -x "$BIN/hrtf_mesh_grading" ]]; then
     ln -sf libpmp.1.2.1.dylib "$BIN/libpmp.dylib"
   fi
   chmod +x "$BIN/hrtf_mesh_grading"
+  printf "%s %s\n" "$GRADING_COMMIT" "$PMP_COMMIT" > "$BIN/hrtf_mesh_grading.source-commit"
 fi
 
 if [[ "$(uname -s)" == "Darwin" && -x "$BIN/hrtf_mesh_grading" && -f "$BIN/libpmp.1.2.1.dylib" ]]; then
-  install_name_tool -change "@rpath/libpmp.1.2.1.dylib" "@loader_path/libpmp.1.2.1.dylib" "$BIN/hrtf_mesh_grading"
+  if otool -L "$BIN/hrtf_mesh_grading" | grep -q "@rpath/libpmp.1.2.1.dylib"; then
+    install_name_tool -change "@rpath/libpmp.1.2.1.dylib" "@loader_path/libpmp.1.2.1.dylib" "$BIN/hrtf_mesh_grading"
+    # install_name_tool invalidates the ad-hoc linker signature; arm64 kills unsigned binaries.
+    codesign --force --sign - "$BIN/hrtf_mesh_grading"
+  fi
 fi
 
 echo "$BIN"

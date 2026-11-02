@@ -6,6 +6,11 @@ struct Pinna2HRTFApp: App {
     @NSApplicationDelegateAdaptor(Pinna2HRTFAppDelegate.self) private var appDelegate
     @StateObject private var store = AppStore()
 
+    init() {
+        // Writing to a subprocess that already exited must fail with EPIPE, not kill the app.
+        signal(SIGPIPE, SIG_IGN)
+    }
+
     var body: some Scene {
         Window("Pinna2HRTF", id: "main") {
             ContentView(store: store)
@@ -43,12 +48,13 @@ struct Pinna2HRTFApp: App {
     }
 }
 
+@MainActor
 final class Pinna2HRTFAppDelegate: NSObject, NSApplicationDelegate {
     var store: AppStore?
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let store else { return .terminateNow }
-        if !store.outputOperations.isEmpty || store.geometryEditing || store.projectDuplicationRequest != nil {
+        if store.hasOutputOperations || store.geometryEditing || store.projectDuplicationRequest != nil {
             let alert = NSAlert(); alert.messageText = "Project files are being updated"
             alert.informativeText = "Wait for the operation to finish before quitting."; alert.addButton(withTitle: "OK"); alert.runModal()
             return .terminateCancel
@@ -71,8 +77,9 @@ final class Pinna2HRTFAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        store?.runningProcesses.values.forEach { $0.terminate() }
-        store?.environmentProcess?.terminate()
+        // Saves pending project-list changes and stops every tracked process tree
+        // (pipeline runs, uv sync, helpers, the fitting worker).
+        if let store { store.prepareForTermination() } else { ProcessLauncher.shared.terminateAll() }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

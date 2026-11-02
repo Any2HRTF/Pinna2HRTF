@@ -5,11 +5,20 @@ enum ProjectConfigDocument {
     static var pythonURL: URL? {
         let bundled = Defaults.pipelineRoot.appendingPathComponent(".venv/bin/python")
         if Defaults.isPackagedApp { return FileManager.default.isExecutableFile(atPath: bundled.path) ? bundled : nil }
-        return [bundled, Defaults.packageRoot().appendingPathComponent(".venv/bin/python"), URL(fileURLWithPath: "/Applications/Pinna2HRTF.app/Contents/Resources/.venv/bin/python")]
-            .first { FileManager.default.isExecutableFile(atPath: $0.path) }
+        // Development builds use the source tree's uv environment.
+        let source = Defaults.packageRoot().appendingPathComponent(".venv/bin/python")
+        for candidate in [bundled, source] where FileManager.default.isExecutableFile(atPath: candidate.path) {
+            return candidate
+        }
+        let installed = URL(fileURLWithPath: "/Applications/Pinna2HRTF.app/Contents/Resources/.venv/bin/python")
+        guard FileManager.default.isExecutableFile(atPath: installed.path) else { return nil }
+        NSLog("Pinna2HRTF: no source-tree Python environment at %@ (run Set Up Python); falling back to %@", source.path, installed.path)
+        return installed
     }
 
-    static func runPython(_ script: String, input: Data, arguments: [String] = []) throws -> Data {
+    /// Runs a short Python helper. Registered with the process launcher so it is
+    /// stopped on quit, and stopped if it takes longer than `timeout`.
+    static func runPython(_ script: String, input: Data, arguments: [String] = [], timeout: TimeInterval = 60) throws -> Data {
         guard let pythonURL else { throw ProjectValidation.Failure(message: "The bundled Python runtime is unavailable.") }
         let fm = FileManager.default
         let temporary = fm.temporaryDirectory.appendingPathComponent("pinna-config-\(UUID().uuidString)")
@@ -32,8 +41,13 @@ enum ProjectConfigDocument {
         process.standardInput = inputHandle
         process.standardOutput = outputHandle
         process.standardError = errorHandle
-        try process.run()
-        process.waitUntilExit()
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
+        try ProcessLauncher.shared.launch(process)
+        if exited.wait(timeout: .now() + timeout) == .timedOut {
+            ProcessTreeTerminator.terminate(process)
+            throw ProjectValidation.Failure(message: "Reading project data took longer than \(Int(timeout)) seconds and was stopped.")
+        }
         guard process.terminationStatus == 0 else {
             let detail = (try? String(contentsOf: errorURL, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Unknown error"
             throw ProjectValidation.Failure(message: "Could not read or validate project data: \(detail)")
@@ -203,7 +217,7 @@ enum ProjectConfigDocument {
         restoredPost.samplingRate = text(post, "sampling_rate") ?? "48000"
         restoredPost.spatialUpsampling = bool(post, "spatial_upsampling") ?? false
         restoredPost.spatialSubdivisions = Int(text(post, "spatial_subdivisions") ?? "3") ?? 3
-        restoredPost.spatialNormalize = bool(post, "spatial_normalize") ?? true
+        restoredPost.spatialNormalize = bool(post, "spatial_normalize") ?? false
         restoredPost.matlabExecutable = text(post, "matlab_executable").map(relocated)
         restoredPost.amtPath = text(post, "amt_path").map(relocated)
         restoredPost.outputFolder = text(post, "output_sofa_dir").map(relocated)

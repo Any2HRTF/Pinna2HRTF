@@ -51,6 +51,8 @@ final class GeneratedOutputManifest {
         }
     }
     private let root: URL
+    /// The root with every link resolved, computed once.
+    private let realRoot: String
     private let inputs: [String]
     private let outputPrefix: String?
     private let gate = NSLock()
@@ -65,6 +67,8 @@ final class GeneratedOutputManifest {
         // Keep the caller's path so link checks inspect the actual output root.
         root = URL(fileURLWithPath: projectRoot)
         guard root.path != "/" else { throw Failure.invalidRoot }
+        realRoot = Self.canonicalPath(projectRoot)
+        guard realRoot != "/" else { throw Failure.invalidRoot }
         if let outputFolder, outputFolder.hasPrefix(root.path + "/") {
             outputPrefix = String(outputFolder.dropFirst(root.path.count + 1))
         } else { outputPrefix = nil }
@@ -282,9 +286,15 @@ final class GeneratedOutputManifest {
               !hasLinkedAncestor(url) else { return nil }
         return url
     }
+    /// True when a path component strictly below the project root is a symbolic link.
+    /// Components at or above the root are the user's choice (/tmp, /var/folders,
+    /// a linked Dropbox folder) and are resolved once in `realRoot`.
     private func hasLinkedAncestor(_ url: URL) -> Bool {
+        let path = url.path
+        guard path != root.path else { return false }
+        guard path.hasPrefix(root.path + "/") else { return true }
         var current = url
-        while current.path != "/" {
+        while current.path.count > root.path.count {
             var info = stat()
             if lstat(current.path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFLNK { return true }
             current.deleteLastPathComponent()
@@ -297,7 +307,9 @@ final class GeneratedOutputManifest {
         return String(cString: resolved)
     }
     private func scan() throws -> (files: [String: Entry], directories: Set<String>) {
-        guard !hasLinkedAncestor(root) else { throw Failure.unsafePath }
+        // The root may be reached through links; it must resolve to a real directory.
+        var isDirectory: ObjCBool = false
+        if fm.fileExists(atPath: realRoot, isDirectory: &isDirectory), !isDirectory.boolValue { throw Failure.unsafePath }
         var files: [String: Entry] = [:], directories = Set<String>()
         func visit(_ folder: URL) throws {
             for url in try fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey]) {

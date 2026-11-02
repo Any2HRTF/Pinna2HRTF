@@ -309,7 +309,7 @@
   {
     "id": "postprocessing.spatial_normalize",
     "title": "Normalize to frontal reference",
-    "description": "Scale using the frontal (0°, 0°) response as a −40 dB reference. Independent of the level offset. Turn off to preserve input levels.",
+    "description": "Scale the upsampled set using the frontal (0°, 0°) response as a −40 dB reference. This replaces the level chosen by the level offset. Off by default, so the upsampled HRIRs keep the level of the exported HRIRs.",
     "publications": []
   },
   {

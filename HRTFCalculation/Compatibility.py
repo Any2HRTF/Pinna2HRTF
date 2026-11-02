@@ -40,7 +40,13 @@ def read_settings(path):
             raw.decode("utf-8")
             encoding = "utf-8"
         except UnicodeDecodeError:
-            encoding = "cp1252"
+            # Older Windows builds wrote ANSI settings. cp1252 leaves five bytes
+            # undefined; latin-1 decodes every byte, so loading cannot fail here.
+            try:
+                raw.decode("cp1252")
+                encoding = "cp1252"
+            except UnicodeDecodeError:
+                encoding = "latin-1"
     return raw, raw.decode(encoding), encoding
 
 

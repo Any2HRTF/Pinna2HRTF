@@ -201,7 +201,7 @@ if __name__ == "__main__":
 
     ear_path = args.ear_path
 
-    ear = trimesh.load(ear_path)
+    ear = trimesh.load(ear_path, force="mesh")
     if args.landmark_path:
         with open(args.landmark_path, "w") as f:
             json.dump(estimate_ear_canal_position(ear, side=args.side), f, indent=2)

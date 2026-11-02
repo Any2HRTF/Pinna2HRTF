@@ -3,8 +3,35 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import networkx as nx
 import numpy as np
 import trimesh
+
+
+def load_mesh(path, process=False, merge=True, validate=False):
+    """Load a mesh file as one Trimesh; scenes are concatenated.
+
+    merge welds duplicate vertices and drops unreferenced ones. validate
+    rejects empty or non-finite geometry.
+    """
+    mesh = trimesh.load_mesh(path, process=process)
+    if isinstance(mesh, trimesh.Scene):
+        mesh = trimesh.util.concatenate(tuple(mesh.geometry.values()))
+    if merge:
+        mesh.merge_vertices()
+        mesh.remove_unreferenced_vertices()
+    if validate and (not len(mesh.faces) or not np.isfinite(mesh.vertices).all()):
+        raise ValueError('The mesh must contain finite, nonempty triangle geometry.')
+    return mesh
+
+
+def boundary_graph(mesh):
+    """Return per-edge face counts and the graph of edges used by one face only."""
+    edges = np.asarray(mesh.edges_sorted)
+    if not len(edges):
+        return np.zeros(0, dtype=int), nx.Graph()
+    unique_edges, counts = np.unique(edges, axis=0, return_counts=True)
+    return counts, nx.Graph(unique_edges[counts == 1].tolist())
 
 
 def boundary(ear):
@@ -64,7 +91,7 @@ def main():
         settings = config.preprocessing
     else:
         left, right, settings = args.left, args.right, PreprocessingConfig()
-    ears = {"left": trimesh.load(left) if left else None, "right": trimesh.load(right) if right else None}
+    ears = {"left": load_mesh(left, process=True) if left else None, "right": load_mesh(right, process=True) if right else None}
     print(json.dumps(resolve_geometry(ears, settings, validate=False), allow_nan=False))
 
 

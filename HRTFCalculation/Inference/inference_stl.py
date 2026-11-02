@@ -9,6 +9,7 @@ import trimesh
 from trimesh.registration import icp
 from trimesh.transformations import reflection_matrix
 import csv
+from pathlib import Path
 import yaml
 import pandas as pd
 import bpy
@@ -24,8 +25,21 @@ except ImportError:
     from src.math_helpers import get_quaternion_from_rotation_matrix, compute_rotation_matrix_from_ortho6d
 
 __DIR_PATH = os.path.dirname(os.path.realpath(__file__))
+MESH_SUFFIXES = (".stl", ".ply")
+VIEW_INDICES = {
+    1: [12],
+    3: [2, 12, 23],
+    9: [0, 2, 4, 10, 12, 14, 20, 22, 24],
+    25: list(range(25)),
+}
 
 def read_grayscale_image(path):
+    """Read a rendered view as float32 in [0, 1].
+
+    PNG renders are 8-bit and are scaled by 1/255. The depth EXR written by
+    bezierppm.render_helpers.render is already mapped to [0, 1] by its
+    compositor MapRange node and is returned unscaled.
+    """
     if path.lower().endswith(".exr"):
         image = bpy.data.images.load(path, check_existing=False)
         width, height = image.size
@@ -34,7 +48,7 @@ def read_grayscale_image(path):
         bpy.data.images.remove(image)
         return result
     with Image.open(path) as image:
-        return np.asarray(image.convert("L"))
+        return np.asarray(image.convert("L"), dtype=np.float32) / 255.0
 
 
 def minimal_distances(P, Q,) -> np.ndarray:
@@ -81,106 +95,104 @@ def get_camera_position(camera_jitter=False, cam_radius=0.18):
     return loc_cam, loc_cam_ref
 
 def get_model_input(path_to_mesh, views, depth, mirror, initial_transforms=None, transformed_output_path=None) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, float | str]]:
+    if not path_to_mesh:
+        raise ValueError("get_model_input requires an input mesh path.")
+    if views not in VIEW_INDICES:
+        raise ValueError(f"Unsupported number_of_camera_views {views!r}; expected one of {sorted(VIEW_INDICES)}.")
+    views_list = VIEW_INDICES[views]
     camera_positions, camera_position_reference = get_camera_position(cam_radius=0.2)
 
-    tempdir = tempfile.mkdtemp()
+    with tempfile.TemporaryDirectory(prefix="pinna2hrtf-inference-") as tempdir:
+        return _get_model_input(path_to_mesh, views_list, depth, mirror, initial_transforms, transformed_output_path,
+                                camera_positions, camera_position_reference, tempdir)
 
+
+def _get_model_input(path_to_mesh, views_list, depth, mirror, initial_transforms, transformed_output_path,
+                     camera_positions, camera_position_reference, tempdir):
     BezierPPM().points
     bpy.ops.object.select_all(action='DESELECT')
     bpy.data.objects['Mesh'].select_set(True)
     bpy.ops.object.delete()
-    if path_to_mesh:
-        original_cloud = trimesh.load_mesh(path_to_mesh)
-        if mirror:
-            mirror_matrix = reflection_matrix(np.array([0,0, 0,0]), np.array([0,1,0]))
-            original_cloud = original_cloud.apply_transform(mirror_matrix)
+    original_cloud = trimesh.load_mesh(path_to_mesh)
+    if mirror:
+        mirror_matrix = reflection_matrix(np.array([0,0, 0,0]), np.array([0,1,0]))
+        original_cloud = original_cloud.apply_transform(mirror_matrix)
 
-        target_cloud = trimesh.load_mesh(f"{__DIR_PATH}/resources/PPM Default.stl")
-        initializations = []
-        candidate_diagnostics = []
-        if initial_transforms:
-            initializations.extend((method, matrix, np.nan) for method, matrix in initial_transforms)
-        else:
-            points = target_cloud.vertices
-            points_pit = trimesh.bounds.oriented_bounds(points)[0]
-            search_pit = original_cloud.principal_inertia_transform if original_cloud.is_volume else original_cloud.bounding_box_oriented.principal_inertia_transform
-            search_to_points = np.linalg.inv(points_pit) @ search_pit
-            cubes = np.array([np.eye(4) * np.append(diag, 1) for diag in [[1, 1, 1], [1, 1, -1], [1, -1, 1], [-1, 1, 1], [-1, -1, 1], [-1, 1, -1], [1, -1, -1], [-1, -1, -1]]])
-            for index, flip in enumerate(cubes):
-                target_to_mesh = trimesh.transformations.transform_around(flip, original_cloud.centroid) @ np.linalg.inv(search_to_points)
-                target_to_mesh, _, cost = icp(points, original_cloud, initial=target_to_mesh, max_iterations=10, scale=False, reflection=False)
-                mesh_to_target = np.linalg.inv(target_to_mesh)
-                determinant = np.linalg.det(mesh_to_target[:3, :3])
-                candidate_diagnostics.append(f"axis_{index}:{cost:.6f}:{determinant:.6f}")
-                if determinant > 1e-8:
-                    initializations.append((f"proper_global_{index}", mesh_to_target, cost))
-            if not initializations:
-                raise RuntimeError(f"Could not find a proper global initialization for {path_to_mesh}")
-            initializations = [min(initializations, key=lambda initialization: initialization[2])]
-        alignments = []
-        for method, initial, candidate_initial_cost in initializations:
-            matrix, _, _ = icp(
-                original_cloud.vertices,
-                target_cloud,
-                initial=initial,
-                max_iterations=50,
-                scale=True,
-                reflection=False,
-            )
-            aligned_cloud = original_cloud.copy()
-            aligned_cloud.apply_transform(matrix)
-            source_height = np.ptp(aligned_cloud.vertices[:, 2])
-            target_height = np.ptp(target_cloud.vertices[:, 2])
-            height_correction = target_height / source_height
-            height_matrix = np.eye(4)
-            height_matrix[2, 2] = height_correction
-            height_matrix = trimesh.transformations.transform_around(height_matrix, aligned_cloud.centroid)
-            matrix = height_matrix @ matrix
-            aligned_cloud.apply_transform(height_matrix)
-            vertical_offset = np.mean(target_cloud.bounds[:, 2]) - np.mean(aligned_cloud.bounds[:, 2])
-            matrix = trimesh.transformations.translation_matrix([0, 0, vertical_offset]) @ matrix
-            aligned_cloud.apply_translation([0, 0, vertical_offset])
-            _, distances, _ = target_cloud.nearest.on_surface(aligned_cloud.vertices)
-            cost = np.mean(distances ** 2)
-            determinant = np.linalg.det(matrix[:3, :3])
-            height_scale = height_correction
-            if determinant > 1e-8:
-                alignments.append((cost, method, determinant, matrix, candidate_initial_cost, height_scale))
-        if not alignments:
-            raise RuntimeError(f"Could not find a proper alignment for {path_to_mesh}")
-        alignment_cost, alignment_method, alignment_determinant, matrix_scale, alignment_initial_cost, alignment_height_scale = min(alignments, key=lambda alignment: alignment[0])
-        candidate_diagnostics.extend(f"{method}:{cost:.6f}:{determinant:.6f}:{height_scale:.6f}" for cost, method, determinant, _, _, height_scale in alignments)
-        alignment_candidates = "|".join(candidate_diagnostics)
-
-        new = original_cloud.apply_transform(matrix_scale)
-
-        # open ear canal
-        vert_ind = np.argwhere((new.vertices[:, 1] <= 0))
-        mask = np.ones(len(new.faces), dtype=bool)
-        mask[vert_ind] = False
-        legit_mask = mask[new.faces].any(axis=1)
-        new.update_faces(legit_mask)
-        new.remove_unreferenced_vertices()
-
-        new.export(f"{tempdir}/transformed.stl")
-        if transformed_output_path:
-            os.makedirs(os.path.dirname(transformed_output_path) or ".", exist_ok=True)
-            new.export(transformed_output_path)
-        bpy.ops.wm.stl_import(filepath=f"{tempdir}/transformed.stl")
+    target_cloud = trimesh.load_mesh(f"{__DIR_PATH}/resources/PPM Default.stl")
+    initializations = []
+    candidate_diagnostics = []
+    if initial_transforms:
+        initializations.extend((method, matrix, np.nan) for method, matrix in initial_transforms)
     else:
-        BezierPPM().points
+        points = target_cloud.vertices
+        points_pit = trimesh.bounds.oriented_bounds(points)[0]
+        search_pit = original_cloud.principal_inertia_transform if original_cloud.is_volume else original_cloud.bounding_box_oriented.principal_inertia_transform
+        search_to_points = np.linalg.inv(points_pit) @ search_pit
+        cubes = np.array([np.eye(4) * np.append(diag, 1) for diag in [[1, 1, 1], [1, 1, -1], [1, -1, 1], [-1, 1, 1], [-1, -1, 1], [-1, 1, -1], [1, -1, -1], [-1, -1, -1]]])
+        for index, flip in enumerate(cubes):
+            target_to_mesh = trimesh.transformations.transform_around(flip, original_cloud.centroid) @ np.linalg.inv(search_to_points)
+            target_to_mesh, _, cost = icp(points, original_cloud, initial=target_to_mesh, max_iterations=10, scale=False, reflection=False)
+            mesh_to_target = np.linalg.inv(target_to_mesh)
+            determinant = np.linalg.det(mesh_to_target[:3, :3])
+            candidate_diagnostics.append(f"axis_{index}:{cost:.6f}:{determinant:.6f}")
+            if determinant > 1e-8:
+                initializations.append((f"proper_global_{index}", mesh_to_target, cost))
+        if not initializations:
+            raise RuntimeError(f"Could not find a proper global initialization for {path_to_mesh}")
+        initializations = [min(initializations, key=lambda initialization: initialization[2])]
+    alignments = []
+    for method, initial, candidate_initial_cost in initializations:
+        matrix, _, _ = icp(
+            original_cloud.vertices,
+            target_cloud,
+            initial=initial,
+            max_iterations=50,
+            scale=True,
+            reflection=False,
+        )
+        aligned_cloud = original_cloud.copy()
+        aligned_cloud.apply_transform(matrix)
+        source_height = np.ptp(aligned_cloud.vertices[:, 2])
+        target_height = np.ptp(target_cloud.vertices[:, 2])
+        height_correction = target_height / source_height
+        height_matrix = np.eye(4)
+        height_matrix[2, 2] = height_correction
+        height_matrix = trimesh.transformations.transform_around(height_matrix, aligned_cloud.centroid)
+        matrix = height_matrix @ matrix
+        aligned_cloud.apply_transform(height_matrix)
+        vertical_offset = np.mean(target_cloud.bounds[:, 2]) - np.mean(aligned_cloud.bounds[:, 2])
+        matrix = trimesh.transformations.translation_matrix([0, 0, vertical_offset]) @ matrix
+        aligned_cloud.apply_translation([0, 0, vertical_offset])
+        _, distances, _ = target_cloud.nearest.on_surface(aligned_cloud.vertices)
+        cost = np.mean(distances ** 2)
+        determinant = np.linalg.det(matrix[:3, :3])
+        height_scale = height_correction
+        if determinant > 1e-8:
+            alignments.append((cost, method, determinant, matrix, candidate_initial_cost, height_scale))
+    if not alignments:
+        raise RuntimeError(f"Could not find a proper alignment for {path_to_mesh}")
+    alignment_cost, alignment_method, alignment_determinant, matrix_scale, alignment_initial_cost, alignment_height_scale = min(alignments, key=lambda alignment: alignment[0])
+    candidate_diagnostics.extend(f"{method}:{cost:.6f}:{determinant:.6f}:{height_scale:.6f}" for cost, method, determinant, _, _, height_scale in alignments)
+    alignment_candidates = "|".join(candidate_diagnostics)
+
+    new = original_cloud.apply_transform(matrix_scale)
+
+    # open ear canal
+    vert_ind = np.argwhere((new.vertices[:, 1] <= 0))
+    mask = np.ones(len(new.vertices), dtype=bool)
+    mask[vert_ind] = False
+    legit_mask = mask[new.faces].any(axis=1)
+    new.update_faces(legit_mask)
+    new.remove_unreferenced_vertices()
+
+    new.export(f"{tempdir}/transformed.stl")
+    if transformed_output_path:
+        os.makedirs(os.path.dirname(transformed_output_path) or ".", exist_ok=True)
+        new.export(transformed_output_path)
+    bpy.ops.wm.stl_import(filepath=f"{tempdir}/transformed.stl")
 
     data = []
     depth_data = []
-
-    if views == 1:
-        views_list = [12]
-    elif views == 3:
-        views_list = [2, 12, 23]
-    elif views == 9:
-        views_list = [0, 2, 4, 10, 12, 14, 20, 22, 24]
-    elif views == 25:
-        views_list = list(range(25))
 
     for i in range(camera_positions.shape[1]):
 
@@ -206,7 +218,7 @@ def get_model_input(path_to_mesh, views, depth, mirror, initial_transforms=None,
         for i in depth_data:
             data.append(i)
     return (
-        np.stack(data).astype(np.float32) / 255.0,
+        np.stack(data).astype(np.float32),
         matrix_scale,
         np.array(new.vertices),
         {
@@ -219,7 +231,8 @@ def get_model_input(path_to_mesh, views, depth, mirror, initial_transforms=None,
         },
     )
 
-def get_model_prediction(model, data):
+def ppm_parameter_groups():
+    """Predicted PPM parameter names, grouped as the network output is laid out."""
     all_parameters = []
     with open(f'{__DIR_PATH}/resources/PPM Parameters.csv', mode ='r') as file:
         csvFile = csv.reader(file)
@@ -230,6 +243,19 @@ def get_model_prediction(model, data):
     rotation_parameters = [param for param in all_parameters if 'Rotation' in param and 'Parent' not in param]
     scale_parameters = [param for param in all_parameters if 'Scale' in param and 'Parent' not in param]
     shape_parameters = [param for param in all_parameters if 'Shape' in param]
+    return location_parameters, rotation_parameters, scale_parameters, shape_parameters
+
+
+def model_output_size():
+    """Network outputs: one per location/scale/shape value, 6D (ortho6d) per quaternion."""
+    location_parameters, rotation_parameters, scale_parameters, shape_parameters = ppm_parameter_groups()
+    if len(rotation_parameters) % 4:
+        raise ValueError("PPM Parameters.csv must list four quaternion components per rotation.")
+    return len(location_parameters) + len(scale_parameters) + len(shape_parameters) + 6 * (len(rotation_parameters) // 4)
+
+
+def get_model_prediction(model, data):
+    location_parameters, rotation_parameters, scale_parameters, shape_parameters = ppm_parameter_groups()
 
     with torch.no_grad():
         out = model(torch.tensor(data).unsqueeze(0))
@@ -263,17 +289,23 @@ def main(args):
     with open(args.configuration, 'r') as file:
         CONFIGURATION = yaml.safe_load(file)
 
+    num_classes = model_output_size()
+    # The shipped checkpoints were trained with 188 outputs; a different count
+    # means PPM Parameters.csv no longer matches the network head.
+    assert num_classes == 188, f"PPM Parameters.csv yields {num_classes} model outputs, expected 188."
+    if CONFIGURATION['model']['number_of_camera_views'] not in VIEW_INDICES:
+        raise ValueError(f"Unsupported number_of_camera_views {CONFIGURATION['model']['number_of_camera_views']!r}; expected one of {sorted(VIEW_INDICES)}.")
     model = SwinTransformerV2(
                     img_size=CONFIGURATION['model']['img_size'],
                     in_chans=2*CONFIGURATION['model']['number_of_camera_views'] if CONFIGURATION['model']['depth'] else CONFIGURATION['model']['number_of_camera_views'],
-                    num_classes=188,
+                    num_classes=num_classes,
                     window_size=CONFIGURATION['model']['window_size'],
                     depths=CONFIGURATION['model']['depths'],
                     num_heads=CONFIGURATION['model']['num_heads'],
                     weights = torch.ones(4)
                 )
 
-    model.load_state_dict(torch.load(args.model_checkpoint, map_location=torch.device('cpu'), weights_only=False)["model_state_dict"])
+    model.load_state_dict(torch.load(args.model_checkpoint, map_location=torch.device('cpu'), weights_only=True)["model_state_dict"])
     model.eval()
 
     prediciton_df = []
@@ -303,7 +335,7 @@ def main(args):
         data_dir = output_path(target_folder)
         if not os.path.isdir(data_dir):
             continue
-        if not any(path.lower().endswith(".stl") for path in os.listdir(data_dir)):
+        if not any(Path(path).suffix.lower() in MESH_SUFFIXES for path in os.listdir(data_dir)):
             continue
         directions.append((direction, data_dir))
     if not directions:
@@ -312,16 +344,19 @@ def main(args):
     left_alignments = {}
     for direction, data_dir in directions:
 
-        for stl_file in sorted(os.listdir(data_dir)):
-            selected_file = getattr(args, f"target_{direction.lower()}_file", None)
-            if selected_file is not None and stl_file != selected_file:
-                continue
-            if stl_file[-4:] != ".stl":
-                continue
+        selected_file = getattr(args, f"target_{direction.lower()}_file", None)
+        mesh_files = sorted(name for name in os.listdir(data_dir) if Path(name).suffix.lower() in MESH_SUFFIXES)
+        if selected_file is not None:
+            mesh_files = [name for name in mesh_files if name == selected_file]
+        else:
+            # Scan preparation writes the same ear as .stl and .ply; process each stem once, preferring .stl.
+            stl_stems = {Path(name).stem for name in mesh_files if Path(name).suffix.lower() == ".stl"}
+            mesh_files = [name for name in mesh_files if Path(name).suffix.lower() == ".stl" or Path(name).stem not in stl_stems]
+        for stl_file in mesh_files:
             print(f"{data_dir}/{stl_file}")
             emit_live_event(f"{direction} ear · Aligning input mesh")
 
-            stem = stl_file[:-4]
+            stem = Path(stl_file).stem
             paired_alignment = None
             if direction == "Right":
                 paired_alignment = left_alignments.get(stem)
@@ -333,7 +368,7 @@ def main(args):
                 depth=CONFIGURATION['model']['depth'],
                 mirror=True if direction == "Right" else False,
                 initial_transforms=[("paired_left", paired_alignment[0])] if paired_alignment else None,
-                transformed_output_path=os.path.join(output_path(intermediates), direction, f"ICP_{stl_file}"),
+                transformed_output_path=os.path.join(output_path(intermediates), direction, f"ICP_{stem}.stl"),
             )
             if direction == "Left":
                 left_alignments[stem] = (transform_matrix, alignment["determinant"])
@@ -348,16 +383,16 @@ def main(args):
             emit_live_event(f"{direction} ear · Predicting ear shape")
             prediction_ppm = get_model_prediction(model, data)
 
-            tempdir = tempfile.mkdtemp()
             prediction = BezierPPM(from_dict=prediction_ppm)
-            prediction.export_stl(file=f"{tempdir}/{stl_file[:-4]}.stl")
 
             prediction_parameters_dir = output_path(folders[direction]["parameters"])
             if not os.path.isdir(prediction_parameters_dir):
                 os.makedirs(prediction_parameters_dir)
-            prediction.export_csv(file=f"{prediction_parameters_dir}/Prediction_Parameters_{stl_file[:-4]}.csv")
+            prediction.export_csv(file=f"{prediction_parameters_dir}/Prediction_Parameters_{stem}.csv")
 
-            predicted_cloud = trimesh.load_mesh(f"{tempdir}/{stl_file[:-4]}.stl")
+            with tempfile.TemporaryDirectory(prefix="pinna2hrtf-prediction-") as tempdir:
+                prediction.export_stl(file=f"{tempdir}/{stem}.stl")
+                predicted_cloud = trimesh.load_mesh(f"{tempdir}/{stem}.stl")
             predicted_cloud = predicted_cloud.apply_transform(np.linalg.inv(transform_matrix))
 
             if direction == "Right":
@@ -367,7 +402,7 @@ def main(args):
             prediction_stl_dir = output_path(folders[direction]["prediction"])
             if not os.path.isdir(prediction_stl_dir):
                 os.makedirs(prediction_stl_dir)
-            predicted_cloud.export(f"{prediction_stl_dir}/Prediction_{stl_file[:-4]}.stl")
+            predicted_cloud.export(f"{prediction_stl_dir}/Prediction_{stem}.stl")
             emit_live_event(f"{direction} ear · Prediction saved")
             predicted_cloud = np.array(predicted_cloud.vertices)
 
@@ -377,7 +412,7 @@ def main(args):
             out = {}
                         
             out["File Path"] = f"{data_dir}/{stl_file}"
-            out["ID"] = stl_file[:-4]
+            out["ID"] = stem
             out["Direction"] = direction
             out["Alignment Method"] = alignment["method"]
             out["Alignment Initial Cost"] = alignment["initial_cost"]
@@ -412,6 +447,12 @@ def main(args):
                 out[f"RMSE {region}"] = np.sqrt(np.mean(distances_region**2))
             prediciton_df.append(out)
 
+    if not prediciton_df:
+        selected = [getattr(args, f"target_{direction.lower()}_file", None) for direction, _ in directions]
+        raise FileNotFoundError(
+            f"No input mesh ({', '.join(MESH_SUFFIXES)}) was processed in {[d for _, d in directions]}"
+            + (f" for the selected files {[f for f in selected if f]}" if any(selected) else "") + "."
+        )
     pd.DataFrame(prediciton_df).to_csv(os.path.join(output_path(intermediates), "Results Inference.csv"))
 
 def parse_args():
