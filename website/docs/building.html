@@ -11,12 +11,12 @@
     <main class="docs-content" id="main">
       <p class="guide-status">SOURCE GUIDE <span>/</span> Features may differ from the published installer. Check your release before following a workflow.</p>
       <p class="kicker"><span class="dot" aria-hidden="true"></span> DEVELOPMENT</p><h1>Build the desktop app.</h1>
-      <p class="lede">These instructions are for developers packaging a local build. Most users should download the release assets from the <a href="../#downloads">downloads page</a>.</p>
+      <p class="lede">These instructions are for building the app from source. To install the app, use the <a href="../#downloads">downloads page</a>.</p>
       <h2 id="get-the-source">Get the source</h2><p>Clone the repository and run the commands below from its root directory.</p><pre><code>git clone https://github.com/Any2HRTF/Pinna2HRTF.git
-cd Pinna2HRTF</code></pre><h2 id="macos">macOS</h2><p>Build on Apple Silicon with Git, <code>uv</code>, Xcode Command Line Tools, and the Swift toolchain available:</p><pre><code>bash Scripts/build_and_run.sh</code></pre>
+cd Pinna2HRTF</code></pre><h2 id="macos">macOS</h2><p>On Apple Silicon, install Git, <code>uv</code>, Xcode Command Line Tools, and the Swift toolchain, then run:</p><pre><code>bash Scripts/build_and_run.sh</code></pre>
       <p>This prepares external tools, builds <code>build/release/Pinna2HRTF.app</code>, and opens it. To build without launching:</p><pre><code>bash Scripts/prepare_external_tools.sh
 bash Scripts/build_release_app.sh</code></pre>
-      <p>Local builds are ad-hoc signed. To create a drag-to-Applications DMG that is ad-hoc signed and not notarized:</p><pre><code>bash Scripts/build_release_app.sh --installer</code></pre>
+      <p>Local builds are ad-hoc signed. To create a DMG for installation, also ad-hoc signed and not notarized, run:</p><pre><code>bash Scripts/build_release_app.sh --installer</code></pre>
       <p>The installer and SHA-256 checksum are written to <code>dist/</code>. The first launch may be blocked by macOS because the package is not notarized. The build defaults to SDK 26.5; set <code>PINNA2HRTF_MACOS_SDK</code> to choose another installed SDK.</p>
       <h3>Signed and notarized distribution</h3><p>Install a Developer ID Application certificate and save notarization credentials in Keychain under <code>Pinna2HRTF-notary</code>, then run:</p><pre><code>bash Scripts/build_release_app.sh --distribution</code></pre>
       <p>Set <code>PINNA2HRTF_SIGNING_IDENTITY</code> to choose a certificate or <code>PINNA2HRTF_NOTARY_PROFILE</code> to select another Keychain profile.</p>

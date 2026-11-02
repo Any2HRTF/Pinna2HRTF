@@ -11,7 +11,7 @@
     <main class="docs-content" id="main">
       <p class="guide-status">SOURCE GUIDE <span>/</span> Features may differ from the published installer. Check your release before following a workflow.</p>
       <p class="kicker"><span class="dot" aria-hidden="true"></span> PYTHON CLI</p><h1>Run the pipeline from a terminal.</h1>
-      <p class="lede">The CLI exposes scan preparation, optional Mesh2PPM inference, simulation preprocessing, NumCalc, and postprocessing. Run individual stages or drive them from one YAML configuration.</p>
+      <p class="lede">Use the CLI to prepare scans, run optional Mesh2PPM inference, prepare and solve simulations, and process results. Run individual stages or configure a full run in YAML.</p>
       <h2 id="install-the-python-environment">Install the Python environment</h2><p>Install <a href="https://git-scm.com/install/">Git</a> and <a href="https://docs.astral.sh/uv/getting-started/installation/">uv</a>, then clone the repository and create the locked Python 3.11 environment:</p>
       <pre><code>git clone https://github.com/Any2HRTF/Pinna2HRTF.git
 cd Pinna2HRTF
@@ -32,7 +32,7 @@ bash Scripts/prepare_external_tools.sh</code></pre>
         <tr><td><code>run-config</code></td><td>Run configured stages in sequence or create a YAML template.</td><td>Configuration file; stages selected with <code>--stage</code>.</td></tr>
       </tbody></table></div>
       <h2 id="configure-a-run">Configure a run</h2><p>Create a complete configuration template:</p><pre><code>uv run Pinna2HRTF run-config --write-template pinna2hrtf.yaml</code></pre>
-      <p>Edit input paths, output directory, external tool locations, evaluation grid, frequency range, and stage settings. Relative paths resolve from the YAML file’s directory. Set an unused ear to <code>null</code>. Mesh2PPM inference is disabled in the template, and preprocessing uses original meshes unless <code>inference.use_predictions_for_preprocessing</code> is set to <code>true</code>.</p>
+      <p>Edit input paths, output directory, external tool locations, evaluation grid, frequency range, and stage settings. Relative paths are resolved from the YAML file’s directory. Set an unused ear to <code>null</code>. Mesh2PPM inference is disabled in the template, and preprocessing uses original meshes unless <code>inference.use_predictions_for_preprocessing</code> is set to <code>true</code>.</p>
       <p>Inspect the planned run first:</p><pre><code>uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage all --dry-run</code></pre>
       <p>Then run all enabled stages, or run a single stage:</p><pre><code>uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage all
 uv run Pinna2HRTF preprocessing --config pinna2hrtf.yaml
@@ -51,7 +51,7 @@ uv run Pinna2HRTF numcalc --config pinna2hrtf.yaml</code></pre>
   require_manual_review: false
   reviewed_left: null
   reviewed_right: null</code></pre>
-      <h2 id="run-individual-stages-without-yaml">Run individual stages without YAML</h2><p>Every stage supports command-line options; inspect the current option list with its help flag. For example:</p><pre><code>uv run Pinna2HRTF scan-preparation --help
+      <h2 id="run-individual-stages-without-yaml">Run individual stages without YAML</h2><p>Every stage has command-line options. Use its help flag to see them. For example:</p><pre><code>uv run Pinna2HRTF scan-preparation --help
 uv run Pinna2HRTF preprocessing --help
 uv run Pinna2HRTF numcalc --help</code></pre>
       <p>Keep a separate output folder for each experiment and inspect the geometry and source placement after preprocessing before starting a long simulation.</p>
