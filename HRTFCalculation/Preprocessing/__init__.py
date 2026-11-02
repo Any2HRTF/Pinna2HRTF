@@ -33,11 +33,39 @@ def _is_generated_project(path, protected_paths):
 
 
 EXPORT_RECORD = ".pinna2hrtf-export.json"
-# Files Mesh2HRTF's solver and Output2HRTF add to a project after export.
-_SOLVER_OUTPUT = re.compile(
-    r"^(NumCalc/source_\d+/(be\.out/.+|NC[^/]*\.(txt|out)|Memory\.txt|[^/]*_log\.txt)"
-    r"|Output2HRTF/.+\.(sofa|pdf|png|txt|csv|json|mat|vtk|vtu))$"
+# Exact names of files NumCalc, Pinna2HRTF's NumCalc runner and Mesh2HRTF's
+# Output2HRTF add to a project after export (see NC_Main.cpp, NumCalc.py,
+# output2hrtf.py, write_output_report.py, inspect_sofa_files.py, export_vtk.py).
+# Any other unrecorded file means the backup is kept.
+_NUMCALC_OUTPUT = re.compile(
+    r"^NumCalc/source_\d+/("
+    r"be\.out/be\.\d+/(pBoundary|pBoundaryVTK\.vtk|pEvalGrid|vBoundary|vEvalGrid)"
+    r"|NC\d+-\d+\.out|NCfrom\d+\.out|NCuntil\d+\.out|NC\.out|Memory\.txt|NC\d+-\d+_log\.txt"
+    r")$"
 )
+_OUTPUT2HRTF_FIXED = re.compile(r"^Output2HRTF/(report_source_\d+\.csv|report_issues\.txt|vtk/[^/]+/frequency_step_\d+\.vtk)$")
+
+
+def _is_solver_output(name, grids):
+    """True only for the exact file names the solver tools write; grids are the project's recorded evaluation grids."""
+    if _NUMCALC_OUTPUT.match(name) or _OUTPUT2HRTF_FIXED.match(name):
+        return True
+    for grid in grids:
+        for kind in ("HRTF", "HRIR"):
+            stem = re.escape(f"{kind}_{grid}")
+            if re.match(rf"^Output2HRTF/{stem}(\.sofa|_2D\.pdf|_3D_(horizontal|median|frontal)_plane\.jpeg)$", name):
+                return True
+    return False
+
+
+def _backup_fingerprint(backup):
+    """Identity of a backup's contents: every file's path, size and modification time."""
+    digest = hashlib.sha256()
+    files, other = _project_files(backup)
+    for name in sorted(files + other):
+        info = (Path(backup) / name).lstat()
+        digest.update(f"{name}\0{info.st_size}\0{info.st_mtime_ns}\0{info.st_mode}\n".encode())
+    return digest.hexdigest()
 
 
 def _project_files(root):
@@ -119,7 +147,8 @@ def inspect_previous_backup(backup, protected_paths=()):
             return False, f"a generated file was removed ({name})"
         if _sha256(backup / name) != digest:
             return False, f"a generated file was changed ({name})"
-    unknown = sorted(name for name in present - set(recorded) if not _SOLVER_OUTPUT.match(name))
+    grids = {name.split("/")[1] for name in recorded if name.startswith("EvaluationGrids/") and name.count("/") >= 2}
+    unknown = sorted(name for name in present - set(recorded) if not _is_solver_output(name, grids))
     if unknown:
         return False, f"it contains files Pinna2HRTF did not generate ({unknown[0]})"
     return True, "only unchanged generated files"
@@ -138,7 +167,8 @@ def _kept_backup_path(destination):
 def plan_export_backups(destinations, protected_paths, logger=print):
     """Describe what publishing will do with existing backups, before any work starts.
 
-    Returns the backups that will be deleted (path, size); the caller must confirm those.
+    Returns the backups that will be deleted as (path, size, fingerprint); the caller
+    must confirm those and pass {str(path): fingerprint} to _publish_export_projects.
     """
     replace = []
     for destination in destinations.values():
@@ -152,24 +182,26 @@ def plan_export_backups(destinations, protected_paths, logger=print):
             continue
         deletable, reason = inspect_previous_backup(backup, protected_paths)
         if deletable:
-            replace.append((backup, _folder_size(backup)))
+            replace.append((backup, _folder_size(backup), _backup_fingerprint(backup)))
         else:
             logger(f"Warning: the older backup {backup} will be kept because {reason}. "
                    f"It will be moved to {destination}.previous-<date> so the current project can become the new backup.")
     return replace
 
 
-def _publish_export_projects(staged, destinations, protected_paths, logger=print):
+def _publish_export_projects(staged, destinations, protected_paths, logger=print, approved_backups=None):
     """Swap freshly generated projects into place, keeping one previous export per ear.
 
     Each replaced project becomes <destination>.previous. An older .previous is
-    deleted only if it still holds just unchanged generated files; otherwise it is
-    kept as <destination>.previous-<date>. If any move fails, every move is undone,
+    deleted only if the user confirmed exactly that folder (same fingerprint as in
+    approved_backups) and it still holds just unchanged generated files; otherwise
+    it is kept as <destination>.previous-<date>. If any move fails, every move is undone,
     so both ears stay on the same export.
     """
     for destination in destinations.values():
         if destination.exists() and not _is_generated_project(destination, protected_paths):
             raise FileExistsError(f"Refusing to replace {destination}: it is not a Mesh2HRTF project generated by Pinna2HRTF or it contains input files.")
+    approved_backups = approved_backups or {}
     moves = []
     retired = {}
 
@@ -200,8 +232,15 @@ def _publish_export_projects(staged, destinations, protected_paths, logger=print
         raise
     for side, retiring in retired.items():
         destination = destinations[side]
-        # Check again: the folder may have changed while the projects were built.
-        deletable, reason = inspect_previous_backup(retiring, protected_paths)
+        # Check again: the folder may have changed or been replaced while the
+        # projects were built. Only the exact folder the user confirmed is deleted.
+        approved = approved_backups.get(str(previous_backup_path(destination)))
+        if approved is None:
+            deletable, reason = False, "it was not among the backups you confirmed for deletion"
+        elif _backup_fingerprint(retiring) != approved:
+            deletable, reason = False, "it changed after you confirmed its deletion"
+        else:
+            deletable, reason = inspect_previous_backup(retiring, protected_paths)
         if deletable:
             shutil.rmtree(retiring.parent)
             logger(f"Deleted the older backup of {destination}; {previous_backup_path(destination)} now holds the previous export.")
@@ -262,13 +301,14 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
                 raise FileExistsError(f"Refusing to replace {project}: it is not a Mesh2HRTF project generated by Pinna2HRTF or it contains input files.")
         to_replace = plan_export_backups({"left": left_project, "right": right_project}, protected, logger)
         if to_replace:
-            listing = "\n".join(f"  {path} ({_format_size(size)})" for path, size in to_replace)
+            listing = "\n".join(f"  {path} ({_format_size(size)})" for path, size, _ in to_replace)
             question = ("Only one previous export is kept per ear. These older backups hold only unchanged "
                         f"generated files and will be deleted after the new export succeeds:\n{listing}")
             if confirm_replace_previous is None:
                 raise FileExistsError(question + "\nCopy anything you need, then rerun with --replace-previous-backup.")
             if not confirm_replace_previous(question):
                 raise RuntimeError("Cancelled: the older export backups were left unchanged.")
+        approved_backups = {str(path): fingerprint for path, _, fingerprint in to_replace}
     side_dirs = {"left": intermediates / "Left", "right": intermediates / "Right"}
     for name in ["Prediction STL Left", "Prediction STL Right", "Prediction Parameters Left", "Prediction Parameters Right", "ICP STL Left", "ICP STL Right"]:
         legacy_path = intermediates / name
@@ -439,7 +479,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             for side, ear in ears.items():
                 if ear is not None:
                     _write_export_record(projects[side])
-            _publish_export_projects({side: projects[side] for side, ear in ears.items() if ear is not None}, export_destinations, protected, logger)
+            _publish_export_projects({side: projects[side] for side, ear in ears.items() if ear is not None}, export_destinations, protected, logger, approved_backups)
             projects = export_destinations
         emit_live_event("Mesh2HRTF projects are ready")
         logger(f"Preprocessing completed: {', '.join(str(projects[side]) for side, ear in ears.items() if ear is not None)}")
