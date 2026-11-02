@@ -865,19 +865,7 @@ final class AppStore: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 cameraNode.orientation = SCNQuaternion(q[0], q[1], q[2], q[3])
             }
             scene.rootNode.addChildNode(cameraNode)
-            let light = SCNLight()
-            light.type = .directional
-            light.intensity = 900
-            let lightNode = SCNNode()
-            lightNode.light = light
-            lightNode.position = SCNVector3(-Float(maximumDimension) * 0.65, Float(maximumDimension) * 0.75, -Float(maximumDimension) * 0.9)
-            cameraNode.addChildNode(lightNode)
-            let ambientLight = SCNLight()
-            ambientLight.type = .ambient
-            ambientLight.intensity = 140
-            let ambientLightNode = SCNNode()
-            ambientLightNode.light = ambientLight
-            scene.rootNode.addChildNode(ambientLightNode)
+            EvenMeshLighting.install(in: scene)
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.meshLoadID == loadID, self.selectedProjectID == projectID else { return }
                 self.selectedMesh = url

@@ -443,6 +443,7 @@ final class PPMFittingModel: ObservableObject {
             let node = SCNNode(mdlObject: asset.object(at: index))
             let material = SCNMaterial()
             material.diffuse.contents = NSColor(calibratedRed: 0.92, green: 0.34, blue: 0.16, alpha: 1)
+            material.lightingModel = .blinn
             material.roughness.contents = 0.48
             material.isDoubleSided = true
             node.geometry?.materials = [material]
@@ -458,6 +459,7 @@ final class PPMFittingModel: ObservableObject {
         let geometry = try makePreviewGeometry(from: url)
         let material = SCNMaterial()
         material.diffuse.contents = NSColor(calibratedRed: 0.92, green: 0.34, blue: 0.16, alpha: 1)
+        material.lightingModel = .blinn
         material.roughness.contents = 0.48
         material.isDoubleSided = true
         geometry.materials = [material]
@@ -644,19 +646,7 @@ final class PPMFittingModel: ObservableObject {
         scene.rootNode.addChildNode(node)
         cameraNode = node
         cameraRevision += 1
-        let light = SCNLight()
-        light.type = .directional
-        light.intensity = 900
-        let lightNode = SCNNode()
-        lightNode.light = light
-        lightNode.position = SCNVector3(-extent * 0.65, extent * 0.75, -extent * 0.9)
-        node.addChildNode(lightNode)
-        let ambient = SCNLight()
-        ambient.type = .ambient
-        ambient.intensity = 150
-        let ambientNode = SCNNode()
-        ambientNode.light = ambient
-        scene.rootNode.addChildNode(ambientNode)
+        EvenMeshLighting.install(in: scene)
     }
 
     private func archiveTemplateIfNeeded() throws -> URL? {

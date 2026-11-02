@@ -280,23 +280,7 @@ final class MeshEditorModel: ObservableObject {
         camera.zNear = 0.05; camera.zFar = max(span * 30, 10000); camera.fieldOfView = 38
         node.camera = camera
         scene.rootNode.addChildNode(node); cameraNode = node
-        // Equal lights on the two ear sides keep either ear readable when orbiting.
-        for side: Float in [-1, 1] {
-            let sideNode = SCNNode(); let sideLight = SCNLight()
-            sideLight.type = .directional; sideLight.intensity = 700
-            sideLight.castsShadow = false; sideNode.light = sideLight
-            sideNode.simdPosition = SIMD3<Float>(0.4, side, 0.6) * Float(span)
-            let aim = SCNLookAtConstraint(target: target)
-            aim.worldUp = SCNVector3(0,0,1); aim.isGimbalLockEnabled = true
-            sideNode.constraints = [aim]
-            target.addChildNode(sideNode)
-        }
-        let lightNode = SCNNode(); let light = SCNLight()
-        light.type = .omni; light.intensity = 250; lightNode.light = light
-        node.addChildNode(lightNode)
-        let ambientNode = SCNNode(); let ambient = SCNLight()
-        ambient.type = .ambient; ambient.intensity = 320; ambientNode.light = ambient
-        scene.rootNode.addChildNode(ambientNode)
+        EvenMeshLighting.install(in: scene)
         resetCamera()
     }
 

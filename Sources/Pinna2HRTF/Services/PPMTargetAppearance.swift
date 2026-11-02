@@ -11,7 +11,7 @@ enum PPMTargetAppearance {
             guard let geometry = node.geometry else { return }
             let material = SCNMaterial()
             material.diffuse.contents = NSColor(calibratedWhite: 0.62, alpha: 1)
-            material.lightingModel = .physicallyBased
+            material.lightingModel = .blinn
             material.isDoubleSided = true
             material.transparency = 1
             material.transparent.contents = NSColor(white: 1, alpha: CGFloat(opacity))
