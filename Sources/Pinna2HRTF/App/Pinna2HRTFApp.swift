@@ -5,6 +5,7 @@ import AppKit
 struct Pinna2HRTFApp: App {
     @NSApplicationDelegateAdaptor(Pinna2HRTFAppDelegate.self) private var appDelegate
     @StateObject private var store = AppStore()
+    @Environment(\.openWindow) private var openWindow
 
     init() {
         // Writing to a subprocess that already exited must fail with EPIPE, not kill the app.
@@ -39,12 +40,14 @@ struct Pinna2HRTFApp: App {
             PipelineCommands()
             CommandGroup(replacing: .help) {
                 Button("Pinna2HRTF Help") {
-                    if let url = URL(string: "https://github.com/Any2HRTF/Pinna2HRTF#readme") {
-                        NSWorkspace.shared.open(url)
-                    }
+                    openWindow(id: "help")
                 }
             }
         }
+        Window("Pinna2HRTF Help", id: "help") {
+            DocumentationView()
+        }
+        .defaultSize(width: 960, height: 720)
     }
 }
 

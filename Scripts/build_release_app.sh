@@ -102,6 +102,8 @@ xcrun vtool -set-build-version macos 13.0 "$SDK_VERSION" -replace -output "$MACO
 cp -R "$ROOT/HRTFCalculation" "$RESOURCES/HRTFCalculation"
 cp "$ROOT/pyproject.toml" "$RESOURCES/pyproject.toml"
 cp "$ROOT/uv.lock" "$RESOURCES/uv.lock"
+# Bundle the website documentation for offline native help.
+cp -R "$ROOT/website" "$RESOURCES/Website"
 if [[ -d "$EXTERNAL_ROOT/bin" ]]; then
   mkdir -p "$RESOURCES/External/bin"
   for bundled_file in NumCalc NumCalc.source-commit hrtf_mesh_grading libpmp.1.2.1.dylib libpmp.dylib; do
