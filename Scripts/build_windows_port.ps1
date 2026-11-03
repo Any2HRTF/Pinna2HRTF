@@ -1,4 +1,8 @@
 param(
+    [string]$OutputDirectory,
+    [string]$RuntimePackage,
+    [string]$ExternalRoot,
+    [switch]$MacImitation,
     [switch]$SkipPythonEnvironment,
     [switch]$AllowMissingExternalTools
 )
@@ -6,8 +10,10 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
+$externalSourceRoot = if ($ExternalRoot) { [IO.Path]::GetFullPath($ExternalRoot) } elseif ($RuntimePackage) { Join-Path ([IO.Path]::GetFullPath($RuntimePackage)) "External" } else { Join-Path $root "External" }
 $windowsProject = Join-Path $root "Sources\Pinna2HRTF.Windows"
-$dist = Join-Path $root "dist\windows\Pinna2HRTF"
+$dist = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $root "dist\windows\Pinna2HRTF" }
+if ($OutputDirectory -and (Test-Path -LiteralPath $dist)) { throw "The review output already exists; choose a new folder to preserve it: $dist" }
 $publish = Join-Path $windowsProject "bin\Release\net8.0-windows10.0.19041.0\win-x64\publish"
 $buildOutput = Split-Path $publish -Parent
 $distExternal = Join-Path $dist "External"
@@ -30,19 +36,18 @@ if (-not $dotnetPath) {
 # Check the native payload before replacing a previously working package.
 $requiredNative = @("libpmp.dll", "libpmp_vis.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll")
 if (-not $AllowMissingExternalTools) { $requiredNative += @("NumCalc.exe", "hrtf_mesh_grading.exe") }
-$missingNative = $requiredNative | Where-Object { -not (Test-Path (Join-Path $root "External\bin\$_")) }
-if ($missingNative.Count -gt 0 -or -not (Test-Path (Join-Path $root "External\src\Mesh2HRTF\mesh2hrtf\Mesh2Input\mesh2input.py"))) {
+$missingNative = $requiredNative | Where-Object { -not (Test-Path (Join-Path $externalSourceRoot "bin\$_")) }
+if ($missingNative.Count -gt 0 -or -not (Test-Path (Join-Path $externalSourceRoot "src\Mesh2HRTF\mesh2hrtf\Mesh2Input\mesh2input.py"))) {
     throw "The Windows preprocessing runtime is incomplete. Run Scripts\prepare_windows_external_tools.ps1, then rebuild. Missing native files: $($missingNative -join ', ')"
 }
 
-if (Test-Path $dist) {
-    $resolvedDist = (Resolve-Path -LiteralPath $dist).Path
-    $expectedDist = [IO.Path]::GetFullPath((Join-Path $root "dist\windows\Pinna2HRTF"))
-    if ($resolvedDist -ne $expectedDist) { throw "Unexpected package path: $resolvedDist" }
-    Remove-Item -LiteralPath $resolvedDist -Recurse -Force
-}
-
-& $dotnetPath publish (Join-Path $windowsProject "Pinna2HRTF.Windows.csproj") -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false
+$finalDestination = $dist
+$dist = $finalDestination + ".staging-" + [Guid]::NewGuid().ToString('N')
+$distExternal = Join-Path $dist "External"; $distBin = Join-Path $distExternal "bin"
+$savedBuildEnvironment = @{}
+foreach ($name in @('UV_CACHE_DIR','UV_PYTHON_INSTALL_DIR','UV_VENV_RELOCATABLE','GIT_CONFIG_COUNT','GIT_CONFIG_KEY_0','GIT_CONFIG_VALUE_0')) { $savedBuildEnvironment[$name] = [Environment]::GetEnvironmentVariable($name,'Process') }
+try {
+& $dotnetPath publish (Join-Path $windowsProject "Pinna2HRTF.Windows.csproj") -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false "-p:MacImitation=$($MacImitation.IsPresent.ToString().ToLowerInvariant())" -p:NuGetAudit=false
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed with exit code $LASTEXITCODE"
 }
@@ -77,7 +82,7 @@ if (-not (Test-Path (Join-Path $root "uv.lock"))) {
 Copy-Item (Join-Path $root "uv.lock") (Join-Path $dist "uv.lock") -Force
 
 New-Item -ItemType Directory -Path $distBin -Force | Out-Null
-$sourceExternal = Join-Path $root "External"
+$sourceExternal = $externalSourceRoot
 $sourceBin = Join-Path $sourceExternal "bin"
 if (Test-Path $sourceBin) {
     # Mesh grading and NumCalc are native builds. Copy their complete sibling
@@ -102,14 +107,25 @@ if (-not $uvCommand) {
 }
 $uv = if ($uvCommand) { $uvCommand.Source } else { "" }
 
-if (-not $SkipPythonEnvironment) {
+if ($RuntimePackage) {
+    $runtimeSource = (Resolve-Path -LiteralPath $RuntimePackage).Path
+    foreach ($folder in @('Python','.venv')) {
+        $payload = Join-Path $runtimeSource $folder
+        if (-not (Test-Path -LiteralPath $payload)) { throw "The runtime source is incomplete: $payload" }
+        Copy-Item -LiteralPath $payload -Destination (Join-Path $dist $folder) -Recurse
+    }
+    $modelSource = Join-Path $runtimeSource 'HRTFCalculation\Inference\resources'
+    $modelDestination = Join-Path $dist 'HRTFCalculation\Inference\resources'
+    Get-ChildItem -LiteralPath $modelSource -File | Where-Object { -not (Test-Path -LiteralPath (Join-Path $modelDestination $_.Name)) } | Copy-Item -Destination $modelDestination
+    & (Join-Path $PSScriptRoot 'make_windows_runtime_portable.ps1') -PackageRoot $dist
+} elseif (-not $SkipPythonEnvironment) {
     if ([string]::IsNullOrWhiteSpace($uv)) {
         throw "uv is not on PATH. Install uv before building the portable runtime, or pass -SkipPythonEnvironment for a shell-only build."
     }
 
     Push-Location $dist
     try {
-        $env:UV_CACHE_DIR = Join-Path $root ".uv-cache"
+        $env:UV_CACHE_DIR = Join-Path $root ".uv-cache-v2"
         $env:UV_PYTHON_INSTALL_DIR = Join-Path $dist "Python"
         $env:UV_VENV_RELOCATABLE = "1"
         $env:GIT_CONFIG_COUNT = "1"
@@ -157,6 +173,7 @@ if (-not $SkipPythonEnvironment) {
             Set-Content -Path $pyvenv -Value $lines -Encoding UTF8
         }
         Get-ChildItem (Join-Path $dist ".venv\Scripts") -Force | Where-Object { $_.Name -notmatch '^python(w|3|3\.11)?\.exe$' } | Remove-Item -Recurse -Force
+        & (Join-Path $PSScriptRoot 'make_windows_runtime_portable.ps1') -PackageRoot $dist
     }
     finally {
         Pop-Location
@@ -194,4 +211,21 @@ if (-not (Test-Path $mesh2input)) {
 }
 
 Copy-Item (Join-Path $root "README.md") (Join-Path $dist "README.md") -Force
-Write-Host "Windows portable app written to $dist"
+Copy-Item -LiteralPath (Join-Path $root "website") -Destination (Join-Path $dist "Website") -Recurse
+if ($SkipPythonEnvironment -or $AllowMissingExternalTools) {
+    Set-Content -LiteralPath (Join-Path $dist "INCOMPLETE-DEVELOPMENT-BUILD.txt") -Value 'This build skipped complete runtime/tool verification and is not a portable release.'
+} else {
+    $runtime = Join-Path $dist '.venv\Scripts\python.exe'
+    & $runtime -I -B -c "import sys; sys.path.insert(0,sys.argv[1]); from HRTFCalculation.Config import PipelineConfig; from HRTFCalculation import RunConfig, DesktopBridge, PressureField; import bpy,mesh2hrtf,bezierppm,scipy,sofar; print('Portable imports verified:',RunConfig.__file__)" $dist
+    if ($LASTEXITCODE -ne 0) { throw 'Portable runtime imports failed.' }
+    $models = @(Get-ChildItem -LiteralPath (Join-Path $dist 'HRTFCalculation\Inference\resources') -Filter '*.pth' -File)
+    if ($models.Count -lt 4 -or @($models | Where-Object { $_.Length -lt 1000000 }).Count) { throw 'The inference model payload is incomplete.' }
+}
+$previousDestination = $finalDestination + '.previous-' + [Guid]::NewGuid().ToString('N')
+if (Test-Path -LiteralPath $finalDestination) { Move-Item -LiteralPath $finalDestination -Destination $previousDestination }
+try { Move-Item -LiteralPath $dist -Destination $finalDestination }
+catch { if ((Test-Path -LiteralPath $previousDestination) -and -not (Test-Path -LiteralPath $finalDestination)) { Move-Item -LiteralPath $previousDestination -Destination $finalDestination }; throw }
+Write-Host "Windows portable app written to $finalDestination"
+} finally {
+    foreach ($name in $savedBuildEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name,$savedBuildEnvironment[$name],'Process') }
+}

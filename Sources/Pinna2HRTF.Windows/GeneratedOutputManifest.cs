@@ -7,7 +7,7 @@ namespace Pinna2HRTF.Windows;
 // Optional project metadata. No absolute paths or GUI project IDs are persisted.
 internal sealed class GeneratedOutputManifest
 {
-    internal enum OutputStage { Inference, Preprocessing, Numcalc, Postprocessing }
+    internal enum OutputStage { ScanPreparation = -1, Inference = 0, Preprocessing, Numcalc, Postprocessing }
     internal sealed class Entry
     {
         public OutputStage Stage { get; set; }
@@ -31,33 +31,59 @@ internal sealed class GeneratedOutputManifest
     internal sealed class ResetResult
     {
         public int Deleted { get; set; }
+        public int ProtectedInputs { get; set; }
         public int Modified { get; set; }
         public int NonEmpty { get; set; }
         public int Errors { get; set; }
-        public bool Success => Modified == 0 && Errors == 0;
+        public bool Success => Errors == 0;
         public string Summary(OutputStage? stage) =>
             $"Outputs reset ({(stage == null ? "all" : stage == OutputStage.Numcalc ? "NumCalc onward" : stage + " onward")}): deleted {Deleted}, kept modified {Modified}, kept non-empty directories {NonEmpty}, errors {Errors}.";
     }
 
     readonly string root;
+    readonly string rootIdentity;
+    readonly string? outputPrefix;
     readonly HashSet<string> protectedFiles;
     readonly object gate = new();
     FileStream? runLock;
     static readonly JsonSerializerOptions Json = new()
     {
         WriteIndented = true,
-        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+        Converters = { new OutputStageConverter(), new System.Text.Json.Serialization.JsonStringEnumConverter() }
     };
+    sealed class OutputStageConverter : System.Text.Json.Serialization.JsonConverter<OutputStage>
+    {
+        public override OutputStage Read(ref Utf8JsonReader reader,Type type,JsonSerializerOptions options)
+        {
+            if(reader.TokenType==JsonTokenType.Number&&reader.TryGetInt32(out var number)&&Enum.IsDefined(typeof(OutputStage),number))return (OutputStage)number;
+            if(reader.TokenType==JsonTokenType.String&&Enum.TryParse<OutputStage>(reader.GetString()!.Replace("-",""),true,out var stage)&&Enum.IsDefined(stage))return stage;
+            throw new JsonException("Unknown output stage.");
+        }
+        public override void Write(Utf8JsonWriter writer,OutputStage stage,JsonSerializerOptions options)=>writer.WriteStringValue(stage==OutputStage.ScanPreparation?"Scan-Preparation":stage.ToString());
+    }
     string Metadata => Path.Combine(root, ".pinna2hrtf");
     string Manifest => Path.Combine(Metadata, "generated-output-manifest.json");
 
-    public GeneratedOutputManifest(string projectRoot, IEnumerable<string> inputs)
+    public GeneratedOutputManifest(string projectRoot, IEnumerable<string> inputs, string? outputFolder = null)
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) throw new IOException("Project folder is missing.");
-        root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectRoot));
+        root = Path.TrimEndingDirectorySeparator(PathIdentity.Resolve(projectRoot));
+        rootIdentity = PathIdentity.Read(root).Id;
         if (root == Path.GetPathRoot(root)) throw new IOException("A drive root cannot be an output project.");
         protectedFiles = inputs.Where(p => !string.IsNullOrWhiteSpace(p))
-            .Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .Select(PathIdentity.Resolve).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(outputFolder))
+        {
+            var destination = PathIdentity.Resolve(outputFolder);
+            if (PathIdentity.Contains(root, destination))
+            {
+                outputPrefix = Path.GetRelativePath(root, destination).Replace('\\', '/');
+                if (outputPrefix == "." || outputPrefix.Split('/')[0] is ".pinna2hrtf" or "Input" or "Prepared" or "MeshEdits" or "Manual PPM" or "Projects" or "Intermediates" ||
+                    protectedFiles.Any(p => PathIdentity.Contains(destination, p) || PathIdentity.Contains(p, destination)))
+                    throw new IOException("Choose a separate SOFA output subfolder without project work or inputs.");
+            }
+        }
+
     }
 
     // Timers call this on a worker thread. Existing files are not repeatedly hashed.
@@ -87,6 +113,14 @@ internal sealed class GeneratedOutputManifest
                 var doc = Load();
                 if (doc.Pending != null) Capture(doc);
                 Reconcile(doc);
+                foreach (var input in protectedFiles.Where(p => PathIdentity.Contains(root, p)))
+                {
+                    var relative = Path.GetRelativePath(root, input).Replace('\\', '/');
+                    var normalized = NormalizedOutput(relative);
+                    if (ClassifyOutput(relative) == stage || DirectoryCanBeCreatedBy(normalized, stage) ||
+                        stage == OutputStage.Preprocessing && Regex.IsMatch(normalized, @"^Projects/(Left|Right)(/|$)", RegexOptions.IgnoreCase))
+                        throw new IOException("This stage would replace a selected or shared input. Choose a separate input location: " + input);
+                }
                 var snapshot = Scan(false);
                 doc.Pending = new PendingRun { Stage = stage, Before = snapshot.Files, Directories = snapshot.Directories.ToList() };
                 Save(doc); // durable baseline before starting the child process
@@ -116,6 +150,51 @@ internal sealed class GeneratedOutputManifest
         lock (gate) { runLock?.Dispose(); runLock = null; }
     }
 
+    internal sealed class EditorLease(GeneratedOutputManifest owner, FileStream stream) : IDisposable
+    {
+        FileStream? held = stream;
+        public bool BelongsTo(GeneratedOutputManifest candidate) => ReferenceEquals(owner, candidate) && held != null;
+        public void Dispose() => Interlocked.Exchange(ref held, null)?.Dispose();
+    }
+    public EditorLease AcquireEditorLease()
+    {
+        lock (gate)
+        {
+            if (runLock != null) throw new IOException("Project outputs are busy.");
+            var lease = new EditorLease(this, Acquire());
+            try { var document = Load(); if (document.Pending != null) { Capture(document); Save(document); } return lease; }
+            catch { lease.Dispose(); throw; }
+        }
+    }
+    public void ValidateEditorPaths(IEnumerable<string> paths)
+    {
+        foreach (var path in paths)
+        {
+            var relative = Path.GetRelativePath(root, PathIdentity.Resolve(path)).Replace('\\', '/');
+            if (SafePath(relative) == null || ClassifyOutput(relative) == null)
+                throw new IOException("An editor output conflicts with an input or an unmanaged location: " + path);
+        }
+    }
+    public void RecordGeneratedFiles(IEnumerable<string> paths, EditorLease? editor = null)
+    {
+        lock (gate)
+        {
+            if (runLock != null) throw new IOException("Project outputs are busy.");
+            if (editor != null && !editor.BelongsTo(this)) throw new IOException("The editor output lease is invalid.");
+            using var lease = editor == null ? Acquire() : null; var doc = Load();
+            foreach (var path in paths)
+            {
+                var relative = Path.GetRelativePath(root, PathIdentity.Resolve(path)).Replace('\\','/');
+                if (SafePath(relative) == null || ClassifyOutput(relative) is not { } stage || !File.Exists(path)) continue;
+                var entry = Fingerprint(path); entry.Stage = stage;
+                // Never rebaseline an archived template changed outside the app.
+                if (relative.StartsWith("Manual PPM/Templates/", StringComparison.OrdinalIgnoreCase) && doc.Files.TryGetValue(relative, out var old) && !old.Sha256.Equals(entry.Sha256, StringComparison.OrdinalIgnoreCase)) continue;
+                doc.Files[relative] = entry;
+            }
+            TrackDirectories(doc, Scan(false).Directories); Save(doc);
+        }
+    }
+
     public ResetResult Reset(OutputStage? from)
     {
         var result = new ResetResult();
@@ -135,8 +214,9 @@ internal sealed class GeneratedOutputManifest
                 {
                     if (from != null && pair.Value.Stage < from) continue;
                     AddDirectoryAncestors(cleanupAncestors, pair.Key);
-                    var path = SafePath(pair.Key);
+                    var path = SafePath(pair.Key, false);
                     if (path == null) { result.Errors++; continue; }
+                    if (SafePath(pair.Key) == null) { result.ProtectedInputs++; continue; }
                     try
                     {
                         if (!File.Exists(path)) { doc.Files.Remove(pair.Key); continue; }
@@ -178,7 +258,7 @@ internal sealed class GeneratedOutputManifest
                 // Removing an empty known directory cannot remove user data.
                 foreach (var directory in Scan(false).Directories.OrderByDescending(p => p.Length))
                 {
-                    if (inspectedDirectories.Contains(directory) || ClassifyEmptyDirectory(directory) is not { } stage ||
+                    if (inspectedDirectories.Contains(directory) || ClassifyDirectory(directory) is not { } stage ||
                         from != null && stage < from && !cleanupAncestors.Contains(directory)) continue;
                     var path = SafePath(directory);
                     if (path == null) { result.Errors++; continue; }
@@ -223,7 +303,7 @@ internal sealed class GeneratedOutputManifest
                 owned.Size != before!.Size || owned.ModifiedUtcTicks != before.ModifiedUtcTicks)) continue;
             // A directory difference alone is not proof that an unrelated file was
             // produced by our process. Only documented producer paths are claimed.
-            if (Classify(pair.Key) is not { } stage) continue;
+            if (ClassifyOutput(pair.Key) is not { } stage) continue;
             if (pending.Stage == OutputStage.Postprocessing && stage != OutputStage.Postprocessing) continue;
             if (pending.Stage == OutputStage.Inference && stage != OutputStage.Inference) continue;
             var path = SafePath(pair.Key);
@@ -232,7 +312,7 @@ internal sealed class GeneratedOutputManifest
             catch (IOException) { continue; }
         }
         foreach (var path in after.Directories.Except(pending.Directories, StringComparer.OrdinalIgnoreCase))
-            if (DirectoryCanBeCreatedBy(path, pending.Stage)) doc.Directories.TryAdd(path, pending.Stage);
+            if (DirectoryCanBeCreatedBy(NormalizedOutput(path), pending.Stage)) doc.Directories.TryAdd(path, pending.Stage);
         foreach (var path in doc.Files.Keys.Except(after.Files.Keys, StringComparer.OrdinalIgnoreCase).ToArray())
             if (SafePath(path) is string full && !File.Exists(full)) doc.Files.Remove(path);
         TrackDirectories(doc, after.Directories);
@@ -245,7 +325,7 @@ internal sealed class GeneratedOutputManifest
         foreach (var pair in scan.Files)
         {
             // A mismatch on an existing entry remains protected; never rebaseline it.
-            if (doc.Files.ContainsKey(pair.Key) || Classify(pair.Key) is not { } stage) continue;
+            if (doc.Files.ContainsKey(pair.Key) || ClassifyOutput(pair.Key) is not { } stage) continue;
             var path = SafePath(pair.Key);
             if (path == null) continue;
             try { var entry = Fingerprint(path); entry.Stage = stage; doc.Files[pair.Key] = entry; }
@@ -275,7 +355,7 @@ internal sealed class GeneratedOutputManifest
     {
         foreach (var directory in directories)
         {
-            if (doc.Directories.ContainsKey(directory) || ClassifyEmptyDirectory(directory) is not { } stage) continue;
+            if (doc.Directories.ContainsKey(directory) || ClassifyDirectory(directory) is not { } stage) continue;
             var path = SafePath(directory);
             if (path == null) continue;
             try
@@ -296,6 +376,7 @@ internal sealed class GeneratedOutputManifest
         bool Match(string pattern) => Regex.IsMatch(path, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         return stage switch
         {
+            OutputStage.ScanPreparation => Match(@"^(Prepared|MeshEdits|Manual PPM)(/.*)?$"),
             OutputStage.Inference => Match(@"^Intermediates(/(Left|Right))?$") ||
                 Match(@"^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)$"),
             OutputStage.Preprocessing => Match(@"^Intermediates(/(Left|Right))?$") ||
@@ -310,6 +391,7 @@ internal sealed class GeneratedOutputManifest
     {
         path = path.Replace('\\', '/');
         bool Match(string pattern) => Regex.IsMatch(path, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (Match(@"^(Prepared|MeshEdits|Manual PPM)(/Templates)?$")) return OutputStage.ScanPreparation;
         if (path.Equals("Intermediates", StringComparison.OrdinalIgnoreCase) ||
             Match(@"^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)$")) return OutputStage.Inference;
         if (Match(@"^Projects/(Left|Right)/NumCalc/source_[0-9]+/be\.out(/be\.[0-9]+)?$")) return OutputStage.Numcalc;
@@ -325,41 +407,54 @@ internal sealed class GeneratedOutputManifest
     {
         path = path.Replace('\\', '/');
         bool Match(string pattern) => Regex.IsMatch(path, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (Match(@"^Prepared/((Left|Right)\.stl|mesh_preparation\.json|inference\.json|preprocessing\.json)$") ||
+            Match(@"^MeshEdits/((Left|Right)\.(stl|json)|AlignedScan\.(ply|json))$") ||
+            Match(@"^Manual PPM/((Left|Right)\.(stl|json|blend[0-9]*)|Templates/[^/]+\.blend)$")) return OutputStage.ScanPreparation;
+        if (path.Equals(".pinna2hrtf-postprocessing-receipt.json", StringComparison.OrdinalIgnoreCase)) return OutputStage.Postprocessing;
+        if (path.Equals(".pinna2hrtf-inference-receipt.json", StringComparison.OrdinalIgnoreCase)) return OutputStage.Inference;
+        if (path.Equals(".pinna2hrtf-inference-signature",StringComparison.OrdinalIgnoreCase))return OutputStage.Inference;
         if (path.Equals(".pinna2hrtf_native_run.yaml", StringComparison.OrdinalIgnoreCase)) return OutputStage.Inference;
         if (Match(@"^(Intermediates/)?Results Inference\.csv$") ||
             Match(@"^Intermediates/(Left|Right)/(ICP_[^/]+\.stl|Prediction_[^/]+\.stl|Prediction_Parameters_[^/]+\.csv)$") ||
             Match(@"^(Intermediates/)?(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)/[^/]+\.(stl|csv)$")) return OutputStage.Inference;
         if (Match(@"^Intermediates/(Left|Right)/(input_ear\.stl|source_landmark\.json|closed_ear\.stl|cut_head\.stl|stitched_head\.stl|graded_head\.ply|dummy_head\.stl)$") ||
             Match(@"^Intermediates/dummy_head\.stl$") ||
-            Match(@"^Projects/(Left|Right)/(parameters\.json|3d Model\.blend[0-9]*|NumCalc/source_[0-9]+/NC\.inp|(ObjectMeshes|EvaluationGrids)/[^/]+/(Nodes|Elements)\.txt)$") ||
+            Match(@"^Projects/(Left|Right)/(\.pinna2hrtf-export\.json|parameters\.json|3d Model\.blend[0-9]*|NumCalc/source_[0-9]+/NC\.inp|(ObjectMeshes|EvaluationGrids)/[^/]+/(Nodes|Elements)\.txt)$") ||
             path.Equals(".pinna2hrtf-preprocessing-signature", StringComparison.OrdinalIgnoreCase)) return OutputStage.Preprocessing;
         if (Match(@"^Projects/(Left|Right)/NumCalc/source_[0-9]+/(NC[0-9]+-[0-9]+_log\.txt|NC([0-9]+-[0-9]+|from[0-9]+|until[0-9]+)?\.out|Memory\.txt|be\.out/be\.[0-9]+/(pBoundary|pEvalGrid|vBoundary|vEvalGrid))$")) return OutputStage.Numcalc;
         if (Match(@"^(HRTF|Projects/(Left|Right)/Output2HRTF)/(HRIR|HRTF)_[^/]+\.(sofa|png|jpg|jpeg|pdf)$") ||
             Match(@"^Projects/(Left|Right)/Output2HRTF/(report_source_[0-9]+\.csv|report_issues\.(txt|csv))$")) return OutputStage.Postprocessing;
+        if (Match(@"^HRTF/Upsampled/HRIR_[^/]+/(hrtf_Nd=[0-5](_dense)?\.sofa|upsampling\.json|upsampling_report\.(mat|txt))$")) return OutputStage.Postprocessing;
         return null;
     }
 
-    static bool Managed(string relative) => relative.Split('/')[0].Equals("Intermediates", StringComparison.OrdinalIgnoreCase) ||
+    string NormalizedOutput(string path) => outputPrefix != null && (path.Equals(outputPrefix, StringComparison.OrdinalIgnoreCase) || path.StartsWith(outputPrefix + "/", StringComparison.OrdinalIgnoreCase))
+        ? "HRTF" + path[outputPrefix.Length..] : path;
+    OutputStage? ClassifyOutput(string path) => Classify(NormalizedOutput(path));
+    OutputStage? ClassifyDirectory(string path) => ClassifyEmptyDirectory(NormalizedOutput(path));
+
+    static bool Managed(string relative) => relative.Equals(".pinna2hrtf-postprocessing-receipt.json", StringComparison.OrdinalIgnoreCase) || relative.Equals(".pinna2hrtf-inference-receipt.json", StringComparison.OrdinalIgnoreCase) || relative.Equals(".pinna2hrtf-inference-signature",StringComparison.OrdinalIgnoreCase) || Regex.IsMatch(relative, @"^(Prepared|MeshEdits|Manual PPM)(/|$)", RegexOptions.IgnoreCase) || relative.Split('/')[0].Equals("Intermediates", StringComparison.OrdinalIgnoreCase) ||
         relative.Split('/')[0].Equals("Projects", StringComparison.OrdinalIgnoreCase) || relative.Split('/')[0].Equals("HRTF", StringComparison.OrdinalIgnoreCase) ||
         Regex.IsMatch(relative, @"^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)(/|$)", RegexOptions.IgnoreCase) ||
         relative.Equals("Results Inference.csv", StringComparison.OrdinalIgnoreCase) ||
         relative.Equals(".pinna2hrtf-preprocessing-signature", StringComparison.OrdinalIgnoreCase) ||
         relative.Equals(".pinna2hrtf_native_run.yaml", StringComparison.OrdinalIgnoreCase);
 
-    string? SafePath(string relative)
+    string? SafePath(string relative, bool protectingInputs = true)
     {
+        if (PathIdentity.Read(root).Id != rootIdentity) return null;
         if (string.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative) || relative.Contains(':')) return null;
         var segments = relative.Replace('\\', '/').Split('/');
-        if (segments.Any(p => p is "" or "." or ".." || p.EndsWith(' ') || p.EndsWith('.')) || !Managed(string.Join('/', segments))) return null;
+        if (segments.Any(p => p is "" or "." or ".." || p.EndsWith(' ') || p.EndsWith('.')) || !Managed(NormalizedOutput(string.Join('/', segments))) && !(outputPrefix?.StartsWith(string.Join('/', segments) + "/", StringComparison.OrdinalIgnoreCase) == true)) return null;
         var path = Path.GetFullPath(Path.Combine(root, Path.Combine(segments)));
         if (!path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
-            protectedFiles.Any(p => p.Equals(path, StringComparison.OrdinalIgnoreCase) || Directory.Exists(p) && path.StartsWith(p + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))) return null;
+            protectingInputs && protectedFiles.Any(p => p.Equals(path, StringComparison.OrdinalIgnoreCase) || Directory.Exists(p) && path.StartsWith(p + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))) return null;
         return HasReparseAncestor(path) ? null : path;
     }
 
-    static bool HasReparseAncestor(string path)
+    bool HasReparseAncestor(string path)
     {
-        for (string? current = path; !string.IsNullOrEmpty(current); current = Path.GetDirectoryName(current))
+        for (string? current = path; !string.IsNullOrEmpty(current) && !current.Equals(root, StringComparison.OrdinalIgnoreCase); current = Path.GetDirectoryName(current))
             if ((File.Exists(current) || Directory.Exists(current)) && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) return true;
         return false;
     }
@@ -374,8 +469,10 @@ internal sealed class GeneratedOutputManifest
             foreach (var path in Directory.EnumerateFileSystemEntries(folder))
             {
                 var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+                var directory = Directory.Exists(path);
+                if (directory ? ClassifyDirectory(relative) == null && !(outputPrefix?.StartsWith(relative + "/", StringComparison.OrdinalIgnoreCase) == true) : ClassifyOutput(relative) == null) continue;
                 if (SafePath(relative) == null) continue;
-                if (Directory.Exists(path)) { directories.Add(relative); Visit(path); }
+                if (directory) { directories.Add(relative); Visit(path); }
                 else files[relative] = hash ? Fingerprint(path) : FileMetadata(path);
             }
         }
@@ -401,6 +498,7 @@ internal sealed class GeneratedOutputManifest
 
     FileStream Acquire()
     {
+        if (PathIdentity.Read(root).Id != rootIdentity) throw new IOException("The save location was replaced. Select it again or restart the app before changing its outputs.");
         if (HasReparseAncestor(Metadata) || HasReparseAncestor(Manifest)) throw new IOException("Linked metadata is not supported.");
         Directory.CreateDirectory(Metadata);
         var lockPath = Path.Combine(Metadata, "outputs.lock");

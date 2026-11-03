@@ -3,6 +3,8 @@ from pathlib import Path
 
 import mesh2hrtf as m2h
 import numpy as np
+from ..SofaIO import install_windows_paths
+install_windows_paths()
 import sofar as sf
 
 

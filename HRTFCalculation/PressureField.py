@@ -156,3 +156,9 @@ def execute(command):
     if command.get("action") == "frame":
         return frame(command["source"], command["step"], command["surface"])
     raise ValueError("Unknown pressure viewer command")
+
+
+if __name__ == "__main__":
+    import json
+    import sys
+    print(json.dumps(execute(json.load(sys.stdin)), allow_nan=False))

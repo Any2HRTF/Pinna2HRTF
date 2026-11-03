@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
+using Path = System.IO.Path;
 using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
@@ -24,7 +25,9 @@ public partial class MainWindow
     async Task EditPreparedEarAsync(string side)
     {
         var project = selectedProject;
-        if (project == null || runningProcesses.ContainsKey(project.Id) || !project.Settings.ScanPreparation.Enabled) return;
+        if (project == null || ProjectBusy(project.Id) || !project.Settings.ScanPreparation.Enabled) return;
+        using var reservation = projectOperations.TryReserve(project.Id);
+        if (reservation == null) return;
         if (!ScanPreparationOutputsCurrent(project))
         {
             AppendLog("Run Scan Preparation successfully before reviewing a prepared ear.", project.Id);
@@ -50,13 +53,14 @@ public partial class MainWindow
             return;
         }
 
-        var resultPath = await ShowWindowsEarEditorAsync(source, output, destination, report, generation, side);
+        var resultPath = await ShowWindowsEarEditorAsync(source, output, destination, report, generation, side, project);
         if (resultPath == null) return;
         if (side == "left") settings.ReviewedLeft = resultPath; else settings.ReviewedRight = resultPath;
         project.Settings.Preprocessing.SourcePositionInputLeft = null;
         project.Settings.Preprocessing.SourcePositionInputRight = null;
         Persist();
         AppendLog($"Saved reviewed {side} ear: {Path.GetFileName(resultPath)}", project.Id);
+        if (selectedProject != project || shutdownCleanupDone) return;
         RememberSelectedArtifact(resultPath);
         RefreshPipelineStatus();
         RefreshArtifacts();
@@ -68,12 +72,26 @@ public partial class MainWindow
         }
     }
 
-    async Task<string?> ShowWindowsEarEditorAsync(string source, string preparedSource, string destination, string report, string generation, string side)
+    async Task<string?> ShowWindowsEarEditorAsync(string source, string preparedSource, string destination, string report, string generation, string side, ProjectRecord project)
     {
+        using var session = CancellationTokenSource.CreateLinkedTokenSource(editorLifetime.Token);
+        Task<JsonElement>? pendingBackend = null;
+        async Task<JsonElement> SessionBackendAsync(Dictionary<string, object> request)
+        { pendingBackend = RunMeshEditorPythonAsync(request, session.Token); return await pendingBackend; }
         var workspace = Path.Combine(Path.GetTempPath(), "pinna-ear-edit-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(workspace);
         var versions = new List<string>();
         var operations = new List<Dictionary<string, object>>();
+        var inheritedOperations = Array.Empty<JsonElement>();
+        if (!SamePath(source, preparedSource))
+        {
+            try
+            {
+                using var receipt = JsonDocument.Parse(File.ReadAllText(Path.ChangeExtension(source,"json")));
+                inheritedOperations = receipt.RootElement.GetProperty("operations").EnumerateArray().Select(item=>item.Clone()).ToArray();
+            }
+            catch(Exception error) when(error is IOException or JsonException or KeyNotFoundException or InvalidOperationException) { }
+        }
         var selectedFaces = new HashSet<int>();
         var toolBeforeNavigate = "Select Faces";
         var currentIndex = 0;
@@ -93,38 +111,34 @@ public partial class MainWindow
         var manualHeight = 40d;
         var mesh = (MeshData?)null;
         var activePointer = uint.MaxValue;
-        var pointerStart = default(Windows.Foundation.Point);
-        var lasso = new List<Windows.Foundation.Point>();
+        var pointerStart = default(global::Windows.Foundation.Point);
+        var lasso = new List<global::Windows.Foundation.Point>();
         MeshGeometryModel3D? meshVisualLocal = null;
         MeshGeometryModel3D? selectionVisual = null;
         MeshGeometryModel3D? planeVisual = null;
 
-        var dialog = new ContentDialog
-        {
-            Title = $"Edit {side} ear",
-            PrimaryButtonText = "Save Reviewed Ear",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = Root.XamlRoot,
-            IsPrimaryButtonEnabled = false
-        };
-        var root = new Grid { Width = 1160, Height = 690, ColumnSpacing = 0 };
+        var editorWindow = new Window { Title = $"Edit {side} ear" };
+        editorWindows.Add(editorWindow);
+        var closed = new TaskCompletionSource();
+        editorWindow.Closed += (_, _) => { session.Cancel(); closed.TrySetResult(); };
+        var saveButton = new Button { Content = "Save Reviewed Ear", IsEnabled = false };
+        var cancelButton = new Button { Content = "Cancel" };
+        cancelButton.Click += (_, _) => editorWindow.Close();
+        var root = new Grid { ColumnSpacing = 0 };
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        var viewerGrid = new Grid { Background = viewerBackgroundBrush };
+        var viewerGrid = new Grid();
         var viewport = new Viewport3DX
         {
-            IsRotationEnabled = false, IsPanEnabled = false, IsMoveEnabled = false, IsZoomEnabled = true,
+            IsRotationEnabled = true, IsPanEnabled = true, IsMoveEnabled = false, IsZoomEnabled = true,
             UseDefaultGestures = true, InputController = new MeshInputController(), EnableMouseButtonHitTest = true,
             ShowCoordinateSystem = false, ShowViewCube = false, ModelUpDirection = Vector3.UnitZ,
             BackgroundColor = ColorHelper.FromArgb(255, 237, 243, 242), EffectsManager = new DefaultEffectsManager()
         };
-        viewport.Items.Add(new AmbientLight3D { Color = Colors.White });
-        viewport.Items.Add(new DirectionalLight3D { Color = Colors.White, Direction = new Vector3(-0.4f, -0.65f, -0.55f) });
-        viewport.Items.Add(new DirectionalLight3D { Color = ColorHelper.FromArgb(205, 220, 235, 255), Direction = new Vector3(0.65f, 0.25f, -0.35f) });
+        EvenMeshLighting.Install(viewport);
         viewerGrid.Children.Add(viewport);
-        var lassoCanvas = new Canvas { Background = new SolidColorBrush(Colors.Transparent), IsHitTestVisible = true };
+        var lassoCanvas = new Canvas { IsHitTestVisible = false };
         viewerGrid.Children.Add(lassoCanvas);
         var navButton = new Button
         {
@@ -145,8 +159,8 @@ public partial class MainWindow
         navButton.Margin = new Thickness(0);
         ToolTipService.SetToolTip(navButton, "Temporarily switch to camera navigation (Space)");
         viewerGrid.Children.Add(navHost);
-        var resetButton = new Button { Content = "Reset view", FontSize = 12, Foreground = viewerHintTextBrush, Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(8, 4, 8, 4), MinWidth = 0, MinHeight = 0 };
-        var resetHost = new Border { CornerRadius = new CornerRadius(5), Background = viewerHintBackgroundBrush, Child = resetButton, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(16) };
+        var resetButton = NavigationHelp.Command("Reset view");
+        var resetHost = new Border { CornerRadius = new CornerRadius(5), Background = new SolidColorBrush(Colors.Transparent), Child = resetButton, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(16) };
         viewerGrid.Children.Add(resetHost);
         Grid.SetColumn(viewerGrid, 0);
         Grid.SetRow(viewerGrid, 0);
@@ -172,11 +186,17 @@ public partial class MainWindow
         var deleteButton = new Button { Content = "Delete Selected Faces", IsEnabled = false };
         var clearButton = new Button { Content = "Clear Selection", IsEnabled = false };
         selectionPanel.Children.Add(deleteButton); selectionPanel.Children.Add(clearButton);
+        var invertButton = new Button { Content = "Invert Selection" };
+
+        selectionPanel.Children.Add(invertButton);
         var planePanel = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
         planePanel.Children.Add(new TextBlock { Text = "The preview fits the mesh at the cut. The cut extends through the mesh; the red side is removed.", TextWrapping = TextWrapping.Wrap, FontSize = 12 });
         var normalBoxes = new[] { new TextBox { Text = "0", PlaceholderText = "X", Header = "Normal X" }, new TextBox { Text = "1", PlaceholderText = "Y", Header = "Normal Y" }, new TextBox { Text = "0", PlaceholderText = "Z", Header = "Normal Z" } };
         var axisPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         var axisButtons = new List<Button>();
+        var offsetSlider = new Slider { Minimum = -90, Maximum = 90, Value = 0, StepFrequency = 0.25 };
+        var offsetLabel = new TextBlock { Text = "Offset: 0.00 mm" };
+        planePanel.Children.Add(offsetLabel); planePanel.Children.Add(offsetSlider);
         foreach (var axis in new[] { "X", "Y", "Z" })
         {
             var button = new Button { Content = axis, MinWidth = 38 };
@@ -194,9 +214,6 @@ public partial class MainWindow
         for (var i = 0; i < 3; i++) normalPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         for (var i = 0; i < normalBoxes.Length; i++) { Grid.SetColumn(normalBoxes[i], i); normalPanel.Children.Add(normalBoxes[i]); normalBoxes[i].TextChanged += (_, _) => { if (TryReadNormal()) RefreshPlane(); }; }
         planePanel.Children.Add(normalPanel);
-        var offsetSlider = new Slider { Minimum = -90, Maximum = 90, Value = 0, StepFrequency = 0.25 };
-        var offsetLabel = new TextBlock { Text = "Offset: 0.00 mm" };
-        planePanel.Children.Add(offsetLabel); planePanel.Children.Add(offsetSlider);
         var fitToggle = new CheckBox { Content = "Fit plane preview to mesh", IsChecked = true };
         var sizePanel = new Grid { ColumnSpacing = 6, Visibility = Visibility.Collapsed };
         sizePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -221,7 +238,37 @@ public partial class MainWindow
         panel.Children.Add(errorText);
         var scroll = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         Grid.SetColumn(scroll, 1); root.Children.Add(scroll);
-        dialog.Content = root;
+        var windowRoot = new Grid { RequestedTheme = Root.ActualTheme };
+        windowRoot.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        windowRoot.RowDefinitions.Add(new RowDefinition());
+        windowRoot.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var header = new Grid { Padding = new Thickness(12, 4, 0, 4), MinHeight = 54 };
+        var drag = new Grid();
+        drag.Children.Add(new TextBlock { Text = editorWindow.Title, FontSize = 14,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+        header.Children.Add(drag); windowRoot.Children.Add(header);
+        Grid.SetRow(root, 1);
+        windowRoot.Children.Add(root);
+        var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(12), HorizontalAlignment = HorizontalAlignment.Right };
+        footer.Children.Add(saveButton); footer.Children.Add(cancelButton);
+        Grid.SetRow(footer, 2); windowRoot.Children.Add(footer);
+        editorWindow.Content = windowRoot;
+        var chrome = new WindowChrome(editorWindow, windowRoot, header, drag, minimumWidth: 900, minimumHeight: 640);
+        void Appearance()
+        {
+            var dark = windowRoot.ActualTheme == ElementTheme.Dark;
+            windowRoot.Background = new SolidColorBrush(dark ? ColorHelper.FromArgb(255, 32, 32, 32) : Colors.White);
+            scroll.Background = new SolidColorBrush(dark ? ColorHelper.FromArgb(255, 45, 45, 45) : ColorHelper.FromArgb(255, 251, 251, 252));
+            viewport.BackgroundColor = dark ? ColorHelper.FromArgb(255, 31, 36, 38) : ColorHelper.FromArgb(255, 237, 243, 242);
+        }
+        void OwnerThemeChanged(FrameworkElement sender, object args) => windowRoot.RequestedTheme = sender.ActualTheme;
+        windowRoot.ActualThemeChanged += (_, _) => Appearance();
+        windowRoot.Loaded += (_, _) => Appearance();
+        Root.ActualThemeChanged += OwnerThemeChanged;
+        editorWindow.Closed += (_, _) => { chrome.Dispose(); Root.ActualThemeChanged -= OwnerThemeChanged; };
+        Appearance();
+        var workArea = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(editorWindow.AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
+        editorWindow.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(Math.Min(1400,workArea.Width),Math.Min(950,workArea.Height)));
 
         void UpdateControls()
         {
@@ -233,9 +280,9 @@ public partial class MainWindow
             sizePanel.Visibility = planeMode && !fitPlane ? Visibility.Visible : Visibility.Collapsed;
             toolRow.Visibility = navigate ? Visibility.Collapsed : Visibility.Visible;
             navHost.Visibility = planeMode ? Visibility.Collapsed : Visibility.Visible;
-            lassoCanvas.IsHitTestVisible = !planeMode && !navigate && !isBusy;
-            viewport.IsRotationEnabled = planeMode || navigate;
-            viewport.IsPanEnabled = planeMode || navigate;
+            lassoCanvas.IsHitTestVisible = false;
+            viewport.IsRotationEnabled = !isBusy;
+            viewport.IsPanEnabled = !isBusy;
             viewport.IsZoomEnabled = true;
             navButton.Content = "Navigate";
             navButton.Background = navigate ? new SolidColorBrush(ColorHelper.FromArgb(35, 48, 112, 110)) : new SolidColorBrush(Colors.Transparent);
@@ -247,7 +294,7 @@ public partial class MainWindow
             undoButton.IsEnabled = !isBusy && currentIndex > 0;
             redoButton.IsEnabled = !isBusy && currentIndex + 1 < versions.Count;
             largestButton.IsEnabled = !isBusy;
-            dialog.IsPrimaryButtonEnabled = !isBusy && selectedFaces.Count == 0 && !planeMode;
+            saveButton.IsEnabled = !isBusy && selectedFaces.Count == 0 && !planeMode;
         }
 
         void RefreshSelectionOverlay()
@@ -367,10 +414,10 @@ public partial class MainWindow
             viewport.Items.Add(meshVisualLocal);
             if (versions.Count == 1)
             {
-                var max = Math.Max(mesh.MaximumDimension * 1.7, 120);
-                var camera = new PerspectiveCamera { FieldOfView = 38, Position = new Vector3(0, -max, max * 0.12f), LookDirection = new Vector3(0, max, -max * 0.12f), UpDirection = Vector3.UnitZ };
+                var max = (float)Math.Max(mesh.MaximumDimension * 1.7, 120);
+                var camera = new PerspectiveCamera { FieldOfView = 38, Position = new Vector3(0, (side == "right" ? -1 : 1)*max, max * 0.12f), LookDirection = new Vector3(0, (side == "right" ? 1 : -1)*max, -max * 0.12f), UpDirection = Vector3.UnitZ };
                 viewport.Camera = camera;
-                viewport.Camera?.ZoomExtents(viewport, 40);
+
             }
             RefreshSelectionOverlay();
             RefreshPlane();
@@ -381,7 +428,8 @@ public partial class MainWindow
             isBusy = true; message.Text = "Applying mesh edit…"; errorText.Visibility = Visibility.Collapsed; UpdateControls();
             try
             {
-                var response = await RunMeshEditorPythonAsync(request);
+                var response = await SessionBackendAsync(request);
+                if (session.IsCancellationRequested) return false;
                 if (response.TryGetProperty("source_sha256", out var hash)) originalSha = hash.GetString() ?? originalSha;
                 if (outputPath != null)
                 {
@@ -391,11 +439,12 @@ public partial class MainWindow
                 message.Text = $"{faceCount:N0} faces · Edit applied. Undo is available.";
                 return true;
             }
+            catch (OperationCanceledException) { return false; }
             catch (Exception error)
             {
-                errorText.Text = error.Message; errorText.Visibility = Visibility.Visible; message.Text = "The mesh was not changed."; return false;
+                if (!session.IsCancellationRequested) { errorText.Text = error.Message; errorText.Visibility = Visibility.Visible; message.Text = "The mesh was not changed."; } return false;
             }
-            finally { isBusy = false; UpdateControls(); }
+            finally { isBusy = false; if (!session.IsCancellationRequested) UpdateControls(); }
         }
 
         async Task<bool> ApplyEditAsync(string action, Dictionary<string, object>? arguments = null)
@@ -417,7 +466,7 @@ public partial class MainWindow
             try
             {
                 var request = new Dictionary<string, object> { ["action"] = "inspect", ["source"] = versions[target], ["frame"] = Path.Combine(workspace, "frame") };
-                await RunMeshEditorPythonAsync(request); currentIndex = target; UpdateMesh(versions[target]); message.Text = $"{faceCount:N0} faces · Mesh restored.";
+                await SessionBackendAsync(request); if (session.IsCancellationRequested) return; currentIndex = target; UpdateMesh(versions[target]); message.Text = $"{faceCount:N0} faces · Mesh restored.";
             }
             catch (Exception error) { errorText.Text = error.Message; errorText.Visibility = Visibility.Visible; }
             finally { isBusy = false; UpdateControls(); }
@@ -432,7 +481,7 @@ public partial class MainWindow
         };
         selectToolButton.Click += (_, _) => SetTool(false);
         planeToolButton.Click += (_, _) => SetTool(true);
-        resetButton.Click += (_, _) => { if (mesh != null) { var max = Math.Max(mesh.MaximumDimension * 1.7, 120); var camera = new PerspectiveCamera { FieldOfView = 38, Position = new Vector3(0, -max, max * 0.12f), LookDirection = new Vector3(0, max, -max * 0.12f), UpDirection = Vector3.UnitZ }; viewport.Camera = camera; viewport.Camera?.ZoomExtents(viewport, 40); } };
+        resetButton.Click += (_, _) => { if (mesh != null) { var max = (float)Math.Max(mesh.MaximumDimension * 1.7, 120); var camera = new PerspectiveCamera { FieldOfView = 38, Position = new Vector3(0, (side == "right" ? -1 : 1)*max, max * 0.12f), LookDirection = new Vector3(0, (side == "right" ? 1 : -1)*max, -max * 0.12f), UpDirection = Vector3.UnitZ }; viewport.Camera = camera;  } };
         throughToggle.Checked += (_, _) => throughMesh = true; throughToggle.Unchecked += (_, _) => throughMesh = false;
         addToggle.Checked += (_, _) => addSelection = true; addToggle.Unchecked += (_, _) => addSelection = false;
         fitToggle.Checked += (_, _) => { fitPlane = true; UpdateControls(); RefreshPlane(); }; fitToggle.Unchecked += (_, _) => { fitPlane = false; UpdateControls(); RefreshPlane(); };
@@ -442,6 +491,7 @@ public partial class MainWindow
         offsetSlider.ValueChanged += (_, args) => { offset = args.NewValue; RefreshPlane(); };
         deleteButton.Click += async (_, _) => await ApplyEditAsync("delete", new Dictionary<string, object> { ["faces"] = selectedFaces.Order().ToArray() });
         clearButton.Click += (_, _) => { selectedFaces.Clear(); RefreshSelectionOverlay(); };
+        invertButton.Click += (_, _) => { if (mesh?.Geometry.Indices == null || isBusy) return; var inverse = Enumerable.Range(0,mesh.Geometry.Indices.Count/3).Where(i=>!selectedFaces.Contains(i)).ToArray(); selectedFaces.Clear(); foreach(var i in inverse)selectedFaces.Add(i); RefreshSelectionOverlay(); };
         largestButton.Click += async (_, _) => await ApplyEditAsync("largest");
         cutButton.Click += async (_, _) =>
         {
@@ -457,15 +507,15 @@ public partial class MainWindow
         };
         undoButton.Click += async (_, _) => await LoadHistoryAsync(currentIndex - 1);
         redoButton.Click += async (_, _) => await LoadHistoryAsync(currentIndex + 1);
-        lassoCanvas.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, e) =>
+        viewport.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, e) =>
         {
             if (navigate || planePanel.Visibility == Visibility.Visible || isBusy) return;
             var point = e.GetCurrentPoint(viewport);
             if (!point.Properties.IsLeftButtonPressed) return;
             activePointer = point.PointerId; pointerStart = point.Position; lasso.Clear(); lasso.Add(pointerStart); lassoCanvas.Children.Clear();
-            lassoCanvas.CapturePointer(e.Pointer); viewport.Focus(FocusState.Programmatic); e.Handled = true;
+            viewport.CapturePointer(e.Pointer); viewport.Focus(FocusState.Programmatic); e.Handled = true;
         }), true);
-        lassoCanvas.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler((_, e) =>
+        viewport.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler((_, e) =>
         {
             if (navigate || activePointer == uint.MaxValue || e.GetCurrentPoint(viewport).PointerId != activePointer) return;
             var point = e.GetCurrentPoint(viewport).Position;
@@ -477,14 +527,16 @@ public partial class MainWindow
             }
             e.Handled = true;
         }), true);
-        lassoCanvas.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, e) =>
+        viewport.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, e) =>
         {
             if (navigate || activePointer == uint.MaxValue || e.GetCurrentPoint(viewport).PointerId != activePointer) return;
             var end = e.GetCurrentPoint(viewport).Position; var wasClick = Math.Abs(end.X - pointerStart.X) + Math.Abs(end.Y - pointerStart.Y) < 7;
-            activePointer = uint.MaxValue; lassoCanvas.ReleasePointerCapture(e.Pointer); lassoCanvas.Children.Clear();
+            activePointer = uint.MaxValue; viewport.ReleasePointerCapture(e.Pointer); lassoCanvas.Children.Clear();
             if (wasClick) SelectNearestFace(end); else SelectLasso(lasso);
             e.Handled = true;
         }), true);
+        var navigation = new SharedNavigation(viewport, () => { activePointer = uint.MaxValue; lasso.Clear(); lassoCanvas.Children.Clear(); viewport.ReleasePointerCaptures(); });
+        editorWindow.Closed += (_, _) => navigation.Dispose();
         var space = new KeyboardAccelerator { Key = VirtualKey.Space };
         space.Invoked += (_, args) =>
         {
@@ -496,27 +548,48 @@ public partial class MainWindow
         root.KeyboardAccelerators.Add(space);
         resetButton.Visibility = Visibility.Visible;
         undoButton.IsEnabled = false; redoButton.IsEnabled = false;
-        dialog.PrimaryButtonClick += async (_, args) =>
+        Task? saveOperation = null;
+        saveButton.Click += async (_, args) =>
         {
-            args.Cancel = true;
+            if (saveOperation is { IsCompleted: false }) return;
+            saveOperation = SaveEarAsync();
+            await saveOperation;
+        };
+        async Task SaveEarAsync()
+        {
             if (isBusy || selectedFaces.Count != 0 || planePanel.Visibility == Visibility.Visible || versions.Count == 0) return;
+            var stagedDestination = Path.Combine(workspace, "saved-ear.stl");
             var request = new Dictionary<string, object>
             {
                 ["action"] = "save", ["kind"] = "ear", ["source"] = versions[currentIndex],
                 ["original_source"] = preparedSource, ["original_sha256"] = originalSha,
-                ["destination"] = destination, ["side"] = side, ["prepared_report"] = report,
-                ["prepared_generation"] = generation, ["operations"] = operations
+                ["destination"] = stagedDestination, ["side"] = side, ["prepared_report"] = report,
+                ["prepared_generation"] = generation, ["operations"] = inheritedOperations.Cast<object>().Concat(operations.Take(currentIndex)).ToArray()
             };
-            if (await RunBackendAsync(request)) { savedPath = destination; dialog.Hide(); }
-        };
+            if (await RunBackendAsync(request) && !session.IsCancellationRequested)
+            {
+                try
+                {
+                    var stagedNote = Path.ChangeExtension(stagedDestination, "json");
+                    await PublishEditorFilesAsync(project, new() { [destination] = File.ReadAllBytes(stagedDestination), [Path.ChangeExtension(destination,"json")] = File.ReadAllBytes(stagedNote) }, session.Token,
+                        new() { [destination] = File.GetLastWriteTimeUtc(stagedDestination) }, new() { [preparedSource] = originalSha });
+                    savedPath = destination; editorWindow.Close();
+                }
+                catch (Exception error) { if (!session.IsCancellationRequested) { errorText.Text = error.Message; errorText.Visibility = Visibility.Visible; } }
+            }
+        }
 
         try
         {
             var first = Path.Combine(workspace, "mesh-0.ply");
-            var opened = await RunMeshEditorPythonAsync(new Dictionary<string, object> { ["action"] = "open", ["source"] = source, ["original_source"] = preparedSource, ["output"] = first, ["frame"] = Path.Combine(workspace, "frame") });
+            var opened = await SessionBackendAsync(new Dictionary<string, object> { ["action"] = "open", ["source"] = source, ["original_source"] = preparedSource, ["output"] = first, ["frame"] = Path.Combine(workspace, "frame") });
+            if (session.IsCancellationRequested) return null;
             originalSha = opened.GetProperty("source_sha256").GetString() ?? "";
             versions.Add(first); currentIndex = 0; isBusy = false; UpdateMesh(first); message.Text = $"{faceCount:N0} faces · Original mesh is preserved."; UpdateControls();
-            await dialog.ShowAsync();
+            Root.IsHitTestVisible = false;
+            editorWindow.Activate();
+            await closed.Task;
+            if (saveOperation != null) await saveOperation;
             return savedPath;
         }
         catch (Exception error)
@@ -526,10 +599,18 @@ public partial class MainWindow
         }
         finally
         {
+            session.Cancel();
+            if (saveOperation != null) { try { await saveOperation; } catch { } }
+            if (pendingBackend != null) { try { await pendingBackend.WaitAsync(TimeSpan.FromSeconds(6)); } catch { } }
+            Root.IsHitTestVisible = true;
+            editorWindows.Remove(editorWindow);
+            viewport.Detach();
+            (viewport.EffectsManager as IDisposable)?.Dispose();
+            try { editorWindow.Close(); } catch { }
             try { if (Directory.Exists(workspace)) Directory.Delete(workspace, true); } catch { }
         }
 
-        void SelectNearestFace(Windows.Foundation.Point screenPoint)
+        void SelectNearestFace(global::Windows.Foundation.Point screenPoint)
         {
             if (mesh == null || meshVisualLocal == null || !TryUnprojectHit(screenPoint, out var hit)) return;
             var positions = mesh.Geometry.Positions!; var indices = mesh.Geometry.Indices!;
@@ -547,14 +628,14 @@ public partial class MainWindow
             RefreshSelectionOverlay();
         }
 
-        bool TryUnprojectHit(Windows.Foundation.Point point, out Vector3 hit)
+        bool TryUnprojectHit(global::Windows.Foundation.Point point, out Vector3 hit)
         {
             var result = viewport.FindHits(point).FirstOrDefault(x => ReferenceEquals(x.ModelHit, meshVisualLocal));
             if (result == null) { hit = default; return false; }
             hit = result.PointHit; return true;
         }
 
-        void SelectLasso(IReadOnlyList<Windows.Foundation.Point> polygon)
+        void SelectLasso(IReadOnlyList<global::Windows.Foundation.Point> polygon)
         {
             if (mesh == null || polygon.Count < 3) return;
             if (!addSelection) selectedFaces.Clear();
@@ -577,28 +658,28 @@ public partial class MainWindow
             }
             RefreshSelectionOverlay();
 
-            bool Project(Vector3 p, out Windows.Foundation.Point pixel)
+            bool Project(Vector3 p, out global::Windows.Foundation.Point pixel)
             {
                 var relative = p - cameraPos; var depth = Vector3.Dot(relative, forward);
                 if (depth <= 1e-3f || viewport.ActualWidth <= 0 || viewport.ActualHeight <= 0) { pixel = default; return false; }
-                pixel = new Windows.Foundation.Point(viewport.ActualWidth / 2 + focal * Vector3.Dot(relative, right) / depth, viewport.ActualHeight / 2 - focal * Vector3.Dot(relative, up) / depth);
+                pixel = new global::Windows.Foundation.Point(viewport.ActualWidth / 2 + focal * Vector3.Dot(relative, right) / depth, viewport.ActualHeight / 2 - focal * Vector3.Dot(relative, up) / depth);
                 return true;
             }
         }
     }
 
-    async Task<JsonElement> RunMeshEditorPythonAsync(Dictionary<string, object> request)
+    async Task<JsonElement> RunMeshEditorPythonAsync(Dictionary<string, object> request, CancellationToken cancellation = default)
     {
         var executable = BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
         if (!File.Exists(executable)) throw new FileNotFoundException("The app's Python runtime is missing.", executable);
         var script = "import sys,json; from HRTFCalculation.MeshEditing import execute; print(json.dumps(execute(json.load(sys.stdin)),allow_nan=False))";
         var start = new ProcessStartInfo(executable) { WorkingDirectory = packageRoot, UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        start.ArgumentList.Add("-X"); start.ArgumentList.Add("utf8");
         start.ArgumentList.Add("-c"); start.ArgumentList.Add(script); ApplyProcessEnvironment(start);
-        using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start the mesh editor.");
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(); var stderrTask = process.StandardError.ReadToEndAsync();
-        await process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(request, jsonOptions)); process.StandardInput.Close(); await process.WaitForExitAsync();
-        var stdout = await stdoutTask; var stderr = await stderrTask;
-        if (process.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "The mesh edit failed." : stderr.Trim());
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, editorLifetime.Token);
+        var result = await ToolProcess.RunAsync(start, JsonSerializer.Serialize(request, jsonOptions), TimeSpan.FromSeconds(600), linked.Token);
+        var stdout = result.Output;
+        if (result.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error) ? "The mesh edit failed." : result.Error.Trim());
         using var document = JsonDocument.Parse(stdout); return document.RootElement.Clone();
     }
 
@@ -653,8 +734,7 @@ public partial class MainWindow
 
     static string FileDigest(string path)
     {
-        using var stream = File.OpenRead(path);
-        return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+        return FileFingerprints.Hash(path);
     }
 
     static Vector3 MeshCenter(MeshGeometry3D geometry)
@@ -704,10 +784,10 @@ public partial class MainWindow
         var denom = 1 / (va + vb + vc); return a + ab * (vb * denom) + ac * (vc * denom);
     }
 
-    static bool InsidePolygon(Windows.Foundation.Point point, IReadOnlyList<Windows.Foundation.Point> polygon)
+    static bool InsidePolygon(global::Windows.Foundation.Point point, IReadOnlyList<global::Windows.Foundation.Point> polygon)
     {
         var inside = false;
-        for (var i = 0, j = polygon.Count - 1; i < polygon.Count; j = i++)
+        for (int i = 0, j = polygon.Count - 1; i < polygon.Count; j = i++)
         {
             var a = polygon[i]; var b = polygon[j];
             if ((a.Y > point.Y) != (b.Y > point.Y) && point.X < (b.X - a.X) * (point.Y - a.Y) / (b.Y - a.Y) + a.X) inside = !inside;

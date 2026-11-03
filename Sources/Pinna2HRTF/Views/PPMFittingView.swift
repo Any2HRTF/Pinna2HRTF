@@ -134,7 +134,7 @@ struct PPMFittingView: View {
                     .accessibilityIdentifier("ppm.showSkeleton")
                     .help("Show the posed Blender bones through the PPM surface.")
                 Spacer(minLength: 0)
-                Button("Reset fit") { Task { await model.resetControls() } }
+                Button("Reset adjustments") { Task { await model.resetControls() } }
                     .font(.caption)
                     .fixedSize()
                     .disabled(model.busy || model.isUpdatingPreview)

@@ -354,12 +354,18 @@ def collect_sofa_files(projects: list[Path], output_dir: Path) -> None:
 
 
 def inspect_sofa_files(output_dir: Path) -> None:
+    # These plots are exported to files, including from the portable CLI where
+    # no Tcl/Tk desktop runtime is required.
+    import matplotlib
+    matplotlib.use("Agg", force=True)
     import mesh2hrtf as m2h
     for plane in ["horizontal", "median"]:
         m2h.inspect_sofa_files(str(output_dir), pattern="HRIR", plot="3D", plane=plane)
 
 
 def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
+    from .SofaIO import install_windows_paths
+    install_windows_paths()
     emit_live_event("Converting simulation results to SOFA")
     logger(f"Running postprocessing into {config.postprocessing.output_sofa_dir}")
     if dry_run:

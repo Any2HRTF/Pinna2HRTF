@@ -86,29 +86,24 @@ public partial class MainWindow
         catch (Exception error) { loading = false; displayedGeometry = null; geometryDescription.Text = error.Message; }
     }
 
-    Task<GeometryValues> InspectGeometry(string? left, string? right) => Task.Run(() =>
+    async Task<GeometryValues> InspectGeometry(string? left, string? right)
     {
         var info = new ProcessStartInfo(BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe"))
         { WorkingDirectory = packageRoot, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        foreach (var argument in new[] { "-m", "HRTFCalculation.Geometry" }) info.ArgumentList.Add(argument);
+        foreach (var argument in new[] { "-X", "utf8", "-m", "HRTFCalculation.Geometry" }) info.ArgumentList.Add(argument);
         if (left != null) { info.ArgumentList.Add("--left"); info.ArgumentList.Add(left); }
         if (right != null) { info.ArgumentList.Add("--right"); info.ArgumentList.Add(right); }
         ApplyProcessEnvironment(info);
-        using var process = Process.Start(info) ?? throw new IOException("Could not start geometry inspection.");
-        var output = process.StandardOutput.ReadToEndAsync();
-        var errors = process.StandardError.ReadToEndAsync();
-        process.WaitForExit();
-        var result = output.GetAwaiter().GetResult();
-        var error = errors.GetAwaiter().GetResult();
-        if (process.ExitCode != 0) throw new IOException(error.Trim());
-        return JsonSerializer.Deserialize<GeometryValues>(result) ?? throw new IOException("No geometry measurements returned.");
-    });
+        var result = await ToolProcess.RunAsync(info, null, TimeSpan.FromSeconds(180), editorLifetime.Token);
+        if (result.ExitCode != 0) throw new IOException(result.Error.Trim());
+        return JsonSerializer.Deserialize<GeometryValues>(result.Output) ?? throw new IOException("No geometry measurements returned.");
+    }
 
     async Task EditGeometryAsync(string field, string text)
     {
         var project = selectedProject;
         if (loading || geometryEditing || project == null) return;
-        if (runningProcesses.ContainsKey(project.Id) || outputOperations.Contains(project.Id)) { LoadSelectedProject(); return; }
+        if (ProjectBusy(project.Id)) { LoadSelectedProject(); return; }
         var before = displayedGeometry;
         if (field != "reset" && before != null && text == GeometryDisplay(before.Distance)) return;
         GeometryValues? desired = null;
@@ -151,25 +146,10 @@ public partial class MainWindow
     {
         var info = new ProcessStartInfo(BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe"))
         { WorkingDirectory = packageRoot, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        info.ArgumentList.Add("-X"); info.ArgumentList.Add("utf8");
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
         ApplyProcessEnvironment(info);
         return info;
-    }
-
-    void ReadGeometrySettings(ProjectRecord project, string path)
-    {
-        // Version compatibility only; remove with v2.0.0.
-        using var process = Process.Start(GeometryProcess("-m", "HRTFCalculation.Compatibility", path)) ?? throw new IOException("Could not load project settings.");
-        var output = process.StandardOutput.ReadToEndAsync();
-        var errors = process.StandardError.ReadToEndAsync();
-        process.WaitForExit();
-        var json = output.GetAwaiter().GetResult();
-        var error = errors.GetAwaiter().GetResult();
-        if (process.ExitCode != 0) throw new IOException(error);
-        using var document = JsonDocument.Parse(json);
-        var value = document.RootElement.GetProperty("ear_distance");
-        project.Settings.Preprocessing.EarDistance = value.ValueKind == JsonValueKind.Null ? null : HeadGeometry.Number(value.GetDouble());
-        foreach (var notice in document.RootElement.GetProperty("warnings").EnumerateArray()) AppendLog(notice.GetString(), project.Id);
     }
 
     string EarDistanceInputStamp(ProjectRecord project)

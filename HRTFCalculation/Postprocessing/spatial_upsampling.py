@@ -15,6 +15,8 @@ def resolve_dependencies(settings):
     """Check the Python dependencies and upsampling settings before any export work starts."""
     import numpy  # noqa: F401
     import scipy  # noqa: F401
+    from ..SofaIO import install_windows_paths
+    install_windows_paths()
     import sofar  # noqa: F401
     subdivisions = settings.spatial_subdivisions
     if isinstance(subdivisions, bool) or not isinstance(subdivisions, int) or not 0 <= subdivisions <= 5:

@@ -1,4 +1,4 @@
-"""Version compatibility only; remove with v2.0.0."""
+"""Version compatibility only; remove in a future release."""
 from __future__ import annotations
 
 import codecs
@@ -16,11 +16,11 @@ DEPRECATION = "Deprecated; use ear_distance. Will be removed in a future version
 
 
 def import_legacy_distance(data):
-    """Version compatibility only; remove with v2.0.0."""
+    """Version compatibility only; remove in a future release."""
     result = copy.deepcopy(data)
     settings = result.get("preprocessing", {})
     if isinstance(settings, dict) and "head_radius" in settings:
-        # Version compatibility only; remove with v2.0.0.
+        # Version compatibility only; remove in a future release.
         legacy = settings.pop("head_radius")
         if "ear_distance" not in settings:
             settings["ear_distance"] = legacy
@@ -51,7 +51,7 @@ def read_settings(path):
 
 
 def annotate_legacy_distance(path, text, encoding, raw):
-    """Version compatibility only; remove with v2.0.0.
+    """Version compatibility only; remove in a future release.
 
     Called only after the full settings file has passed model validation.
     Edit YAML nodes in place so unrelated comments and formatting survive.

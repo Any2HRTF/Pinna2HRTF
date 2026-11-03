@@ -12,11 +12,16 @@
     <PublishTrimmed>false</PublishTrimmed>
     <AssemblyName>Pinna2HRTF</AssemblyName>
     <RootNamespace>Pinna2HRTF.Windows</RootNamespace>
-    <Version>1.1.1</Version>
-    <InformationalVersion>1.1.1</InformationalVersion>
-    <AssemblyVersion>1.1.1.0</AssemblyVersion>
-    <FileVersion>1.1.1.0</FileVersion>
+    <Version>2.0.0-review-main</Version>
+    <InformationalVersion>2.0.0-review-main</InformationalVersion>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
     <ApplicationIcon>Resources\app_icon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MacImitation)' == 'true'">
+    <DefineConstants>$(DefineConstants);PINNA_MAC_LAYOUT</DefineConstants>
+    <Version>2.0.0-review-main-macimitation</Version>
+    <InformationalVersion>2.0.0-review-main-macimitation</InformationalVersion>
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="Resources\app_icon.ico" />

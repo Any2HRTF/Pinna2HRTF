@@ -34,24 +34,12 @@ namespace Pinna2HRTF.Windows;
 
 public partial class MainWindow : Window
 {
+    WindowChrome? windowChrome;
+    SharedNavigation? meshNavigation;
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern IntPtr LoadLibraryEx(string lpFileName, IntPtr hFile, uint dwFlags);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool FreeLibrary(IntPtr hModule);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern IntPtr CreateJobObject(IntPtr attributes, string? name);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    static extern bool SetInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint length);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    static extern bool TerminateJobObject(IntPtr job, uint exitCode);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    static extern bool CloseHandle(IntPtr handle);
-    const int JobObjectExtendedLimitInformation = 9;
-    const uint JobObjectLimitKillOnJobClose = 0x2000;
     const uint LoadLibrarySearchDllLoadDir = 0x00000100;
     const uint LoadLibrarySearchDefaultDirs = 0x00001000;
     const double MicrophoneMarkerRadiusMeshUnits = 0.5;
@@ -60,14 +48,19 @@ public partial class MainWindow : Window
     sealed record PipelineRun(Process Process, Stage Stage, PipelineLogCapture? Capture)
     {
         public GeneratedOutputManifest? Outputs { get; set; }
+        public OwnedProcess? Owned { get; init; }
+        public IDisposable? Reservation { get; init; }
+        public bool StopRequested { get; set; }
     }
     readonly Dictionary<Guid, PipelineRun> runs = [];
     readonly Dictionary<Guid, Queue<Stage>> queuedStages = [];
     readonly Dictionary<Guid, HashSet<Stage>> failedStages = [];
     readonly Dictionary<string, GeneratedOutputManifest> outputStores = new(StringComparer.OrdinalIgnoreCase);
     readonly Dictionary<Guid, HashSet<GeneratedOutputManifest.OutputStage>> knownOutputs = [];
-    readonly HashSet<Guid> outputOperations = [];
-    readonly HashSet<Guid> outputScans = [];
+    readonly ActivityCounter outputOperations = new();
+    readonly ProjectOperations projectOperations = new();
+    bool ProjectBusy(Guid id) => runs.ContainsKey(id) || outputOperations.Contains(id) || projectOperations.Contains(id) || OwnedProcess.HasProjectActivity(id) || scanAlignmentMode && alignmentSessionProject == id;
+    readonly ActivityCounter outputScans = new();
     readonly Dictionary<Guid, DateTime> lastOutputScan = [];
     readonly Dictionary<Guid, string> projectLogs = [];
     readonly Dictionary<Guid, string> legacyProjectLogs = [];
@@ -100,7 +93,6 @@ public partial class MainWindow : Window
     string viewerStatePath = "";
     string uiStatePath = "";
     string logsPath = "";
-    IntPtr pipelineJob;
     double projectsExpandedWidth = 280;
     double liveLogExpandedHeight = 170;
     double settingsExpandedWidth = 390;
@@ -158,13 +150,15 @@ public partial class MainWindow : Window
     Button? projectsToggle;
     ColumnDefinition? projectsSplitterColumn;
     FrameworkElement? projectsSplitter;
-    Expander? logExpander;
+    Button? logToggle;
+    StackPanel? logHeaderActions;
+    Border? logContentHost;
     RowDefinition? centerLogRow;
     RowDefinition? logSplitterRow;
     FrameworkElement? logSplitter;
     bool projectsCollapsed;
     bool logCollapsed;
-    bool suppressLogExpansionCallback;
+
     ScrollViewer? logScrollViewer;
     bool logFollowTail = true;
     bool logProgrammaticScroll;
@@ -220,7 +214,6 @@ public partial class MainWindow : Window
     readonly Button editPreparedEarButton = new() { Content = "Edit Ear…", Visibility = Visibility.Collapsed, MinHeight = 30 };
     readonly Button alignScanButton = new() { Content = "Align scan with nose and ears" };
     readonly Button applyScanAlignmentButton = new() { Content = "Apply Alignment", IsEnabled = false };
-
     readonly CheckBox adaptiveFmmLengthBox = new();
     readonly CheckBox normalizeHrtfsBox = new();
     readonly CheckBox resampleHrirsBox = new();
@@ -229,8 +222,14 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        FileFingerprints.UiThread = Environment.CurrentManagedThreadId;
+        FileFingerprints.Ready = () => DispatcherQueue.TryEnqueue(() => { if (!shutdownCleanupDone) RefreshPipelineStatus(); });
         InitializeComponent();
         textSettings = CreateTextSettings();
+        AddV2TextSettings(textSettings);
+        var cancelInteraction=new KeyboardAccelerator{Key=VirtualKey.Escape};
+        cancelInteraction.Invoked+=(_,args)=>{if(placementSide!=null){EndPlacement();args.Handled=true;}else if(scanAlignmentMode){EndScanAlignment();args.Handled=true;}};
+        Root.KeyboardAccelerators.Add(cancelInteraction);
         Root.Loaded += WindowLoaded;
         Root.ActualThemeChanged += (_, _) => UpdateViewerAppearance();
         statusTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
@@ -241,7 +240,7 @@ public partial class MainWindow : Window
         var hwnd = WindowNative.GetWindowHandle(this);
         var id = Win32Interop.GetWindowIdFromWindow(hwnd);
         var appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(id);
-        appWindow.Title = "Pinna2HRTF";
+        appWindow.Title = "Pinna2HRTF " + ReviewVersion;
         try
         {
             var icon = Path.Combine(AppContext.BaseDirectory, "app_icon.ico");
@@ -250,94 +249,7 @@ public partial class MainWindow : Window
         }
         catch { }
         appWindow.Closing += AppWindowClosing;
-        InitializePipelineJob();
-    }
 
-    [StructLayout(LayoutKind.Sequential)]
-    struct JobBasicLimitInformation
-    {
-        public long PerProcessUserTimeLimit;
-        public long PerJobUserTimeLimit;
-        public uint LimitFlags;
-        public UIntPtr MinimumWorkingSetSize;
-        public UIntPtr MaximumWorkingSetSize;
-        public uint ActiveProcessLimit;
-        public UIntPtr Affinity;
-        public uint PriorityClass;
-        public uint SchedulingClass;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    struct IoCounters
-    {
-        public ulong ReadOperationCount;
-        public ulong WriteOperationCount;
-        public ulong OtherOperationCount;
-        public ulong ReadTransferCount;
-        public ulong WriteTransferCount;
-        public ulong OtherTransferCount;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    struct ExtendedLimitInformation
-    {
-        public JobBasicLimitInformation BasicLimitInformation;
-        public IoCounters IoInfo;
-        public UIntPtr ProcessMemoryLimit;
-        public UIntPtr JobMemoryLimit;
-        public UIntPtr PeakProcessMemoryUsed;
-        public UIntPtr PeakJobMemoryUsed;
-    }
-
-    void InitializePipelineJob()
-    {
-        if (!OperatingSystem.IsWindows()) return;
-        pipelineJob = CreateJobObject(IntPtr.Zero, null);
-        if (pipelineJob == IntPtr.Zero) return;
-        var info = new ExtendedLimitInformation { BasicLimitInformation = new JobBasicLimitInformation { LimitFlags = JobObjectLimitKillOnJobClose } };
-        var pointer = Marshal.AllocHGlobal(Marshal.SizeOf<ExtendedLimitInformation>());
-        try
-        {
-            Marshal.StructureToPtr(info, pointer, false);
-            if (!SetInformationJobObject(pipelineJob, JobObjectExtendedLimitInformation, pointer, (uint)Marshal.SizeOf<ExtendedLimitInformation>()))
-            {
-                CloseHandle(pipelineJob);
-                pipelineJob = IntPtr.Zero;
-            }
-        }
-        finally { Marshal.FreeHGlobal(pointer); }
-    }
-
-    void AssignPipelineJob(Process process, Guid projectId)
-    {
-        var processName = SafeProcessName(process);
-        if (pipelineJob == IntPtr.Zero)
-        {
-            AppendLog($"Process association warning: application job is unavailable for {processName}; explicit tree cleanup remains active.", projectId);
-            return;
-        }
-
-        try
-        {
-            if (!AssignProcessToJobObject(pipelineJob, process.Handle))
-            {
-                var error = Marshal.GetLastWin32Error();
-                AppendLog($"Process association warning: could not assign {processName} to the application job (Win32 {error}); explicit tree cleanup remains active.", projectId);
-                return;
-            }
-
-            if (!IsProcessInJob(process.Handle, pipelineJob, out var inJob) || !inJob)
-            {
-                var error = Marshal.GetLastWin32Error();
-                AppendLog($"Process association warning: {processName} was not confirmed in the application job (Win32 {error}); explicit tree cleanup remains active.", projectId);
-                return;
-            }
-
-        }
-        catch (Exception error)
-        {
-            AppendLog($"Process association warning: {processName} could not be checked ({error.Message}); explicit tree cleanup remains active.", projectId);
-        }
     }
 
     static string SafeProcessName(Process process)
@@ -347,9 +259,11 @@ public partial class MainWindow : Window
 
     void WindowLoaded(object sender, RoutedEventArgs e)
     {
+        if (MacLayout) { projectsExpandedWidth = 240; settingsExpandedWidth = 360; logCollapsed = true; }
         BuildInterface();
         packageRoot = FindPackageRoot();
-        appData = Environment.GetEnvironmentVariable("PINNA2HRTF_APP_DATA") is string overrideData && Path.IsPathFullyQualified(overrideData) ? overrideData : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Pinna2HRTF");
+        var reviewBuild=typeof(MainWindow).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Contains("-review",StringComparison.OrdinalIgnoreCase)==true;
+        appData = Environment.GetEnvironmentVariable("PINNA2HRTF_APP_DATA") is string overrideData && Path.IsPathFullyQualified(overrideData) ? overrideData : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), MacLayout ? "Pinna2HRTF-v2-review-macimitation" : reviewBuild ? "Pinna2HRTF-v2-review" : "Pinna2HRTF");
 #if PINNA2HRTF_REVIEW
         appData = Path.Combine(AppContext.BaseDirectory, ".appdata");
 #endif
@@ -358,6 +272,7 @@ public partial class MainWindow : Window
         uiStatePath = Path.Combine(appData, "ui-state.json");
         logsPath = Path.Combine(appData, "logs.json");
         Directory.CreateDirectory(appData);
+        WriteRuntimeInfo();
         Directory.CreateDirectory(Path.Combine(appData, "Cache", "matplotlib"));
         Directory.CreateDirectory(Path.Combine(appData, "Cache", "python"));
         Directory.CreateDirectory(Path.Combine(appData, "Blender", "config"));
@@ -400,7 +315,7 @@ public partial class MainWindow : Window
         Root.RowDefinitions.Clear();
         Root.ColumnDefinitions.Clear();
         Root.UseLayoutRounding = true;
-        Root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(36) });
+        Root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(54) });
         Root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         var titleBar = BuildTitleBar();
         Grid.SetRow(titleBar, 0);
@@ -437,6 +352,7 @@ public partial class MainWindow : Window
         Grid.SetColumn(settings, 4);
         contentGrid.Children.Add(settings);
         SetProjectsCollapsed(projectsCollapsed, false);
+        if (MacLayout) ApplyMacWorkspace();
     }
 
     Grid BuildSplitter(bool vertical, DragDeltaEventHandler handler)
@@ -446,7 +362,7 @@ public partial class MainWindow : Window
             Background = new SolidColorBrush(Colors.Transparent),
             IsHitTestVisible = true
         };
-        
+
         if (vertical)
         {
             host.VerticalAlignment = VerticalAlignment.Stretch;
@@ -455,7 +371,7 @@ public partial class MainWindow : Window
         {
             host.HorizontalAlignment = HorizontalAlignment.Stretch;
         }
-        
+
         var line = new Border
         {
             Width = vertical ? 1 : double.NaN,
@@ -465,7 +381,7 @@ public partial class MainWindow : Window
             Background = borderBrush,
             IsHitTestVisible = false
         };
-        
+
         var thumb = new Thumb
         {
             HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -473,17 +389,17 @@ public partial class MainWindow : Window
             Background = new SolidColorBrush(Colors.Transparent),
             IsHitTestVisible = true
         };
-        
+
         thumb.DragDelta += handler;
         host.Children.Add(line);
         host.Children.Add(thumb);
-        
+
         return host;
     }
 
     Grid BuildTitleBar()
     {
-        var titleBar = new Grid { Height = 36, Background = new SolidColorBrush(Colors.Transparent), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch };
+        var titleBar = new Grid { Height = 54, Background = new SolidColorBrush(Colors.Transparent), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch };
         titleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         titleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         var logo = new Image { Width = 20, Height = 20, Margin = new Thickness(10, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -496,14 +412,14 @@ public partial class MainWindow : Window
         menu.HorizontalAlignment = HorizontalAlignment.Left;
         Grid.SetColumn(menu, 1);
         titleBar.Children.Add(menu);
-        SetTitleBar(titleBar);
+        windowChrome?.Dispose(); windowChrome = new WindowChrome(this, Root, titleBar, titleBar);
         return titleBar;
     }
 
     void ProjectSplitterDragged(object sender, DragDeltaEventArgs e)
     {
         if (projectsCollapsed || projectsColumn == null) return;
-        projectsExpandedWidth = Math.Clamp(projectsExpandedWidth + e.HorizontalChange, 280, 520);
+        projectsExpandedWidth = Math.Clamp(projectsExpandedWidth + e.HorizontalChange, MacLayout ? 180 : 280, MacLayout ? 320 : 520);
         projectsColumn.Width = new GridLength(projectsExpandedWidth);
         SaveUiState();
     }
@@ -518,6 +434,7 @@ public partial class MainWindow : Window
 
     void SetProjectsCollapsed(bool collapsed, bool persist)
     {
+        if (MacLayout && macSidebarReady) { SetMacSidebar(collapsed); if (persist) SaveUiState(); return; }
         projectsCollapsed = collapsed;
         if (projectsHeader != null) projectsHeader.ColumnSpacing = collapsed ? 0 : 8;
         if (projectsToggle != null)
@@ -570,7 +487,8 @@ public partial class MainWindow : Window
         pipeline.Items.Add(MenuItem("Stop", StopClicked, "Esc"));
         pipeline.Items.Add(MenuItem("Reset Outputs", ResetOutputsClicked));
         var help = new MenuBarItem { Title = "Help", VerticalAlignment = VerticalAlignment.Center };
-        help.Items.Add(MenuItem("Online Documentation", OpenDocumentationClicked));
+        help.Items.Add(MenuItem("Pinna2HRTF Help", OpenDocumentationClicked, "F1"));
+        help.Items.Add(MenuItem("Online Documentation", (_, _) => OpenExternal("https://any2hrtf.github.io/Pinna2HRTF/docs/")));
         help.Items.Add(new MenuFlyoutSeparator());
         help.Items.Add(MenuItem("About Pinna2HRTF", ShowAboutClicked));
         bar.Items.Add(project);
@@ -599,6 +517,7 @@ public partial class MainWindow : Window
             "D" => VirtualKey.D,
             "R" => VirtualKey.R,
             "DELETE" => VirtualKey.Delete,
+            "F1" => VirtualKey.F1,
             "ESC" or "ESCAPE" => VirtualKey.Escape,
             _ => VirtualKey.None
         };
@@ -644,7 +563,9 @@ public partial class MainWindow : Window
         header.Children.Add(projectsToggle);
         grid.Children.Add(header);
         projectList.SelectionChanged += ProjectSelectionChanged;
+        projectList.KeyDown += RenameFocusedFolder;
         projectList.Background = new SolidColorBrush(Colors.Transparent);
+        projectList.ItemContainerTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection();
         projectList.BorderThickness = new Thickness(0);
         projectList.HorizontalContentAlignment = HorizontalAlignment.Stretch;
         projectList.VerticalContentAlignment = VerticalAlignment.Stretch;
@@ -735,6 +656,7 @@ public partial class MainWindow : Window
             EnsureSceneLighting();
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RefreshArtifacts);
         };
+        meshNavigation?.Dispose(); meshNavigation = new SharedNavigation(meshViewport, ResetMeshPointerState, SaveMeshCamera);
         meshViewport.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(MeshViewportPointerPressed), true);
         meshViewport.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(MeshViewportPointerMoved), true);
         meshViewport.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(MeshViewportPointerReleased), true);
@@ -753,33 +675,14 @@ public partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(16),
-            Padding = new Thickness(8, 4, 8, 4),
+            Padding = new Thickness(0),
             CornerRadius = new CornerRadius(5),
-            Background = viewerHintBackgroundBrush,
+            Background = new SolidColorBrush(Colors.Transparent),
             Visibility = Visibility.Collapsed,
-            IsHitTestVisible = false,
-            Child = new TextBlock
-            {
-                Text = "Drag to rotate  |  Mouse wheel to zoom",
-                FontSize = 12,
-                Foreground = viewerHintTextBrush,
-                VerticalAlignment = VerticalAlignment.Center
-            }
+            Child = NavigationHelp.Create()
         };
         viewerGrid.Children.Add(viewerInteractionHint);
-        var resetViewButton = new Button
-        {
-            Content = "Reset view",
-            FontSize = 12,
-            Foreground = viewerHintTextBrush,
-            Background = new SolidColorBrush(Colors.Transparent),
-            BorderThickness = new Thickness(0),
-            Padding = new Thickness(8, 4, 8, 4),
-            MinWidth = 0,
-            MinHeight = 0,
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center
-        };
+        var resetViewButton = NavigationHelp.Command("Reset view");
         resetViewButton.Click += ResetViewClicked;
         resetViewButtonHost = new Border
         {
@@ -787,7 +690,7 @@ public partial class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(16),
             CornerRadius = new CornerRadius(5),
-            Background = viewerHintBackgroundBrush,
+            Background = new SolidColorBrush(Colors.Transparent),
             Visibility = Visibility.Collapsed,
             IsHitTestVisible = true,
             Child = resetViewButton
@@ -818,6 +721,8 @@ public partial class MainWindow : Window
         var restartAlignment = new Button { Content = "Restart picks" };
         restartAlignment.Click += (_, _) => ResetScanAlignmentPicks();
         alignmentPanel.Children.Add(scanAlignmentStatus);
+        alignmentPanel.Children.Add(coordinateToggle);
+        coordinateToggle.Click += (_, _) => UpdateAlignmentAxes();
         alignmentPanel.Children.Add(restartAlignment);
         alignmentPanel.Children.Add(applyScanAlignmentButton);
         alignmentPanel.Children.Add(cancelAlignment);
@@ -843,13 +748,7 @@ public partial class MainWindow : Window
     {
         if (!viewportReady || meshViewport.Items == null || sceneLights.Count > 0)
             return;
-        var ambient = new AmbientLight3D { Color = Colors.White };
-        var key = new DirectionalLight3D { Color = Colors.White, Direction = new System.Numerics.Vector3(-0.45f, -0.65f, -0.6f) };
-        var fill = new DirectionalLight3D { Color = ColorHelper.FromArgb(210, 220, 235, 255), Direction = new System.Numerics.Vector3(0.7f, 0.25f, -0.35f) };
-        var rim = new DirectionalLight3D { Color = ColorHelper.FromArgb(170, 255, 235, 210), Direction = new System.Numerics.Vector3(0.15f, 0.55f, 0.8f) };
-        sceneLights.AddRange([ambient, key, fill, rim]);
-        foreach (var light in sceneLights)
-            meshViewport.Items.Add(light);
+        sceneLights.AddRange(EvenMeshLighting.Install(meshViewport));
     }
 
     void LogSplitterDragged(object sender, DragDeltaEventArgs e)
@@ -863,94 +762,48 @@ public partial class MainWindow : Window
     Border BuildLogPane()
     {
         logPanelBorder = new Border { CornerRadius = new CornerRadius(8), Margin = new Thickness(0, 3, 0, 0), Background = surfaceBrush, BorderBrush = borderBrush, BorderThickness = new Thickness(1) };
-        var panel = logPanelBorder;
-        var header = new Grid { Height = LogHeaderHeight, MinHeight = LogHeaderHeight, Margin = new Thickness(10, 0, 6, 0), HorizontalAlignment = HorizontalAlignment.Stretch };
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var title = new TextBlock { Text = "Live Log", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(title, 0);
-        header.Children.Add(title);
-        technicalLogButton = new Button { Content = "Technical Log", HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(10, 2, 10, 2), IsEnabled = false };
-        technicalLogButton.Click += OpenTechnicalLogClicked;
-        Grid.SetColumn(technicalLogButton, 1);
-        header.Children.Add(technicalLogButton);
-        var clear = new Button { Content = "Clear", HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(10, 2, 10, 2) };
-        clear.Click += ClearLogClicked;
-        Grid.SetColumn(clear, 2);
-        header.Children.Add(clear);
+        var panel = new Grid(); panel.RowDefinitions.Add(new() { Height = GridLength.Auto }); panel.RowDefinitions.Add(new());
+        var header = new Grid { Height = LogHeaderHeight, Padding = new Thickness(8, 0, 12, 0), ColumnSpacing = 12 };
+        header.ColumnDefinitions.Add(new()); header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        var title = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        title.Children.Add(new FontIcon { FontFamily = new FontFamily("Segoe Fluent Icons"), Glyph = "\uE76C", FontSize = 12 });
+        title.Children.Add(new TextBlock { Text = "Live Log", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+        logToggle = new Button { Content = title, HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center,
+            Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(6), MinHeight = 32 };
+        logToggle.Click += (_, _) => SetLogCollapsed(!logCollapsed, true); header.Children.Add(logToggle);
+        logHeaderActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        technicalLogButton = new Button { Content = "Technical Log", Padding = new Thickness(10, 4, 10, 4), MinHeight = 30, IsEnabled = false };
+        technicalLogButton.Click += OpenTechnicalLogClicked; logHeaderActions.Children.Add(technicalLogButton);
+        var clear = new Button { Content = "Clear", Padding = new Thickness(10, 4, 10, 4), MinHeight = 30, IsEnabled = false };
+        ToolTipService.SetToolTip(clear, "Clear the activity shown here. Technical logs remain available."); clear.Click += ClearLogClicked; logHeaderActions.Children.Add(clear);
+        Grid.SetColumn(logHeaderActions, 1); header.Children.Add(logHeaderActions); panel.Children.Add(header);
         logText = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Consolas"), FontSize = 12, BorderThickness = new Thickness(0), Margin = new Thickness(10) };
-        ScrollViewer.SetVerticalScrollBarVisibility(logText, ScrollBarVisibility.Auto);
-        logText.Loaded += (_, _) => AttachLogScrollViewer();
-        logExpander = new Expander
-        {
-            Header = header,
-            Content = logText,
-            ExpandDirection = ExpandDirection.Up,
-            IsExpanded = !logCollapsed,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            VerticalContentAlignment = VerticalAlignment.Stretch,
-            MinHeight = LogHeaderHeight,
-            Padding = new Thickness(0),
-            Margin = new Thickness(0)
-        };
-        logExpander.RegisterPropertyChangedCallback(Expander.IsExpandedProperty, (_, _) =>
-        {
-            if (suppressLogExpansionCallback) return;
-            var collapsed = !logExpander.IsExpanded;
-            SetLogCollapsed(collapsed, true);
-            if (!collapsed)
-                RestoreLogScroll(0, true);
-        });
-        ToolTipService.SetToolTip(logExpander, null);
-        logExpander.Loaded += (_, _) => SetLogCollapsed(logCollapsed, false);
-        if (FindDescendant<ToggleButton>(logExpander) is { } logHeader)
-            ToolTipService.SetToolTip(logHeader, "Expand or collapse Live Log");
-        AutomationProperties.SetName(logExpander, "Live Log");
-        panel.Child = logExpander;
-        return panel;
+        logText.TextChanged += (_, _) => clear.IsEnabled = !string.IsNullOrEmpty(logText.Text);
+        ScrollViewer.SetVerticalScrollBarVisibility(logText, ScrollBarVisibility.Auto); logText.Loaded += (_, _) => AttachLogScrollViewer();
+        logContentHost = new Border { Child = logText, BorderBrush = borderBrush, BorderThickness = new Thickness(0, 1, 0, 0) };
+        Grid.SetRow(logContentHost, 1); panel.Children.Add(logContentHost); logPanelBorder.Child = panel;
+        panel.Loaded += (_, _) => SetLogCollapsed(logCollapsed, false);
+        return logPanelBorder;
     }
 
     void SetLogCollapsed(bool collapsed, bool persist)
     {
         logCollapsed = collapsed;
-        if (collapsed)
+        if (logSplitterRow != null) logSplitterRow.Height = new GridLength(collapsed ? 0 : 12);
+        if (logSplitter != null) logSplitter.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        if (centerLogRow != null) centerLogRow.Height = new GridLength(collapsed
+            ? LogHeaderHeight + (logPanelBorder?.BorderThickness.Top ?? 0) + (logPanelBorder?.BorderThickness.Bottom ?? 0) + (logPanelBorder?.Margin.Top ?? 0)
+            : Math.Clamp(liveLogExpandedHeight, 100, 600));
+        if (logPanelBorder != null) logPanelBorder.Visibility = Visibility.Visible;
+        if (logContentHost != null) logContentHost.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        if (logHeaderActions != null) logHeaderActions.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        if (logToggle != null)
         {
-            if (logSplitterRow != null) logSplitterRow.Height = new GridLength(0);
-            if (logSplitter != null) logSplitter.Visibility = Visibility.Collapsed;
-            if (centerLogRow != null) centerLogRow.Height = new GridLength(CollapsedLogHeaderHeight);
+            ((FontIcon)((StackPanel)logToggle.Content).Children[0]).Glyph = collapsed ? "\uE76C" : "\uE70D";
+            AutomationProperties.SetName(logToggle, collapsed ? "Expand Live Log" : "Collapse Live Log");
         }
-        else
-        {
-            if (centerLogRow != null) centerLogRow.Height = new GridLength(Math.Clamp(liveLogExpandedHeight, 100, 600));
-            if (logSplitterRow != null) logSplitterRow.Height = new GridLength(12);
-            if (logSplitter != null) logSplitter.Visibility = Visibility.Visible;
-        }
-        if (logExpander != null)
-        {
-            logExpander.VerticalAlignment = collapsed ? VerticalAlignment.Top : VerticalAlignment.Stretch;
-            ToolTipService.SetToolTip(logExpander, null);
-            if (FindDescendant<ToggleButton>(logExpander) is { } logHeader)
-            {
-                // Keep the actual native toggle the same height in both visual states.
-                var height = LogHeaderHeight + logHeader.BorderThickness.Top + logHeader.BorderThickness.Bottom;
-                logHeader.Height = height;
-                logHeader.MinHeight = height;
-                logHeader.MaxHeight = height;
-                ToolTipService.SetToolTip(logHeader, collapsed ? "Expand Live Log" : "Collapse Live Log");
-                if (collapsed && centerLogRow != null && logPanelBorder != null)
-                    centerLogRow.Height = new GridLength(height + logPanelBorder.BorderThickness.Top +
-                        logPanelBorder.BorderThickness.Bottom + logPanelBorder.Margin.Top + logPanelBorder.Margin.Bottom);
-            }
-            if (logExpander.IsExpanded == collapsed)
-            {
-                suppressLogExpansionCallback = true;
-                try { logExpander.IsExpanded = !collapsed; }
-                finally { suppressLogExpansionCallback = false; }
-            }
-        }
+        if (MacLayout) RefreshMacPresentation();
         if (!collapsed) RestoreLogScroll(0, true);
         if (persist) SaveUiState();
     }
@@ -969,18 +822,19 @@ public partial class MainWindow : Window
         AddPathSetting(settings, "Left ear (optional)", "project.left_ear", leftEarBox, BrowseLeftEarClicked);
         AddPathSetting(settings, "Right ear (optional)", "project.right_ear", rightEarBox, BrowseRightEarClicked);
         AddPathSetting(settings, "Save location", "project.save_location", saveLocationBox, BrowseSaveLocationClicked);
-        settings.Children.Add(new TextBlock { Text = "Choose at least one ear mesh.", Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)), Margin = new Thickness(0, 3, 0, 4) });
+        settings.Children.Add(new TextBlock { Text = "Choose ear meshes or prepare ears from a full-head scan.", Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)), Margin = new Thickness(0, 3, 0, 4) });
         AddExpander(settings, "Optional scan preparation", [
             AddSettingPanel("Prepare ears from a full-head scan", "scan_preparation.enabled", scanPreparationEnabledBox, "Prepare ears from a full-head scan"),
             PathSettingPanel("Full-head scan mesh", "scan_preparation.scan_path", scanPathBox, BrowseScanClicked),
             alignScanButton,
             AddSettingPanel("Prepare left ear", "scan_preparation.prepare_left", prepareLeftEarBox, "Prepare left ear"),
             AddSettingPanel("Prepare right ear", "scan_preparation.prepare_right", prepareRightEarBox, "Prepare right ear"),
-            new TextBlock { Text = "Align the scan with the nose tip and both ear-canal entrances first. Preparation crops, remeshes, and repairs the selected ears. Editing prepared ears is optional; saved current edits are used automatically. Mesh2PPM inference can be enabled separately.", TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 4, 0, 0), Foreground = mutedTextBrush }
+            new TextBlock { Text = "Use an externally aligned scan (X forward, Y left, Z up), or align it here with the nose tip and ear-canal entrances. Preparation crops, remeshes, and repairs the selected ears. Editing prepared ears is optional; saved current edits are used automatically. Mesh2PPM inference can be enabled separately.", TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 4, 0, 0), Foreground = mutedTextBrush }
         ]);
         alignScanButton.Click += BeginScanAlignmentClicked;
-        scanPathBox.TextChanged += ProjectEdited;
+
         AddSetting(settings, "Use Mesh2PPM", "project.use_bezierppm", usePredictionsBox, "Use Mesh2PPM");
+        AddV2Settings(settings);
         AddExpander(settings, "Mesh2PPM", [AddSettingPanel("Model", "inference.model", modelPicker)]);
         AddExpander(settings, "Mesh2HRTF", [PathSettingPanel("Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked), GeometryPanel(), AddSettingPanel("Min frequency", "mesh2hrtf.min_frequency", minFrequencyBox), AddSettingPanel("Max frequency", "mesh2hrtf.max_frequency", maxFrequencyBox), AddSettingPanel("Frequency steps (minimum 2)", "mesh2hrtf.frequency_steps", frequencyStepsBox), AddSettingPanel("Microphone faces", "mesh2hrtf.microphone_faces", microphoneFacesBox)]);
         AddExpander(settings, "Mesh Grading", [AddSettingPanel("Min edge length", "mesh_grading.min_edge_length", meshMinEdgeBox), AddSettingPanel("Max edge length", "mesh_grading.max_edge_length", meshMaxEdgeBox), AddSettingPanel("Max error", "mesh_grading.max_error", meshMaxErrorBox), AddSettingPanel("Gamma", "mesh_grading.gamma", meshGammaBox), AddSettingPanel("Gamma opposite", "mesh_grading.gamma_opposite", meshGammaOppositeBox)]);
@@ -993,6 +847,7 @@ public partial class MainWindow : Window
         outer.Children.Add(stages);
         pane.Child = outer;
         RegisterSettingControls();
+        if (MacLayout) ArrangeMacInspector(settings, outer, scroll, stages);
         return pane;
     }
 
@@ -1110,7 +965,7 @@ public partial class MainWindow : Window
         return info;
     }
 
-    void AddExpander(StackPanel parent, string title, IEnumerable<Grid> children)
+    void AddExpander(StackPanel parent, string title, IEnumerable<FrameworkElement> children)
     {
         var panel = new StackPanel { Spacing = 3 };
         foreach (var child in children)
@@ -1203,6 +1058,7 @@ public partial class MainWindow : Window
 
     void ProjectSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (reconcilingProjectRows) return;
         if (projectList.SelectedItem is Grid { Tag: ProjectRecord project } && !ReferenceEquals(selectedProject, project))
         {
             SaveMeshCamera();
@@ -1213,16 +1069,24 @@ public partial class MainWindow : Window
         }
     }
 
+    void RenameProjectFromContext(ProjectRecord project)
+    {
+        SelectProjectFromContext(project);
+        if (MacLayout && !macInspectorVisible) ToggleMacInspector();
+        DispatcherQueue.TryEnqueue(() => { projectNameBox.StartBringIntoView(); projectNameBox.Focus(FocusState.Keyboard); projectNameBox.SelectAll(); });
+    }
+
     void SelectProjectFromContext(ProjectRecord project)
     {
         if (!projects.Contains(project)) return;
-        selectedProject = project;
+        if (!ReferenceEquals(selectedProject, project)) { SaveMeshCamera(); ResetViewer(); selectedProject = project; }
         if (projectRows.TryGetValue(project.Id, out var row) && !ReferenceEquals(projectList.SelectedItem, row.Root)) projectList.SelectedItem = row.Root;
-        else { LoadSelectedProject(); RefreshArtifacts(); RefreshPipelineStatus(); }
+        LoadSelectedProject(); RefreshArtifacts(); RefreshPipelineStatus(); Persist();
     }
 
     void LoadSelectedProject()
     {
+        if (scanAlignmentMode && alignmentSessionProject != selectedProject?.Id) EndScanAlignment();
         if (placementSide != null) EndPlacement();
         loading = true;
         var project = selectedProject;
@@ -1230,6 +1094,14 @@ public partial class MainWindow : Window
         leftEarBox.Text = project?.LeftEar ?? "";
         rightEarBox.Text = project?.RightEar ?? "";
         saveLocationBox.Text = project?.SaveLocation ?? "";
+        scanPreparationEnabledBox.IsChecked = project?.Settings.ScanPreparation.Enabled ?? false;
+        scanPathBox.Text = project?.Settings.ScanPreparation.ScanPath ?? "";
+        prepareLeftEarBox.IsChecked = project?.Settings.ScanPreparation.PrepareLeft ?? true;
+        prepareRightEarBox.IsChecked = project?.Settings.ScanPreparation.PrepareRight ?? true;
+        UpdatePreparedEarEditButton();
+        useManualFitsBox.IsChecked = project?.Settings.ManualPPM.Enabled ?? false;
+        requireReviewBox.IsChecked = project?.Settings.ScanPreparation.RequireManualReview ?? false;
+        usePredictionsBox.IsChecked = project?.Settings.Inference.UsePredictionsForPreprocessing ?? false;
         evaluationGridBox.Text = project?.Settings.Preprocessing.EvaluationGrid ?? "";
         earDistanceBox.Text = "";
         minFrequencyBox.Text = project?.Settings.Preprocessing.MinFrequency ?? "0";
@@ -1243,16 +1115,11 @@ public partial class MainWindow : Window
         meshGammaOppositeBox.Text = project?.Settings.Preprocessing.MeshGammaOpposite ?? "0.1";
         maxInstancesBox.Text = project?.Settings.NumCalc.MaxInstances ?? "1";
         maxCpuLoadBox.Text = project?.Settings.NumCalc.MaxCpuLoad ?? "90";
-        scanPreparationEnabledBox.IsChecked = project?.Settings.ScanPreparation.Enabled ?? false;
-        scanPathBox.Text = project?.Settings.ScanPreparation.ScanPath ?? "";
-        prepareLeftEarBox.IsChecked = project?.Settings.ScanPreparation.PrepareLeft ?? true;
-        prepareRightEarBox.IsChecked = project?.Settings.ScanPreparation.PrepareRight ?? true;
-        UpdatePreparedEarEditButton();
-        usePredictionsBox.IsChecked = project?.Settings.Inference.UsePredictionsForPreprocessing ?? false;
-
         adaptiveFmmLengthBox.IsChecked = project?.Settings.NumCalc.AdaptiveFmmLength ?? true;
         normalizeHrtfsBox.IsChecked = project?.Settings.Postprocessing?.Normalize ?? true;
         resampleHrirsBox.IsChecked = project?.Settings.Postprocessing?.ResampleHrirs ?? false;
+        spatialUpsamplingBox.IsChecked = project?.Settings.Postprocessing?.SpatialUpsampling ?? false;
+        spatialNormalizeBox.IsChecked = project?.Settings.Postprocessing?.SpatialNormalize ?? false;
         foreach (var binding in textSettings.Values)
             binding.Control.Text = project == null ? binding.DefaultValue : binding.Read(project) ?? binding.DefaultValue;
         SelectModel(project);
@@ -1261,11 +1128,13 @@ public partial class MainWindow : Window
         UpdatePostprocessingControls();
         UpdatePlacementButtons();
         RebaseSettingInputs();
+        RestoreSettingDrafts(project);
         RefreshGeometry();
     }
 
     Stage? SettingResetStage(string id)
     {
+        if (id.StartsWith("scan_preparation.")) return Stage.ScanPreparation;
         if (id == "project.use_bezierppm" || id.StartsWith("inference.", StringComparison.OrdinalIgnoreCase)) return Stage.Inference;
         if (id.StartsWith("mesh2hrtf.", StringComparison.OrdinalIgnoreCase) || id.StartsWith("mesh_grading.", StringComparison.OrdinalIgnoreCase)) return Stage.Preprocessing;
         if (id.StartsWith("postprocessing.", StringComparison.OrdinalIgnoreCase)) return Stage.Postprocessing;
@@ -1279,14 +1148,13 @@ public partial class MainWindow : Window
     {
         ["mesh2hrtf.evaluation_grid"] = new(evaluationGridBox, p => p.Settings.Preprocessing.EvaluationGrid,
             (p, value) => p.Settings.Preprocessing.EvaluationGrid = value.Trim(), ""),
-        ["mesh2hrtf.ear_distance"] = new(earDistanceBox, p => p.Settings.Preprocessing.EarDistance,
-            (p, value) => p.Settings.Preprocessing.EarDistance = value.Trim(), ""),
+
         ["mesh2hrtf.min_frequency"] = new(minFrequencyBox, p => p.Settings.Preprocessing.MinFrequency,
             (p, value) => p.Settings.Preprocessing.MinFrequency = value.Trim(), "0"),
         ["mesh2hrtf.max_frequency"] = new(maxFrequencyBox, p => p.Settings.Preprocessing.MaxFrequency,
             (p, value) => p.Settings.Preprocessing.MaxFrequency = value.Trim(), "24000"),
         ["mesh2hrtf.frequency_steps"] = new(frequencyStepsBox, p => p.Settings.Preprocessing.FrequencyStepCount,
-            (p, value) => p.Settings.Preprocessing.FrequencyStepCount = Math.Max(int.TryParse(value, out var steps) ? steps : 129, 2).ToString(CultureInfo.InvariantCulture), "129"),
+            (p, value) => p.Settings.Preprocessing.FrequencyStepCount = value.Trim(), "129"),
         ["mesh2hrtf.microphone_faces"] = new(microphoneFacesBox, p => p.Settings.Preprocessing.SourceAssignmentFaceCount,
             (p, value) => p.Settings.Preprocessing.SourceAssignmentFaceCount = value.Trim(), "6"),
         ["mesh_grading.min_edge_length"] = new(meshMinEdgeBox, p => p.Settings.Preprocessing.MeshMinEdgeLength,
@@ -1313,22 +1181,10 @@ public partial class MainWindow : Window
     {
         "project.use_bezierppm" => (usePredictionsBox.IsChecked == true).ToString(),
         "inference.model" => modelPicker.SelectedItem?.ToString() ?? "",
-        "mesh2hrtf.evaluation_grid" => evaluationGridBox.Text,
-        "mesh2hrtf.ear_distance" => earDistanceBox.Text,
-        "mesh2hrtf.min_frequency" => minFrequencyBox.Text,
-        "mesh2hrtf.max_frequency" => maxFrequencyBox.Text,
-        "mesh2hrtf.frequency_steps" => frequencyStepsBox.Text,
-        "mesh2hrtf.microphone_faces" => microphoneFacesBox.Text,
-        "mesh_grading.min_edge_length" => meshMinEdgeBox.Text,
-        "mesh_grading.max_edge_length" => meshMaxEdgeBox.Text,
-        "mesh_grading.max_error" => meshMaxErrorBox.Text,
-        "mesh_grading.gamma" => meshGammaBox.Text,
-        "mesh_grading.gamma_opposite" => meshGammaOppositeBox.Text,
-        "numcalc.parallel_instances" => maxInstancesBox.Text,
-        "numcalc.cpu_limit" => maxCpuLoadBox.Text,
-
         "numcalc.adaptive_fmm" => (adaptiveFmmLengthBox.IsChecked == true).ToString(),
         "postprocessing.normalize" => (normalizeHrtfsBox.IsChecked == true).ToString(),
+        "postprocessing.spatial_upsampling" => (spatialUpsamplingBox.IsChecked == true).ToString(),
+        "postprocessing.spatial_normalize" => (spatialNormalizeBox.IsChecked == true).ToString(),
         "postprocessing.resample_hrirs" => (resampleHrirsBox.IsChecked == true).ToString(),
         _ => ""
     };
@@ -1337,28 +1193,16 @@ public partial class MainWindow : Window
     {
         "project.use_bezierppm" => project.Settings.Inference.UsePredictionsForPreprocessing.ToString(),
         "inference.model" => ModelName(project.Settings.Inference.ModelConfig),
-        "mesh2hrtf.evaluation_grid" => project.Settings.Preprocessing.EvaluationGrid ?? "",
-        "mesh2hrtf.ear_distance" => project.Settings.Preprocessing.EarDistance ?? "",
-        "mesh2hrtf.min_frequency" => project.Settings.Preprocessing.MinFrequency ?? "",
-        "mesh2hrtf.max_frequency" => project.Settings.Preprocessing.MaxFrequency ?? "",
-        "mesh2hrtf.frequency_steps" => project.Settings.Preprocessing.FrequencyStepCount ?? "",
-        "mesh2hrtf.microphone_faces" => project.Settings.Preprocessing.SourceAssignmentFaceCount ?? "",
-        "mesh_grading.min_edge_length" => project.Settings.Preprocessing.MeshMinEdgeLength ?? "",
-        "mesh_grading.max_edge_length" => project.Settings.Preprocessing.MeshMaxEdgeLength ?? "",
-        "mesh_grading.max_error" => project.Settings.Preprocessing.MeshMaxError ?? "",
-        "mesh_grading.gamma" => project.Settings.Preprocessing.MeshGamma ?? "",
-        "mesh_grading.gamma_opposite" => project.Settings.Preprocessing.MeshGammaOpposite ?? "",
-        "numcalc.parallel_instances" => project.Settings.NumCalc.MaxInstances ?? "",
-        "numcalc.cpu_limit" => project.Settings.NumCalc.MaxCpuLoad ?? "",
-
         "numcalc.adaptive_fmm" => project.Settings.NumCalc.AdaptiveFmmLength.ToString(),
         "postprocessing.normalize" => (project.Settings.Postprocessing?.Normalize ?? true).ToString(),
+        "postprocessing.spatial_upsampling" => (project.Settings.Postprocessing?.SpatialUpsampling ?? false).ToString(),
+        "postprocessing.spatial_normalize" => (project.Settings.Postprocessing?.SpatialNormalize ?? false).ToString(),
         "postprocessing.resample_hrirs" => (project.Settings.Postprocessing?.ResampleHrirs ?? false).ToString(),
         _ => ""
     };
 
     static GeneratedOutputManifest.OutputStage OutputStageFor(Stage stage) => stage == Stage.ScanPreparation
-        ? GeneratedOutputManifest.OutputStage.Preprocessing : stage == Stage.Inference
+        ? GeneratedOutputManifest.OutputStage.ScanPreparation : stage == Stage.Inference
         ? GeneratedOutputManifest.OutputStage.Inference : stage == Stage.Preprocessing
         ? GeneratedOutputManifest.OutputStage.Preprocessing : stage == Stage.Numcalc
         ? GeneratedOutputManifest.OutputStage.Numcalc : GeneratedOutputManifest.OutputStage.Postprocessing;
@@ -1370,17 +1214,17 @@ public partial class MainWindow : Window
         if (projects.Any(other => other.Id != project.Id && !string.IsNullOrWhiteSpace(other.SaveLocation) &&
             (ContainsPath(root, other.SaveLocation) || ContainsPath(other.SaveLocation, root))))
             throw new IOException("Choose a separate output folder for this project before resetting or running it.");
-        var inputs = projects.SelectMany(p => new[] { p.LeftEar, p.RightEar, p.Settings.Preprocessing.EvaluationGrid ?? "" })
+        var inputs = projects.SelectMany(p => ProtectedInputs(p, project.Id))
             .Where(p => !string.IsNullOrWhiteSpace(p)).OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToArray();
-        var key = root + "\n" + string.Join("\n", inputs);
-        if (!outputStores.TryGetValue(key, out var store)) outputStores[key] = store = new GeneratedOutputManifest(root, inputs);
+        var key = root + "\n" + SofaDirectory(project) + "\n" + string.Join("\n", inputs);
+        if (!outputStores.TryGetValue(key, out var store)) outputStores[key] = store = new GeneratedOutputManifest(root, inputs, SofaDirectory(project));
         return store;
     }
 
     async Task ReconcileOutputsAsync(ProjectRecord project, bool required = false)
     {
         if (shutdownCleanupDone || string.IsNullOrWhiteSpace(project.SaveLocation) || !Directory.Exists(project.SaveLocation) ||
-            runs.ContainsKey(project.Id) || outputOperations.Contains(project.Id)) return;
+            ProjectBusy(project.Id)) return;
         if (!required && (outputScans.Contains(project.Id) || lastOutputScan.TryGetValue(project.Id, out var previous) && DateTime.UtcNow - previous < TimeSpan.FromSeconds(10))) return;
         var root = project.SaveLocation;
         outputScans.Add(project.Id);
@@ -1400,7 +1244,7 @@ public partial class MainWindow : Window
     void SettingChanged(object sender, RoutedEventArgs e)
     {
         if (loading || sender is not Control control || control.Tag is not string id) return;
-        _ = HandleSettingChangeAsync(id);
+        _ = ObserveUiTaskAsync(HandleSettingChangeAsync(id), "Change setting", selectedProject);
     }
 
     async Task HandleSettingChangeAsync(string id)
@@ -1410,7 +1254,7 @@ public partial class MainWindow : Window
         var project = selectedProject;
         var desired = CurrentSettingValue(id);
         if (desired == StoredSettingValue(project, id)) return;
-        if (runs.ContainsKey(project.Id) || outputOperations.Contains(project.Id)) { LoadSelectedProject(); return; }
+        if (ProjectBusy(project.Id)) { LoadSelectedProject(); return; }
         var resetStage = SettingResetStage(id);
         if (resetStage != null)
         {
@@ -1435,7 +1279,7 @@ public partial class MainWindow : Window
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = Root.XamlRoot
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary) return;
         if (selectedProject != project || !await ResetProjectOutputsAsync(project, resetStage!) || selectedProject != project) return;
         loading = true;
         SetSettingControlValue(id, desired);
@@ -1461,22 +1305,10 @@ public partial class MainWindow : Window
         {
             case "project.use_bezierppm": usePredictionsBox.IsChecked = bool.TryParse(value, out var use) && use; break;
             case "inference.model": modelPicker.SelectedItem = value; break;
-            case "mesh2hrtf.evaluation_grid": evaluationGridBox.Text = value; break;
-            case "mesh2hrtf.ear_distance": earDistanceBox.Text = value; break;
-            case "mesh2hrtf.min_frequency": minFrequencyBox.Text = value; break;
-            case "mesh2hrtf.max_frequency": maxFrequencyBox.Text = value; break;
-            case "mesh2hrtf.frequency_steps": frequencyStepsBox.Text = value; break;
-            case "mesh2hrtf.microphone_faces": microphoneFacesBox.Text = value; break;
-            case "mesh_grading.min_edge_length": meshMinEdgeBox.Text = value; break;
-            case "mesh_grading.max_edge_length": meshMaxEdgeBox.Text = value; break;
-            case "mesh_grading.max_error": meshMaxErrorBox.Text = value; break;
-            case "mesh_grading.gamma": meshGammaBox.Text = value; break;
-            case "mesh_grading.gamma_opposite": meshGammaOppositeBox.Text = value; break;
-            case "numcalc.parallel_instances": maxInstancesBox.Text = value; break;
-            case "numcalc.cpu_limit": maxCpuLoadBox.Text = value; break;
-
             case "numcalc.adaptive_fmm": adaptiveFmmLengthBox.IsChecked = bool.TryParse(value, out var adaptive) && adaptive; break;
             case "postprocessing.normalize": normalizeHrtfsBox.IsChecked = bool.TryParse(value, out var normalize) && normalize; break;
+            case "postprocessing.spatial_upsampling": spatialUpsamplingBox.IsChecked = bool.TryParse(value, out var spatial) && spatial; break;
+            case "postprocessing.spatial_normalize": spatialNormalizeBox.IsChecked = bool.TryParse(value, out var spatialNormal) && spatialNormal; break;
             case "postprocessing.resample_hrirs": resampleHrirsBox.IsChecked = bool.TryParse(value, out var resample) && resample; UpdatePostprocessingControls(); break;
         }
     }
@@ -1486,6 +1318,9 @@ public partial class MainWindow : Window
         if (loading || selectedProject == null)
             return;
         var project = selectedProject;
+        if (ProjectBusy(project.Id)) { LoadSelectedProject(); return; }
+        if (projectsBeingRemoved.Count != 0 && !SamePath(project.SaveLocation, saveLocationBox.Text.Trim()))
+        { AppendLog("Wait for project removal before changing a save location.", project.Id); LoadSelectedProject(); return; }
         var previousLeftEar = project.LeftEar;
         var previousRightEar = project.RightEar;
         var previousScanPath = project.Settings.ScanPreparation.ScanPath;
@@ -1496,18 +1331,6 @@ public partial class MainWindow : Window
         project.Settings.Inference.UsePredictionsForPreprocessing = usePredictionsBox.IsChecked == true;
         UpdatePlacementButtons();
         if (placementSide != null && (project.Settings.Inference.UsePredictionsForPreprocessing || !PlacementIsCurrent())) EndPlacement();
-        project.Settings.Preprocessing.EvaluationGrid = evaluationGridBox.Text.Trim();
-        project.Settings.Preprocessing.MinFrequency = minFrequencyBox.Text.Trim();
-        project.Settings.Preprocessing.MaxFrequency = maxFrequencyBox.Text.Trim();
-        project.Settings.Preprocessing.FrequencyStepCount = Math.Max(int.TryParse(frequencyStepsBox.Text, out var steps) ? steps : 129, 2).ToString(CultureInfo.InvariantCulture);
-        project.Settings.Preprocessing.SourceAssignmentFaceCount = microphoneFacesBox.Text.Trim();
-        project.Settings.Preprocessing.MeshMinEdgeLength = meshMinEdgeBox.Text.Trim();
-        project.Settings.Preprocessing.MeshMaxEdgeLength = meshMaxEdgeBox.Text.Trim();
-        project.Settings.Preprocessing.MeshMaxError = meshMaxErrorBox.Text.Trim();
-        project.Settings.Preprocessing.MeshGamma = meshGammaBox.Text.Trim();
-        project.Settings.Preprocessing.MeshGammaOpposite = meshGammaOppositeBox.Text.Trim();
-        project.Settings.NumCalc.MaxInstances = maxInstancesBox.Text.Trim();
-        project.Settings.NumCalc.MaxCpuLoad = maxCpuLoadBox.Text.Trim();
         project.Settings.ScanPreparation.Enabled = scanPreparationEnabledBox.IsChecked == true;
         project.Settings.ScanPreparation.ScanPath = scanPathBox.Text.Trim();
         project.Settings.ScanPreparation.PrepareLeft = prepareLeftEarBox.IsChecked == true;
@@ -1518,12 +1341,15 @@ public partial class MainWindow : Window
             project.Settings.ScanPreparation.ReviewedLeft = null;
             project.Settings.ScanPreparation.ReviewedRight = null;
         }
-
+        project.Settings.Preprocessing.EvaluationGrid = evaluationGridBox.Text.Trim();
         project.Settings.NumCalc.AdaptiveFmmLength = adaptiveFmmLengthBox.IsChecked == true;
         project.Settings.Postprocessing ??= new PostprocessingSettings();
         project.Settings.Postprocessing.Normalize = normalizeHrtfsBox.IsChecked == true;
+        project.Settings.Postprocessing.SpatialUpsampling = spatialUpsamplingBox.IsChecked == true;
+        project.Settings.Postprocessing.SpatialNormalize = spatialNormalizeBox.IsChecked == true;
         project.Settings.Postprocessing.ResampleHrirs = resampleHrirsBox.IsChecked == true;
-        foreach (var binding in textSettings.Values) binding.Write(project, binding.Control.Text);
+        foreach (var binding in textSettings.Values)
+            if (!HasInvalidSettingDraft(binding.Control) && (!HasSettingDraft(binding.Control) || committingSettingInputs.Contains(binding.Control))) binding.Write(project, binding.Control.Text);
         samplingRateBox.Text = project.Settings.Postprocessing.SamplingRate;
         UpdatePostprocessingControls();
         InvalidateManualPositions(project);
@@ -1540,48 +1366,75 @@ public partial class MainWindow : Window
 
     static string NormalizeSamplingRate(string value)
     {
-        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var rate) && rate > 0 && rate % 10 == 0
-            ? rate.ToString(CultureInfo.InvariantCulture)
-            : "48000";
+        return value.Trim();
     }
 
     void UpdatePostprocessingControls() => samplingRateBox.IsEnabled = resampleHrirsBox.IsChecked == true;
 
-    async void BezierPPMSettingChanged(object sender, RoutedEventArgs e) => await HandleSettingChangeAsync("project.use_bezierppm");
+    void BezierPPMSettingChanged(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(HandleSettingChangeAsync("project.use_bezierppm"), "Change Mesh2PPM", selectedProject);
+
+    readonly Dictionary<Guid, Grid> folderRows = [];
+    bool reconcilingProjectRows;
 
     void RefreshProjectList(ArtifactInspection? inspection = null)
     {
         inspection ??= new ArtifactInspection();
-        projectRows.Clear();
-        projectList.Items.Clear();
-        foreach (var project in projects.Where(p => p.FolderId == null)) AddProjectListRow(project);
+        var projectScroll = FindDescendant<ScrollViewer>(projectList);
+        var projectScrollOffset = projectScroll?.VerticalOffset ?? 0;
+        var desired = new List<object>();
+        void AddProject(ProjectRecord project)
+        {
+            if (!projectRows.TryGetValue(project.Id, out var ui)) ui = AddProjectListRow(project);
+            ui.Root.Margin = new Thickness(project.FolderId != null ? 25 : 8, 7, 8, 7);
+            desired.Add(ui.Root);
+        }
+        foreach (var project in projects.Where(p => p.FolderId == null)) AddProject(project);
         foreach (var folder in registry.Folders)
         {
-            projectList.Items.Add(BuildProjectFolderRow(folder));
+            if (!folderRows.TryGetValue(folder.Id, out var row)) folderRows[folder.Id] = row = BuildProjectFolderRow(folder);
+            var toggle = (Button)row.Children[0];
+            ((FontIcon)toggle.Content).Glyph = folder.IsExpanded ? "\uE70D" : "\uE76C";
+            AutomationProperties.SetName(toggle, (folder.IsExpanded ? "Collapse " : "Expand ") + folder.Name);
+            ToolTipService.SetToolTip(toggle, folder.IsExpanded ? "Collapse folder" : "Expand folder");
+            ((TextBlock)row.Children[1]).Text = folder.Name;
+            desired.Add(row);
             if (folder.IsExpanded)
-                foreach (var project in projects.Where(p => p.FolderId == folder.Id)) AddProjectListRow(project);
+                foreach (var project in projects.Where(p => p.FolderId == folder.Id)) AddProject(project);
         }
+        reconcilingProjectRows = true;
+        try
+        {
+            StableRows.Reconcile(projectList.Items, desired, item => item is FrameworkElement { Tag: ProjectFolder });
+            if (selectedProject != null && projectRows.TryGetValue(selectedProject.Id, out var selectedRow) && projectList.Items.Contains(selectedRow.Root))
+                projectList.SelectedItem = selectedRow.Root;
+        }
+        finally { reconcilingProjectRows = false; }
+        if (projectScroll != null)
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                projectScroll.ChangeView(null, Math.Min(projectScrollOffset, projectScroll.ScrollableHeight), null, true));
+        foreach (var id in projectRows.Keys.Where(id => projects.All(p => p.Id != id)).ToArray()) projectRows.Remove(id);
+        foreach (var id in folderRows.Keys.Where(id => registry.Folders.All(f => f.Id != id)).ToArray()) folderRows.Remove(id);
+        RefreshProjectRows(inspection);
+    }
+
+    void RefreshProjectRows(ArtifactInspection inspection)
+    {
         foreach (var project in projects)
         {
             project.IsRunning = runs.ContainsKey(project.Id);
             project.StatusText = NextStageSummary(project, inspection);
-            if (projectRows.TryGetValue(project.Id, out var ui))
-            {
-                ui.Name.Text = project.Name;
-                ui.Status.Text = project.StatusText;
-                ui.Name.Foreground = primaryTextBrush;
-                ui.Status.Foreground = mutedTextBrush;
-                ui.Spinner.IsActive = project.IsRunning;
-                ui.Spinner.Visibility = project.IsRunning ? Visibility.Visible : Visibility.Collapsed;
-            }
+            if (!projectRows.TryGetValue(project.Id, out var ui)) continue;
+            ui.Name.Text = project.Name; ui.Status.Text = project.StatusText;
+            ui.Name.Foreground = primaryTextBrush; ui.Status.Foreground = mutedTextBrush;
+            ui.Spinner.IsActive = project.IsRunning;
+            ui.Spinner.Visibility = project.IsRunning ? Visibility.Visible : Visibility.Collapsed;
         }
-        if (selectedProject != null && projectRows.TryGetValue(selectedProject.Id, out var selectedRow))
-            projectList.SelectedItem = selectedRow.Root;
     }
 
-    void AddProjectListRow(ProjectRecord project)
+    ProjectRowUi AddProjectListRow(ProjectRecord project)
     {
-        var ui = new ProjectRowUi(project, SelectProjectFromContext, DuplicateProject, RemoveProject, MoveProjectToFolder, registry.Folders, project.FolderId != null);
+        var ui = new ProjectRowUi(project, SelectProjectFromContext, RenameProjectFromContext, DuplicateProject, RemoveProject, MoveProjectToFolder, registry.Folders, project.FolderId != null);
+        ui.Root.Tapped += (_, _) => SelectProjectFromContext(project);
         ui.Root.CanDrag = true;
         ui.Root.AllowDrop = true;
         ui.Root.DragStarting += ProjectDragStarting;
@@ -1594,25 +1447,41 @@ public partial class MainWindow : Window
                 MoveProjectToFolder(moving, project.FolderId);
         };
         projectRows[project.Id] = ui;
-        projectList.Items.Add(ui.Root);
+        return ui;
     }
+
+    void ToggleProjectFolder(ProjectFolder folder) { folderNameClickTimer?.Stop(); folderNameClickTimer = null; folder.IsExpanded = !folder.IsExpanded; Persist(); RefreshProjectList(); }
 
     Grid BuildProjectFolderRow(ProjectFolder folder)
     {
-        var row = new Grid { Height = 34, Margin = new Thickness(2, 5, 2, 1), Tag = folder, Background = new SolidColorBrush(ColorHelper.FromArgb(25, 120, 130, 140)), AllowDrop = true };
+        var row = new Grid { Height = 34, Margin = new Thickness(2, 4, 2, 4), Tag = folder, Background = new SolidColorBrush(Colors.Transparent), AllowDrop = true };
         row.DragOver += ProjectFolderDragOver;
         row.Drop += ProjectFolderDrop;
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var toggle = new Button { Content = folder.IsExpanded ? "⌄" : "›", Width = 24, Height = 24, MinWidth = 0, MinHeight = 0, Padding = new Thickness(0), Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), Tag = folder };
-        toggle.Click += (_, _) => { folder.IsExpanded = !folder.IsExpanded; Persist(); RefreshProjectList(); };
+        // Native Fluent chevrons, as used by WinUI expanders, rather than text
+        // characters whose baseline and weight depend on the content font.
+        var toggle = new Button { Content = new FontIcon { FontFamily = new FontFamily("Segoe Fluent Icons"), Glyph = folder.IsExpanded ? "\uE70D" : "\uE76C", FontSize = 12 },
+            Width = 28, Height = 28, MinWidth = 0, MinHeight = 0, VerticalAlignment = VerticalAlignment.Center, Padding = new Thickness(0), Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), Tag = folder };
+        AutomationProperties.SetName(toggle, (folder.IsExpanded ? "Collapse " : "Expand ") + folder.Name);
+        ToolTipService.SetToolTip(toggle, folder.IsExpanded ? "Collapse folder" : "Expand folder");
+        toggle.Click += (_, _) => ToggleProjectFolder(folder);
+        row.Tapped += (_, args) =>
+        {
+            for (DependencyObject? item = args.OriginalSource as DependencyObject; item != null && !ReferenceEquals(item, row); item = VisualTreeHelper.GetParent(item))
+                if (item is Button or TextBox) return;
+            ToggleProjectFolder(folder); args.Handled = true;
+        };
         row.Children.Add(toggle);
-        var title = new TextBlock { Text = folder.Name, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(5, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis };
+        var title = new TextBlock { Text = folder.Name, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(5, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis };
         Grid.SetColumn(title, 1);
         row.Children.Add(title);
+        title.Tapped += (_, args) => { DeferFolderNameClick(folder); args.Handled = true; };
+        title.DoubleTapped += (_, args) => { BeginFolderNameEdit(folder); args.Handled = true; };
+        row.KeyDown += (_, args) => { if (args.Key == VirtualKey.F2 && editingProjectFolder == null) { BeginFolderNameEdit(folder); args.Handled = true; } };
         var menu = new MenuFlyout();
         var rename = new MenuFlyoutItem { Text = "Rename Folder" };
-        rename.Click += async (_, _) => await EditProjectFolderAsync(folder);
+        rename.Click += (_, _) => BeginFolderNameEdit(folder);
         var remove = new MenuFlyoutItem { Text = "Remove Folder" };
         remove.Click += (_, _) => RemoveProjectFolder(folder);
         menu.Items.Add(rename);
@@ -1669,38 +1538,15 @@ public partial class MainWindow : Window
     {
         if (loading || selectedProject == null || modelPicker.SelectedItem is not string name)
             return;
-        _ = HandleSettingChangeAsync("inference.model");
+        _ = ObserveUiTaskAsync(HandleSettingChangeAsync("inference.model"), "Change model", selectedProject);
     }
 
     void CreateProjectClicked(object sender, RoutedEventArgs e) => CreateProject();
-    async void CreateProjectFolderClicked(object sender, RoutedEventArgs e) => await EditProjectFolderAsync();
-    void ImportProjectClicked(object sender, RoutedEventArgs e) => _ = ImportProjectAsync();
+    void CreateProjectFolderClicked(object sender, RoutedEventArgs e) => BeginFolderNameEdit();
+    void ImportProjectClicked(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(ImportProjectAsync(), "Import project", selectedProject);
     void DuplicateProjectClicked(object sender, RoutedEventArgs e) => DuplicateProject();
     void RemoveProjectClicked(object sender, RoutedEventArgs e) => RemoveProject();
     void StageButtonClicked(object sender, RoutedEventArgs e) { if (sender is Button button && button.Tag is Stage stage) RunOrStop(stage); }
-
-    async Task EditProjectFolderAsync(ProjectFolder? folder = null)
-    {
-        var nameBox = new TextBox { Text = folder?.Name ?? "", PlaceholderText = "Folder name", MinWidth = 280 };
-        var dialog = new ContentDialog
-        {
-            Title = folder == null ? "New Project Folder" : "Rename Project Folder",
-            Content = nameBox,
-            PrimaryButtonText = "Save",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = Root.XamlRoot
-        };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-        var name = nameBox.Text.Trim();
-        if (name.Length == 0) return;
-        if (folder == null)
-            registry.Folders.Add(new ProjectFolder { Name = name });
-        else
-            folder.Name = name;
-        Persist();
-        RefreshProjectList();
-    }
 
     void RemoveProjectFolder(ProjectFolder folder)
     {
@@ -1719,10 +1565,8 @@ public partial class MainWindow : Window
             var folder = registry.Folders.FirstOrDefault(item => item.Id == id);
             if (folder != null) folder.IsExpanded = true;
         }
-        selectedProject = project;
         Persist();
         RefreshProjectList();
-        if (projectRows.TryGetValue(project.Id, out var row)) projectList.SelectedItem = row.Root;
     }
 
     void ProjectDragStarting(UIElement sender, DragStartingEventArgs args)
@@ -1748,7 +1592,7 @@ public partial class MainWindow : Window
     {
         var project = selectedProject;
         if (project == null) return;
-        if (runs.ContainsKey(project.Id))
+        if (ProjectBusy(project.Id))
         {
             AppendLog("Wait for the running project stage to finish before aligning its scan.", project.Id);
             return;
@@ -1762,10 +1606,11 @@ public partial class MainWindow : Window
         }
         if (string.IsNullOrWhiteSpace(project.SaveLocation))
         {
-            AppendLog("Choose a project folder before saving the aligned scan.", project.Id);
+            AppendLog("Choose a save location before saving the aligned scan.", project.Id);
             return;
         }
         ResetScanAlignmentPicks();
+        alignmentSessionProject = project.Id;
         if (placementSide != null) EndPlacement();
         scanAlignmentMode = true;
         alignScanButton.IsEnabled = false;
@@ -1776,7 +1621,10 @@ public partial class MainWindow : Window
 
     void EndScanAlignment()
     {
+        alignmentSessionProject = null;
         scanAlignmentMode = false;
+        ClearAlignmentPreview();
+        meshViewport.ShowCoordinateSystem = false;
         ResetScanAlignmentPicks();
         scanAlignmentBorder.Visibility = Visibility.Collapsed;
         alignScanButton.IsEnabled = true;
@@ -1784,6 +1632,7 @@ public partial class MainWindow : Window
 
     void ResetScanAlignmentPicks()
     {
+        ClearAlignmentPreview();
         if (meshViewport.Items != null)
             foreach (var marker in scanAlignmentMarkerVisuals) meshViewport.Items.Remove(marker);
         foreach (var marker in scanAlignmentMarkerVisuals) meshVisuals.Remove(marker);
@@ -1793,85 +1642,7 @@ public partial class MainWindow : Window
         scanAlignmentStatus.Text = "Click nose tip, then left and right ear-canal entrances";
     }
 
-    async Task ApplyScanAlignmentAsync()
-    {
-        var project = selectedProject;
-        if (!scanAlignmentMode || project == null || scanAlignmentLandmarks.Count != 3) return;
-        var source = !string.IsNullOrWhiteSpace(project.Settings.ScanPreparation.OriginalScanPath)
-            ? project.Settings.ScanPreparation.OriginalScanPath : project.Settings.ScanPreparation.ScanPath;
-        if (string.IsNullOrWhiteSpace(source) || !File.Exists(source)) return;
-        scanAlignmentStatus.Text = "Aligning scan…";
-        applyScanAlignmentButton.IsEnabled = false;
-        alignScanButton.IsEnabled = false;
-        var workspace = Path.Combine(Path.GetTempPath(), "pinna-scan-align-" + Guid.NewGuid().ToString("N"));
-        var destination = Path.Combine(project.SaveLocation, "MeshEdits", "AlignedScan.ply");
-        try
-        {
-            Directory.CreateDirectory(workspace);
-            var request = new Dictionary<string, object>
-            {
-                ["source"] = source,
-                ["workspace"] = workspace,
-                ["destination"] = destination,
-                ["points"] = scanAlignmentLandmarks.Select(point => new[] { (double)point.X, point.Y, point.Z }).ToArray()
-            };
-            var executable = BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
-            if (!File.Exists(executable)) throw new FileNotFoundException("The app's Python runtime is missing.", executable);
-            var script = """
-                import json, sys
-                from pathlib import Path
-                from HRTFCalculation.MeshEditing import execute
-                r=json.load(sys.stdin); w=Path(r['workspace']); w.mkdir(parents=True, exist_ok=True)
-                src=r['source']; opened=w/'source.ply'; aligned=w/'aligned.ply'; frame=w/'frame'
-                first=execute({'action':'open','source':src,'original_source':src,'output':str(opened),'frame':str(frame)})
-                result=execute({'action':'align','source':str(opened),'output':str(aligned),'frame':str(frame),'points':r['points']})
-                labels=['nose_tip','left_ear_canal_entrance','right_ear_canal_entrance']
-                operation={'action':'align','points':r['points'],'transform':result['transform'],'alignment_method':result['alignment_method'],'landmark_labels':labels}
-                saved=execute({'action':'save','kind':'alignment','source':str(aligned),'original_source':src,'original_sha256':first['source_sha256'],'destination':r['destination'],'operations':[operation]})
-                print(json.dumps(saved, allow_nan=False))
-                """;
-            var start = new ProcessStartInfo(executable) { WorkingDirectory = packageRoot, UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-            start.ArgumentList.Add("-c"); start.ArgumentList.Add(script);
-            ApplyProcessEnvironment(start);
-            using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start the mesh alignment tool.");
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
-            await process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(request, jsonOptions));
-            process.StandardInput.Close();
-            await process.WaitForExitAsync();
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
-            if (process.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "The scan alignment failed." : stderr.Trim());
-            using (JsonDocument.Parse(stdout)) { }
-            project.Settings.ScanPreparation.OriginalScanPath = source;
-            project.Settings.ScanPreparation.ReviewedLeft = null;
-            project.Settings.ScanPreparation.ReviewedRight = null;
-            project.Settings.ScanPreparation.ScanPath = destination;
-            project.Settings.ScanPreparation.Enabled = true;
-            project.Settings.Preprocessing.SourcePositionInputLeft = null;
-            project.Settings.Preprocessing.SourcePositionInputRight = null;
-            loading = true;
-            scanPreparationEnabledBox.IsChecked = true;
-            scanPathBox.Text = destination;
-            loading = false;
-            EndScanAlignment();
-            Persist();
-            AppendLog("Aligned full-head scan using the nose tip and both ear-canal entrances.", project.Id);
-            RefreshArtifacts();
-            OpenArtifact(new Artifact("Aligned full-head scan", destination));
-        }
-        catch (Exception error)
-        {
-            scanAlignmentStatus.Text = error.Message;
-            applyScanAlignmentButton.IsEnabled = scanAlignmentLandmarks.Count == 3;
-            AppendLog("Could not align scan: " + error.Message, project.Id);
-        }
-        finally
-        {
-            alignScanButton.IsEnabled = true;
-            try { if (Directory.Exists(workspace)) Directory.Delete(workspace, true); } catch { }
-        }
-    }
+    Task ApplyScanAlignmentAsync() => PreviewOrSaveAlignmentAsync();
 
     async Task ImportProjectAsync()
     {
@@ -1880,24 +1651,30 @@ public partial class MainWindow : Window
         InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
         var folder = await picker.PickSingleFolderAsync();
         if (folder != null)
-            ImportProject(folder.Path);
+            await ImportProjectFolderAsync(folder.Path);
     }
 
-    void ImportProject(string folder)
+    async Task ImportProjectFolderAsync(string folder)
     {
+        if (projectsBeingRemoved.Count != 0) throw new IOException("Wait for project removal before importing another folder.");
+        if (ExistingProjectRoot(folder) is { } existing) { SelectProjectFromContext(existing); return; }
         var project = NewProject(projects.Count + 1);
         project.Name = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         project.SaveLocation = folder;
+        project.InputHandling = InputHandling.Reference; project.FolderProvenance = "Imported";
         project.LeftEar = ImportedMesh(folder, "Left");
         project.RightEar = ImportedMesh(folder, "Right");
         project.Settings.Inference.UsePredictionsForPreprocessing = false;
-        try { TryReadProjectSettings(project); }
+        try { await TryReadProjectSettingsAsync(project); }
         catch (Exception error)
         {
             AppendLog("Could not import project settings: " + error.Message);
             return;
         }
         InvalidateManualPositions(project);
+        if(PreprocessingFilesPresent(project) && !File.Exists(Path.Combine(project.SaveLocation,".pinna2hrtf-preprocessing-signature")))HeadGeometry.AtomicWrite(Path.Combine(project.SaveLocation,".pinna2hrtf-preprocessing-signature"),PreprocessingStamp(project));
+        if (ExistingProjectRoot(folder) is { } duplicate) { SelectProjectFromContext(duplicate); return; }
+        if (shutdownCleanupDone || projectsBeingRemoved.Count != 0) return;
         projects.Add(project);
         failedStages[project.Id] = [];
         selectedProject = project;
@@ -1908,37 +1685,24 @@ public partial class MainWindow : Window
         AppendLog("Imported project.", project.Id);
     }
 
-    void TryReadProjectSettings(ProjectRecord project)
+    async Task TryReadProjectSettingsAsync(ProjectRecord project)
     {
         var path = Path.Combine(project.SaveLocation, "Project Settings.yaml");
-        if (!File.Exists(path))
-            return;
-        var text = File.ReadAllText(path);
-        ReadGeometrySettings(project, path);
-        var usePredictionsLine = text.Split('\n').FirstOrDefault(x => x.TrimStart().StartsWith("use_predictions_for_preprocessing:", StringComparison.OrdinalIgnoreCase));
-        project.Settings.Inference.UsePredictionsForPreprocessing = usePredictionsLine != null && bool.TryParse(usePredictionsLine[(usePredictionsLine.IndexOf(':') + 1)..].Trim(), out var usePredictions) && usePredictions;
-
-        foreach (var (key, setter) in new (string, Action<string>)[] { ("min_frequency", v => project.Settings.Preprocessing.MinFrequency = v), ("max_frequency", v => project.Settings.Preprocessing.MaxFrequency = v), ("frequency_step_count", v => project.Settings.Preprocessing.FrequencyStepCount = Math.Max(int.TryParse(v, out var n) ? n : 129, 2).ToString(CultureInfo.InvariantCulture)), ("mesh_min_edge_length", v => project.Settings.Preprocessing.MeshMinEdgeLength = v), ("mesh_max_edge_length", v => project.Settings.Preprocessing.MeshMaxEdgeLength = v), ("mesh_max_error", v => project.Settings.Preprocessing.MeshMaxError = v), ("mesh_gamma", v => project.Settings.Preprocessing.MeshGamma = v), ("mesh_gamma_opposite", v => project.Settings.Preprocessing.MeshGammaOpposite = v) })
+        if (!File.Exists(path)) return;
+        var result = await RequestPythonAsync("HRTFCalculation.DesktopBridge", new { action = "load", path, folder = project.SaveLocation });
+        if (result.TryGetProperty("warnings", out var notices))
+            foreach (var notice in notices.EnumerateArray()) AppendLog(notice.GetString(), project.Id);
+        var root = System.Text.Json.Nodes.JsonNode.Parse(result.GetProperty("config").GetRawText())!.AsObject();
+        ProjectDocument.Restore(project, root);
+        NormalizeInferenceModelPaths(project);
+        foreach (var side in new[] { "left", "right" })
         {
-            var line = text.Split('\n').FirstOrDefault(x => x.TrimStart().StartsWith(key + ":", StringComparison.OrdinalIgnoreCase));
-            if (line != null)
-                setter(line[(line.IndexOf(':') + 1)..].Trim().Trim('\''));
+            if (root["preprocessing"]?["source_position_input_" + side] is not System.Text.Json.Nodes.JsonArray a || a.Count != 3) continue;
+            var mesh = PreprocessingMesh(project, side);
+            if (mesh == null) continue;
+            var pos = new ManualMicrophonePosition { X = a[0]!.GetValue<double>(), Y = a[1]!.GetValue<double>(), Z = a[2]!.GetValue<double>(), MeshPath = mesh, MeshIdentity = MeshIdentity(mesh) };
+            if (side == "left") project.Settings.Preprocessing.SourcePositionInputLeft = pos; else project.Settings.Preprocessing.SourcePositionInputRight = pos;
         }
-        project.Settings.Preprocessing.SourcePositionInputLeft = ReadManualPosition(project, text, "source_position_input_left");
-        project.Settings.Preprocessing.SourcePositionInputRight = ReadManualPosition(project, text, "source_position_input_right");
-    }
-
-    ManualMicrophonePosition? ReadManualPosition(ProjectRecord project, string text, string key)
-    {
-        var line = text.Split('\n').FirstOrDefault(x => x.TrimStart().StartsWith(key + ":", StringComparison.OrdinalIgnoreCase));
-        if (line == null) return null;
-        var start = line.IndexOf('[');
-        if (start < 0) return null;
-        var values = line[(start + 1)..].Trim().TrimEnd(']').Split(',').Select(x => double.TryParse(x.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : double.NaN).ToArray();
-        if (values.Length != 3 || values.Any(double.IsNaN)) return null;
-        var side = key.EndsWith("left", StringComparison.OrdinalIgnoreCase) ? "left" : "right";
-        var mesh = PreprocessingMesh(project, side);
-        return mesh == null ? null : new ManualMicrophonePosition { X = values[0], Y = values[1], Z = values[2], MeshPath = mesh, MeshIdentity = MeshIdentity(mesh) };
     }
 
     string ImportedMesh(string folder, string side)
@@ -1968,68 +1732,7 @@ public partial class MainWindow : Window
         RefreshArtifacts();
     }
 
-    void DuplicateProject()
-    {
-        if (selectedProject == null)
-            return;
-        var duplicate = Clone(selectedProject);
-        duplicate.Id = Guid.NewGuid();
-        duplicate.Name = selectedProject.Name + " Copy";
-        if (!string.IsNullOrWhiteSpace(selectedProject.SaveLocation))
-        {
-            var original = new DirectoryInfo(selectedProject.SaveLocation);
-            var parent = original.Parent?.FullName ?? selectedProject.SaveLocation;
-            var location = Path.Combine(parent, original.Name + " Copy");
-            var number = 2;
-            while (Directory.Exists(location))
-                location = Path.Combine(parent, original.Name + " Copy " + number++);
-            duplicate.SaveLocation = location;
-            if (original.Exists)
-            {
-                try
-                {
-                    CopyDirectory(original.FullName, location);
-                    var originalPath = Path.GetFullPath(original.FullName).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                    var duplicatePath = Path.GetFullPath(location).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                    string Relocate(string path)
-                    {
-                        if (string.IsNullOrWhiteSpace(path)) return path;
-                        var normalized = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                        return normalized.Equals(originalPath, StringComparison.OrdinalIgnoreCase) || normalized.StartsWith(originalPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ? duplicatePath + normalized[originalPath.Length..] : path;
-                    }
-                    duplicate.LeftEar = Relocate(duplicate.LeftEar);
-                    duplicate.RightEar = Relocate(duplicate.RightEar);
-                    var settingsPath = Path.Combine(location, "Project Settings.yaml");
-                    if (File.Exists(settingsPath))
-                        File.WriteAllText(settingsPath, File.ReadAllText(settingsPath).Replace(originalPath, duplicatePath, StringComparison.OrdinalIgnoreCase));
-                }
-                catch (Exception error)
-                {
-                    AppendLog("Could not duplicate project folder: " + error.Message, selectedProject.Id);
-                    return;
-                }
-            }
-        }
-        duplicate.Settings.Preprocessing.SourcePositionInputLeft = null;
-        duplicate.Settings.Preprocessing.SourcePositionInputRight = null;
-        InvalidateManualPositions(duplicate);
-        projects.Add(duplicate);
-        failedStages[duplicate.Id] = [];
-        selectedProject = duplicate;
-        Persist();
-        RefreshProjectList();
-        LoadSelectedProject();
-        RefreshArtifacts();
-    }
-
-    void CopyDirectory(string source, string destination)
-    {
-        Directory.CreateDirectory(destination);
-        foreach (var file in Directory.EnumerateFiles(source))
-            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)));
-        foreach (var directory in Directory.EnumerateDirectories(source))
-            CopyDirectory(directory, Path.Combine(destination, Path.GetFileName(directory)));
-    }
+    void DuplicateProject() => _ = ObserveUiTaskAsync(DuplicateProjectV2Async(), "Duplicate project", selectedProject);
 
     ProjectRecord NewProject(int index)
     {
@@ -2042,63 +1745,38 @@ public partial class MainWindow : Window
         if (selectedProject is not { } project || !projectsBeingRemoved.Add(project.Id)) return;
         try
         {
-            if (runs.ContainsKey(project.Id) || outputOperations.Contains(project.Id) || outputScans.Contains(project.Id))
+            if (ProjectBusy(project.Id) || outputScans.Contains(project.Id))
             {
                 await ShowProjectRemovalErrorAsync("Wait for the project task and output checks to finish before removing this project.");
                 return;
             }
 
+            using var reservation = projectOperations.TryReserve(project.Id);
+            if (reservation == null) return;
+            var snapshot = projects.Select(Clone).ToArray();
+            var initial = Clone(project);
+            var plan = await Task.Run(() => PlanRemoval(initial, snapshot));
             var confirmation = new ContentDialog
             {
-                Title = $"Move {project.Name} to Recycle Bin?",
-                Content = "This removes the project from Pinna2HRTF and moves its project folder and contents to the Recycle Bin. You can restore the folder from there.",
-                PrimaryButtonText = "Move to Recycle Bin",
-                CloseButtonText = "Cancel",
-                DefaultButton = ContentDialogButton.Close,
-                XamlRoot = Root.XamlRoot
+                Title = $"Remove {project.Name}?",
+                Content = $"Save location: {project.SaveLocation}\n\n{plan.Reason}",
+                PrimaryButtonText = "Remove from list",
+                SecondaryButtonText = plan.CanRecycle ? "Recycle folder" : "",
+                CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close
             };
-            if (await confirmation.ShowAsync() != ContentDialogResult.Primary) return;
-            if (!projects.Contains(project)) return;
-            if (runs.ContainsKey(project.Id) || outputOperations.Contains(project.Id) || outputScans.Contains(project.Id))
+            var choice = await ShowDialogAsync(confirmation);
+            if (choice == ContentDialogResult.None || !projects.Contains(project) || shutdownCleanupDone) return;
+            if (choice == ContentDialogResult.Secondary)
             {
-                await ShowProjectRemovalErrorAsync("The project started a task while the confirmation was open. Wait for it to finish, then remove the project again.");
-                return;
-            }
-
-            var location = project.SaveLocation?.Trim();
-            if (!string.IsNullOrWhiteSpace(location))
-            {
-                string folder;
-                try { folder = Path.GetFullPath(location); }
-                catch (Exception error)
+                var roots = projects.Select(Clone).ToArray(); var frozen = Clone(project);
+                var rechecked = await Task.Run(() => PlanRemoval(frozen, roots));
+                if (!rechecked.CanRecycle || rechecked.Root != plan.Root || rechecked.Identity != plan.Identity)
+                    throw new IOException("The folder changed after confirmation. Remove it from the list instead.");
+                await ShellRecycle.RecycleAsync(plan.Root!, () =>
                 {
-                    await ShowProjectRemovalErrorAsync("The saved project folder path is invalid. The project remains in the app. " + error.Message);
-                    return;
-                }
-                if (!CanRecycleProjectFolder(project, folder, out var reason))
-                {
-                    await ShowProjectRemovalErrorAsync(reason);
-                    return;
-                }
-                if (Directory.Exists(folder))
-                {
-                    try
-                    {
-                        Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(folder,
-                            Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
-                            Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
-                    }
-                    catch (Exception error)
-                    {
-                        await ShowProjectRemovalErrorAsync("The project folder could not be moved to the Recycle Bin. The project remains in the app. " + error.Message);
-                        return;
-                    }
-                }
-                else if (File.Exists(folder))
-                {
-                    await ShowProjectRemovalErrorAsync("The saved project location is a file, not a folder. It was left in place and the project remains in the app.");
-                    return;
-                }
+                    var current = PlanRemoval(frozen, roots);
+                    return current.CanRecycle && current.Identity == plan.Identity && current.Root == plan.Root;
+                }, WinRT.Interop.WindowNative.GetWindowHandle(this));
             }
 
             projectLogs.Remove(project.Id);
@@ -2122,55 +1800,8 @@ public partial class MainWindow : Window
                 RefreshArtifacts();
             }
         }
+        catch (Exception error) { AppendLog("Project removal failed: " + error, project.Id); await ShowProjectRemovalErrorAsync(error.Message); }
         finally { projectsBeingRemoved.Remove(project.Id); }
-    }
-
-    bool CanRecycleProjectFolder(ProjectRecord project, string folder, out string reason)
-    {
-        try
-        {
-            var normalized = NormalizeDirectoryPath(folder);
-            if (normalized == Path.GetPathRoot(normalized))
-            {
-                reason = "A drive root cannot be moved to the Recycle Bin as a project folder.";
-                return false;
-            }
-            var package = string.IsNullOrWhiteSpace(packageRoot) ? "" : NormalizeDirectoryPath(packageRoot);
-            var appDataRoot = string.IsNullOrWhiteSpace(appData) ? "" : NormalizeDirectoryPath(appData);
-            if (package.Length > 0 && (IsSameOrChildPath(package, normalized) || IsSameOrChildPath(normalized, package))
-                || appDataRoot.Length > 0 && IsSameOrChildPath(normalized, appDataRoot))
-            {
-                reason = "This folder is a protected app location. Choose a separate project folder before removing it.";
-                return false;
-            }
-            foreach (var other in projects.Where(item => item.Id != project.Id && !string.IsNullOrWhiteSpace(item.SaveLocation)))
-            {
-                var otherPath = NormalizeDirectoryPath(other.SaveLocation);
-                if (string.Equals(normalized, otherPath, StringComparison.OrdinalIgnoreCase) || IsSameOrChildPath(normalized, otherPath))
-                {
-                    reason = "This folder contains another project. Move the projects to separate folders before removing it.";
-                    return false;
-                }
-            }
-            reason = "";
-            return true;
-        }
-        catch (Exception error) { reason = "Could not validate the project folder path. The project remains in the app. " + error.Message; return false; }
-    }
-
-    static string NormalizeDirectoryPath(string path)
-    {
-        var full = Path.GetFullPath(path);
-        var root = Path.GetPathRoot(full) ?? "";
-        return full.Length > root.Length ? full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) : full;
-    }
-
-    static bool IsSameOrChildPath(string parent, string child)
-    {
-        var normalizedParent = NormalizeDirectoryPath(parent);
-        var normalizedChild = NormalizeDirectoryPath(child);
-        return normalizedChild.Equals(normalizedParent, StringComparison.OrdinalIgnoreCase)
-            || normalizedChild.StartsWith(normalizedParent + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     async Task ShowProjectRemovalErrorAsync(string message)
@@ -2183,14 +1814,14 @@ public partial class MainWindow : Window
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = Root.XamlRoot
         };
-        await dialog.ShowAsync();
+        await ShowDialogAsync(dialog);
     }
 
-    async void BrowseLeftEarClicked(object sender, RoutedEventArgs e) { var path = await PickFileAsync(leftEarBox.Text); if (path != null) leftEarBox.Text = path; }
-    async void BrowseRightEarClicked(object sender, RoutedEventArgs e) { var path = await PickFileAsync(rightEarBox.Text); if (path != null) rightEarBox.Text = path; }
-    async void BrowseScanClicked(object sender, RoutedEventArgs e) { var path = await PickFileAsync(scanPathBox.Text); if (path != null) scanPathBox.Text = path; }
-    async void BrowseSaveLocationClicked(object sender, RoutedEventArgs e) { var path = await PickFolderAsync(saveLocationBox.Text); if (path != null) saveLocationBox.Text = path; }
-    async void BrowseEvaluationGridClicked(object sender, RoutedEventArgs e) { var path = await PickFolderAsync(evaluationGridBox.Text); if (path != null) evaluationGridBox.Text = path; }
+    void BrowseLeftEarClicked(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(ChoosePathAsync(leftEarBox, false), "Choose location", selectedProject);
+    void BrowseRightEarClicked(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(ChoosePathAsync(rightEarBox, false), "Choose location", selectedProject);
+    void BrowseScanClicked(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(ChoosePathAsync(scanPathBox, false), "Choose location", selectedProject);
+    void BrowseSaveLocationClicked(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(ChoosePathAsync(saveLocationBox, true), "Choose location", selectedProject);
+    void BrowseEvaluationGridClicked(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(ChoosePathAsync(evaluationGridBox, true), "Choose location", selectedProject);
 
     static string? ExistingPickerFolder(string? path)
     {
@@ -2219,6 +1850,13 @@ public partial class MainWindow : Window
             folderPicker.SuggestedStartLocation = PickerLocationId.ComputerFolder;
             if (folder != null) folderPicker.SettingsIdentifier = "Pinna2HRTF:" + folder;
         }
+    }
+
+    async Task ChoosePathAsync(TextBox box, bool folder)
+    {
+        var project = selectedProject; var previous = box.Text;
+        var path = folder ? await PickFolderAsync(previous) : await PickFileAsync(previous);
+        if (path != null && selectedProject == project && box.Text == previous && !shutdownCleanupDone && (project == null || !ProjectBusy(project.Id))) box.Text = path;
     }
 
     async Task<string?> PickFileAsync(string? currentPath = null)
@@ -2274,7 +1912,7 @@ public partial class MainWindow : Window
     {
         inspection ??= new ArtifactInspection();
         var list = new List<Artifact>();
-        var hrtf = Path.Combine(project.SaveLocation, "HRTF");
+        var hrtf = SofaDirectory(project);
         if (project.Settings.ScanPreparation.Enabled && ScanPreparationOutputsCurrent(project, inspection))
         {
             foreach (var (side, selected, reviewed) in new[]
@@ -2308,6 +1946,14 @@ public partial class MainWindow : Window
                 .OrderBy(x => PlotOrder(x))
                 .ThenBy(x => x, StringComparer.OrdinalIgnoreCase))
                 list.Add(new Artifact(PlotTitle(file), file));
+        foreach (var side in new[] { "left", "right" })
+        {
+            if (project.Settings.ManualPPM.For(side) is { } fit && File.Exists(fit.Mesh)) list.Add(new Artifact($"Manual {side} PPM",fit.Mesh,side));
+            if (SourceEar(project,side,inspection) != null) list.Add(new Artifact($"{side} simulation mesh",Path.Combine(project.SaveLocation,"Intermediates",side=="left"?"Left":"Right","graded_head.ply"),side));
+            var solver=Path.Combine(project.SaveLocation,"Projects",side=="left"?"Left":"Right","NumCalc");
+            if(Directory.Exists(solver)) foreach(var source in Directory.GetDirectories(solver,"source_*").OrderBy(x=>x))
+                if(File.Exists(Path.Combine(source,"NC.inp"))&&Directory.Exists(Path.Combine(source,"be.out")))list.Add(new Artifact($"{side} pressure · Source {Path.GetFileName(source)[7..]}",Path.Combine(source,"NC.inp"),side));
+        }
         return list.DistinctBy(x => Path.GetFullPath(x.Path), StringComparer.OrdinalIgnoreCase).ToList();
     }
 
@@ -2335,6 +1981,11 @@ public partial class MainWindow : Window
 
     void OpenArtifact(Artifact artifact)
     {
+        if (artifact.IsPressure)
+        {
+            if (selectedArtifactPath != artifact.Path) { selectedArtifactPath = artifact.Path; RememberSelectedArtifact(artifact.Path); _ = ObserveUiTaskAsync(OpenPressureViewerAsync(artifact), "Pressure viewer", selectedProject); }
+            return;
+        }
         if (currentMesh != null && selectedArtifactPath != null &&
             SamePath(currentMesh.Path, selectedArtifactPath))
             SaveMeshCamera();
@@ -2353,7 +2004,7 @@ public partial class MainWindow : Window
         }
         if (artifact.IsMesh)
         {
-            _ = OpenMeshAsync(artifact);
+            _ = ObserveUiTaskAsync(OpenMeshAsync(artifact), "Mesh viewer", selectedProject);
             return;
         }
         viewerPlaceholder.Text = artifact.IsText ? SafeReadText(artifact.Path) : "Preview unavailable for " + Path.GetFileName(artifact.Path);
@@ -2380,6 +2031,7 @@ public partial class MainWindow : Window
             if (!viewportReady || meshViewport.RenderHost == null || meshViewport.Items == null)
                 throw new InvalidOperationException("The 3D viewport render host is not ready yet.");
             currentMesh = loaded;
+            UpdateAlignmentAxes();
             meshVisual = new MeshGeometryModel3D { Geometry = currentMesh.Geometry, Material = new PhongMaterial { AmbientColor = new Color4(0.18f, 0.22f, 0.22f, 1), DiffuseColor = new Color4(0.48f, 0.68f, 0.66f, 1), EmissiveColor = new Color4(0.035f, 0.045f, 0.045f, 1), SpecularColor = new Color4(0.12f, 0.14f, 0.14f, 1), SpecularShininess = 12 }, CullMode = SharpDX.Direct3D11.CullMode.None };
             meshVisual.RenderWireframe = string.Equals(Path.GetExtension(artifact.Path), ".ply", StringComparison.OrdinalIgnoreCase);
             meshVisual.WireframeColor = ColorHelper.FromArgb(65, 31, 56, 56);
@@ -2473,7 +2125,11 @@ public partial class MainWindow : Window
             return;
         var point = e.GetCurrentPoint(meshViewport);
         var properties = point.Properties;
-        meshPointerMode = properties.IsLeftButtonPressed ? MeshPointerMode.Rotate : properties.IsMiddleButtonPressed ? MeshPointerMode.Pan : MeshPointerMode.None;
+        meshPointerIsPrimary = properties.IsLeftButtonPressed;
+        var action = NavigationBindings.Mouse(properties.IsMiddleButtonPressed, properties.IsRightButtonPressed,
+            (InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift) & CoreVirtualKeyStates.Down) != 0,
+            (InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control) & CoreVirtualKeyStates.Down) != 0);
+        meshPointerMode = properties.IsLeftButtonPressed || action is NavigationAction.Orbit or NavigationAction.Zoom ? MeshPointerMode.Rotate : action == NavigationAction.Pan ? MeshPointerMode.Pan : MeshPointerMode.None;
         if (meshPointerMode == MeshPointerMode.None)
             return;
         activeMeshPointerId = point.PointerId;
@@ -2499,10 +2155,11 @@ public partial class MainWindow : Window
         if (point.PointerId != activeMeshPointerId)
             return;
         var mode = meshPointerMode;
+        var primaryClick = meshPointerIsPrimary;
         var wasClick = !pointerMoved;
         ResetMeshPointerState();
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, SaveMeshCamera);
-        if (PlacementIsCurrent() && !calculatingAutomaticPosition && mode == MeshPointerMode.Rotate && wasClick && currentMesh != null && meshVisual != null)
+        if (primaryClick && PlacementIsCurrent() && !calculatingAutomaticPosition && mode == MeshPointerMode.Rotate && wasClick && currentMesh != null && meshVisual != null)
         {
             var hit = meshViewport.FindHits(point.Position).FirstOrDefault(x => ReferenceEquals(x.ModelHit, meshVisual));
             if (hit != null)
@@ -2516,7 +2173,7 @@ public partial class MainWindow : Window
             else
                 AppendLog("Could not hit the active mesh at the selected position. Try clicking directly on the mesh surface.", selectedProject?.Id);
         }
-        else if (scanAlignmentMode && mode == MeshPointerMode.Rotate && wasClick && currentMesh != null && meshVisual != null)
+        else if (primaryClick && scanAlignmentMode && mode == MeshPointerMode.Rotate && wasClick && currentMesh != null && meshVisual != null)
         {
             var hit = meshViewport.FindHits(point.Position).FirstOrDefault(x => ReferenceEquals(x.ModelHit, meshVisual));
             if (hit != null && scanAlignmentLandmarks.Count < 3)
@@ -2601,7 +2258,7 @@ public partial class MainWindow : Window
         SamePath(placementMeshPath, PreprocessingMesh(selectedProject, placementSide)) &&
         placementMeshIdentity == MeshIdentity(placementMeshPath!);
 
-    async void BeginPlacement(string side) => await BeginPlacementAsync(side);
+    void BeginPlacement(string side) => _ = ObserveUiTaskAsync(BeginPlacementAsync(side), "Place microphone", selectedProject);
 
     async Task BeginPlacementAsync(string side)
     {
@@ -2651,7 +2308,7 @@ public partial class MainWindow : Window
         AppendLog($"{side} microphone placement uses {artifact.Title}. Click the mesh or calculate automatically, then press Done.", project.Id);
     }
 
-    async void AutomaticPositionClicked(object sender, RoutedEventArgs e) => await UseAutomaticPositionAsync();
+    void AutomaticPositionClicked(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(UseAutomaticPositionAsync(), "Automatic microphone", selectedProject);
 
     async Task UseAutomaticPositionAsync()
     {
@@ -2694,20 +2351,14 @@ public partial class MainWindow : Window
     {
         var landmark = Path.Combine(appData, "Cache", "automatic-landmark-" + Guid.NewGuid().ToString("N") + ".json");
         var executable = BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
-        var info = new ProcessStartInfo(executable, $"-m HRTFCalculation.Preprocessing.src.ear_canal_closer --ear_path {QuoteArgument(mesh)} --landmark_path {QuoteArgument(landmark)} --side {side} --estimate-only") { WorkingDirectory = packageRoot, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        ApplyProcessEnvironment(info);
+        var info = GeometryProcess("-m", "HRTFCalculation.Preprocessing.src.ear_canal_closer", "--ear_path", mesh,
+            "--landmark_path", landmark, "--side", side, "--estimate-only");
         Directory.CreateDirectory(Path.GetDirectoryName(landmark)!);
-        using var process = Process.Start(info) ?? throw new InvalidOperationException("Could not start the bundled Python environment.");
-        using var registration = cancellation.Register(() => TryTerminate(process));
         try
         {
-            var outputTask = process.StandardOutput.ReadToEndAsync(cancellation);
-            var errorTask = process.StandardError.ReadToEndAsync(cancellation);
-            await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync(cancellation));
-            var output = await outputTask;
-            var error = await errorTask;
-            if (process.ExitCode != 0)
-                throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? $"Estimator exited with status {process.ExitCode}. {output.Trim()}" : error.Trim());
+            var result = await ToolProcess.RunAsync(info, null, TimeSpan.FromSeconds(600), cancellation, placementProjectId);
+            var output = result.Output; var error = result.Error;
+            if (result.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? "Microphone estimation failed: " + output : error.Trim());
             using var document = JsonDocument.Parse(File.Exists(landmark) ? File.ReadAllText(landmark) : output);
             var values = document.RootElement.GetProperty("position").EnumerateArray().Select(x => (float)x.GetDouble()).ToArray();
             if (values.Length != 3 || values.Any(x => !float.IsFinite(x))) throw new InvalidDataException("The estimator returned an invalid position.");
@@ -2715,12 +2366,13 @@ public partial class MainWindow : Window
         }
         finally
         {
-            if (!process.HasExited) { TryTerminate(process); await process.WaitForExitAsync(); }
+
             if (File.Exists(landmark)) File.Delete(landmark);
         }
     }
 
-    async void DonePositionClicked(object sender, RoutedEventArgs e)
+    void DonePositionClicked(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(DonePositionAsync(), "DonePosition", selectedProject);
+    async Task DonePositionAsync()
     {
         if (!PlacementIsCurrent() || calculatingAutomaticPosition || pendingMicrophonePosition == null ||
             !PositionMatchesMesh(pendingMicrophonePosition, placementMeshPath))
@@ -2743,7 +2395,7 @@ public partial class MainWindow : Window
                 DefaultButton = ContentDialogButton.Close,
                 XamlRoot = Root.XamlRoot
             };
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+            if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary) return;
             EndPlacement();
             placementEndedForReset = true;
             if (!await ResetProjectOutputsAsync(project, Stage.Preprocessing)) return;
@@ -2785,7 +2437,7 @@ public partial class MainWindow : Window
         var yaw = state.Yaw * Math.PI / 180;
         var pitch = state.Pitch * Math.PI / 180;
         var horizontal = state.Distance * Math.Cos(pitch);
-        var center = System.Numerics.Vector3.Zero;
+        var center = new System.Numerics.Vector3((float)state.TargetX,(float)state.TargetY,(float)state.TargetZ);
         var position = new System.Numerics.Vector3(center.X + (float)(horizontal * Math.Sin(yaw)), center.Y - (float)(horizontal * Math.Cos(yaw)), center.Z + (float)(state.Distance * Math.Sin(pitch)));
         camera.Position = position;
         camera.LookDirection = center - position;
@@ -2827,9 +2479,10 @@ public partial class MainWindow : Window
     {
         if (selectedProject == null || selectedArtifactPath == null || currentMesh == null || meshViewport.Camera is not PerspectiveCamera camera)
             return;
-        var direction = camera.Position - System.Numerics.Vector3.Zero;
+        var target = camera.Position + camera.LookDirection;
+        var direction = camera.Position - target;
         if (!viewerStates.TryGetValue(selectedProject.Id, out var state)) viewerStates[selectedProject.Id] = state = new ProjectViewerState();
-        state.CameraByArtifact[selectedArtifactPath] = new MeshCameraState { Distance = direction.Length(), Pitch = Math.Asin(direction.Z / Math.Max(direction.Length(), 1e-6f)) * 180 / Math.PI, Yaw = Math.Atan2(direction.X, -direction.Y) * 180 / Math.PI };
+        state.CameraByArtifact[selectedArtifactPath] = new MeshCameraState { TargetX = target.X, TargetY = target.Y, TargetZ = target.Z, Distance = direction.Length(), Pitch = Math.Asin(direction.Z / Math.Max(direction.Length(), 1e-6f)) * 180 / Math.PI, Yaw = Math.Atan2(direction.X, -direction.Y) * 180 / Math.PI };
         SaveViewerStates();
     }
 
@@ -2864,16 +2517,29 @@ public partial class MainWindow : Window
         RunStage(stages[0], selectedProject, true);
     }
 
-    async void RunStage(Stage stage, ProjectRecord? targetProject = null, bool continueQueued = false)
+    void RunStage(Stage stage, ProjectRecord? targetProject = null, bool continueQueued = false) =>
+        _ = ObserveUiTaskAsync(RunStageAsync(stage, targetProject, continueQueued), stage.Title, targetProject ?? selectedProject);
+
+    async Task RunStageAsync(Stage stage, ProjectRecord? targetProject = null, bool continueQueued = false)
     {
         var project = targetProject ?? selectedProject;
         if (project == null) return;
+        if (ReferenceEquals(project, selectedProject))
+            foreach (var box in settingControls.Values.OfType<TextBox>().ToArray())
+                if (HasSettingDraft(box)) await CommitSettingInputAsync(box);
+        var preflightRevision = StatusRevision(project);
+        await RefreshStatusSnapshotAsync(project, true);
+        if (shutdownCleanupDone || !projects.Contains(project) || StatusRevision(project) != preflightRevision) return;
+        if (stage != Stage.ScanPreparation && !await RecoverStaleReviewAsync(project)) return;
         if (StageUnavailableReason(stage, project) is string reason)
         {
+            queuedStages.Remove(project.Id);
             AppendLog($"{stage.Title} cannot start: {reason}", project.Id);
             return;
         }
         if (!continueQueued) queuedStages.Remove(project.Id);
+        var reservation = projectOperations.TryReserve(project.Id);
+        if (reservation == null) { AppendLog("Wait for the project operation to finish.", project.Id); return; }
         GeneratedOutputManifest? outputStore = null;
         outputOperations.Add(project.Id);
         try
@@ -2883,19 +2549,28 @@ public partial class MainWindow : Window
                 if (!await ConfirmEarDistanceAsync(project)) return;
                 if (!ValidateExternalRuntime(project)) return;
             }
+            var createdRoot = !Directory.Exists(project.SaveLocation);
             Directory.CreateDirectory(project.SaveLocation);
+            if (createdRoot) { RecordCreatedFolder(project); Persist(); }
+            outputStore = OutputsFor(project);
+            await Task.Run(() => outputStore.Begin(OutputStageFor(stage)));
             if (stage == Stage.Inference)
             {
                 project.Settings.Preprocessing.SourcePositionInputLeft = null;
                 project.Settings.Preprocessing.SourcePositionInputRight = null;
                 Persist();
             }
-            var config = PrepareConfig(project);
-            outputStore = OutputsFor(project);
-            await Task.Run(() => outputStore.Begin(OutputStageFor(stage)));
+            if(stage==Stage.Preprocessing||stage==Stage.Inference)runInputStamps[project.Id]=stage==Stage.Preprocessing?PreprocessingStamp(project):InferenceStamp(project);
+            var preparedProject=Clone(project);
+            if(stage==Stage.Postprocessing && HasExternalSofa(project))
+            {
+                var staging=Path.Combine(project.SaveLocation,".pinna-export-windows-"+Guid.NewGuid().ToString("N"));
+                stagedSofaOutputs[project.Id]=staging;(preparedProject.Settings.Postprocessing??=new()).OutputFolder=staging;
+            }
+            var config = await PrepareConfigAsync(preparedProject);
             if (shutdownCleanupDone) { outputStore.ReleaseForRecovery(); return; }
             var executable = BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
-            var info = new ProcessStartInfo(executable, $"-m HRTFCalculation.CLI {stage.Value} --config {QuoteArgument(config)}") { WorkingDirectory = packageRoot, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            var info = GeometryProcess("-m", "HRTFCalculation.CLI", stage.Value, "--config", config);
             ApplyProcessEnvironment(info);
             var runId = Guid.NewGuid();
             var startedAt = DateTime.Now;
@@ -2904,29 +2579,18 @@ public partial class MainWindow : Window
             try
             {
                 capture = new PipelineLogCapture(logPath,
-                    $"Pinna2HRTF technical output\nProject: {project.Name}\nStage: {stage.Title}\nStarted: {startedAt.ToString("F", CultureInfo.CurrentCulture)}\nCommand: {executable} {info.Arguments}\n\n--- stdout and stderr ---",
+                    $"Pinna2HRTF technical output\nProject: {project.Name}\nStage: {stage.Title}\nStarted: {startedAt.ToString("F", CultureInfo.CurrentCulture)}\nCommand: {executable} {string.Join(" ", info.ArgumentList.Select(OwnedProcess.Quote))}\n\n--- stdout and stderr ---",
                     progress => DispatcherQueue.TryEnqueue(() => RecordPipelineEvent(progress, stage, project.Id, runId)),
                     message => DispatcherQueue.TryEnqueue(() => AppendLog("Could not save complete technical output: " + message, project.Id)));
                 technicalLogPaths[project.Id] = logPath;
                 RefreshTechnicalLogButton();
             }
             catch (Exception error) { AppendLog("Could not create a technical log: " + error.Message, project.Id); }
-            var process = new Process { StartInfo = info, EnableRaisingEvents = true };
-            process.OutputDataReceived += (_, args) => capture?.Append("stdout", args.Data);
-            process.ErrorDataReceived += (_, args) => capture?.Append("stderr", args.Data);
-            process.Exited += (_, _) =>
-            {
-                try { process.WaitForExit(); } catch { }
-                capture?.Dispose();
-                DispatcherQueue.TryEnqueue(() => ProcessFinished(process, project, stage));
-            };
-            runs[project.Id] = new PipelineRun(process, stage, capture) { Outputs = outputStore };
+            var owned = OwnedProcess.Start(info, project.Id);
+            var process = owned.Process;
+            runs[project.Id] = new PipelineRun(process, stage, capture) { Outputs = outputStore, Owned = owned, Reservation = reservation };
             FailedStages(project.Id).Remove(stage);
-            if (!process.Start())
-                throw new InvalidOperationException("Process.Start returned false.");
-            AssignPipelineJob(process, project.Id);
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
+            _ = ObservePipelineAsync(owned, capture, project, stage);
             var details = StageStartDetails(stage, project);
             AppendLog($"{stage.Title} started{(details.Length == 0 ? "" : " · " + details)}.", project.Id);
             RefreshPipelineStatus();
@@ -2935,7 +2599,7 @@ public partial class MainWindow : Window
         {
             if (runs.Remove(project.Id, out var failedRun))
             {
-                TryTerminate(failedRun.Process);
+                failedRun.Owned?.Dispose();
                 failedRun.Capture?.Dispose();
                 try { failedRun.Process.Dispose(); } catch { }
             }
@@ -2946,6 +2610,7 @@ public partial class MainWindow : Window
         finally
         {
             outputOperations.Remove(project.Id);
+            if (!runs.ContainsKey(project.Id)) { reservation.Dispose(); queuedStages.Remove(project.Id); }
             if (!runs.ContainsKey(project.Id) && outputStore != null)
             {
                 try { await Task.Run(outputStore.Complete); }
@@ -2955,7 +2620,7 @@ public partial class MainWindow : Window
         }
     }
 
-    async void ProcessFinished(Process process, ProjectRecord project, Stage stage)
+    async Task ProcessFinishedAsync(Process process, ProjectRecord project, Stage stage, int code)
     {
         if (shutdownCleanupDone)
         {
@@ -2964,8 +2629,33 @@ public partial class MainWindow : Window
         }
         // StopProject may already have handled and disposed this process.
         if (!runs.TryGetValue(project.Id, out var run) || !ReferenceEquals(run.Process, process)) return;
-        var code = process.ExitCode;
-        if (code != 0) FailedStages(project.Id).Add(stage);
+        if (code == 0)
+        {
+            try
+            {
+                if((stage==Stage.Preprocessing||stage==Stage.Inference)&&runInputStamps.TryGetValue(project.Id,out var originalStamp)&&originalStamp!=(stage==Stage.Preprocessing?PreprocessingStamp(project):InferenceStamp(project)))throw new IOException("Project inputs or settings changed while the stage was running; rerun it.");
+                if(stage==Stage.Inference)HeadGeometry.AtomicWrite(Path.Combine(project.SaveLocation,".pinna2hrtf-inference-signature"),InferenceStamp(project));
+                if(stage==Stage.Preprocessing && PreprocessingFilesPresent(project)) HeadGeometry.AtomicWrite(Path.Combine(project.SaveLocation,".pinna2hrtf-preprocessing-signature"),PreprocessingStamp(project));
+                if(stage==Stage.Postprocessing&&stagedSofaOutputs.TryGetValue(project.Id,out var staging))
+                {
+                    await RequestPythonAsync("HRTFCalculation.DesktopBridge",new{action="validate_outputs",paths=Directory.GetFiles(staging,"*.sofa")});
+                    var external = ExternalOutputsFor(project); var destination = SofaDirectory(project);
+                    await Task.Run(() => external.Publish(staging,destination));
+                }
+                if (stage == Stage.Postprocessing)
+                {
+                    await RequestPythonAsync("HRTFCalculation.DesktopBridge", new { action = "validate_outputs", paths = Directory.GetFiles(SofaDirectory(project), "*.sofa", SearchOption.AllDirectories) });
+                    if (!SpatialOutputsCurrent(project)) throw new IOException("Spatial upsampling outputs are incomplete or stale.");
+                    HeadGeometry.AtomicWrite(PostprocessingReceipt(project), await Task.Run(() => PostprocessingStamp(project)));
+                }
+                await RefreshStatusSnapshotAsync(project, true);
+                if (!StageIsComplete(stage, project, new ArtifactInspection())) throw new IOException("Expected stage outputs are missing, stale or incomplete.");
+                if (stage == Stage.Postprocessing)
+                    await RequestPythonAsync("HRTFCalculation.DesktopBridge", new { action = "validate_outputs", paths = Directory.GetFiles(SofaDirectory(project), "*.sofa") });
+            }
+            catch (Exception error) { code = -1; AppendLog("Output validation failed: " + error.Message, project.Id); }
+        }
+        if (code != 0 && !run.StopRequested) FailedStages(project.Id).Add(stage);
         outputOperations.Add(project.Id);
         var captured = true;
         var store = run.Outputs;
@@ -2975,10 +2665,19 @@ public partial class MainWindow : Window
             try { await Task.Run(store.Complete); }
             catch { captured = false; AppendLog("Output tracking is pending; it will be retried before reset.", project.Id); }
         }
+        if(stagedSofaOutputs.Remove(project.Id,out var completedStaging))
+        {
+            if (code == 0) { try { if (Directory.Exists(completedStaging)) Directory.Delete(completedStaging,true); } catch(IOException) {} }
+            else AppendLog("Postprocessing staging/recovery files were retained: " + completedStaging, project.Id);
+            // The persisted settings always describe the final destination.
+            try{HeadGeometry.AtomicWrite(Path.Combine(project.SaveLocation,"Project Settings.yaml"),Yaml(project));}catch(Exception error){AppendLog(error.Message,project.Id);}
+        }
         runs.Remove(project.Id);
+        run.Reservation?.Dispose();
+        runInputStamps.Remove(project.Id);
         outputOperations.Remove(project.Id);
         var technicalOutput = technicalLogPaths.TryGetValue(project.Id, out var logPath) ? $" Technical output: {Path.GetFileName(logPath)}." : "";
-        AppendLog(code == 0 ? stage.Title + " finished." : stage.Title + " failed (status " + code + ")." + technicalOutput, project.Id);
+        AppendLog(run.StopRequested ? stage.Title + " stopped. Completed work is kept for resuming." : code == 0 ? stage.Title + " finished." : stage.Title + " failed (status " + code + ")." + technicalOutput, project.Id);
         process.Dispose();
         RefreshTechnicalLogButton();
         RefreshArtifacts();
@@ -2990,9 +2689,11 @@ public partial class MainWindow : Window
     void ApplyProcessEnvironment(ProcessStartInfo info)
     {
         info.Environment["PINNA2HRTF_ROOT"] = Directory.GetParent(packageRoot)?.FullName ?? packageRoot;
+        info.Environment["MPLBACKEND"] = "Agg";
         info.Environment["MPLCONFIGDIR"] = Path.Combine(appData, "Cache", "matplotlib");
         info.Environment["PYTHONPYCACHEPREFIX"] = Path.Combine(appData, "Cache", "python");
         info.Environment["PYTHONNOUSERSITE"] = "1";
+        info.Environment["PYTHONUTF8"] = "1";
         info.Environment["BLENDER_USER_CONFIG"] = Path.Combine(appData, "Blender", "config");
         info.Environment["BLENDER_USER_SCRIPTS"] = Path.Combine(appData, "Blender", "scripts");
         info.Environment["BLENDER_USER_DATAFILES"] = Path.Combine(appData, "Blender", "datafiles");
@@ -3087,20 +2788,21 @@ public partial class MainWindow : Window
         return Directory.Exists(candidate) ? candidate : null;
     }
 
-    string PrepareConfig(ProjectRecord project)
+    async Task<string> PrepareConfigAsync(ProjectRecord project)
     {
         var prepared = Clone(project);
         if (prepared.InputHandling == InputHandling.Copy)
         {
-            if (!string.IsNullOrWhiteSpace(project.LeftEar)) prepared.LeftEar = CopyInput(project.LeftEar, Path.Combine(project.SaveLocation, "Input", "Left"));
-            if (!string.IsNullOrWhiteSpace(project.RightEar)) prepared.RightEar = CopyInput(project.RightEar, Path.Combine(project.SaveLocation, "Input", "Right"));
+            if (!string.IsNullOrWhiteSpace(project.LeftEar)) prepared.LeftEar = await Task.Run(() => CopyInput(project.LeftEar, Path.Combine(project.SaveLocation, "Input", "Left")));
+            if (!string.IsNullOrWhiteSpace(project.RightEar)) prepared.RightEar = await Task.Run(() => CopyInput(project.RightEar, Path.Combine(project.SaveLocation, "Input", "Right")));
             if (prepared.Settings.ScanPreparation.Enabled && !string.IsNullOrWhiteSpace(project.Settings.ScanPreparation.ScanPath))
-                prepared.Settings.ScanPreparation.ScanPath = CopyInput(project.Settings.ScanPreparation.ScanPath, Path.Combine(project.SaveLocation, "Input", "Scan"));
+                prepared.Settings.ScanPreparation.ScanPath = await Task.Run(() => CopyInput(project.Settings.ScanPreparation.ScanPath, Path.Combine(project.SaveLocation, "Input", "Scan")));
             RebaseManualPosition(prepared.Settings.Preprocessing.SourcePositionInputLeft, project.LeftEar, prepared.LeftEar);
             RebaseManualPosition(prepared.Settings.Preprocessing.SourcePositionInputRight, project.RightEar, prepared.RightEar);
         }
         var config = Path.Combine(project.SaveLocation, "Project Settings.yaml");
-        File.WriteAllText(config, Yaml(prepared), Encoding.UTF8);
+        var validated = await RequestPythonAsync("HRTFCalculation.DesktopBridge", new { action = "validate", config = ProjectDocument.Build(prepared, environment) });
+        HeadGeometry.AtomicWrite(config, validated.GetProperty("yaml").GetString()!);
         return config;
     }
 
@@ -3113,85 +2815,29 @@ public partial class MainWindow : Window
     {
         Directory.CreateDirectory(folder);
         var target = Path.Combine(folder, Path.GetFileName(path));
-        if (!Path.GetFullPath(path).Equals(Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase)) File.Copy(path, target, true);
+        if (File.Exists(target) && PathIdentity.Read(path).Id == PathIdentity.Read(target).Id) return target;
+        string Digest(string file) { using var stream = File.OpenRead(file); return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)); }
+        var digest = Digest(path);
+        if (File.Exists(target) && Digest(target) != digest)
+            target = Path.Combine(folder, Path.GetFileNameWithoutExtension(path) + "-" + digest[..12].ToLowerInvariant() + Path.GetExtension(path));
+        if (File.Exists(target))
+        { if (Digest(target) != digest) throw new IOException("An input copy already exists with different contents: " + target); }
+        else
+        {
+            var temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.Copy(path, temporary);
+                if (Digest(temporary) != digest || Digest(path) != digest) throw new IOException("The input changed while it was being copied.");
+                File.Move(temporary, target, false);
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        }
         return target;
     }
 
-    string Yaml(ProjectRecord project)
-    {
-        var inference = project.Settings.Inference;
-        var pre = project.Settings.Preprocessing;
-        var num = project.Settings.NumCalc;
-        var post = project.Settings.Postprocessing ?? new PostprocessingSettings();
-        var scan = project.Settings.ScanPreparation;
-        var preprocessing = new Dictionary<string, object?>
-        {
-            ["title"] = project.Name,
-            ["min_frequency"] = ConfigNumber(pre.MinFrequency),
-            ["max_frequency"] = ConfigNumber(pre.MaxFrequency),
-            ["frequency_step_count"] = Math.Max(int.TryParse(pre.FrequencyStepCount, out var steps) ? steps : 129, 2),
-            ["source_assignment_face_count"] = ConfigNumber(pre.SourceAssignmentFaceCount),
-            ["mesh_min_edge_length"] = ConfigNumber(pre.MeshMinEdgeLength),
-            ["mesh_max_edge_length"] = ConfigNumber(pre.MeshMaxEdgeLength),
-            ["mesh_max_error"] = ConfigNumber(pre.MeshMaxError),
-            ["mesh_gamma"] = ConfigNumber(pre.MeshGamma),
-            ["mesh_gamma_opposite"] = ConfigNumber(pre.MeshGammaOpposite),
-            ["skip_mesh_grading"] = false
-        };
-        if (!string.IsNullOrWhiteSpace(pre.EarDistance)) preprocessing["ear_distance"] = ConfigNumber(pre.EarDistance);
-        foreach (var side in new[] { "left", "right" })
-            if (ValidManualPosition(project, side) && ManualPosition(project, side) is { } position)
-                preprocessing["source_position_input_" + side] = new[] { position.X, position.Y, position.Z };
-        var sections = new Dictionary<string, Dictionary<string, object?>>
-        {
-            ["paths"] = new()
-            {
-                ["left_ear"] = ConfigPath(project.LeftEar), ["right_ear"] = ConfigPath(project.RightEar),
-                ["output_dir"] = project.SaveLocation, ["external_deps_dir"] = environment.ExternalDir,
-                ["numcalc_executable"] = environment.NumCalcExecutable, ["mesh_grading_executable"] = environment.MeshGradingExecutable,
-                ["evaluation_grid"] = string.IsNullOrWhiteSpace(pre.EvaluationGrid) ? "Default" : pre.EvaluationGrid
-            },
-            ["scan_preparation"] = new()
-            {
-                ["enabled"] = scan.Enabled, ["scan_path"] = ConfigPath(scan.ScanPath), ["rotation_degrees"] = 0,
-                ["reviewed_left"] = ConfigPath(scan.ReviewedLeft), ["reviewed_right"] = ConfigPath(scan.ReviewedRight),
-                ["prepare_left"] = scan.PrepareLeft, ["prepare_right"] = scan.PrepareRight
-            },
-            ["inference"] = new()
-            {
-                ["enabled"] = true, ["model_config_file"] = inference.ModelConfig, ["model_checkpoint"] = inference.ModelCheckpoint,
-                ["target_left_folder"] = inference.TargetLeftFolder, ["target_right_folder"] = inference.TargetRightFolder,
-                ["prediction_left_folder"] = inference.PredictionLeftFolder, ["prediction_right_folder"] = inference.PredictionRightFolder,
-                ["use_predictions_for_preprocessing"] = inference.UsePredictionsForPreprocessing
-            },
-            ["preprocessing"] = preprocessing,
-            ["numcalc"] = new()
-            {
-                ["enabled"] = false, ["mode"] = "local", ["max_instances"] = ConfigNumber(num.MaxInstances),
-                ["max_cpu_load"] = ConfigNumber(num.MaxCpuLoad), ["adaptive_fmm_length"] = num.AdaptiveFmmLength
-            },
-            ["postprocessing"] = new()
-            {
-                ["enabled"] = false, ["output_sofa_dir"] = Path.Combine(project.SaveLocation, "HRTF"), ["overwrite"] = true,
-                ["normalize"] = post.Normalize, ["level_offset_db"] = ConfigNumber(post.LevelOffsetDB),
-                ["resample_hrirs"] = post.ResampleHrirs, ["sampling_rate"] = int.Parse(NormalizeSamplingRate(post.SamplingRate), CultureInfo.InvariantCulture)
-            }
-        };
-        // JSON scalars and arrays are valid YAML values. Keep the section layout for legacy imports.
-        return string.Join("\n", sections.Select(section => section.Key + ":\n" +
-            string.Join("\n", section.Value.Select(field => "  " + field.Key + ": " + JsonSerializer.Serialize(field.Value))))) + "\n";
-    }
+    string Yaml(ProjectRecord project) => ProjectDocument.Build(project, environment).ToJsonString();
 
-    static string? ConfigPath(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
-    static object? ConfigNumber(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return null;
-        if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integer)) return integer;
-        return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && double.IsFinite(number) ? number : value;
-
-    }
-
-    string QuoteArgument(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
 
     void StopClicked(object sender, RoutedEventArgs e) { if (selectedProject != null) StopProject(selectedProject); }
     void StopProject(ProjectRecord project)
@@ -3199,13 +2845,12 @@ public partial class MainWindow : Window
         queuedStages.Remove(project.Id);
         if (runs.TryGetValue(project.Id, out var run))
         {
-            StopTrackedProcess(run.Process, 1500);
-            runs.Remove(project.Id);
-            run.Capture?.Dispose();
-            run.Outputs?.ReleaseForRecovery();
-            try { run.Process.Dispose(); } catch { }
-            AppendLog("Stopping task.", project.Id);
+            run.StopRequested = true;
+            try { run.Owned?.Terminate(); AppendLog("Stopping task and its child processes.", project.Id); }
+            catch (Exception error) { AppendLog("Could not stop the task: " + error.Message, project.Id); }
         }
+        // The single completion path retains output ownership until the job is
+        // empty and final logs/capture are settled.
         RefreshPipelineStatus();
     }
     void TryTerminate(Process process)
@@ -3234,11 +2879,12 @@ public partial class MainWindow : Window
     {
         TryTerminate(process);
         if (!WaitForExitSafe(process, timeoutMilliseconds))
-            AppendLog($"Process {SafeProcessName(process)} did not exit within {timeoutMilliseconds} ms; application job cleanup remains active.", selectedProject?.Id);
+            AppendLog($"Process {SafeProcessName(process)} did not exit within {timeoutMilliseconds} ms; owned process cleanup remains active.", selectedProject?.Id);
     }
-    async void ResetOutputsClicked(object sender, RoutedEventArgs e)
+    void ResetOutputsClicked(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(ResetOutputsAsync(), "ResetOutputs", selectedProject);
+    async Task ResetOutputsAsync()
     {
-        if (selectedProject is not { } project || runs.ContainsKey(project.Id) || outputOperations.Contains(project.Id)) return;
+        if (selectedProject is not { } project || ProjectBusy(project.Id)) return;
         var dialog = new ContentDialog
         {
             Title = "Reset pipeline outputs?",
@@ -3246,18 +2892,25 @@ public partial class MainWindow : Window
             PrimaryButtonText = "Reset Outputs", CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close, XamlRoot = Root.XamlRoot
         };
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary) await ResetProjectOutputsAsync(project);
+        if (await ShowDialogAsync(dialog) == ContentDialogResult.Primary) await ResetProjectOutputsAsync(project);
     }
 
-    async Task<bool> ResetProjectOutputsAsync(ProjectRecord project, Stage? fromStage = null)
+    async Task<bool> ResetProjectOutputsAsync(ProjectRecord project, Stage? fromStage = null, IDisposable? parent = null)
     {
-        if (shutdownCleanupDone || runs.ContainsKey(project.Id) || !outputOperations.Add(project.Id)) return false;
+        if (shutdownCleanupDone || runs.ContainsKey(project.Id) || parent == null && ProjectBusy(project.Id)) return false;
+        using var reservation = projectOperations.TryReserve(project.Id, parent);
+        if (reservation == null || !outputOperations.TryAdd(project.Id)) return false;
         if (placementProjectId == project.Id) EndPlacement();
         queuedStages.Remove(project.Id);
         RefreshPipelineStatus();
         var boundary = fromStage == null ? (GeneratedOutputManifest.OutputStage?)null : OutputStageFor(fromStage);
         GeneratedOutputManifest.ResetResult result;
-        try { var store = OutputsFor(project); result = await Task.Run(() => store.Reset(boundary)); }
+        try
+        {
+            var store=OutputsFor(project);result=await Task.Run(()=>store.Reset(boundary));
+            var externalStore = ExternalOutputsFor(project);
+            var external=await Task.Run(externalStore.Reset);result.Deleted+=external.Deleted;result.Modified+=external.Modified;result.Errors+=external.Errors;result.ProtectedInputs+=external.ProtectedInputs;
+        }
         catch { result = new GeneratedOutputManifest.ResetResult { Errors = 1 }; }
         finally { outputOperations.Remove(project.Id); }
         AppendLog(result.Summary(boundary), project.Id);
@@ -3267,8 +2920,9 @@ public partial class MainWindow : Window
             knownOutputs.Remove(project.Id);
             lastOutputScan.Remove(project.Id);
         }
+        ReconcileEditorReferences(project);
         Persist();
-        if (selectedProject == project) RefreshArtifacts();
+        if (selectedProject == project) { LoadSelectedProject(); RefreshArtifacts(); }
         RefreshPipelineStatus();
         return result.Success;
     }
@@ -3462,6 +3116,7 @@ public partial class MainWindow : Window
     // An inspection lives only for one synchronous refresh, including its dependent status queries.
     sealed class ArtifactInspection
     {
+        public bool Background { get; init; }
         public readonly Dictionary<(Guid, Stage), bool> Stages = [];
         public readonly Dictionary<(string, int), bool> Steps = [];
         readonly Dictionary<string, JsonElement> documents = new(StringComparer.OrdinalIgnoreCase);
@@ -3502,7 +3157,7 @@ public partial class MainWindow : Window
             var complete = StageIsComplete(stage, selectedProject, inspection);
             stageStatus[i].Text = skipped ? "Skipped" : running ? "Running…" : failed ? "Failed" : complete ? "Done" : reason != null ? "Blocked" : "Ready";
             stageStatus[i].Foreground = new SolidColorBrush(skipped ? ColorHelper.FromArgb(255, 130, 130, 130) : running ? Colors.DarkOrange : failed ? Colors.Firebrick : complete ? Colors.ForestGreen : Colors.Gray);
-            stageButtons[i].Content = running ? "Stop" : "Run";
+            if (!MacLayout) stageButtons[i].Content = running ? "Stop" : "Run";
             stageButtons[i].IsEnabled = placementSide == null && (running || reason == null);
             ToolTipService.SetToolTip(stageStatus[i], reason ?? $"{stage.Title} is ready.");
             ToolTipService.SetToolTip(stageButtons[i], running ? "Stop this stage" : reason ?? $"Run {stage.Title}");
@@ -3518,12 +3173,12 @@ public partial class MainWindow : Window
         pipelineHintText.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
         UpdatePlacementButtons();
         UpdatePreparedEarEditButton(inspection);
-        RefreshProjectList(inspection);
+        RefreshProjectRows(inspection);
         RefreshNumCalcStatus(inspection);
+        if (MacLayout) RefreshMacPresentation(inspection);
     }
 
-    bool InferenceIsAutomatic(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing &&
-        (!string.IsNullOrWhiteSpace(project.LeftEar) || !string.IsNullOrWhiteSpace(project.RightEar));
+    bool InferenceIsAutomatic(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing && !project.Settings.ManualPPM.Enabled;
     bool HasGeneratedPipelineOutputs(ProjectRecord project) => (project.Settings.ScanPreparation.Enabled || !string.IsNullOrWhiteSpace(project.LeftEar) || !string.IsNullOrWhiteSpace(project.RightEar)) && !string.IsNullOrWhiteSpace(project.SaveLocation) && ((InferenceIsAutomatic(project) && StageIsComplete(Stage.Inference, project)) || StageIsComplete(Stage.Preprocessing, project) || StageIsComplete(Stage.Numcalc, project) || StageIsComplete(Stage.Postprocessing, project));
     bool PreprocessingBlocked(ProjectRecord project, ArtifactInspection? inspection = null) => InferenceIsAutomatic(project) && !StageIsComplete(Stage.Inference, project, inspection);
     bool StageCanRun(Stage stage, ProjectRecord? project, ArtifactInspection? inspection = null) => StageUnavailableReason(stage, project, inspection) == null;
@@ -3532,20 +3187,41 @@ public partial class MainWindow : Window
     {
         inspection ??= new ArtifactInspection();
         if (project == null) return "Select a project first.";
+        if (scanAlignmentMode && alignmentSessionProject == project.Id) return "Save or cancel scan alignment before running a stage.";
+        if (SettingDraftError(project) is string draftError) return draftError;
+        if (ProjectDocument.ValidationError(project) is string validation) return validation;
+        if (project.Settings.ManualPPM.Enabled && project.Settings.ManualPPM.Left == null && project.Settings.ManualPPM.Right == null) return "Fit at least one ear before enabling saved manual fits.";
+        if (projectOperations.Contains(project.Id) || OwnedProcess.HasProjectActivity(project.Id)) return "Wait for the project operation or editor to finish.";
         if (outputOperations.Contains(project.Id)) return "Wait for project outputs to finish updating.";
         if (runs.ContainsKey(project.Id)) return "Wait for the running stage to finish.";
         if (placementProjectId == project.Id) return "Finish microphone placement with Done or Cancel.";
-        if (string.IsNullOrWhiteSpace(project.SaveLocation)) return "Choose a project folder first.";
+        if (SofaConflict(project) is string conflict) return conflict;
+        if (!inspection.Background && DispatcherQueue.HasThreadAccess)
+        {
+            _ = CachedStageComplete(stage, project);
+            return statusSnapshots.TryGetValue(project.Id, out var saved) && saved.Revision == StatusRevision(project)
+                ? saved.Reasons.GetValueOrDefault(stage) : "Checking project inputs…";
+        }
+        return StageAvailabilityReason(stage, project, inspection);
+    }
+    string? StageAvailabilityReason(Stage stage, ProjectRecord project, ArtifactInspection inspection)
+    {
+        if (string.IsNullOrWhiteSpace(project.SaveLocation)) return "Choose a save location first.";
+        if (stage == Stage.Postprocessing && project.Settings.Postprocessing?.SpatialUpsampling == true &&
+            (SourceEar(project, "left", inspection) == null || SourceEar(project, "right", inspection) == null))
+            return "Spatial upsampling requires both left and right ears. Disable it for a one-ear export.";
         if (string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar) && !project.Settings.ScanPreparation.Enabled) return "Select at least one input ear.";
         if (stage == Stage.ScanPreparation)
         {
             if (!project.Settings.ScanPreparation.Enabled) return "Enable optional scan preparation first.";
             if (!File.Exists(project.Settings.ScanPreparation.ScanPath)) return "Choose an existing full-head scan.";
-            if (string.IsNullOrWhiteSpace(project.Settings.ScanPreparation.OriginalScanPath) || SamePath(project.Settings.ScanPreparation.ScanPath, project.Settings.ScanPreparation.OriginalScanPath))
-                return "Align the full-head scan with its nose tip and ear-canal entrances first.";
+            if (!project.Settings.ScanPreparation.PrepareLeft && !project.Settings.ScanPreparation.PrepareRight) return "Select an ear to prepare.";
             return null;
         }
         if ((!string.IsNullOrWhiteSpace(project.LeftEar) && !File.Exists(project.LeftEar)) || (!string.IsNullOrWhiteSpace(project.RightEar) && !File.Exists(project.RightEar))) return "An input ear file is missing. Select it again.";
+        if (project.Settings.ScanPreparation.Enabled && !ScanPreparationOutputsCurrent(project, inspection)) return "Run Scan Preparation with the current settings first.";
+        if (project.Settings.ScanPreparation.Enabled && project.Settings.ScanPreparation.RequireManualReview && new[] { "left", "right" }.Any(side => SourceEar(project, side, inspection) != null && !EarReviewIsCurrent(project, side, inspection))) return "Review the prepared ears before continuing.";
+        if (project.Settings.ManualPPM.Enabled && new[] { "left", "right" }.Any(side => project.Settings.ManualPPM.For(side) != null && !FitIsCurrent(project, side))) return "A saved manual fit is stale; refit or disable saved fits.";
         if (stage == Stage.Inference)
         {
             if (!InferenceIsAutomatic(project)) return "Enable Use Mesh2PPM and select at least one input ear.";
@@ -3564,12 +3240,14 @@ public partial class MainWindow : Window
         return stage == Stage.Postprocessing && StageIsComplete(Stage.Numcalc, project, inspection) ? null : "Run NumCalc first.";
     }
 
-    Stage[] AutomaticStages(ProjectRecord project) => project.Settings.ScanPreparation.Enabled
-        ? [Stage.ScanPreparation, .. (project.Settings.Inference.UsePredictionsForPreprocessing && (!string.IsNullOrWhiteSpace(project.LeftEar) || !string.IsNullOrWhiteSpace(project.RightEar)) ? [Stage.Inference, Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing] : [Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing])]
-        : project.Settings.Inference.UsePredictionsForPreprocessing ? Stage.GetValues().Where(x => x != Stage.ScanPreparation).ToArray() : [Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing];
+    Stage[] AutomaticStages(ProjectRecord project) => [
+        .. (project.Settings.ScanPreparation.Enabled ? new[] { Stage.ScanPreparation } : Array.Empty<Stage>()),
+        .. (InferenceIsAutomatic(project) ? new[] { Stage.Inference } : Array.Empty<Stage>()),
+        Stage.Preprocessing, Stage.Numcalc, Stage.Postprocessing];
     bool StageIsComplete(Stage stage, ProjectRecord project, ArtifactInspection? inspection = null)
     {
         inspection ??= new ArtifactInspection();
+        if (!inspection.Background && DispatcherQueue.HasThreadAccess) return CachedStageComplete(stage, project);
         var key = (project.Id, stage);
         if (!inspection.Stages.TryGetValue(key, out var complete))
             inspection.Stages[key] = complete = InspectStage(stage, project, inspection);
@@ -3584,13 +3262,13 @@ public partial class MainWindow : Window
             if (!project.Settings.Inference.UsePredictionsForPreprocessing) return true;
             if (!InferenceIsAutomatic(project)) return false;
             if (project.Settings.ScanPreparation.Enabled && !ScanReviewStageReceiptCurrent(project, "inference", inspection)) return false;
-            var leftDone = string.IsNullOrWhiteSpace(project.LeftEar) || PredictionMesh(project, "left") != null;
-            var rightDone = string.IsNullOrWhiteSpace(project.RightEar) || PredictionMesh(project, "right") != null;
-            return leftDone && rightDone;
+            var leftDone = SourceEar(project,"left",inspection) == null || PredictionMesh(project, "left") != null;
+            var rightDone = SourceEar(project,"right",inspection) == null || PredictionMesh(project, "right") != null;
+            return leftDone && rightDone && InferenceStampIsCurrent(project);
         }
         if (stage == Stage.ScanPreparation)
         {
-            if (!project.Settings.ScanPreparation.Enabled || string.IsNullOrWhiteSpace(output) || string.IsNullOrWhiteSpace(project.Settings.ScanPreparation.OriginalScanPath) || SamePath(project.Settings.ScanPreparation.ScanPath, project.Settings.ScanPreparation.OriginalScanPath)) return false;
+            if (!project.Settings.ScanPreparation.Enabled || string.IsNullOrWhiteSpace(output)) return false;
             var prepared = Path.Combine(output, "Prepared");
             var leftReady = project.Settings.ScanPreparation.PrepareLeft && File.Exists(Path.Combine(prepared, "Left.stl"));
             var rightReady = project.Settings.ScanPreparation.PrepareRight && File.Exists(Path.Combine(prepared, "Right.stl"));
@@ -3599,15 +3277,12 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(output) || (string.IsNullOrWhiteSpace(project.LeftEar) && string.IsNullOrWhiteSpace(project.RightEar) && !project.Settings.ScanPreparation.Enabled)) return false;
         if (stage == Stage.Preprocessing)
         {
-            var scan = project.Settings.ScanPreparation;
-            var leftInput = scan.Enabled ? (scan.PrepareLeft ? (EarReviewIsCurrent(project, "left", inspection) ? scan.ReviewedLeft : null) ?? Path.Combine(output, "Prepared", "Left.stl") : "") : project.LeftEar;
-            var rightInput = scan.Enabled ? (scan.PrepareRight ? (EarReviewIsCurrent(project, "right", inspection) ? scan.ReviewedRight : null) ?? Path.Combine(output, "Prepared", "Right.stl") : "") : project.RightEar;
-            return (!project.Settings.ScanPreparation.Enabled || ScanReviewStageReceiptCurrent(project, "preprocessing", inspection)) &&
-                (string.IsNullOrWhiteSpace(leftInput) || !File.Exists(leftInput) || (File.Exists(Path.Combine(output, "Projects", "Left", "parameters.json")) && File.Exists(Path.Combine(output, "Intermediates", "Left", "graded_head.ply")))) &&
-                (string.IsNullOrWhiteSpace(rightInput) || !File.Exists(rightInput) || (File.Exists(Path.Combine(output, "Projects", "Right", "parameters.json")) && File.Exists(Path.Combine(output, "Intermediates", "Right", "graded_head.ply"))));
+            if(project.Settings.ScanPreparation.Enabled&&!ScanReviewStageReceiptCurrent(project,"preprocessing",inspection))return false;
+            return PreprocessingFilesPresent(project) && PreprocessingStampIsCurrent(project);
+
         }
         if (stage == Stage.Numcalc) return StageIsComplete(Stage.Preprocessing, project, inspection) && NumCalcIsComplete(project, inspection);
-        return stage == Stage.Postprocessing && StageIsComplete(Stage.Numcalc, project, inspection) && Directory.Exists(Path.Combine(output, "HRTF")) && Directory.GetFiles(Path.Combine(output, "HRTF"), "*.sofa").Any();
+        return stage == Stage.Postprocessing && StageIsComplete(Stage.Numcalc, project, inspection) && PostprocessingIsCurrent(project);
     }
 
     bool ScanPreparationOutputsCurrent(ProjectRecord project, ArtifactInspection? inspection = null)
@@ -3615,24 +3290,21 @@ public partial class MainWindow : Window
         inspection ??= new ArtifactInspection();
         try
         {
-            var reportPath = Path.Combine(project.SaveLocation, "Prepared", "mesh_preparation.json");
-            var scanPath = project.Settings.ScanPreparation.ScanPath;
-            var info = new FileInfo(scanPath);
-            var root = inspection.Document(reportPath);
-            if (root.GetProperty("status").GetString() != "completed") return false;
-            var settings = root.GetProperty("signature").GetProperty("settings");
-            if (settings.GetProperty("enabled").GetBoolean() != project.Settings.ScanPreparation.Enabled ||
-                !SamePath(settings.GetProperty("scan_path").GetString() ?? "", scanPath) ||
-                settings.GetProperty("prepare_left").GetBoolean() != project.Settings.ScanPreparation.PrepareLeft ||
-                settings.GetProperty("prepare_right").GetBoolean() != project.Settings.ScanPreparation.PrepareRight ||
-                settings.GetProperty("rotation_degrees").GetDouble() != 0) return false;
-            var identity = root.GetProperty("source_identity");
-            var recordedSize = identity.GetProperty("size").GetInt64();
-            var recordedTime = identity.GetProperty("mtime").GetDouble();
-            var currentTime = new DateTimeOffset(info.LastWriteTimeUtc).ToUnixTimeMilliseconds() / 1000.0;
-            return info.Exists && recordedSize == info.Length && Math.Abs(recordedTime - currentTime) < 0.01;
+            var scan=project.Settings.ScanPreparation;
+            var report=inspection.Document(Path.Combine(project.SaveLocation,"Prepared","mesh_preparation.json"));
+            if(report.GetProperty("status").GetString()!="completed"||report.GetProperty("signature").GetProperty("source_sha256").GetString()!=inspection.Digest(scan.ScanPath))return false;
+            var recorded=System.Text.Json.Nodes.JsonNode.Parse(report.GetProperty("signature").GetProperty("settings").GetRawText())!.AsObject();
+            var expected=ProjectDocument.Build(project,environment)["scan_preparation"]!.AsObject();
+            foreach(var key in new[]{"require_manual_review","reviewed_left","reviewed_right","scan_path","original_scan_path"}) {recorded.Remove(key);expected.Remove(key);}
+            // The default polygon is YAML-only, and is preserved on import.
+            if(!expected.ContainsKey("crop_polygon_xz"))recorded.Remove("crop_polygon_xz");
+            if(!ProjectDocument.SameJson(recorded,expected))return false;
+            foreach(var side in new[]{"left","right"})
+                if(side=="left"?scan.PrepareLeft:scan.PrepareRight)
+                    if(report.GetProperty("ears").GetProperty(side).GetProperty("sha256").GetString()!=inspection.Digest(Path.Combine(project.SaveLocation,"Prepared",side=="left"?"Left.stl":"Right.stl")))return false;
+            return true;
         }
-        catch { return false; }
+        catch{return false;}
     }
 
     string NextStageSummary(ProjectRecord project, ArtifactInspection? inspection = null)
@@ -3645,6 +3317,8 @@ public partial class MainWindow : Window
     string NumCalcStatus(ProjectRecord project, ArtifactInspection? inspection = null)
     {
         inspection ??= new ArtifactInspection();
+        if (!inspection.Background && DispatcherQueue.HasThreadAccess)
+            return statusSnapshots.TryGetValue(project.Id, out var saved) && saved.Revision == StatusRevision(project) ? saved.NumCalc : "NumCalc: checking results…";
         var sides = project.Settings.ScanPreparation.Enabled
             ? new[] { project.Settings.ScanPreparation.PrepareLeft, project.Settings.ScanPreparation.PrepareRight }
             : new[] { !string.IsNullOrWhiteSpace(project.LeftEar), !string.IsNullOrWhiteSpace(project.RightEar) };
@@ -3736,12 +3410,14 @@ public partial class MainWindow : Window
     }
 
     void PublicationClicked(object sender, RoutedEventArgs e) { if (sender is Button button && button.Tag is string url) OpenExternal(url); }
-    void OpenDocumentationClicked(object sender, RoutedEventArgs e) => OpenExternal("https://github.com/Any2HRTF/Pinna2HRTF#readme");
+    async void OpenDocumentationClicked(object sender, RoutedEventArgs e)
+    { try { await OpenOfflineDocumentationAsync(); } catch (Exception error) { AppendLog("Could not open Help: " + error.Message); } }
     void OpenExternal(string url) { try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { } }
 
-    async void ShowAboutClicked(object sender, RoutedEventArgs e)
+    void ShowAboutClicked(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(ShowAboutAsync(), "ShowAbout", selectedProject);
+    async Task ShowAboutAsync()
     {
-        var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "1.1.1";
+        var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "1.2.0";
         var content = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
         var logoPath = Path.Combine(AppContext.BaseDirectory, "icon.png");
         if (File.Exists(logoPath)) content.Children.Add(new Image { Source = new BitmapImage(new Uri(logoPath)), Width = 336, Height = 240, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center });
@@ -3749,7 +3425,7 @@ public partial class MainWindow : Window
         content.Children.Add(new TextBlock { Text = "Version " + version, FontSize = 13, HorizontalAlignment = HorizontalAlignment.Center });
         content.Children.Add(new TextBlock { Text = "A desktop pipeline for ear-mesh preprocessing, Mesh2PPM inference, Mesh2HRTF simulation, and SOFA export.", FontSize = 13, TextWrapping = TextWrapping.Wrap, MaxWidth = 540, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center });
         var dialog = new ContentDialog { Title = "About Pinna2HRTF", Content = content, CloseButtonText = "Close", XamlRoot = Root.XamlRoot };
-        await dialog.ShowAsync();
+        await ShowDialogAsync(dialog);
     }
 
     void LoadSettingHelp()
@@ -3803,6 +3479,13 @@ public partial class MainWindow : Window
 
     public void ShutdownForAppClose()
     {
+        try { FinishFolderNameForClose(); } catch { }
+        windowChrome?.Dispose();
+        meshNavigation?.Dispose();
+        try { documentationWindow?.Close(); } catch { }
+        editorLifetime.Cancel();
+        OwnedProcess.StopAll();
+        foreach (var editor in editorWindows.ToArray()) { try { editor.Close(); } catch { } }
         if (shutdownCleanupDone) return;
         shutdownCleanupDone = true;
         try { if (placementSide != null) EndPlacement(); } catch { }
@@ -3828,33 +3511,15 @@ public partial class MainWindow : Window
             try { StopTrackedProcess(process, 1500); } catch { }
         }
 
-        if (pipelineJob != IntPtr.Zero && processes.Any(process => !HasExitedSafe(process)))
-        {
-            try
-            {
-                if (!TerminateJobObject(pipelineJob, 1))
-                    AppendLog($"Application job termination warning (Win32 {Marshal.GetLastWin32Error()}).", selectedProject?.Id);
-            }
-            catch (Exception error)
-            {
-                AppendLog("Application job termination warning: " + error.Message, selectedProject?.Id);
-            }
-        }
-
         foreach (var process in processes)
         {
             WaitForExitSafe(process, 1000);
             try { process.Dispose(); } catch { }
         }
-        foreach (var run in runs.Values) run.Capture?.Dispose();
+        foreach (var run in runs.Values) { run.Capture?.Dispose(); run.Reservation?.Dispose(); }
         foreach (var store in runs.Values.Select(run => run.Outputs).Distinct()) store?.ReleaseForRecovery();
         runs.Clear();
         queuedStages.Clear();
-        if (pipelineJob != IntPtr.Zero)
-        {
-            try { CloseHandle(pipelineJob); } catch { }
-            pipelineJob = IntPtr.Zero;
-        }
         try { Persist(); } catch { }
         try { SaveUiState(); } catch { }
         try { SaveViewerStates(); } catch { }
@@ -3871,7 +3536,7 @@ public partial class MainWindow : Window
     async Task ConfirmQuitAsync(Microsoft.UI.Windowing.AppWindow appWindow)
     {
         var dialog = new ContentDialog { Title = "Quit Pinna2HRTF?", Content = "A pipeline task is still running. Quitting will stop it and may leave incomplete outputs.", PrimaryButtonText = "Quit", CloseButtonText = "Keep Running", DefaultButton = ContentDialogButton.Close, XamlRoot = Root.XamlRoot };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary) return;
         closingConfirmed = true;
         ShutdownForAppClose();
         Close();
@@ -3888,14 +3553,13 @@ public partial class MainWindow : Window
                 registry = JsonSerializer.Deserialize<ProjectRegistry>(migrated, jsonOptions) ?? throw new InvalidDataException("Invalid registry.");
                 if (changed)
                 {
-                    File.Copy(registryPath, registryPath + ".pre-1.1.1-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff") + ".bak");
+                    File.Copy(registryPath, registryPath + ".compatibility-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff") + ".bak");
                     HeadGeometry.AtomicWrite(registryPath, migrated);
                 }
             }
             catch (Exception error) { registrySavingBlocked = true; AppendLog("Project list could not be migrated; the original file is protected: " + error.Message); }
         }
         registry.Folders ??= [];
-
         projects.Clear();
         foreach (var project in registry.Projects) projects.Add(project);
         var folderIds = registry.Folders.Select(folder => folder.Id).ToHashSet();
@@ -4051,7 +3715,6 @@ public partial class MainWindow : Window
         if (registrySavingBlocked) return;
         registry = new ProjectRegistry { Projects = projects.ToList(), SelectedProjectID = selectedProject?.Id, Environment = environment, Folders = registry.Folders };
         if (!string.IsNullOrWhiteSpace(registryPath)) HeadGeometry.AtomicWrite(registryPath, JsonSerializer.Serialize(registry, jsonOptions));
-
     }
 
     void LoadViewerStates()
@@ -4073,16 +3736,14 @@ public partial class MainWindow : Window
 
     string? PreprocessingMesh(ProjectRecord project, string side)
     {
-        if (InferenceIsAutomatic(project)) return PredictionMesh(project, side);
-        var raw = side == "left" ? project.LeftEar : project.RightEar;
-        return !string.IsNullOrWhiteSpace(raw) && File.Exists(raw) ? raw : null;
+        if (project.Settings.ManualPPM.Enabled && project.Settings.ManualPPM.For(side) is { } fit)
+            return FitIsCurrent(project, side) ? fit.Mesh : null;
+        return InferenceIsAutomatic(project) ? PredictionMesh(project, side) : SourceEar(project, side);
     }
 
     string? PredictionMesh(ProjectRecord project, string side)
     {
-        var raw = project.Settings.ScanPreparation.Enabled
-            ? Path.Combine(project.SaveLocation, "Prepared", side == "left" ? "Left.stl" : "Right.stl")
-            : side == "left" ? project.LeftEar : project.RightEar;
+        var raw = SourceEar(project, side);
         if (string.IsNullOrWhiteSpace(raw) || string.IsNullOrWhiteSpace(project.SaveLocation)) return null;
         var folder = Path.Combine(project.SaveLocation, side == "left" ? project.Settings.Inference.PredictionLeftFolder : project.Settings.Inference.PredictionRightFolder);
         if (!Directory.Exists(folder)) return null;
@@ -4109,7 +3770,7 @@ public partial class MainWindow : Window
     ManualMicrophonePosition? ManualPosition(ProjectRecord project, string side) => side == "left" ? project.Settings.Preprocessing.SourcePositionInputLeft : project.Settings.Preprocessing.SourcePositionInputRight;
     bool ValidManualPosition(ProjectRecord project, string side) => PositionMatchesMesh(ManualPosition(project, side), PreprocessingMesh(project, side));
     void InvalidateManualPositions(ProjectRecord project) { if (!ValidManualPosition(project, "left")) project.Settings.Preprocessing.SourcePositionInputLeft = null; if (!ValidManualPosition(project, "right")) project.Settings.Preprocessing.SourcePositionInputRight = null; }
-    string MeshIdentity(string path) { try { var file = new FileInfo(path); return Path.GetFullPath(path).ToLowerInvariant() + ":" + file.Length + ":" + file.LastWriteTimeUtc.Ticks; } catch { return ""; } }
+    string MeshIdentity(string path) { try { var file = new FileInfo(path); return Path.GetFullPath(path).ToLowerInvariant() + ":" + file.Length + ":" + file.LastWriteTimeUtc.Ticks + ":" + FileFingerprints.Hash(path); } catch { return ""; } }
 
     System.Numerics.Vector3? MicrophonePosition(string meshPath)
     {
@@ -4144,7 +3805,7 @@ public partial class MainWindow : Window
         public TextBlock Status { get; }
         public ProgressRing Spinner { get; }
 
-        public ProjectRowUi(ProjectRecord project, Action<ProjectRecord> select, Action duplicate, Action remove, Action<ProjectRecord, Guid?> move, IReadOnlyList<ProjectFolder> folders, bool nested)
+        public ProjectRowUi(ProjectRecord project, Action<ProjectRecord> select, Action<ProjectRecord> rename, Action duplicate, Action remove, Action<ProjectRecord, Guid?> move, IReadOnlyList<ProjectFolder> folders, bool nested)
         {
             Root = new Grid { Margin = new Thickness(nested ? 25 : 8, 7, 8, 7), Tag = project, HorizontalAlignment = HorizontalAlignment.Stretch };
             Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -4159,20 +3820,27 @@ public partial class MainWindow : Window
             Grid.SetColumn(Spinner, 1);
             Root.Children.Add(Spinner);
             var menu = new MenuFlyout();
+            var renameItem = new MenuFlyoutItem { Text = "Rename Project" };
+            renameItem.Click += (_, _) => rename(project);
             var duplicateItem = new MenuFlyoutItem { Text = "Duplicate Project" };
             duplicateItem.Click += (_, _) => { select(project); duplicate(); };
             var removeItem = new MenuFlyoutItem { Text = "Remove Project" };
             removeItem.Click += (_, _) => { select(project); remove(); };
             var moveItem = new MenuFlyoutSubItem { Text = "Move to Folder" };
-            var unfiled = new MenuFlyoutItem { Text = "No Folder" };
-            unfiled.Click += (_, _) => move(project, null);
-            moveItem.Items.Add(unfiled);
-            foreach (var folder in folders)
+            menu.Opening += (_, _) =>
             {
-                var folderItem = new MenuFlyoutItem { Text = folder.Name, Tag = folder.Id };
-                folderItem.Click += (_, _) => move(project, folder.Id);
-                moveItem.Items.Add(folderItem);
-            }
+                moveItem.Items.Clear();
+                var unfiled = new MenuFlyoutItem { Text = "No Folder" };
+                unfiled.Click += (_, _) => move(project, null);
+                moveItem.Items.Add(unfiled);
+                foreach (var folder in folders)
+                {
+                    var folderItem = new MenuFlyoutItem { Text = folder.Name, Tag = folder.Id };
+                    folderItem.Click += (_, _) => move(project, folder.Id);
+                    moveItem.Items.Add(folderItem);
+                }
+            };
+            menu.Items.Add(renameItem);
             menu.Items.Add(duplicateItem);
             menu.Items.Add(moveItem);
             menu.Items.Add(removeItem);
@@ -4183,7 +3851,8 @@ public partial class MainWindow : Window
 
 record Artifact(string Title, string Path, string? Side = null)
 {
-    public bool Exists => File.Exists(Path);
+    public bool IsPressure => System.IO.Path.GetFileName(Path).Equals("NC.inp",StringComparison.OrdinalIgnoreCase) && File.Exists(Path) && Directory.Exists(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(Path)!,"be.out"));
+    public bool Exists => File.Exists(Path) || IsPressure;
     public bool IsMesh => new[] { ".stl", ".ply" }.Contains(System.IO.Path.GetExtension(Path), StringComparer.OrdinalIgnoreCase);
     public bool IsImage => new[] { ".jpg", ".jpeg", ".png", ".bmp", ".gif" }.Contains(System.IO.Path.GetExtension(Path), StringComparer.OrdinalIgnoreCase);
     public bool IsText => new[] { ".txt", ".csv", ".json", ".yaml", ".yml", ".log", ".out" }.Contains(System.IO.Path.GetExtension(Path), StringComparer.OrdinalIgnoreCase);
@@ -4199,24 +3868,14 @@ record Stage(string Value, string Title)
     public static Stage[] GetValues() => [ScanPreparation, Inference, Preprocessing, Numcalc, Postprocessing];
 }
 
-enum InputHandling { Copy, Reference }
-class ProjectRegistry { public List<ProjectRecord> Projects { get; set; } = []; public Guid? SelectedProjectID { get; set; } public EnvironmentConfig Environment { get; set; } = new(); public List<ProjectFolder> Folders { get; set; } = []; }
+class ProjectRegistry { public string NumericFormat { get; set; } = "invariant-1"; public List<ProjectRecord> Projects { get; set; } = []; public Guid? SelectedProjectID { get; set; } public EnvironmentConfig Environment { get; set; } = new(); public List<ProjectFolder> Folders { get; set; } = []; }
 class ProjectFolder { public Guid Id { get; set; } = Guid.NewGuid(); public string Name { get; set; } = ""; public bool IsExpanded { get; set; } = true; }
 class WindowUiState { public double ProjectsWidth { get; set; } = 280; public double LiveLogHeight { get; set; } = 170; public double SettingsWidth { get; set; } = 390; }
 class ProjectViewerState { public string? SelectedArtifactPath { get; set; } public Dictionary<string, MeshCameraState> CameraByArtifact { get; set; } = []; }
-class MeshCameraState { public double Yaw { get; set; } public double Pitch { get; set; } public double Distance { get; set; } }
+class MeshCameraState { public double TargetX { get; set; } public double TargetY { get; set; } public double TargetZ { get; set; } public double Yaw { get; set; } public double Pitch { get; set; } public double Distance { get; set; } }
 class SettingHelpEntry { public string Id { get; set; } = ""; public string Title { get; set; } = ""; public string Description { get; set; } = ""; public List<SettingHelpPublication> Publications { get; set; } = []; }
 class SettingHelpPublication { public string Title { get; set; } = ""; public string Url { get; set; } = ""; }
-class EnvironmentConfig { public string UvExecutable { get; set; } = ""; public string NumCalcExecutable { get; set; } = ""; public string MeshGradingExecutable { get; set; } = ""; public string ExternalDir { get; set; } = ""; [JsonIgnore] public bool IsEmpty => string.IsNullOrWhiteSpace(NumCalcExecutable) && string.IsNullOrWhiteSpace(MeshGradingExecutable) && string.IsNullOrWhiteSpace(ExternalDir); }
-class ProjectRecord { public Guid Id { get; set; } = Guid.NewGuid(); public string Name { get; set; } = ""; public string LeftEar { get; set; } = ""; public string RightEar { get; set; } = ""; public string SaveLocation { get; set; } = ""; public Guid? FolderId { get; set; } public InputHandling InputHandling { get; set; } = InputHandling.Copy; public ProjectSettings Settings { get; set; } = new(); [JsonIgnore] public string StatusText { get; set; } = ""; [JsonIgnore] public bool IsRunning { get; set; } }
-class ProjectSettings { public InferenceSettings Inference { get; set; } = new(); public PreprocessingSettings Preprocessing { get; set; } = new(); public NumCalcSettings NumCalc { get; set; } = new(); public PostprocessingSettings? Postprocessing { get; set; } = new(); public ScanPreparationSettings ScanPreparation { get; set; } = new(); }
-class ScanPreparationSettings { public bool Enabled { get; set; } public string ScanPath { get; set; } = ""; public string OriginalScanPath { get; set; } = ""; public bool PrepareLeft { get; set; } = true; public bool PrepareRight { get; set; } public string? ReviewedLeft { get; set; } public string? ReviewedRight { get; set; } }
-class InferenceSettings { public string ModelConfig { get; set; } = ""; public string ModelCheckpoint { get; set; } = ""; public string TargetLeftFolder { get; set; } = "Input/Left"; public string TargetRightFolder { get; set; } = "Input/Right"; public string PredictionLeftFolder { get; set; } = "Intermediates/Left"; public string PredictionRightFolder { get; set; } = "Intermediates/Right"; public bool UsePredictionsForPreprocessing { get; set; } = false; }
-class PreprocessingSettings { public string MinFrequency { get; set; } = "0"; public string MaxFrequency { get; set; } = "24000"; public string FrequencyStepCount { get; set; } = "129"; public string? EvaluationGrid { get; set; } public string? EarDistance { get; set; } public string SourceAssignmentFaceCount { get; set; } = "6"; public string MeshMinEdgeLength { get; set; } = "0.5"; public string MeshMaxEdgeLength { get; set; } = "10.0"; public string MeshMaxError { get; set; } = "0.5"; public string MeshGamma { get; set; } = "0.2"; public string MeshGammaOpposite { get; set; } = "0.1"; public ManualMicrophonePosition? SourcePositionInputLeft { get; set; } public ManualMicrophonePosition? SourcePositionInputRight { get; set; } }
 
-class ManualMicrophonePosition { public double X { get; set; } public double Y { get; set; } public double Z { get; set; } public string MeshPath { get; set; } = ""; public string MeshIdentity { get; set; } = ""; }
-class PostprocessingSettings { public bool Normalize { get; set; } = true; public string LevelOffsetDB { get; set; } = "-30";  public bool ResampleHrirs { get; set; } = false; public string SamplingRate { get; set; } = "48000"; }
-class NumCalcSettings { public string MaxInstances { get; set; } = "1"; public string MaxCpuLoad { get; set; } = "90"; public bool AdaptiveFmmLength { get; set; } = true; }
 
 [ComImport, Guid("42f85136-db7e-439c-85f1-e4075d135fc8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
 interface IFileDialogNative
@@ -4320,11 +3979,17 @@ sealed class CursorGrid : Grid
 }
 
 sealed class MeshInputController : InputController
-{    protected override bool IsStartRotate(Microsoft.UI.Input.PointerPointProperties properties) =>
-        properties.IsLeftButtonPressed && !properties.IsMiddleButtonPressed && !properties.IsRightButtonPressed;
+{
+    static bool Pressed(global::Windows.System.VirtualKey key) => (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(key) & global::Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
+    static NavigationAction Action(Microsoft.UI.Input.PointerPointProperties properties) => NavigationBindings.Mouse(properties.IsMiddleButtonPressed, properties.IsRightButtonPressed,
+        Pressed(global::Windows.System.VirtualKey.Shift), Pressed(global::Windows.System.VirtualKey.Control));
+    protected override bool IsStartRotate(Microsoft.UI.Input.PointerPointProperties properties) =>
+        Action(properties) == NavigationAction.Orbit;
 
     protected override bool IsStartPan(Microsoft.UI.Input.PointerPointProperties properties) =>
-        properties.IsMiddleButtonPressed;
+        Action(properties) == NavigationAction.Pan;
+    protected override bool IsStartZoom(Microsoft.UI.Input.PointerPointProperties properties) =>
+        Action(properties) == NavigationAction.Zoom;
 }
 
 class MeshData
