@@ -262,6 +262,18 @@
     "publications": []
   },
   {
+    "id": "scan.prepare_left",
+    "title": "Prepare left ear",
+    "description": "Extract and prepare the person's left ear from the aligned head scan when you run Scan Preparation. Clear this option to prepare only the right ear. At least one ear must be selected. The original scan is preserved.",
+    "publications": []
+  },
+  {
+    "id": "scan.prepare_right",
+    "title": "Prepare right ear",
+    "description": "Extract and prepare the person's right ear from the aligned head scan when you run Scan Preparation. Clear this option to prepare only the left ear. At least one ear must be selected. The original scan is preserved.",
+    "publications": []
+  },
+  {
     "id": "scan.target_edge",
     "title": "Target edge",
     "description": "Target remeshing edge length, in mm. Default: 0.75 mm. Scan holes are closed using Screened Poisson reconstruction; one attachment boundary per ear is preserved.",

@@ -954,7 +954,9 @@ public partial class MainWindow : Window
             },
             Width = 20, Height = 20,
             Padding = new Thickness(0), Margin = new Thickness(4, 0, 0, 0),
-            Tag = id, Background = new SolidColorBrush(Colors.Transparent),
+            Tag = id.StartsWith("scan_preparation.", StringComparison.Ordinal)
+                ? "scan." + (id == "scan_preparation.scan_path" ? "path" : id["scan_preparation.".Length..])
+                : id, Background = new SolidColorBrush(Colors.Transparent),
             BorderThickness = new Thickness(0), Foreground = mutedTextBrush,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center
