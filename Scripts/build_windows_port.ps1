@@ -180,6 +180,9 @@ if ($RuntimePackage) {
     }
 }
 
+if (-not $SkipPythonEnvironment) {
+    & (Join-Path $PSScriptRoot 'trim_windows_runtime.ps1') -PackageRoot $dist
+}
 Get-ChildItem $dist -Directory -Recurse -Force | Where-Object { $_.Name -eq "__pycache__" } | Sort-Object { $_.FullName.Length } -Descending | Remove-Item -Recurse -Force
 Get-ChildItem $dist -File -Recurse -Force | Where-Object { $_.Extension -in @(".pyc", ".pyo") } | Remove-Item -Force
 if (Test-Path (Join-Path $distBin "uv.exe")) {
@@ -216,7 +219,26 @@ if ($SkipPythonEnvironment -or $AllowMissingExternalTools) {
     Set-Content -LiteralPath (Join-Path $dist "INCOMPLETE-DEVELOPMENT-BUILD.txt") -Value 'This build skipped complete runtime/tool verification and is not a portable release.'
 } else {
     $runtime = Join-Path $dist '.venv\Scripts\python.exe'
-    & $runtime -I -B -c "import sys; sys.path.insert(0,sys.argv[1]); from HRTFCalculation.Config import PipelineConfig; from HRTFCalculation import RunConfig, DesktopBridge, PressureField; import bpy,mesh2hrtf,bezierppm,scipy,sofar; print('Portable imports verified:',RunConfig.__file__)" $dist
+    $runtimeCheck = @'
+import importlib.metadata as metadata
+import json, platform, sys, tomllib
+from pathlib import Path
+from packaging.requirements import Requirement
+root = Path(sys.argv[1])
+sys.path.insert(0, str(root))
+from HRTFCalculation.Config import PipelineConfig
+from HRTFCalculation import RunConfig, DesktopBridge, PressureField
+import bpy, pymeshlab, mesh2hrtf, bezierppm, scipy, sofar, torch
+with (root / 'pyproject.toml').open('rb') as stream:
+    requirements = [Requirement(value) for value in tomllib.load(stream)['project']['dependencies']]
+versions = {item.name: metadata.version(item.name) for item in requirements}
+for item in requirements:
+    if item.specifier and not item.specifier.contains(versions[item.name], prereleases=True):
+        raise RuntimeError(f'Bundled {item.name} {versions[item.name]} does not match {item.specifier}')
+(root / 'runtime-versions.json').write_text(json.dumps({'python': platform.python_version(), 'packages': versions}, indent=2), encoding='utf-8')
+print('Portable imports and dependency versions verified:', RunConfig.__file__)
+'@
+    & $runtime -I -B -c $runtimeCheck $dist
     if ($LASTEXITCODE -ne 0) { throw 'Portable runtime imports failed.' }
     $models = @(Get-ChildItem -LiteralPath (Join-Path $dist 'HRTFCalculation\Inference\resources') -Filter '*.pth' -File)
     if ($models.Count -lt 4 -or @($models | Where-Object { $_.Length -lt 1000000 }).Count) { throw 'The inference model payload is incomplete.' }
