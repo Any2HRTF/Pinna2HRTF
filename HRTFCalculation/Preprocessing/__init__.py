@@ -382,16 +382,18 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             return
         if is_input(path):
             raise FileExistsError(f"Refusing to replace an input: {path}")
-        if keep_one and not path.is_symlink() and path.is_file():
+        previous = Path(f"{path}.previous")
+        # A .previous that is or holds a selected input is never moved or replaced.
+        if keep_one and not path.is_symlink() and path.is_file() and not ((previous.exists() or previous.is_symlink()) and is_input(previous)):
             # Generated intermediate file: keep one previous copy. The older copy
             # is replaced only if it still matches the fingerprint recorded when
             # it was made; an edited, unrecorded or unusual one is kept dated.
-            target = Path(f"{path}.previous")
+            target = previous
             record = _read_previous_record(path.parent)
             if target.exists() or target.is_symlink():
                 expected = record.get(target.name)
                 unchanged = (expected is not None and not target.is_symlink() and target.is_file()
-                             and not is_input(target) and _sha256(target) == expected)
+                             and _sha256(target) == expected)
                 if not unchanged:
                     kept = _kept_backup_path(path)
                     target.rename(kept)
