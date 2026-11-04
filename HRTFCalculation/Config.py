@@ -150,7 +150,7 @@ class PreprocessingConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def legacy_distance(cls, data):
-        # Version compatibility only; remove with v2.0.0.
+        # Version compatibility only; remove in a future release.
         return import_legacy_distance({"preprocessing": data})["preprocessing"] if isinstance(data, dict) else data
 
     @field_validator("ear_distance")

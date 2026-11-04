@@ -10,7 +10,11 @@ public partial class App : Application
 {
     Window? window;
     private Mutex? instanceMutex;
+    #if PINNA_MAC_LAYOUT
+    private const string InstanceMutexName = @"Local\Pinna2HRTF.MacImitation.Instance";
+#else
     private const string InstanceMutexName = @"Local\Pinna2HRTF.Instance";
+#endif
     private bool closedCleanupCompleted;
 
     [DllImport("user32.dll")]
@@ -20,10 +24,24 @@ public partial class App : Application
 
     public App()
     {
+        // FileInfo timestamps can lazily initialize TimeZoneInfo under a lock.
+        // Do this before XAML loading/background inspection: an STA lock wait
+        // inside Loaded pumps native callbacks into the half-built window.
+        _ = TimeZoneInfo.Local;
+        var requestedCulture = Environment.GetEnvironmentVariable("PINNA2HRTF_CULTURE");
+        if (!string.IsNullOrWhiteSpace(requestedCulture))
+        {
+            var culture = System.Globalization.CultureInfo.GetCultureInfo(requestedCulture);
+            System.Globalization.CultureInfo.DefaultThreadCurrentCulture = culture;
+            System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = culture;
+        }
         // Keep a named marker alive for the whole process lifetime. Inno Setup
         // uses the same mutex to detect a running app before install/uninstall.
         bool createdNew;
-        instanceMutex = new Mutex(initiallyOwned: true, name: InstanceMutexName, createdNew: out createdNew);
+        var instanceName = InstanceMutexName;
+        var reviewProfile = Environment.GetEnvironmentVariable("PINNA2HRTF_APP_DATA");
+        if (!string.IsNullOrWhiteSpace(reviewProfile)) instanceName += ".Review." + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(reviewProfile).ToLowerInvariant())))[..16];
+        instanceMutex = new Mutex(initiallyOwned: true, name: instanceName, createdNew: out createdNew);
         if (!createdNew)
         {
             // Do not create a second visible app instance.
@@ -35,6 +53,16 @@ public partial class App : Application
         // Render at the monitor's native DPI instead of allowing Windows to
         // bitmap-scale the complete unpackaged process at 125%/150%/200%.
         _ = SetProcessDpiAwarenessContext(PerMonitorV2);
+        UnhandledException += (_, error) =>
+        {
+            try
+            {
+                var profile = Environment.GetEnvironmentVariable("PINNA2HRTF_APP_DATA") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Pinna2HRTF-v2-review-macimitation");
+                Directory.CreateDirectory(profile);
+                File.WriteAllText(Path.Combine(profile,"startup-error.log"), error.Exception.ToString() + "\n" + error.Message);
+            }
+            catch { }
+        };
         InitializeComponent();
     }
 

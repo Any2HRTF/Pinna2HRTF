@@ -11,14 +11,24 @@ import json
 import shutil
 import tempfile
 import uuid
+import sys
 import numpy as np
 import networkx as nx
-import pymeshlab as ml
 import trimesh
 
 TARGET_FACES = 150_000
 POISSON = dict(depth=7, fulldepth=5, scale=1.1, samplespernode=3.0,
                pointweight=1.0, iters=8, threads=1)
+
+
+def _meshlab():
+    # The Windows wheels share native DLL names. Loading MeshLab first makes
+    # the later bpy import fail with ERROR_PROC_NOT_FOUND. Receipt inspection
+    # needs neither library; actual meshing establishes the compatible order.
+    if sys.platform == "win32":
+        import bpy
+    import pymeshlab
+    return pymeshlab
 
 def load_mesh(path, process=False):
     return _load_mesh(path, process=process, merge=True)
@@ -105,6 +115,7 @@ def close_non_attachment_boundaries(mesh):
     sizes = boundary_loop_sizes(mesh)
     if len(sizes) <= 1:
         return mesh
+    ml = _meshlab()
     ms = ml.MeshSet()
     ms.add_mesh(ml.Mesh(
         vertex_matrix=np.asarray(mesh.vertices),
@@ -144,6 +155,7 @@ def attachment_boundary_is_simple(mesh):
 
 def regularize_surface(mesh, target_edge_mm):
     """Regularize triangles near an inset cut for the native HRTF grader."""
+    ml = _meshlab()
     ms = ml.MeshSet()
     ms.add_mesh(ml.Mesh(
         vertex_matrix=np.asarray(mesh.vertices),
@@ -269,6 +281,7 @@ def inverse_rotate(mesh, degrees):
 
 
 def remesh(cut, output, rotation_degrees, target_edge_mm):
+    ml = _meshlab()
     output.parent.mkdir(parents=True, exist_ok=True)
     inverse_rotate(cut, rotation_degrees)
     temp = output.with_suffix(".cut.tmp.stl")
@@ -308,6 +321,7 @@ def remesh(cut, output, rotation_degrees, target_edge_mm):
 
 
 def screened_poisson(mesh, output):
+    ml = _meshlab()
     output.parent.mkdir(parents=True, exist_ok=True)
     mesh.fix_normals(multibody=True)
     ms = ml.MeshSet()

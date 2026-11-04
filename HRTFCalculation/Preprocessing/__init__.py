@@ -286,7 +286,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             legacy_intermediates.rename(migration_path)
             migration_path.rename(intermediates)
         elif legacy_intermediates is not None and current_intermediates is not legacy_intermediates:
-            shutil.rmtree(legacy_intermediates)
+            legacy_intermediates.rename(_kept_backup_path(legacy_intermediates))
     else:
         export_prefix = Path(export_path)
         left_project = Path(f"{export_prefix}-Left")
@@ -308,11 +308,23 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             if not confirm_replace_previous(question):
                 raise RuntimeError("Cancelled: the older export backups were left unchanged.")
         approved_backups = {str(path): fingerprint for path, _, fingerprint in to_replace}
+    # Preserve legacy and previous intermediate files; these folders can hold
+    # inputs, inference results and files changed outside the app.
+    protected = [path.resolve() for path in (left_path, right_path) if path is not None]
+    def archive(path):
+        if not path.exists():
+            return
+        resolved = path.resolve()
+        if any(resolved == selected or resolved in selected.parents for selected in protected):
+            raise FileExistsError(f"Refusing to replace an input: {path}")
+        target = _kept_backup_path(path)
+        path.rename(target)
+        logger(f"Kept previous output at {target}")
     side_dirs = {"left": intermediates / "Left", "right": intermediates / "Right"}
     for name in ["Prediction STL Left", "Prediction STL Right", "Prediction Parameters Left", "Prediction Parameters Right", "ICP STL Left", "ICP STL Right"]:
         legacy_path = intermediates / name
         if legacy_path.is_dir():
-            shutil.rmtree(legacy_path)
+            archive(legacy_path)
     entries = list(intermediates.iterdir()) if intermediates.exists() else []
     for side in ("left", "right"):
         legacy_side = next((entry for entry in entries if entry.name == side), None)
@@ -322,7 +334,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             legacy_side.rename(migration_path)
             migration_path.rename(side_dirs[side])
         elif legacy_side is not None and current_side is not legacy_side:
-            shutil.rmtree(legacy_side)
+            archive(legacy_side)
     if settings.write_intermediates:
         work_dir = intermediates
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -333,7 +345,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
                 for name in generated_names:
                     generated_path = side_dir / name
                     if generated_path.exists():
-                        generated_path.unlink()
+                        archive(generated_path)
             if path is not None:
                 side_dir.mkdir(parents=True, exist_ok=True)
             elif side_dir.exists():
@@ -343,6 +355,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
                     side_dir.rmdir()
                 except OSError:
                     pass
+        archive(work_dir / "dummy_head.stl")
         cleanup = None
     else:
         cleanup = tempfile.TemporaryDirectory()
@@ -435,24 +448,17 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             grading_env = os.environ.copy()
             grading_env["DYLD_LIBRARY_PATH"] = os.pathsep.join(filter(None, [str(Path(mesh_grading_executable).parent), grading_env.get("DYLD_LIBRARY_PATH")]))
             subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-e', str(settings.mesh_max_error), '-v', '-g', str(gamma_l), '-h', str(gamma_r), '-s', side, '-i', str(stitched[side]), '-o', str(graded[side])], check=True, env=grading_env)
-        export_destinations = None
-        if output_dir is None:
-            # Build the projects in a fresh sibling folder and only swap them in
-            # after every side succeeded, so stale {export}-Left/Right from an
-            # earlier run never survive next to new results.
-            export_destinations = {"left": left_project, "right": right_project}
-            left_project.parent.mkdir(parents=True, exist_ok=True)
-            export_staging = Path(tempfile.mkdtemp(prefix=f".{left_project.name}-staging-", dir=left_project.parent))
-            left_project = export_staging / "Left"
-            right_project = export_staging / "Right"
-        for project in [projects_dir / "Left", projects_dir / "Right"] if output_dir is not None else []:
-            if project.exists():
-                shutil.rmtree(project)
-        for project in legacy_projects:
-            if project.exists():
-                shutil.rmtree(project)
+        # Both app/config and standalone exports publish only after every side
+        # has been generated. Existing projects are retained, including unknown
+        # or externally modified files. Older backups require explicit consent
+        # for deletion; the desktop/config route never grants that consent.
+        export_destinations = {"left": left_project, "right": right_project}
         if output_dir is not None:
-            projects_dir.mkdir(parents=True, exist_ok=True)
+            approved_backups = {}
+        left_project.parent.mkdir(parents=True, exist_ok=True)
+        export_staging = Path(tempfile.mkdtemp(prefix=f".{left_project.name}-staging-", dir=left_project.parent))
+        left_project = export_staging / "Left"
+        right_project = export_staging / "Right"
         from .src.material_assign_and_mesh2input import main as mesh2input_main
         projects = {"left": left_project, "right": right_project}
         source_types = {"left": settings.source_type_left, "right": settings.source_type_right}
@@ -464,6 +470,9 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             mesh2input_main(
                 head=str(graded[side]), title=settings.title, source_type=source_types[side], filepath=str(projects[side]), mesh2hrtf_path=str(mesh2hrtf_path), evaluationGrids=str(evaluation_grid), method=settings.method, pictures=settings.pictures, reference=settings.reference, computeHRIRs=settings.compute_hrirs, unit=settings.unit, speedOfSound=settings.speed_of_sound, densityOfMedium=settings.air_density, materialSearchPaths=settings.material_search_paths, min_frequency=settings.min_frequency, max_frequency=settings.max_frequency, frequency_vector_type=settings.frequency_vector_type, frequency_step_count=settings.frequency_step_count, tolerance=settings.source_assignment_tolerance, source_position=landmarks[side]["position"], source_assignment_mode=settings.source_assignment_mode, source_face_count=settings.source_assignment_face_count,
             )
+            if os.name == "nt":
+                from .src.solver_paths import normalize_solver_grid_paths
+                normalize_solver_grid_paths(projects[side])
             if landmarks[side]["method"] == "configured":
                 parameters_path = projects[side] / "parameters.json"
                 with parameters_path.open("r", encoding="utf-8") as file:
@@ -500,7 +509,7 @@ def preprocess():
     parser.add_argument('--ear-cut-clearance-scale', type=float, default=1.3)
     parser.add_argument('--ear-cut-mode', choices=['ellipse', 'projected_footprint', 'exact'], default='ellipse')
     parser.add_argument('--ear-canal-closer-mode', choices=['legacy', 'interpolated'], default='legacy')
-    parser.add_argument('--head-radius', type=float, default=None, help='Deprecated alias for --ear-distance; removed in v2.0.0.')
+    parser.add_argument('--head-radius', type=float, default=None, help='Deprecated alias for --ear-distance; removed in a future release.')
     parser.add_argument('--ear-distance', type=float, help='Mean ear distance from head center in mm; preserves left/right asymmetry.')
     parser.add_argument('--min-frequency', type=int, default=1000)
     parser.add_argument('--max-frequency', type=int, default=24000)
@@ -523,9 +532,9 @@ def preprocess():
         frequency_step_count=args.frequency_step_count,
         source_assignment_face_count=args.source_face_count,
     )
-    # Version compatibility only; remove with v2.0.0.
+    # Version compatibility only; remove in a future release.
     if args.head_radius is not None:
-        print("Warning: --head-radius is deprecated; use --ear-distance. Removed in v2.0.0.")
+        print("Warning: --head-radius is deprecated; use --ear-distance. Removed in a future release.")
     run_preprocessing_pipeline(
         left_path=args.left_path,
         right_path=args.right_path,

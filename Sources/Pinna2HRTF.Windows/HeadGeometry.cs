@@ -30,7 +30,7 @@ internal static class HeadGeometry
     public static string Number(double value) => value.ToString("G17", CultureInfo.InvariantCulture);
     public static double Parse(string value)
     {
-        if (!double.TryParse(value.Trim().Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out var result) || !double.IsFinite(result))
+        if (!double.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var result) || !double.IsFinite(result))
             throw new InvalidDataException("Enter a finite number in millimetres.");
         return result;
     }
@@ -38,9 +38,27 @@ internal static class HeadGeometry
     static JsonNode? Get(JsonObject node, string key) => node[Key(node, key)];
     public static string MigrateRegistry(string json, out bool changed)
     {
-        // Version compatibility only; remove with v2.0.0.
+        // Version compatibility only; remove in a future release.
         var root = JsonNode.Parse(json)?.AsObject() ?? throw new InvalidDataException("Invalid project registry.");
         changed = root.Remove(Key(root, "appVersion"));
+        if (Get(root, "numericFormat")?.GetValue<string>() != "invariant-1")
+        {
+            var numericKeys = new HashSet<string>(new[] { "headRadius", "earDistance", "earDistanceLeft", "earDistanceRight", "rotationDegrees", "targetEdgeMM", "leftMarginMM", "rightMarginMM", "sideMinMM", "sideMaxMM",
+                "minFrequency", "maxFrequency", "frequencyStepCount", "sourceAssignmentFaceCount", "meshMinEdgeLength", "meshMaxEdgeLength", "meshMaxError", "meshGamma", "meshGammaOpposite", "maxInstances", "maxCpuLoad", "levelOffsetDB", "samplingRate", "spatialSubdivisions" }, StringComparer.OrdinalIgnoreCase);
+            void Normalize(JsonNode? node)
+            {
+                if (node is JsonObject obj)
+                    foreach (var item in obj.ToArray())
+                    {
+                        if (numericKeys.Contains(item.Key) && item.Value is JsonValue value && value.TryGetValue<string>(out var text) &&
+                            System.Text.RegularExpressions.Regex.IsMatch(text.Trim(), @"^[+-]?\d+,\d+(?:[eE][+-]?\d+)?$"))
+                            obj[item.Key] = Number(Parse(text.Replace(',', '.')));
+                        else Normalize(item.Value);
+                    }
+                else if (node is JsonArray array) foreach (var item in array) Normalize(item);
+            }
+            Normalize(Get(root, "projects")); root[Key(root, "numericFormat")] = "invariant-1"; changed = true;
+        }
         foreach (var entry in Get(root, "projects")?.AsArray() ?? throw new InvalidDataException("Missing project list."))
         {
             if (entry is not JsonObject project || Get(project, "settings") is not JsonObject settings || Get(settings, "preprocessing") is not JsonObject p) continue;
@@ -56,7 +74,7 @@ internal static class HeadGeometry
                     if (enabled && !string.IsNullOrWhiteSpace(old)) p[Key(p, "earDistance")] = old;
                 }
             }
-            // Legacy headRadius field: version compatibility only; remove with v2.0.0.
+            // Legacy headRadius field: version compatibility only; remove in a future release.
             foreach (var key in new[] { "headRadius", "useCustomHeadRadius", "earDistanceLeft", "earDistanceRight", "linkGeometry" })
                 changed |= p.Remove(Key(p, key));
         }
@@ -66,6 +84,12 @@ internal static class HeadGeometry
     {
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try { File.WriteAllText(temporary, contents); File.Move(temporary, path, true); }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+    public static void AtomicWriteBytes(string path, byte[] contents)
+    {
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try { File.WriteAllBytes(temporary, contents); File.Move(temporary, path, true); }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 }
