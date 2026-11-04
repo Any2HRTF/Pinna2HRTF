@@ -275,7 +275,7 @@ def run_numcalc_local(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
     if dry_run:
         return
     run_local_numcalc(
-        project_path=projects_root,
+        project_path=projects,
         numcalc_path=numcalc_path,
         max_ram_load_gb=config.numcalc.max_ram_load_gb,
         ram_safety_factor=config.numcalc.ram_safety_factor,
@@ -551,7 +551,9 @@ def _publish_export(staging, destination, overwrite, project_root=None) -> list[
 
 def _export_postprocessing(config, output_dir, logger):
     import mesh2hrtf as m2h
+    from .Preprocessing import snapshot_generated_outputs, claim_generated_outputs
     projects = project_dirs(config)
+    snapshots = {project: snapshot_generated_outputs(project) for project in projects}
     for project in projects:
         emit_live_event(f"Converting {project.name} results")
         m2h.output2hrtf(str(project))
@@ -565,6 +567,8 @@ def _export_postprocessing(config, output_dir, logger):
         for project in projects:
             emit_live_event(f"Normalizing {project.name} SOFA files")
             normalize_sofa_files(project / "Output2HRTF", config.postprocessing.level_offset_db)
+    for project in projects:
+        claim_generated_outputs(project, snapshots[project])
     if len(projects) == 2:
         emit_live_event("Combining left and right results")
     collect_sofa_files(projects, output_dir)

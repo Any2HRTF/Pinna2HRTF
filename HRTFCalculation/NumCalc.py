@@ -75,12 +75,17 @@ def _terminate(process: subprocess.Popen) -> None:
             pass
 
 
-def run_local_numcalc(project_path: Path, numcalc_path: Path, max_ram_load_gb: float | None, ram_safety_factor: float, max_cpu_load: int, max_instances: int, starting_order: str, wait_time: int, adaptive_fmm_length: bool) -> None:
+def run_local_numcalc(project_path: Path | list[Path], numcalc_path: Path, max_ram_load_gb: float | None, ram_safety_factor: float, max_cpu_load: int, max_instances: int, starting_order: str, wait_time: int, adaptive_fmm_length: bool) -> None:
     executable = resolve_numcalc_executable(numcalc_path)
     adaptive_arguments = ["-adapt_fmmlength"] if adaptive_fmm_length else []
     running = []
     try:
-        projects = [project_path] if (project_path / "parameters.json").exists() else [path for path in project_path.iterdir() if (path / "parameters.json").exists()]
+        if isinstance(project_path, (list, tuple)):
+            # Explicit projects from the app/config route; sibling backups such
+            # as Left.previous must never be scheduled.
+            projects = [Path(path) for path in project_path if (Path(path) / "parameters.json").exists()]
+        else:
+            projects = [project_path] if (project_path / "parameters.json").exists() else [path for path in project_path.iterdir() if (path / "parameters.json").exists()]
         if not projects:
             raise FileNotFoundError(f"No Mesh2HRTF projects found at {project_path}")
         # Snapshot existing names before NumCalc runs. Only newly produced files

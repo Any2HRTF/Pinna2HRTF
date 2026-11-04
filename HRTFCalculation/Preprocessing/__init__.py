@@ -100,6 +100,43 @@ def _write_export_record(project):
     os.replace(temporary, project / EXPORT_RECORD)
 
 
+def snapshot_generated_outputs(project):
+    """State before Output2HRTF writes into a recorded project, or None if it has no record.
+
+    Returns (record, existing names, recorded Output2HRTF files still unchanged).
+    """
+    project = Path(project)
+    try:
+        record = json.loads((project / EXPORT_RECORD).read_text(encoding="utf-8"))
+        recorded = record["files"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    files, _ = _project_files(project)
+    unchanged = {name for name in files if name.startswith("Output2HRTF/") and name in recorded and _sha256(project / name) == recorded[name]}
+    return record, set(files), unchanged
+
+
+def claim_generated_outputs(project, snapshot):
+    """Record Output2HRTF files this run wrote, so an unchanged backup can later be replaced.
+
+    Only new files, or files that were recorded and unchanged before the run, are
+    claimed; pre-existing unrecorded or edited files stay unrecorded and keep the backup.
+    """
+    if snapshot is None:
+        return
+    project = Path(project)
+    record, existing, unchanged = snapshot
+    recorded = record["files"]
+    grids = {name.split("/")[1] for name in recorded if name.startswith("EvaluationGrids/") and name.count("/") >= 2}
+    files, _ = _project_files(project)
+    for name in files:
+        if _is_solver_output(name, grids) and (name not in existing or name in unchanged):
+            recorded[name] = _sha256(project / name)
+    temporary = project / (EXPORT_RECORD + ".tmp")
+    temporary.write_text(json.dumps(record, indent=1), encoding="utf-8")
+    os.replace(temporary, project / EXPORT_RECORD)
+
+
 def previous_backup_path(destination):
     return Path(f"{destination}.previous")
 
@@ -287,6 +324,13 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             migration_path.rename(intermediates)
         elif legacy_intermediates is not None and current_intermediates is not legacy_intermediates:
             legacy_intermediates.rename(_kept_backup_path(legacy_intermediates))
+        # One previous export per ear. The desktop/config route cannot prompt, so
+        # an older backup is approved for deletion only when it holds unchanged
+        # generated files; it is checked again before deletion. Anything else is
+        # kept as <project>.previous-<date>.
+        protected = [path.resolve() for path in (left_path, right_path) if path is not None]
+        to_replace = plan_export_backups({"left": left_project, "right": right_project}, protected, logger)
+        approved_backups = {str(path): fingerprint for path, _, fingerprint in to_replace}
     else:
         export_prefix = Path(export_path)
         left_project = Path(f"{export_prefix}-Left")
@@ -311,14 +355,25 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
     # Preserve legacy and previous intermediate files; these folders can hold
     # inputs, inference results and files changed outside the app.
     protected = [path.resolve() for path in (left_path, right_path) if path is not None]
-    def archive(path):
+    def is_input(path):
+        resolved = path.resolve()
+        return any(resolved == selected or resolved in selected.parents for selected in protected)
+
+    def archive(path, keep_one=False):
         if not path.exists():
             return
-        resolved = path.resolve()
-        if any(resolved == selected or resolved in selected.parents for selected in protected):
+        if is_input(path):
             raise FileExistsError(f"Refusing to replace an input: {path}")
-        target = _kept_backup_path(path)
-        path.rename(target)
+        if keep_one:
+            # Generated intermediate file: the latest run replaces the older
+            # copy, so only one previous version is kept per file.
+            target = Path(f"{path}.previous")
+            if target.is_symlink() or target.is_dir() or is_input(target):
+                target = _kept_backup_path(path)
+            path.replace(target)
+        else:
+            target = _kept_backup_path(path)
+            path.rename(target)
         logger(f"Kept previous output at {target}")
     side_dirs = {"left": intermediates / "Left", "right": intermediates / "Right"}
     for name in ["Prediction STL Left", "Prediction STL Right", "Prediction Parameters Left", "Prediction Parameters Right", "ICP STL Left", "ICP STL Right"]:
@@ -345,7 +400,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
                 for name in generated_names:
                     generated_path = side_dir / name
                     if generated_path.exists():
-                        archive(generated_path)
+                        archive(generated_path, keep_one=True)
             if path is not None:
                 side_dir.mkdir(parents=True, exist_ok=True)
             elif side_dir.exists():
@@ -355,7 +410,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
                     side_dir.rmdir()
                 except OSError:
                     pass
-        archive(work_dir / "dummy_head.stl")
+        archive(work_dir / "dummy_head.stl", keep_one=True)
         cleanup = None
     else:
         cleanup = tempfile.TemporaryDirectory()
@@ -450,11 +505,9 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-e', str(settings.mesh_max_error), '-v', '-g', str(gamma_l), '-h', str(gamma_r), '-s', side, '-i', str(stitched[side]), '-o', str(graded[side])], check=True, env=grading_env)
         # Both app/config and standalone exports publish only after every side
         # has been generated. Existing projects are retained, including unknown
-        # or externally modified files. Older backups require explicit consent
-        # for deletion; the desktop/config route never grants that consent.
+        # or externally modified files. Older backups are deleted only when
+        # approved above and still unchanged at publication.
         export_destinations = {"left": left_project, "right": right_project}
-        if output_dir is not None:
-            approved_backups = {}
         left_project.parent.mkdir(parents=True, exist_ok=True)
         export_staging = Path(tempfile.mkdtemp(prefix=f".{left_project.name}-staging-", dir=left_project.parent))
         left_project = export_staging / "Left"
