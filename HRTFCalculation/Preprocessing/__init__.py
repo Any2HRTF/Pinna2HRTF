@@ -137,6 +137,24 @@ def claim_generated_outputs(project, snapshot):
     os.replace(temporary, project / EXPORT_RECORD)
 
 
+PREVIOUS_RECORD = ".pinna2hrtf-previous.json"
+
+
+def _read_previous_record(folder):
+    """Fingerprints of the <name>.previous intermediate copies as Pinna2HRTF made them."""
+    try:
+        record = json.loads((Path(folder) / PREVIOUS_RECORD).read_text(encoding="utf-8"))
+        return {str(name): str(digest) for name, digest in record["files"].items()}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {}
+
+
+def _write_previous_record(folder, record):
+    temporary = Path(folder) / (PREVIOUS_RECORD + ".tmp")
+    temporary.write_text(json.dumps({"version": 1, "files": record}, indent=1), encoding="utf-8")
+    os.replace(temporary, Path(folder) / PREVIOUS_RECORD)
+
+
 def previous_backup_path(destination):
     return Path(f"{destination}.previous")
 
@@ -364,13 +382,24 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             return
         if is_input(path):
             raise FileExistsError(f"Refusing to replace an input: {path}")
-        if keep_one:
-            # Generated intermediate file: the latest run replaces the older
-            # copy, so only one previous version is kept per file.
+        if keep_one and not path.is_symlink() and path.is_file():
+            # Generated intermediate file: keep one previous copy. The older copy
+            # is replaced only if it still matches the fingerprint recorded when
+            # it was made; an edited, unrecorded or unusual one is kept dated.
             target = Path(f"{path}.previous")
-            if target.is_symlink() or target.is_dir() or is_input(target):
-                target = _kept_backup_path(path)
+            record = _read_previous_record(path.parent)
+            if target.exists() or target.is_symlink():
+                expected = record.get(target.name)
+                unchanged = (expected is not None and not target.is_symlink() and target.is_file()
+                             and not is_input(target) and _sha256(target) == expected)
+                if not unchanged:
+                    kept = _kept_backup_path(path)
+                    target.rename(kept)
+                    logger(f"Kept an older or edited copy at {kept}")
+            digest = _sha256(path)
             path.replace(target)
+            record[target.name] = digest
+            _write_previous_record(path.parent, record)
         else:
             target = _kept_backup_path(path)
             path.rename(target)
