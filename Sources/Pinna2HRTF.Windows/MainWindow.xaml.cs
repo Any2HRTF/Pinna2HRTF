@@ -1182,6 +1182,9 @@ public partial class MainWindow : Window
     string CurrentSettingValue(string id) => textSettings.TryGetValue(id, out var binding) ? binding.Control.Text : id switch
     {
         "project.use_bezierppm" => (usePredictionsBox.IsChecked == true).ToString(),
+        "scan_preparation.enabled" => (scanPreparationEnabledBox.IsChecked == true).ToString(),
+        "scan_preparation.prepare_left" => (prepareLeftEarBox.IsChecked == true).ToString(),
+        "scan_preparation.prepare_right" => (prepareRightEarBox.IsChecked == true).ToString(),
         "inference.model" => modelPicker.SelectedItem?.ToString() ?? "",
         "numcalc.adaptive_fmm" => (adaptiveFmmLengthBox.IsChecked == true).ToString(),
         "postprocessing.normalize" => (normalizeHrtfsBox.IsChecked == true).ToString(),
@@ -1194,6 +1197,9 @@ public partial class MainWindow : Window
     string StoredSettingValue(ProjectRecord project, string id) => textSettings.TryGetValue(id, out var binding) ? binding.Read(project) ?? "" : id switch
     {
         "project.use_bezierppm" => project.Settings.Inference.UsePredictionsForPreprocessing.ToString(),
+        "scan_preparation.enabled" => project.Settings.ScanPreparation.Enabled.ToString(),
+        "scan_preparation.prepare_left" => project.Settings.ScanPreparation.PrepareLeft.ToString(),
+        "scan_preparation.prepare_right" => project.Settings.ScanPreparation.PrepareRight.ToString(),
         "inference.model" => ModelName(project.Settings.Inference.ModelConfig),
         "numcalc.adaptive_fmm" => project.Settings.NumCalc.AdaptiveFmmLength.ToString(),
         "postprocessing.normalize" => (project.Settings.Postprocessing?.Normalize ?? true).ToString(),
@@ -1306,6 +1312,9 @@ public partial class MainWindow : Window
         switch (id)
         {
             case "project.use_bezierppm": usePredictionsBox.IsChecked = bool.TryParse(value, out var use) && use; break;
+            case "scan_preparation.enabled": scanPreparationEnabledBox.IsChecked = bool.TryParse(value, out var scan) && scan; break;
+            case "scan_preparation.prepare_left": prepareLeftEarBox.IsChecked = bool.TryParse(value, out var left) && left; break;
+            case "scan_preparation.prepare_right": prepareRightEarBox.IsChecked = bool.TryParse(value, out var right) && right; break;
             case "inference.model": modelPicker.SelectedItem = value; break;
             case "numcalc.adaptive_fmm": adaptiveFmmLengthBox.IsChecked = bool.TryParse(value, out var adaptive) && adaptive; break;
             case "postprocessing.normalize": normalizeHrtfsBox.IsChecked = bool.TryParse(value, out var normalize) && normalize; break;
