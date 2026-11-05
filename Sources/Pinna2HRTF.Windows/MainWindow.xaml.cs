@@ -210,7 +210,7 @@ public partial class MainWindow : Window
     readonly CheckBox scanPreparationEnabledBox = new();
     readonly CheckBox prepareLeftEarBox = new() { IsChecked = true };
     readonly CheckBox prepareRightEarBox = new() { IsChecked = true };
-    readonly Button alignScanButton = new() { Content = "Align scan with nose and ears" };
+    readonly Button alignScanButton = new() { Content = "Align scan…" };
     readonly Button applyScanAlignmentButton = new() { Content = "Apply Alignment", IsEnabled = false };
     readonly CheckBox adaptiveFmmLengthBox = new();
     readonly CheckBox normalizeHrtfsBox = new();
