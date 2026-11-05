@@ -25,12 +25,9 @@ public partial class MainWindow
 
     void UpdateAlignmentSaveEnabled()
     {
-        if (pendingAlignment != null && prepareLeftEarBox.IsChecked != true && prepareRightEarBox.IsChecked != true)
-            scanAlignmentStatus.Text = "Choose at least one ear to prepare.";
-        else if (pendingAlignment != null)
+        if (pendingAlignment != null)
             scanAlignmentStatus.Text = "Inspect alignment: X forward, Y left, Z up. Save or cancel.";
-        applyScanAlignmentButton.IsEnabled = scanAlignmentLandmarks.Count == 3 &&
-            (pendingAlignment == null || prepareLeftEarBox.IsChecked == true || prepareRightEarBox.IsChecked == true);
+        applyScanAlignmentButton.IsEnabled = scanAlignmentLandmarks.Count == 3;
     }
 
     void ClearAlignmentPreview()
@@ -77,7 +74,6 @@ public partial class MainWindow
             {
                 var prepareLeft = prepareLeftEarBox.IsChecked == true;
                 var prepareRight = prepareRightEarBox.IsChecked == true;
-                if (!prepareLeft && !prepareRight) return;
                 if(alignmentProjectId!=project.Id||alignmentWorkspace==null||alignmentSource==null)throw new IOException("The project changed; restart alignment.");
                 var destination=Path.Combine(originalRoot,"MeshEdits","AlignedScan.ply");
                 var operation=new Dictionary<string,object>{["action"]="align",["points"]=scanAlignmentLandmarks.Select(p=>new[]{(double)p.X,p.Y,p.Z}).ToArray(),
