@@ -127,9 +127,12 @@ struct ProjectInspectorView: View {
             HeadGeometryControls(store: store)
             Text("Microphone positions").fontWeight(.semibold)
             Text("Automatic positioning remains the default; adjust only when needed.").font(.caption).foregroundStyle(.secondary)
-            ForEach(store.workflowSides) { side in
-                Button("Adjust \(side.rawValue) microphone…") { store.beginMicrophonePlacement(side) }
-                    .disabled(!(store.selectedProjectStatus?.pipelineSides.contains(side) ?? false))
+            HStack(spacing: 8) {
+                ForEach(store.workflowSides) { side in
+                    Button("Adjust \(side.rawValue)…") { store.beginMicrophonePlacement(side) }
+                        .accessibilityLabel("Adjust \(side.rawValue) microphone")
+                        .disabled(!(store.selectedProjectStatus?.pipelineSides.contains(side) ?? false))
+                }
             }
             VStack(alignment: .leading, spacing: 9) {
                     PathField("Evaluation grid", helpID: "mesh2hrtf.evaluation_grid", text: optionalPreprocessingBinding(\.evaluationGrid), mode: .directory)

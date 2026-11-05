@@ -150,7 +150,12 @@ public partial class MainWindow
         var simulation = workflowPages[2]; simulation.Children.Add(GeometryPanel());
         simulation.Children.Add(new TextBlock { Text = "Microphone positions", FontWeight = FontWeights.SemiBold });
         simulation.Children.Add(WorkflowText("Automatic positioning remains the default; adjust only when needed."));
-        simulation.Children.Add(placeLeftButtonHost!); simulation.Children.Add(placeRightButtonHost!);
+        var microphoneActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        placeLeftButton.Content = "Adjust left…"; placeRightButton.Content = "Adjust right…";
+        AutomationProperties.SetName(placeLeftButton, "Adjust left microphone");
+        AutomationProperties.SetName(placeRightButton, "Adjust right microphone");
+        microphoneActions.Children.Add(placeLeftButtonHost!); microphoneActions.Children.Add(placeRightButtonHost!);
+        simulation.Children.Add(microphoneActions);
         simulation.Children.Add(PathSettingPanel("Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked));
         AddSetting(simulation, "Min frequency", "mesh2hrtf.min_frequency", minFrequencyBox);
         AddSetting(simulation, "Max frequency", "mesh2hrtf.max_frequency", maxFrequencyBox);
