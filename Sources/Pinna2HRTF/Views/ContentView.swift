@@ -75,7 +75,7 @@ struct ContentView: View {
         } else {
             HSplitView {
                 navigationWorkspace
-                    .frame(minWidth: 460, maxWidth: .infinity)
+                    .frame(minWidth: PressureFieldView.minimumViewerWidth + 180, maxWidth: .infinity)
                     .layoutPriority(1)
                 if inspectorPresented {
                     ProjectInspectorView(store: store)
@@ -91,7 +91,7 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 180, ideal: 240, max: 320)
         } detail: {
             meshViewer
-                .frame(minWidth: 280, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                .frame(minWidth: PressureFieldView.minimumViewerWidth, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
         }
         .navigationSplitViewStyle(.balanced)
     }

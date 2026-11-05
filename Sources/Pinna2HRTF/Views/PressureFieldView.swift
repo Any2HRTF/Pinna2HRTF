@@ -2,6 +2,7 @@ import SwiftUI
 import SceneKit
 
 struct PressureFieldView: View {
+    static let minimumViewerWidth: CGFloat = 680
     @StateObject private var model: PressureFieldModel
     @Environment(\.colorScheme) private var colorScheme
 
@@ -9,10 +10,7 @@ struct PressureFieldView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView(.horizontal) {
-                HStack { selectors }
-                    .fixedSize(horizontal: true, vertical: false)
-            }
+            HStack(spacing: 8) { selectors; Spacer(minLength: 0) }
             .padding(12)
             Divider()
             ZStack(alignment: .bottomLeading) {
@@ -49,13 +47,15 @@ struct PressureFieldView: View {
         Picker("Frequency", selection: $model.step) {
             ForEach(model.steps) { step in Text(step.label).tag(step.id) }
         }
-        .frame(minWidth: 160)
+        .frame(width: 190)
         Picker("Surface", selection: $model.surface) {
             ForEach(model.surfaces, id: \.self) { Text($0).tag($0) }
         }
+        .frame(width: 180)
         Picker("Quantity", selection: $model.quantity) {
             ForEach(PressureQuantity.allCases) { Text($0.rawValue).tag($0) }
         }
+        .frame(width: 165)
         Button("Reset view", systemImage: "arrow.counterclockwise", action: model.resetCamera)
             .labelStyle(.iconOnly)
             .help("Reset pressure view")

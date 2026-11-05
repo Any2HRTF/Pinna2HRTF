@@ -16,7 +16,7 @@ struct Pinna2HRTFApp: App {
         Window("Pinna2HRTF", id: "main") {
             ContentView(store: store)
                 .onAppear { appDelegate.store = store }
-                .frame(minWidth: 900, maxWidth: .infinity, minHeight: 650, maxHeight: .infinity)
+                .frame(minWidth: PressureFieldView.minimumViewerWidth + 590, maxWidth: .infinity, minHeight: 650, maxHeight: .infinity)
         }
         .defaultSize(width: 1320, height: 900)
         .windowStyle(.titleBar)

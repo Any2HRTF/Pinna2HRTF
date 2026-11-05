@@ -18,7 +18,7 @@ final class MeshWorkspaceSplitView: NSSplitView, NSSplitViewDelegate {
     }
     override var fittingSize: NSSize { .zero }
 
-    init(inspectorWidth: CGFloat = 320, minimumViewerWidth: CGFloat = 340,
+    init(inspectorWidth: CGFloat = 320, minimumViewerWidth: CGFloat = PressureFieldView.minimumViewerWidth,
          minimumInspectorWidth: CGFloat = 260, maximumInspectorWidth: CGFloat = 720) {
         self.inspectorWidth = inspectorWidth
         self.minimumViewerWidth = minimumViewerWidth
