@@ -2,14 +2,13 @@ import Foundation
 import AppKit
 
 enum WorkflowStep: Int, CaseIterable, Identifiable {
-    case inputs, prepare, model, simulation, calculate, results
+    case inputs, prepare, simulation, calculate, results
     var id: Int { rawValue }
-    var title: String { ["Inputs", "Prepare ears", "Ear model", "Simulation setup", "Calculate", "Results"][rawValue] }
+    var title: String { ["Inputs", "Prepare ears & model", "Simulation setup", "Calculate", "Results"][rawValue] }
     var stage: Stage? {
         switch self {
         case .inputs: nil
         case .prepare: .scanPreparation
-        case .model: .inference
         case .simulation: .preprocessing
         case .calculate: .numcalc
         case .results: .postprocessing
@@ -96,13 +95,14 @@ extension AppStore {
         if let issue = selectedValidationIssues.first(where: { $0.id.hasPrefix("ear_edit.") }) {
             return .init(title: issue.message, step: .prepare)
         }
-        if earModelMethod == nil { return .init(title: "Choose one ear modelling method", step: .model) }
+        if earModelMethod == nil { return .init(title: "Choose one ear modelling method", step: .prepare) }
         if earModelMethod == .manual,
            let side = workflowSides.first(where: { !(selectedProjectStatus?.validFitSides.contains($0) ?? false) }) {
-            return .init(title: "Fit \(side.rawValue) ear", step: .model, fit: side)
+            return .init(title: "Fit \(side.rawValue) ear", step: .prepare, fit: side)
         }
-        if let stage = nextStage, let step = WorkflowStep.allCases.first(where: { $0.stage == stage }) {
-            return .init(title: "Run \(stage.title)", step: step, stage: stage)
+        if let stage = nextStage {
+            let step = stage == .inference ? WorkflowStep.prepare : WorkflowStep.allCases.first(where: { $0.stage == stage })
+            if let step { return .init(title: "Run \(stage.title)", step: step, stage: stage) }
         }
         return .init(title: "Open results", step: .results)
     }
@@ -132,14 +132,28 @@ extension AppStore {
     func workflowStatus(_ step: WorkflowStep) -> String {
         guard let project = selectedProject else { return "Needs input" }
         if step == .inputs { return workflowInputIssue == nil ? "Complete" : "Needs input" }
-        if step == .prepare && !project.scanPreparation.enabled { return "Optional" }
-        if step == .model {
+        if step == .prepare {
+            if project.scanPreparation.enabled {
+                let scanState = stageStates[.scanPreparation] ?? .ready
+                if scanState == .running { return "Running…" }
+                if scanState == .failed { return "Failed" }
+                if scanState == .stopped { return "Stopped" }
+                if !(selectedProjectStatus?.completed.contains(.scanPreparation) ?? false) {
+                    return canRun(stage: .scanPreparation) ? "Ready" : "Needs input"
+                }
+            }
             if earModelMethod == nil { return "Choose method" }
-            if earModelMethod == EarModelMethod.none { return "Not needed" }
+            if earModelMethod == EarModelMethod.none { return project.scanPreparation.enabled ? "Complete" : "Optional" }
             if earModelMethod == .manual {
                 let count = workflowSides.filter { selectedProjectStatus?.validFitSides.contains($0) ?? false }.count
                 return !workflowSides.isEmpty && count == workflowSides.count ? "Complete" : "Needs fit · \(count)/\(workflowSides.count)"
             }
+            let inferenceState = stageStates[.inference] ?? .ready
+            if inferenceState == .running { return "Running…" }
+            if inferenceState == .failed { return "Failed" }
+            if inferenceState == .stopped { return "Stopped" }
+            if selectedProjectStatus?.completed.contains(.inference) == true { return "Complete" }
+            return canRun(stage: .inference) ? "Ready" : "Needs input"
         }
         guard let stage = step.stage else { return "Ready" }
         let state = stageStates[stage] ?? .ready

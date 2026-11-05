@@ -90,7 +90,7 @@ struct ProjectInspectorView: View {
                     }
                 }
             }
-        case .model:
+            Divider().padding(.vertical, 4)
             Picker("Ear modelling method", selection: Binding<EarModelMethod?>(get: { store.earModelMethod }, set: { if let value = $0 { store.selectEarModelMethod(value) } })) {
                 ForEach(EarModelMethod.allCases) { method in Text(method.title).tag(Optional(method)) }
             }.pickerStyle(.radioGroup)

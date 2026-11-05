@@ -79,7 +79,7 @@ struct ContentView: View {
                     .layoutPriority(1)
                 if inspectorPresented {
                     ProjectInspectorView(store: store)
-                        .frame(minWidth: 260, idealWidth: 320, maxWidth: 720)
+                        .frame(minWidth: 300, idealWidth: 320, maxWidth: 720)
                 }
             }
         }

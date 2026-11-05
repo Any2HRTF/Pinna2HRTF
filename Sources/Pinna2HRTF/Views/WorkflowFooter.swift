@@ -15,8 +15,11 @@ struct WorkflowFooter: View {
     }
 
     var body: some View {
-        let stage = store.workflowStep.stage
-        let reason = stage.flatMap { store.runUnavailableReason(stage: $0) }
+        let stages: [Stage] = store.workflowStep == .prepare
+            ? (store.selectedProject?.scanPreparation.enabled == true ? [.scanPreparation] : [])
+                + (store.earModelMethod == .mesh2ppm ? [.inference] : [])
+            : store.workflowStep.stage.map { [$0] } ?? []
+        let reason = stages.compactMap { store.runUnavailableReason(stage: $0) }.first
         VStack(alignment: .leading, spacing: 8) {
             if store.selectedProjectIsRunning {
                 ProgressView()
@@ -28,11 +31,14 @@ struct WorkflowFooter: View {
                 if runningNow {
                     Button("Stop") { store.stopRunningProcess() }
                 }
-                if let stage {
-                    Button(runTitle(stage)) { store.run(stage: stage) }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.blue)
-                        .disabled(!store.canRun(stage: stage))
+                ForEach(stages) { stage in
+                    Button(stages.count > 1 ? (stage == .scanPreparation ? "Prepare" : "Run PPM") : runTitle(stage)) {
+                        store.run(stage: stage)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+                    .disabled(!store.canRun(stage: stage))
+                    .help("Run \(stage.title)")
                 }
                 Spacer(minLength: 0)
                 if !runningNow {
