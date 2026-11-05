@@ -37,6 +37,13 @@ struct MeshEditorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if model.request.isAlignment {
+                        Text("Ears to prepare").font(.subheadline.weight(.semibold))
+                        Toggle("Prepare left ear", isOn: $model.request.prepareLeft)
+                        Toggle("Prepare right ear", isOn: $model.request.prepareRight)
+                        if !model.request.prepareLeft && !model.request.prepareRight {
+                            Text("Choose at least one ear to prepare.").font(.caption).foregroundStyle(.orange)
+                        }
+                        Divider()
                         alignmentControls
 
                     } else {

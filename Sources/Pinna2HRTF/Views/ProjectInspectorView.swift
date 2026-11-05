@@ -199,9 +199,7 @@ struct ProjectInspectorView: View {
             }.pickerStyle(.radioGroup)
             if store.selectedProject?.scanPreparation.enabled == true {
                 PathField("Full-head scan", helpID: "scan.path", text: scanTextBinding(\.scanPath), mode: .file)
-                Toggle("Prepare left ear", isOn: scanBoolBinding(\.prepareLeft))
-                Toggle("Prepare right ear", isOn: scanBoolBinding(\.prepareRight))
-                Text("Align and extract ears in Prepare ears.").font(.caption)
+                Text("Choose ears in Align scan, then extract them in Prepare ears.").font(.caption)
             } else {
                 PathField("Left ear", helpID: "project.left_ear", text: projectStringBinding(\.leftEar), mode: .file)
                 PathField("Right ear", helpID: "project.right_ear", text: projectStringBinding(\.rightEar), mode: .file)

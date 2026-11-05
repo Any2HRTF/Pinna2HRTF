@@ -451,7 +451,8 @@ final class AppStore: ObservableObject {
         let url = URL(fileURLWithPath: source)
         meshEditorRequest = MeshEditorRequest(projectID: project.id, source: url, originalSource: url,
             destination: URL(fileURLWithPath: project.saveLocation).appendingPathComponent("MeshEdits/AlignedScan.ply"),
-            side: nil, preparedGeneration: nil, preparedReport: nil)
+            side: nil, preparedGeneration: nil, preparedReport: nil,
+            prepareLeft: project.scanPreparation.prepareLeft, prepareRight: project.scanPreparation.prepareRight)
     }
 
     func beginEarEditing(_ side: EarSide) {
@@ -560,6 +561,8 @@ final class AppStore: ObservableObject {
         if let side = request.side {
             scan.setEarEdit(request.destination.path, side: side)
         } else {
+            scan.prepareLeft = request.prepareLeft
+            scan.prepareRight = request.prepareRight
             scan.originalScanPath = request.originalSource.path
             scan.scanPath = request.destination.path
             scan.rotationDegrees = "0"

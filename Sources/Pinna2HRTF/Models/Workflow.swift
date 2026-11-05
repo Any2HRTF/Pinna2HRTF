@@ -4,7 +4,7 @@ import AppKit
 enum WorkflowStep: Int, CaseIterable, Identifiable {
     case inputs, prepare, simulation, calculate, results
     var id: Int { rawValue }
-    var title: String { ["Inputs", "Prepare ears & model", "Simulation setup", "Calculate", "Results"][rawValue] }
+    var title: String { ["Project", "Prepare ears & model", "Simulation setup", "Calculate", "Results"][rawValue] }
     var stage: Stage? {
         switch self {
         case .inputs: nil

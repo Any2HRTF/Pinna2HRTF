@@ -10,6 +10,8 @@ struct MeshEditorRequest: Identifiable {
     let side: EarSide?
     let preparedGeneration: String?
     let preparedReport: URL?
+    var prepareLeft = true
+    var prepareRight = true
     var isAlignment: Bool { side == nil }
     var title: String { side.map { "Edit \($0.title) Ear" } ?? "Nose and Ear Alignment" }
 }

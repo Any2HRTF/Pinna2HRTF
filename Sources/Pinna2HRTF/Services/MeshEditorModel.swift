@@ -9,7 +9,7 @@ final class MeshEditorModel: ObservableObject {
         case landmarks = "Landmarks", selection = "Select Faces", plane = "Cutting Plane"
         var id: String { rawValue }
     }
-    let request: MeshEditorRequest
+    @Published var request: MeshEditorRequest
     let scene = SCNScene()
     let workspace = URL(fileURLWithPath: "/private/tmp/pinna-mesh-editor-\(UUID().uuidString)")
     @Published var tool: Tool
@@ -60,7 +60,7 @@ final class MeshEditorModel: ObservableObject {
     var canUndo: Bool { !busy && currentVersion > 0 }
     var canRedo: Bool { !busy && currentVersion + 1 < versions.count }
     var hasAlignment: Bool { operations.prefix(currentVersion).contains { $0["action"] as? String == "align" } }
-    var canSave: Bool { !busy && !versions.isEmpty && selectedFaces.isEmpty && tool != .plane && (!request.isAlignment || hasAlignment) }
+    var canSave: Bool { !busy && !versions.isEmpty && selectedFaces.isEmpty && tool != .plane && (!request.isAlignment || (hasAlignment && (request.prepareLeft || request.prepareRight))) }
     var span: Double { max(Double(simd_length(boundsMax - boundsMin)), 1) }
     var center: SIMD3<Float> { (boundsMin + boundsMax) / 2 }
     var normal: SIMD3<Float>? {
