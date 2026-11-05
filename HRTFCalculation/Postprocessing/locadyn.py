@@ -2,15 +2,15 @@
 
 Copyright (C) 2003–2022 Acoustics Research Institute, Austrian Academy of
 Sciences; Piotr Majdak and Michael Mihocic. Licensed under EUPL 1.2.
-The unmodified source and full license are retained in upsample_hrtf.m.
+Original sources and licence notices are documented in LOCADYN-LICENSES.txt.
 The on/off-axis models derive from AMT (Harald Ziegelwanger, Robert
 Baumgartner, Laurin Steidle), GPL-3.0-or-later:
 https://amtoolbox.org/amt-1.6.0/doc/modelstages/ziegelwanger2014_offaxis_code.php
-TriQuad subdivision: Anton Semechko (2015), BSD notice in upsample_hrtf.m.
+TriQuad subdivision: Anton Semechko (2015), BSD notice in LOCADYN-LICENSES.txt.
 This combined translation is distributed under GPL-3.0, using the EUPL
 compatibility provision. See AMT-GPL-3.0.txt for the full license.
 
-Numerical comparisons against MATLAB are covered by the reference fixtures.
+The translation was numerically compared with the original MATLAB implementation.
 Floating-point results are numerically equivalent, not bitwise identical.
 """
 from __future__ import annotations
@@ -161,7 +161,7 @@ def fit_toa(ir, positions, fs):
     x = positions[:, :2]*np.pi/180
     initial = fit_onaxis(estimated, positions, fs)
     # NOTE (kept on purpose, scientific decision): alpha = number of directions
-    # mirrors upsample_hrtf.m:633, where LocaDyn calls ziegelwanger2014 with
+    # mirrors the original LocaDyn call to ziegelwanger2014 with
     # outlierDetection=1 so deleteoutliers gets alpha = 1*M (AMT's default is
     # prod([0.05;0.01])*M). With alpha/(2n) >= 0.5 the Grubbs critical value is
     # ~0, so roughly half of the directions are excluded from the TOA fits even

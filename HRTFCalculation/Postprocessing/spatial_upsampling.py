@@ -1,8 +1,7 @@
 """Spatial HRTF upsampling using the bundled Python LocaDyn translation (locadyn.py).
 
-upsample_hrtf.m (with its helper experiment_general_fir.m) is shipped only as
-the reference implementation and license record for that translation; it is
-never executed. No MATLAB or AMT installation is used at runtime.
+The Python implementation does not require MATLAB or AMT at runtime.
+Source attribution and licence notices are in LOCADYN-LICENSES.txt.
 """
 from __future__ import annotations
 
