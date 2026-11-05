@@ -260,8 +260,7 @@ public partial class MainWindow : Window
         if (MacLayout) { projectsExpandedWidth = 240; settingsExpandedWidth = 360; logCollapsed = true; }
         BuildInterface();
         packageRoot = FindPackageRoot();
-        var reviewBuild=typeof(MainWindow).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Contains("-review",StringComparison.OrdinalIgnoreCase)==true;
-        appData = Environment.GetEnvironmentVariable("PINNA2HRTF_APP_DATA") is string overrideData && Path.IsPathFullyQualified(overrideData) ? overrideData : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), MacReviewStorage ? "Pinna2HRTF-v2-review-macimitation" : reviewBuild ? "Pinna2HRTF-v2-review" : "Pinna2HRTF");
+        appData = Environment.GetEnvironmentVariable("PINNA2HRTF_APP_DATA") is string overrideData && Path.IsPathFullyQualified(overrideData) ? overrideData : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), MacReviewStorage ? "Pinna2HRTF-v2-review-macimitation" : "Pinna2HRTF-v2-review");
 #if PINNA2HRTF_REVIEW
         appData = Path.Combine(AppContext.BaseDirectory, ".appdata");
 #endif
