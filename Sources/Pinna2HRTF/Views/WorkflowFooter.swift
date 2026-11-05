@@ -22,7 +22,6 @@ struct WorkflowFooter: View {
         let reason = stages.compactMap { store.runUnavailableReason(stage: $0) }.first
         VStack(alignment: .leading, spacing: 8) {
             if store.selectedProjectIsRunning {
-                ProgressView()
                 Text("Processing…").font(.caption)
             } else if let reason {
                 Text(reason).font(.caption).foregroundStyle(.secondary)
