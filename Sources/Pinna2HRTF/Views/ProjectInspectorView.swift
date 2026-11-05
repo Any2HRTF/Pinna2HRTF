@@ -88,9 +88,7 @@ struct ProjectInspectorView: View {
                 manualPPMPanel
             } else if store.earModelMethod == .mesh2ppm {
                 Text("Generate PPM geometry automatically.").font(.caption)
-                DisclosureGroup("Advanced settings · model") {
-                    ModelPicker(selection: modelNameBinding, options: store.modelOptions, helpID: "inference.model")
-                }
+                ModelPicker(selection: modelNameBinding, options: store.modelOptions, helpID: "inference.model")
                 stageAction(.inference)
             } else if store.earModelMethod == EarModelMethod.none {
                 Text("Using ear meshes directly. Required mesh preprocessing still runs.").font(.caption)
