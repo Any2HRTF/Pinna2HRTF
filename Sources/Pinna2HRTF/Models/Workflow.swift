@@ -102,7 +102,7 @@ extension AppStore {
         }
         if let stage = nextStage {
             let step = stage == .inference ? WorkflowStep.prepare : WorkflowStep.allCases.first(where: { $0.stage == stage })
-            if let step { return .init(title: "Run \(stage.title)", step: step, stage: stage, enabled: canRun(stage: stage)) }
+            if let step { return .init(title: step == .calculate ? "Calculate" : step == .results ? "SOFA export" : "Run \(step.title.lowercased())", step: step, stage: stage, enabled: canRun(stage: stage)) }
         }
         return .init(title: "Open results", step: .results)
     }

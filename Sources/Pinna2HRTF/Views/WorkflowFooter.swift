@@ -8,9 +8,9 @@ struct WorkflowFooter: View {
         switch stage {
         case .scanPreparation: "Prepare ears"
         case .inference: "Run inference"
-        case .preprocessing: "Run preprocessing"
-        case .numcalc: "Run NumCalc"
-        case .postprocessing: "Run postprocessing"
+        case .preprocessing: "Run simulation setup"
+        case .numcalc: "Calculate"
+        case .postprocessing: "SOFA export"
         }
     }
 
@@ -37,7 +37,7 @@ struct WorkflowFooter: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.blue)
                     .disabled(!store.canRun(stage: stage))
-                    .help("Run \(stage.title)")
+                    .help(runTitle(stage))
                 }
                 Spacer(minLength: 0)
                 if !runningNow {
