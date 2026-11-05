@@ -27,21 +27,28 @@ struct MeshViewerView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HStack {
-                    Picker("Viewing", selection: Binding<URL?>(
-                        get: { store.selectedMesh },
-                        set: { url in
-                            if let artifact = store.artifacts.first(where: { $0.exists && $0.url == url }) {
+                    let previews = store.artifacts.filter(\.exists)
+                    let previewTitle = previews.first(where: { $0.url == store.selectedMesh })?.title
+                        ?? store.selectedMesh?.lastPathComponent
+                        ?? (previews.isEmpty ? "No artifacts" : "Select artifact")
+                    Menu {
+                        ForEach(previews) { artifact in
+                            Button {
                                 store.openArtifact(artifact)
+                            } label: {
+                                if artifact.url == store.selectedMesh {
+                                    Label(artifact.title, systemImage: "checkmark")
+                                } else {
+                                    Text(artifact.title)
+                                }
                             }
                         }
-                    )) {
-                        Text("Choose preview").tag(Optional<URL>.none)
-                        ForEach(store.artifacts.filter(\.exists)) { artifact in
-                            Text(artifact.title).tag(Optional(artifact.url))
-                        }
+                    } label: {
+                        Text(previewTitle)
                     }
-                    .pickerStyle(.menu)
-                    .disabled(store.isPlacingMicrophone)
+                    .accessibilityLabel("Artifact to view")
+                    .accessibilityValue(Text(previewTitle))
+                    .disabled(store.isPlacingMicrophone || previews.isEmpty)
                     Spacer()
                 }.padding(10)
                 Divider()
