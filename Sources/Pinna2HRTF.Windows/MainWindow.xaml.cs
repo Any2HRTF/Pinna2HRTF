@@ -887,6 +887,7 @@ public partial class MainWindow : Window
         var row = new Grid { Margin = new Thickness(0, 2, 0, 0), HorizontalAlignment = HorizontalAlignment.Stretch };
         row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var labelPanel = new StackPanel { Orientation = Orientation.Horizontal };
@@ -894,15 +895,37 @@ public partial class MainWindow : Window
         var info = InfoButton(id);
         labelPanel.Children.Add(info);
         row.Children.Add(labelPanel);
-        var browse = new Button { Content = "Browse", HorizontalAlignment = HorizontalAlignment.Right, MinHeight = 28, Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(6, 0, 0, 0) };
+        var browse = new Button { Content = "Choose…", HorizontalAlignment = HorizontalAlignment.Right, MinHeight = 28, Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(6, 0, 0, 0) };
         browse.Click += handler;
         Grid.SetColumn(browse, 1);
+        Grid.SetRow(browse, 1);
         row.Children.Add(browse);
-        Grid.SetRow(box, 1);
-        Grid.SetColumnSpan(box, 2);
+        var name = new TextBlock { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, IsTextSelectionEnabled = true };
+        void UpdateName()
+        {
+            var path = box.Text.Trim();
+            name.Text = path.Length == 0 ? "No path selected" : Path.GetFileName(Path.TrimEndingDirectorySeparator(path)) is { Length: > 0 } leaf ? leaf : path;
+            ToolTipService.SetToolTip(name, path);
+        }
+        box.TextChanged += (_, _) => UpdateName(); UpdateName();
+        var menu = new MenuFlyout(); var copy = new MenuFlyoutItem { Text = "Copy path" };
+        copy.Click += (_, _) => { var data = new global::Windows.ApplicationModel.DataTransfer.DataPackage(); data.SetText(box.Text); global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data); };
+        menu.Items.Add(copy); name.ContextFlyout = menu;
+        Grid.SetRow(name, 1); row.Children.Add(name);
         box.HorizontalAlignment = HorizontalAlignment.Stretch;
         box.MinHeight = 28;
-        row.Children.Add(box);
+        var disclosure = new Expander { Header = "Path", Content = box, IsExpanded = false, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 4, 0, 0) };
+        Grid.SetRow(disclosure, 2); Grid.SetColumnSpan(disclosure, 2); row.Children.Add(disclosure);
+        if (id == "project.save_location")
+        {
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right };
+            row.Children.Remove(browse); actions.Children.Add(browse);
+            var open = new Button { Content = "Open", MinHeight = 28, Padding = new Thickness(8, 2, 8, 2) };
+            open.Click += (_, _) => { if (Directory.Exists(box.Text)) OpenExternal(box.Text); };
+            box.TextChanged += (_, _) => open.IsEnabled = Directory.Exists(box.Text);
+            open.IsEnabled = Directory.Exists(box.Text); actions.Children.Add(open);
+            Grid.SetRow(actions, 1); Grid.SetColumn(actions, 1); row.Children.Add(actions);
+        }
         box.Tag = id;
         settingControls[id] = box;
         AttachSettingInput(box);
