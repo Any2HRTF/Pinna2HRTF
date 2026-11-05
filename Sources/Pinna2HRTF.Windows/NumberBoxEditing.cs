@@ -15,12 +15,13 @@ internal static class NumberBoxEditing
         bool editing = false, updating = false, attached = false;
         double initial = read();
         double? validatedDraft = null;
+        TextBox? inputBox = null;
         var clearButtons = new HashSet<Button>();
 
         bool Inside(DependencyObject? child)
         {
             while (child != null) {
-                if (ReferenceEquals(child, number)) return true;
+                if (child.Equals(number)) return true;
                 child = VisualTreeHelper.GetParent(child);
             }
             return false;
@@ -32,22 +33,25 @@ internal static class NumberBoxEditing
             try {
                 if (cancel) commit(initial);
                 else {
-                    var draft = validatedDraft is double validated && double.IsFinite(validated) && number.Text == format(validated)
-                        ? validated : parse(number.Text);
+                    var text = inputBox?.Text ?? number.Text;
+                    var draft = validatedDraft is double validated && double.IsFinite(validated) && text == format(validated)
+                        ? validated : parse(text);
                     if (draft is double value && double.IsFinite(value)) commit(Math.Clamp(value, number.Minimum, number.Maximum));
                 }
                 var current = read();
                 number.Value = current; number.Text = format(current);
+                if (inputBox != null) inputBox.Text = format(current);
                 editing = false;
             } finally { updating = false; }
-            if (number.XamlRoot != null && Inside(FocusManager.GetFocusedElement(number.XamlRoot) as DependencyObject))
-                focusTarget.Focus(FocusState.Programmatic);
+            if (cancel || number.XamlRoot != null && Inside(FocusManager.GetFocusedElement(number.XamlRoot) as DependencyObject))
+                number.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                    () => focusTarget.Focus(FocusState.Programmatic));
         }
         void FindClear(DependencyObject parent)
         {
             for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++) {
                 var child = VisualTreeHelper.GetChild(parent, i);
-                if (child is TextBox input) input.ApplyTemplate();
+                if (child is TextBox input) { inputBox = input; input.ApplyTemplate(); }
                 if (child is Button { Name: "DeleteButton" } clear && clearButtons.Add(clear)) {
                     clear.Click += (_, args) => {
                         // Run after the TextBox template's own clear handler.
@@ -71,6 +75,8 @@ internal static class NumberBoxEditing
         number.GotFocus += (_, _) => {
             if (!editing) { initial = read(); validatedDraft = null; editing = true; }
             FindClear(number);
+            // TextBox creates its clear-button template lazily on first focus.
+            number.DispatcherQueue.TryEnqueue(() => FindClear(number));
         };
         number.LostFocus += (_, _) => {
             if (number.XamlRoot != null && !Inside(FocusManager.GetFocusedElement(number.XamlRoot) as DependencyObject)) Finish(false);
