@@ -24,7 +24,7 @@ struct Pinna2HRTFApp: App {
             CommandGroup(replacing: .appInfo) {
                 Button("About Pinna2HRTF") {
                     let version = Bundle.main.object(forInfoDictionaryKey: "Pinna2HRTFDisplayVersion") as? String
-                        ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0"
+                        ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0 beta"
                     let revision = Bundle.main.object(forInfoDictionaryKey: "Pinna2HRTFGitHead") as? String ?? "unknown"
                     let paragraph = NSMutableParagraphStyle()
                     paragraph.alignment = .center

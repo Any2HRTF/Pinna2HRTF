@@ -17,8 +17,8 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$ROOT/.." && pwd)"
 APP_VERSION="2.0"
-APP_DISPLAY_VERSION="$APP_VERSION"
-APP_ARTIFACT_VERSION="$APP_VERSION"
+APP_DISPLAY_VERSION="2.0 beta"
+APP_ARTIFACT_VERSION="2.0-beta"
 if git -C "$ROOT" rev-parse --verify HEAD >/dev/null 2>&1; then
   GIT_HEAD="$(git -C "$ROOT" rev-parse --short HEAD)"
   APP_BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD)"
