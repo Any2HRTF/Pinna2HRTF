@@ -727,6 +727,18 @@ public partial class MainWindow : Window
         alignmentPanel.Children.Add(scanAlignmentStatus);
         alignmentPanel.Children.Add(alignmentPrepareLeft);
         alignmentPanel.Children.Add(alignmentPrepareRight);
+        var saveEarSelection = new Button { Content = "Save ear selection" };
+        saveEarSelection.Click += (_, _) => {
+            if (alignmentSaving || selectedProject is not { } project || projectOperations.Contains(project.Id)) return;
+            var left = alignmentPrepareLeft.IsChecked == true;
+            var right = alignmentPrepareRight.IsChecked == true;
+            if (!left && !right) { scanAlignmentStatus.Text = "Choose at least one ear to prepare."; return; }
+            project.Settings.ScanPreparation.PrepareLeft = left;
+            project.Settings.ScanPreparation.PrepareRight = right;
+            EndScanAlignment();
+            Persist(); LoadSelectedProject(); RefreshArtifacts(); RefreshPipelineStatus();
+        };
+        alignmentPanel.Children.Add(saveEarSelection);
         alignmentPrepareLeft.Click += (_, _) => UpdateAlignmentSaveEnabled();
         alignmentPrepareRight.Click += (_, _) => UpdateAlignmentSaveEnabled();
         alignmentPanel.Children.Add(coordinateToggle);

@@ -11,6 +11,7 @@ final class PPMFittingPythonWorker: @unchecked Sendable {
     private let process = Process()
     private let inputPipe = Pipe()
     private let outputPipe = Pipe()
+    private let errorPipe = Pipe()
     private let lock = NSLock()
     private var buffer = Data()
     private let stopped = LockedValue(false)
@@ -26,7 +27,12 @@ final class PPMFittingPythonWorker: @unchecked Sendable {
         process.currentDirectoryURL = workingDirectory
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
-        process.standardError = FileHandle.nullDevice
+        process.standardError = errorPipe
+        errorPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty { handle.readabilityHandler = nil; return }
+            NSLog("Pinna2HRTF PPM worker: %@", String(decoding: data.prefix(8192), as: UTF8.self))
+        }
         try ProcessLauncher.shared.launch(process)
     }
 

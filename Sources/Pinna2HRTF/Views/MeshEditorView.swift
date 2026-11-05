@@ -6,13 +6,22 @@ struct MeshEditorView: View {
     @StateObject private var model: MeshEditorModel
     @Environment(\.dismiss) private var dismiss
     let saved: (MeshEditorRequest) -> Void
+    let savedSelection: (MeshEditorRequest) -> Void
 
-    init(request: MeshEditorRequest, saved: @escaping (MeshEditorRequest) -> Void) {
+    init(request: MeshEditorRequest, saved: @escaping (MeshEditorRequest) -> Void, savedSelection: @escaping (MeshEditorRequest) -> Void) {
         _model = StateObject(wrappedValue: MeshEditorModel(request: request))
         self.saved = saved
+        self.savedSelection = savedSelection
     }
 
     private func closeEditor() {
+        if model.canUndo || !model.landmarks.isEmpty || !model.selectedFaces.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = "Discard unsaved mesh changes?"
+            alert.addButton(withTitle: "Keep editing")
+            alert.addButton(withTitle: "Discard")
+            guard alert.runModal() == .alertSecondButtonReturn else { return }
+        }
         dismiss()
     }
 
@@ -43,6 +52,11 @@ struct MeshEditorView: View {
                         if !model.request.prepareLeft && !model.request.prepareRight {
                             Text("Choose at least one ear to prepare.").font(.caption).foregroundStyle(.orange)
                         }
+                        Button("Save ear selection") {
+                            savedSelection(model.request)
+                            dismiss()
+                        }
+                        .disabled(!model.request.prepareLeft && !model.request.prepareRight)
                         Divider()
                         alignmentControls
 
@@ -82,7 +96,7 @@ struct MeshEditorView: View {
                 Button("Cancel") { closeEditor() }.keyboardShortcut(.cancelAction).disabled(model.busy)
                 Button(model.request.isAlignment ? "Save aligned scan" : "Save ear") {
                     Task {
-                        if await model.save() { saved(model.request); closeEditor() }
+                        if await model.save() { saved(model.request); dismiss() }
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -90,7 +104,7 @@ struct MeshEditorView: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .interactiveDismissDisabled(model.busy)
+        .interactiveDismissDisabled(true)
         .task { await model.open() }
     }
 

@@ -81,6 +81,14 @@ def run_local_numcalc(project_path: Path | list[Path], numcalc_path: Path, max_r
     executable = resolve_numcalc_executable(numcalc_path)
     adaptive_arguments = ["-adapt_fmmlength"] if adaptive_fmm_length else []
     running = []
+    import threading
+    previous_sigterm = None
+    handles_sigterm = threading.current_thread() is threading.main_thread()
+    if handles_sigterm:
+        previous_sigterm = signal.getsignal(signal.SIGTERM)
+        def terminate_stage(signum, frame):
+            raise SystemExit(128 + signum)
+        signal.signal(signal.SIGTERM, terminate_stage)
     try:
         if isinstance(project_path, (list, tuple)):
             # Explicit projects from the app/config route; sibling backups such
@@ -208,6 +216,8 @@ def run_local_numcalc(project_path: Path | list[Path], numcalc_path: Path, max_r
             temporary.write_text(json.dumps(record, indent=1), encoding="utf-8")
             os.replace(temporary, project / EXPORT_RECORD)
     finally:
+        if handles_sigterm:
+            signal.signal(signal.SIGTERM, previous_sigterm)
         for process, log_file, _, _, _, _, _ in running:
             _terminate(process)
             log_file.close()
