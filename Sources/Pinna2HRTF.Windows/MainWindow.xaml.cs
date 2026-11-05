@@ -3492,14 +3492,14 @@ public partial class MainWindow : Window
 
     void AppWindowClosing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
     {
-        if (closingConfirmed || runs.Count == 0) { ShutdownForAppClose(); return; }
+        if (closingConfirmed || (runs.Count == 0 && editorWindows.Count == 0)) { ShutdownForAppClose(); return; }
         args.Cancel = true;
         _ = ConfirmQuitAsync(sender);
     }
 
     async Task ConfirmQuitAsync(Microsoft.UI.Windowing.AppWindow appWindow)
     {
-        var dialog = new ContentDialog { Title = "Quit Pinna2HRTF?", Content = "A pipeline task is still running. Quitting will stop it and may leave incomplete outputs.", PrimaryButtonText = "Quit", CloseButtonText = "Keep Running", DefaultButton = ContentDialogButton.Close, XamlRoot = Root.XamlRoot };
+        var dialog = new ContentDialog { Title = "Quit Pinna2HRTF?", Content = "Quitting stops running tasks and discards unsaved changes in open editors. Save editor work before quitting.", PrimaryButtonText = "Quit", CloseButtonText = "Keep app open", DefaultButton = ContentDialogButton.Close, XamlRoot = Root.XamlRoot };
         if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary) return;
         closingConfirmed = true;
         ShutdownForAppClose();
