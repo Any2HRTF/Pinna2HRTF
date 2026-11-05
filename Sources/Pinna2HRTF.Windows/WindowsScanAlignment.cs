@@ -19,8 +19,20 @@ public partial class MainWindow
     Guid? alignmentSessionProject;
     int alignmentGeneration;
     readonly HashSet<string> activeAlignmentWorkspaces = [];
+    readonly CheckBox alignmentPrepareLeft = new() { Content = "Prepare left ear" };
+    readonly CheckBox alignmentPrepareRight = new() { Content = "Prepare right ear" };
     readonly CheckBox coordinateToggle = new() { Content = "Show coordinate system", IsChecked = true };
     readonly List<LineGeometryModel3D> alignmentAxes = [];
+
+    void UpdateAlignmentSaveEnabled()
+    {
+        if (pendingAlignment != null && alignmentPrepareLeft.IsChecked != true && alignmentPrepareRight.IsChecked != true)
+            scanAlignmentStatus.Text = "Choose at least one ear to prepare.";
+        else if (pendingAlignment != null)
+            scanAlignmentStatus.Text = "Inspect alignment: X forward, Y left, Z up. Save or cancel.";
+        applyScanAlignmentButton.IsEnabled = scanAlignmentLandmarks.Count == 3 &&
+            (pendingAlignment == null || alignmentPrepareLeft.IsChecked == true || alignmentPrepareRight.IsChecked == true);
+    }
 
     void ClearAlignmentPreview()
     {
@@ -63,6 +75,7 @@ public partial class MainWindow
         {
             if(pendingAlignment is { } aligned)
             {
+                if (alignmentPrepareLeft.IsChecked != true && alignmentPrepareRight.IsChecked != true) return;
                 if(alignmentProjectId!=project.Id||alignmentWorkspace==null||alignmentSource==null)throw new IOException("The project changed; restart alignment.");
                 var destination=Path.Combine(originalRoot,"MeshEdits","AlignedScan.ply");
                 var operation=new Dictionary<string,object>{["action"]="align",["points"]=scanAlignmentLandmarks.Select(p=>new[]{(double)p.X,p.Y,p.Z}).ToArray(),
@@ -73,7 +86,7 @@ public partial class MainWindow
                 if (shutdownCleanupDone || !projects.Contains(project) || project.SaveLocation != originalRoot) return;
                 await PublishEditorFilesAsync(project, new() { [destination] = File.ReadAllBytes(staged), [Path.ChangeExtension(destination, "json")] = File.ReadAllBytes(Path.ChangeExtension(staged, "json")) }, editorLifetime.Token,
                     new() { [destination] = File.GetLastWriteTimeUtc(staged) }, new() { [originalSource!] = originalHash! });
-                var scan=project.Settings.ScanPreparation;scan.OriginalScanPath=originalSource!;scan.ScanPath=destination;scan.RotationDegrees="0";scan.Enabled=true;scan.ReviewedLeft=null;scan.ReviewedRight=null;
+                var scan=project.Settings.ScanPreparation;scan.PrepareLeft=alignmentPrepareLeft.IsChecked == true;scan.PrepareRight=alignmentPrepareRight.IsChecked == true;scan.OriginalScanPath=originalSource!;scan.ScanPath=destination;scan.RotationDegrees="0";scan.Enabled=true;scan.ReviewedLeft=null;scan.ReviewedRight=null;
                 project.Settings.Preprocessing.SourcePositionInputLeft=null;project.Settings.Preprocessing.SourcePositionInputRight=null;
                 Persist();
                 if (selectedProject == project && session == alignmentGeneration) { EndScanAlignment(); LoadSelectedProject(); RefreshArtifacts(); OpenArtifact(new Artifact("Aligned full-head scan",destination)); }
@@ -102,7 +115,7 @@ public partial class MainWindow
                 activeAlignmentWorkspaces.Remove(workspace);
                 if (alignmentWorkspace != workspace) { try { Directory.Delete(workspace, true); } catch(IOException) {} }
             }
-            if(selectedProject==project && session==alignmentGeneration && scanAlignmentMode)applyScanAlignmentButton.IsEnabled=scanAlignmentLandmarks.Count==3;
+            if(selectedProject==project && session==alignmentGeneration && scanAlignmentMode)UpdateAlignmentSaveEnabled();
         }
     }
 }

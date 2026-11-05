@@ -9,10 +9,10 @@ namespace Pinna2HRTF.Windows;
 
 public partial class MainWindow
 {
-    static readonly string[] WorkflowTitles = ["Inputs", "Prepare ears", "Ear model", "Simulation setup", "Calculate", "Results"];
-    readonly StackPanel[] workflowPages = Enumerable.Range(0, 6).Select(_ => new StackPanel { Spacing = 10 }).ToArray();
+    static readonly string[] WorkflowTitles = ["Project", "Prepare ears & model", "Simulation setup", "Calculate", "SOFA export"];
+    readonly StackPanel[] workflowPages = Enumerable.Range(0, 5).Select(_ => new StackPanel { Spacing = 10 }).ToArray();
     readonly ListBox workflowNavigation = new() { SelectionMode = SelectionMode.Single };
-    readonly TextBlock[] workflowStates = Enumerable.Range(0, 6).Select(_ => new TextBlock { FontSize = 11, TextWrapping = TextWrapping.Wrap }).ToArray();
+    readonly TextBlock[] workflowStates = Enumerable.Range(0, 5).Select(_ => new TextBlock { FontSize = 11, TextWrapping = TextWrapping.Wrap }).ToArray();
     readonly TextBlock[] workflowReasons = Enumerable.Range(0, 5).Select(_ => new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap }).ToArray();
     readonly RadioButtons workflowSource = new() { Header = "Input source", MaxColumns = 1, ItemsSource = new[] { "Full-head scan", "Individual ear meshes" } };
     readonly RadioButtons workflowMethod = new() { Header = "Ear modelling method", MaxColumns = 1, ItemsSource = new[] { "Mesh2PPM", "Manual PPM fitting", "No PPM" } };
@@ -39,6 +39,8 @@ public partial class MainWindow
         return "manual";
     }
 
+    static string WorkflowStageTitle(Stage stage) => WorkflowTitles[Math.Max(1, Array.IndexOf(Stage.GetValues(), stage))];
+
     TextBlock WorkflowText(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = mutedTextBrush, FontSize = 12 };
     Button WorkflowButton(string title, RoutedEventHandler action) { var b = new Button { Content = title }; b.Click += action; return b; }
 
@@ -51,7 +53,7 @@ public partial class MainWindow
         outer.RowDefinitions.Add(new() { Height = new GridLength(1, GridUnitType.Star) });
         outer.RowDefinitions.Add(new() { Height = GridLength.Auto });
         outer.Children.Add(new TextBlock { Text = "Workflow", FontSize = 20, FontWeight = FontWeights.SemiBold, Margin = new Thickness(14, 10, 14, 6) });
-        for (var i = 0; i < 6; i++) {
+        for (var i = 0; i < 5; i++) {
             var row = new Grid { ColumnSpacing = 8 };
             row.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
@@ -79,8 +81,7 @@ public partial class MainWindow
         AddPathSetting(workflowEarInputs, "Right ear (optional)", "project.right_ear", rightEarBox, BrowseRightEarClicked);
         workflowEarInputs.Children.Add(WorkflowText("Choose at least one ear. Inspect and edit in Prepare ears.")); input.Children.Add(workflowEarInputs);
         AddPathSetting(workflowScanInputs, "Full-head scan", "scan_preparation.scan_path", scanPathBox, BrowseScanClicked);
-        AddSetting(workflowScanInputs, "Prepare left ear", "scan_preparation.prepare_left", prepareLeftEarBox);
-        AddSetting(workflowScanInputs, "Prepare right ear", "scan_preparation.prepare_right", prepareRightEarBox);
+        workflowScanInputs.Children.Add(WorkflowText("Choose ears in Align scan, then extract them in Prepare ears."));
         input.Children.Add(workflowScanInputs);
         workflowSource.SelectionChanged += (_, _) => {
             if (updatingWorkflow || loading || selectedProject is not { } p || ProjectBusy(p.Id)) return;
@@ -113,7 +114,7 @@ public partial class MainWindow
             }}); row.Children.Add(original); prepare.Children.Add(row);
             workflowEarRows.Add((side, row, status, inspect, edit, original));
         }
-        var model = workflowPages[2]; model.Children.Add(workflowMethod);
+        var model = prepare; model.Children.Add(workflowMethod);
         model.Children.Add(WorkflowText("One method applies to every included ear."));
         workflowMethod.SelectionChanged += (_, _) => {
             if (updatingWorkflow || loading || selectedProject is not { } p || ProjectBusy(p.Id) || workflowMethod.SelectedIndex < 0) return;
@@ -128,7 +129,7 @@ public partial class MainWindow
             workflowManual.Children.Add(row); workflowFitRows.Add((side, row, status, fit));
         }
         workflowManual.Children.Add(WorkflowText("Save a current fit for every included ear to continue."));
-        var simulation = workflowPages[3]; simulation.Children.Add(GeometryPanel());
+        var simulation = workflowPages[2]; simulation.Children.Add(GeometryPanel());
         simulation.Children.Add(WorkflowText("Microphone positions: automatic by default. Adjust only when needed."));
         simulation.Children.Add(placeLeftButtonHost!); simulation.Children.Add(placeRightButtonHost!);
         AddExpander(simulation, "Advanced settings - preprocessing", [
@@ -137,8 +138,8 @@ public partial class MainWindow
             AddSettingPanel("Frequency steps", "mesh2hrtf.frequency_steps", frequencyStepsBox), AddSettingPanel("Microphone faces", "mesh2hrtf.microphone_faces", microphoneFacesBox),
             AddSettingPanel("Min edge length", "mesh_grading.min_edge_length", meshMinEdgeBox), AddSettingPanel("Max edge length", "mesh_grading.max_edge_length", meshMaxEdgeBox),
             AddSettingPanel("Max error", "mesh_grading.max_error", meshMaxErrorBox), AddSettingPanel("Gamma", "mesh_grading.gamma", meshGammaBox), AddSettingPanel("Gamma opposite", "mesh_grading.gamma_opposite", meshGammaOppositeBox)]);
-        AddExpander(workflowPages[4], "Advanced settings - calculation", [AddSettingPanel("Parallel instances", "numcalc.parallel_instances", maxInstancesBox), AddSettingPanel("CPU limit (%)", "numcalc.cpu_limit", maxCpuLoadBox), AddSettingPanel("Adaptive FMM expansion length", "numcalc.adaptive_fmm", adaptiveFmmLengthBox)]);
-        var results = workflowPages[5];
+        AddExpander(workflowPages[3], "Advanced settings - calculation", [AddSettingPanel("Parallel instances", "numcalc.parallel_instances", maxInstancesBox), AddSettingPanel("CPU limit (%)", "numcalc.cpu_limit", maxCpuLoadBox), AddSettingPanel("Adaptive FMM expansion length", "numcalc.adaptive_fmm", adaptiveFmmLengthBox)]);
+        var results = workflowPages[4];
         AddExpander(results, "Advanced settings - results", [
             PathSettingPanel("SOFA folder (optional)", "postprocessing.output_folder", sofaFolderBox, async (_, _) => { var path = await PickFolderAsync(sofaFolderBox.Text); if (path != null) sofaFolderBox.Text = path; }),
             AddSettingPanel("Normalize HRTFs", "postprocessing.normalize", normalizeHrtfsBox), AddSettingPanel("Level offset (dB)", "postprocessing.level_offset", levelOffsetBox),
@@ -150,8 +151,8 @@ public partial class MainWindow
         for (var index = 0; index < stages.Length; index++) {
             var stage = stages[index];
             var target = stage == Stage.ScanPreparation ? workflowPreparation
-                : stage == Stage.Inference ? workflowInference : workflowPages[index + 1];
-            var run = WorkflowButton("Run " + stage.Title, StageButtonClicked);
+                : stage == Stage.Inference ? workflowInference : workflowPages[index];
+            var run = WorkflowButton("Run " + WorkflowStageTitle(stage), StageButtonClicked);
             run.Tag = stage;
             stageButtons.Add(run);
             target.Children.Add(run);
@@ -162,7 +163,7 @@ public partial class MainWindow
         runAllButton.HorizontalAlignment = HorizontalAlignment.Stretch;
         pipelineHintText = WorkflowText("");
         numCalcStatusText = WorkflowText("");
-        workflowPages[4].Children.Add(numCalcStatusText);
+        workflowPages[3].Children.Add(numCalcStatusText);
         footer.Children.Add(workflowProgress);
         footer.Children.Add(pipelineHintText);
         footer.Children.Add(runAllButton);
@@ -173,7 +174,7 @@ public partial class MainWindow
 
     void SelectWorkflowStep(int step)
     {
-        workflowStep = Math.Clamp(step, 0, 5);
+        workflowStep = Math.Clamp(step, 0, 4);
         foreach (var (page, i) in workflowPages.Select((page, i) => (page, i))) page.Visibility = i == workflowStep ? Visibility.Visible : Visibility.Collapsed;
         if (workflowNavigation.SelectedIndex != workflowStep) workflowNavigation.SelectedIndex = workflowStep;
     }
@@ -190,19 +191,19 @@ public partial class MainWindow
     {
         if (selectedProject is not { } p) return new("Create or select a project", 0, Enabled: false);
         if (runs.ContainsKey(p.Id)) return new("Stop", workflowStep);
-        if (placementSide != null) return new("Finish microphone placement", 3);
+        if (placementSide != null) return new("Finish microphone placement", 2);
         if (scanAlignmentMode) return new("Finish scan alignment", 1);
-        if (WorkflowInputIssue(p) is string input) return new(input, 0);
-        if (p.Settings.ScanPreparation.Enabled && !StageIsComplete(Stage.ScanPreparation, p, inspection)) return new("Prepare ears", 1, Stage.ScanPreparation);
+        if (WorkflowInputIssue(p) is string input) return new(input, p.Settings.ScanPreparation.Enabled && !WorkflowSides(p).Any() && File.Exists(p.Settings.ScanPreparation.ScanPath) && !string.IsNullOrWhiteSpace(p.SaveLocation) ? 1 : 0);
+        if (p.Settings.ScanPreparation.Enabled && !StageIsComplete(Stage.ScanPreparation, p, inspection)) return new("Run " + WorkflowStageTitle(Stage.ScanPreparation), 1, Stage.ScanPreparation);
         if (WorkflowSides(p).Any(side => p.Settings.ScanPreparation.EarEdit(side) != null && !EarReviewIsCurrent(p, side, inspection))) return new("Review outdated ear edit", 1);
         if (p.Settings.ScanPreparation.Enabled && p.Settings.ScanPreparation.RequireManualReview &&
             WorkflowSides(p).FirstOrDefault(side => !EarReviewIsCurrent(p, side, inspection)) is string reviewSide)
             return new($"Review {reviewSide} ear", 1);
-        if (CurrentEarModel(p) == null) return new("Choose one ear modelling method", 2);
-        if (p.Settings.ManualPPM.Enabled && WorkflowSides(p).FirstOrDefault(side => !FitIsCurrent(p, side)) is string missing) return new($"Fit {missing} ear", 2, Fit: missing);
+        if (CurrentEarModel(p) == null) return new("Choose one ear modelling method", 1);
+        if (p.Settings.ManualPPM.Enabled && WorkflowSides(p).FirstOrDefault(side => !FitIsCurrent(p, side)) is string missing) return new($"Fit {missing} ear", 1, Fit: missing);
         var next = AutomaticStages(p).FirstOrDefault(stage => !StageIsComplete(stage, p, inspection));
-        if (next == null) return new("Open results", 5);
-        return new("Run " + next.Title, Array.IndexOf(Stage.GetValues(), next) + 1, next);
+        if (next == null) return new("Open results", 4);
+        return new("Run " + WorkflowStageTitle(next), Math.Max(1, Array.IndexOf(Stage.GetValues(), next)), next);
     }
     void PerformWorkflowAction()
     {
@@ -258,20 +259,22 @@ public partial class MainWindow
             workflowStates[0].Text = p != null && WorkflowInputIssue(p) == null ? "Complete" : "Needs input";
             for (var i = 0; i < 5; i++) {
                 var stage = Stage.GetValues()[i];
-                workflowStates[i + 1].Text = p == null ? "Needs input" : stageStatus[i].Text;
+                if (i != 1) workflowStates[Math.Max(1, i)].Text = p == null ? "Needs input" : stageStatus[i].Text;
                 workflowReasons[i].Text = p == null ? "Select a project" : StageUnavailableReason(stage, p, inspection) ?? "Ready";
-                stageButtons[i].Content = p != null && runs.TryGetValue(p.Id, out var active) && active.Stage == stage ? "Stop" : "Run " + stage.Title;
+                stageButtons[i].Content = p != null && runs.TryGetValue(p.Id, out var active) && active.Stage == stage ? "Stop" : "Run " + WorkflowStageTitle(stage);
             }
             if (!scan) workflowStates[1].Text = "Optional";
-            if (workflowMethod.SelectedIndex == 2) workflowStates[2].Text = "Not needed";
-            if (workflowMethod.SelectedIndex == -1) workflowStates[2].Text = "Choose method";
-            if (workflowMethod.SelectedIndex == 1) workflowStates[2].Text = p != null && sides.All(side => FitIsCurrent(p, side)) && sides.Length > 0 ? "Complete" : "Needs fit";
+            if (p != null && (!scan || StageIsComplete(Stage.ScanPreparation, p, inspection))) {
+                if (workflowMethod.SelectedIndex == -1) workflowStates[1].Text = "Choose method";
+                else if (workflowMethod.SelectedIndex == 1) workflowStates[1].Text = sides.Length > 0 && sides.All(side => FitIsCurrent(p, side)) ? "Complete" : "Needs fit";
+                else if (workflowMethod.SelectedIndex == 0) workflowStates[1].Text = stageStatus[1].Text;
+            }
             for (var index = 0; index < workflowStates.Length; index++) {
                 var label = workflowStates[index].Text;
                 if (label == "Blocked") label = index == 0 ? "Needs input" : "Waiting";
                 if (label == "Done") label = "Complete";
                 if (p != null && index >= 3 && label is "Waiting" or "Ready" && statusSnapshots.TryGetValue(p.Id, out var snapshot) &&
-                    snapshot.Revision == StatusRevision(p) && snapshot.Outdated.Contains(Stage.GetValues()[index - 1])) label = "Needs rerun";
+                    snapshot.Revision == StatusRevision(p) && snapshot.Outdated.Contains(Stage.GetValues()[index])) label = "Needs rerun";
                 var symbol = label switch { "Complete" => "\u2713", "Failed" or "Needs rerun" => "!", "Not needed" or "Optional" => "\u2013",
                     "Ready" => "\u25B7", "Running\u2026" => "\u25B6", _ => "\u25CB" };
                 workflowStates[index].Text = $"{symbol}  {label}";
@@ -281,7 +284,7 @@ public partial class MainWindow
             var reason = next.Stage != null && p != null ? StageUnavailableReason(next.Stage, p, inspection) : null;
             runAllButton.Content = reason == null ? next.Title : "Review " + WorkflowTitles[next.Step].ToLowerInvariant(); runAllButton.IsEnabled = next.Enabled && (!busy || p != null && runs.ContainsKey(p.Id));
             var retry = p != null && next.Stage != null && FailedStages(p.Id).Contains(next.Stage);
-            if (retry && reason == null) runAllButton.Content = "Retry " + next.Stage!.Title;
+            if (retry && reason == null) runAllButton.Content = "Retry " + WorkflowStageTitle(next.Stage!);
             workflowCompact.Content = runAllButton.Content;
             workflowCompact.Visibility = macInspectorVisible ? Visibility.Collapsed : Visibility.Visible;
             workflowProgress.Visibility = p != null && runs.ContainsKey(p.Id) ? Visibility.Visible : Visibility.Collapsed;

@@ -16,10 +16,12 @@ public partial class MainWindow
 {
 #if PINNA_MAC_LAYOUT
     internal static bool MacLayout => true;
-    internal const string ReviewVersion = "2.0.0-review-main-macimitation";
+    internal const bool MacReviewStorage = true;
+    internal const string ReviewVersion = "2.0 beta";
 #else
-    internal static bool MacLayout => false;
-    internal const string ReviewVersion = "2.0.0-review-main";
+    internal static bool MacLayout => true;
+    internal const bool MacReviewStorage = false;
+    internal const string ReviewVersion = "2.0 beta";
 #endif
     Grid? macSettingsDivider;
     TextBlock? macProjectTitle;

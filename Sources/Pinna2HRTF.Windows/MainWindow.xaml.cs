@@ -261,7 +261,7 @@ public partial class MainWindow : Window
         BuildInterface();
         packageRoot = FindPackageRoot();
         var reviewBuild=typeof(MainWindow).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Contains("-review",StringComparison.OrdinalIgnoreCase)==true;
-        appData = Environment.GetEnvironmentVariable("PINNA2HRTF_APP_DATA") is string overrideData && Path.IsPathFullyQualified(overrideData) ? overrideData : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), MacLayout ? "Pinna2HRTF-v2-review-macimitation" : reviewBuild ? "Pinna2HRTF-v2-review" : "Pinna2HRTF");
+        appData = Environment.GetEnvironmentVariable("PINNA2HRTF_APP_DATA") is string overrideData && Path.IsPathFullyQualified(overrideData) ? overrideData : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), MacReviewStorage ? "Pinna2HRTF-v2-review-macimitation" : reviewBuild ? "Pinna2HRTF-v2-review" : "Pinna2HRTF");
 #if PINNA2HRTF_REVIEW
         appData = Path.Combine(AppContext.BaseDirectory, ".appdata");
 #endif
@@ -726,6 +726,10 @@ public partial class MainWindow : Window
         var restartAlignment = new Button { Content = "Restart picks" };
         restartAlignment.Click += (_, _) => ResetScanAlignmentPicks();
         alignmentPanel.Children.Add(scanAlignmentStatus);
+        alignmentPanel.Children.Add(alignmentPrepareLeft);
+        alignmentPanel.Children.Add(alignmentPrepareRight);
+        alignmentPrepareLeft.Click += (_, _) => UpdateAlignmentSaveEnabled();
+        alignmentPrepareRight.Click += (_, _) => UpdateAlignmentSaveEnabled();
         alignmentPanel.Children.Add(coordinateToggle);
         coordinateToggle.Click += (_, _) => UpdateAlignmentAxes();
         alignmentPanel.Children.Add(restartAlignment);
@@ -1516,6 +1520,8 @@ public partial class MainWindow : Window
         ResetScanAlignmentPicks();
         alignmentSessionProject = project.Id;
         if (placementSide != null) EndPlacement();
+        alignmentPrepareLeft.IsChecked = project.Settings.ScanPreparation.PrepareLeft;
+        alignmentPrepareRight.IsChecked = project.Settings.ScanPreparation.PrepareRight;
         scanAlignmentMode = true;
         alignScanButton.IsEnabled = false;
         scanAlignmentStatus.Text = "Click nose tip, then left and right ear-canal entrances";
@@ -2101,7 +2107,7 @@ public partial class MainWindow : Window
                 scanAlignmentStatus.Text = scanAlignmentLandmarks.Count == 3
                     ? "Three landmarks picked. Apply the alignment or cancel."
                     : $"Picked {scanAlignmentLandmarks.Count}/3. Next: {names[scanAlignmentLandmarks.Count]}";
-                applyScanAlignmentButton.IsEnabled = scanAlignmentLandmarks.Count == 3;
+                UpdateAlignmentSaveEnabled();
             }
             else if (hit == null)
                 AppendLog("Click directly on the scan surface to place each landmark.", selectedProject?.Id);
@@ -3062,7 +3068,7 @@ public partial class MainWindow : Window
             if (!MacLayout) stageButtons[i].Content = running ? "Stop" : "Run";
             stageButtons[i].IsEnabled = placementSide == null && (running || reason == null);
             ToolTipService.SetToolTip(stageStatus[i], reason ?? $"{stage.Title} is ready.");
-            ToolTipService.SetToolTip(stageButtons[i], running ? "Stop this stage" : reason ?? $"Run {stage.Title}");
+            ToolTipService.SetToolTip(stageButtons[i], running ? "Stop this stage" : reason ?? $"Run {WorkflowStageTitle(stage)}");
         }
         var pending = AutomaticStages(selectedProject).Where(x => !StageIsComplete(x, selectedProject, inspection)).ToList();
         runAllButton.IsEnabled = placementSide == null && pending.Count > 0 && StageCanRun(pending[0], selectedProject, inspection);
