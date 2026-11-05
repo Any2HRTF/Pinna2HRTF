@@ -155,12 +155,9 @@ struct ProjectInspectorView: View {
             stageAction(.preprocessing)
         case .calculate:
             Text(store.selectedProjectStatus?.numcalcStatus ?? "Checking project files…").font(.caption)
-            DisclosureGroup("Advanced settings · calculation") {
-                    LabeledTextField("Parallel instances", helpID: "numcalc.parallel_instances", text: numcalcBinding(\.maxInstances))
-                    LabeledTextField("CPU limit (%)", helpID: "numcalc.cpu_limit", text: numcalcBinding(\.maxCPULoad))
-                    SettingToggle(title: "Adaptive FMM expansion length", helpID: "numcalc.adaptive_fmm", isOn: numcalcBoolBinding(\.adaptiveFmmLength))
-
-            }
+            LabeledTextField("Parallel instances", helpID: "numcalc.parallel_instances", text: numcalcBinding(\.maxInstances))
+            LabeledTextField("CPU limit (%)", helpID: "numcalc.cpu_limit", text: numcalcBinding(\.maxCPULoad))
+            SettingToggle(title: "Adaptive FMM expansion length", helpID: "numcalc.adaptive_fmm", isOn: numcalcBoolBinding(\.adaptiveFmmLength))
             stageAction(.numcalc)
         case .results:
             SettingToggle(title: "Apply level offset", helpID: "postprocessing.normalize", isOn: postprocessingNormalizeBinding)
