@@ -40,7 +40,7 @@ struct WorkflowFooter: View {
                         .disabled(store.selectedProject == nil || store.selectedProjectIsRunning)
                 }
             }
-            .controlSize(.small)
+            .controlSize(.regular)
         }.frame(maxWidth: .infinity, alignment: .leading)
         .task(id: store.selectedProjectID) {
             while !Task.isCancelled {
