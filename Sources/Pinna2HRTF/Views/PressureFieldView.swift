@@ -9,9 +9,9 @@ struct PressureFieldView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ViewThatFits(in: .horizontal) {
+            ScrollView(.horizontal) {
                 HStack { selectors }
-                VStack(alignment: .leading) { selectors }
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .padding(12)
             Divider()
