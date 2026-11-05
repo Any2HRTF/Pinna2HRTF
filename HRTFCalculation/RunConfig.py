@@ -221,7 +221,7 @@ def validate_preprocessing_inputs(config: PipelineConfig, logger: Logger, allow_
     path = config.paths.output_dir / PREPROCESSING_INPUT_RECEIPT
     if not path.exists():
         if allow_legacy:
-            logger("Legacy preprocessing has no shared input receipt; the desktop application's validated stage receipt is required before resuming NumCalc.")
+            logger("Legacy preprocessing has no shared input receipt; proceeding with the existing simulation records. Current desktop preprocessing checks still apply.")
             return
         raise ValueError("This legacy project has no shared preprocessing input receipt. Validate and rerun preprocessing with the current inputs before config-based SOFA export. Existing results are preserved.")
     recorded = json.loads(path.read_text(encoding="utf-8"))
@@ -453,7 +453,7 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
     if config.postprocessing.spatial_upsampling:
         from .Postprocessing.spatial_upsampling import resolve_dependencies
         resolve_dependencies(config.postprocessing)
-    validate_preprocessing_inputs(config, logger)
+    validate_preprocessing_inputs(config, logger, allow_legacy=True)
     root = config.paths.output_dir.resolve()
     destination = output_dir.resolve()
     protected = [root / name for name in ("Input", "Projects", "Intermediates", "Prepared", "Manual PPM", "MeshEdits", "Logs", ".pinna2hrtf")]

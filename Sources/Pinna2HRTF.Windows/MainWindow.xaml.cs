@@ -1609,8 +1609,20 @@ public partial class MainWindow : Window
             AppendLog("Could not import project settings: " + error.Message);
             return;
         }
-        InvalidateManualPositions(project);
-        if(PreprocessingFilesPresent(project) && !File.Exists(Path.Combine(project.SaveLocation,WindowsPreprocessingReceipt)))HeadGeometry.AtomicWrite(Path.Combine(project.SaveLocation,WindowsPreprocessingReceipt),PreprocessingStamp(project));
+        try
+        {
+            await Task.Run(() => {
+                using var fresh = FileFingerprints.Fresh();
+                InvalidateManualPositions(project);
+                var receipt = Path.Combine(project.SaveLocation, WindowsPreprocessingReceipt);
+                if (PreprocessingFilesPresent(project) && !File.Exists(receipt))
+                    HeadGeometry.AtomicWrite(receipt, PreprocessingStamp(project));
+            });
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            AppendLog("Could not validate existing preprocessing during import: " + error.Message, project.Id);
+        }
         if (ExistingProjectRoot(folder) is { } duplicate) { SelectProjectFromContext(duplicate); return; }
         if (shutdownCleanupDone || projectsBeingRemoved.Count != 0) return;
         projects.Add(project);

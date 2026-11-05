@@ -52,7 +52,6 @@ struct ProjectStatusSnapshot {
     static func savedSummary(for project: ProjectRecord) -> String {
         if project.stageOutcomes?.values.contains(.failed) == true { return "Latest run failed · previous results may remain" }
         if project.stageOutcomes?.values.contains(.stopped) == true { return "Task stopped · previous results may remain" }
-        if project.stageOutcomes?.values.contains(.done) == true { return "Checking saved results…" }
         return URL(fileURLWithPath: project.saveLocation, isDirectory: true).lastPathComponent
     }
 
