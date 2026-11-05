@@ -627,15 +627,7 @@ public partial class MainWindow : Window
 
 
 
-<<<<<<< Updated upstream
         AutomationProperties.SetName(artifactPicker, "Viewing");
-=======
-        editPreparedEarButton.Click += async (_, _) =>
-        {
-            if (selectedProject != null && selectedArtifactPath != null && PreparedEarSideForPath(selectedProject, selectedArtifactPath) is string side)
-                await EditPreparedEarAsync(side);
-        };
->>>>>>> Stashed changes
         artifactPicker.Width = 230;
         artifactPicker.MinHeight = 30;
         artifactPicker.ItemsSource = artifacts;
@@ -3100,11 +3092,7 @@ public partial class MainWindow : Window
         if (scanAlignmentMode && alignmentSessionProject == project.Id) return "Save or cancel scan alignment before running a stage.";
         if (SettingDraftError(project) is string draftError) return draftError;
         if (ProjectDocument.ValidationError(project) is string validation) return validation;
-<<<<<<< Updated upstream
         if (stage != Stage.ScanPreparation && CurrentEarModel(project) == null) return "Choose one ear modelling method in Ear model.";
-=======
-        if (stage != Stage.ScanPreparation && project.Settings.ManualPPM.Enabled && project.Settings.Inference.UsePredictionsForPreprocessing) return "Choose one ear modelling method in Ear model.";
->>>>>>> Stashed changes
         if (projectOperations.Contains(project.Id) || OwnedProcess.HasProjectActivity(project.Id)) return "Wait for the project operation or editor to finish.";
         if (outputOperations.Contains(project.Id)) return "Wait for project outputs to finish updating.";
         if (runs.ContainsKey(project.Id)) return "Wait for the running stage to finish.";
@@ -3136,11 +3124,7 @@ public partial class MainWindow : Window
         if (project.Settings.ScanPreparation.Enabled && !ScanPreparationOutputsCurrent(project, inspection)) return "Run Scan Preparation with the current settings first.";
         if (project.Settings.ScanPreparation.Enabled && project.Settings.ScanPreparation.RequireManualReview && new[] { "left", "right" }.Any(side => SourceEar(project, side, inspection) != null && !EarReviewIsCurrent(project, side, inspection))) return "Review the prepared ears before continuing.";
         foreach (var side in WorkflowSides(project)) {
-<<<<<<< Updated upstream
             var reviewed = project.Settings.ScanPreparation.EarEdit(side);
-=======
-            var reviewed = side == "left" ? project.Settings.ScanPreparation.ReviewedLeft : project.Settings.ScanPreparation.ReviewedRight;
->>>>>>> Stashed changes
             if (reviewed != null && !EarReviewIsCurrent(project, side, inspection)) return $"The {side} ear edit is outdated. Edit again or use the original in Prepare ears.";
             if (project.Settings.ManualPPM.Enabled && !FitIsCurrent(project, side)) return $"Fit the {side} ear: manual mode requires a current saved fit for every included ear.";
         }

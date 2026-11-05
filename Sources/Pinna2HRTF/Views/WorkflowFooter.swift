@@ -2,7 +2,6 @@ import SwiftUI
 
 struct WorkflowFooter: View {
     @ObservedObject var store: AppStore
-<<<<<<< Updated upstream
     private var runningNow: Bool { store.selectedProjectID.flatMap { store.runningProcesses[$0] } != nil }
     var body: some View {
         let action = store.workflowNextAction
@@ -20,24 +19,9 @@ struct WorkflowFooter: View {
             Button(running ? "Stop" : title) { store.performWorkflowAction() }
                 .buttonStyle(.borderedProminent)
                 .disabled(store.selectedProject == nil || (!running && (store.selectedProjectIsRunning || !action.enabled)))
-=======
-    var body: some View {
-        let action = store.workflowNextAction
-        VStack(alignment: .leading, spacing: 8) {
-            if store.selectedProjectIsRunning { ProgressView(); Text("Processing…").font(.caption) }
-            if let stage = action.stage, let reason = store.runUnavailableReason(stage: stage), !store.selectedProjectIsRunning {
-                Text(reason).font(.caption).foregroundStyle(.secondary)
-            }
-            Button(store.selectedProjectIsRunning ? "Stop" : action.title) { store.performWorkflowAction() }
-                .buttonStyle(.borderedProminent)
-                .disabled(store.selectedProject == nil || (!action.enabled && !store.selectedProjectIsRunning))
->>>>>>> Stashed changes
-            Menu("Project actions") {
-                Button("Reset outputs…", role: .destructive) { store.confirmResetSelectedProjectOutputs() }
-                    .disabled(store.selectedProjectIsRunning)
-            }.menuStyle(.borderlessButton)
+            Button("Reset outputs…", role: .destructive) { store.confirmResetSelectedProjectOutputs() }
+                .disabled(store.selectedProject == nil || store.selectedProjectIsRunning)
         }.frame(maxWidth: .infinity, alignment: .leading)
-<<<<<<< Updated upstream
         .task(id: store.selectedProjectID) {
             while !Task.isCancelled {
                 do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { return }
@@ -46,7 +30,5 @@ struct WorkflowFooter: View {
                 }
             }
         }
-=======
->>>>>>> Stashed changes
     }
 }

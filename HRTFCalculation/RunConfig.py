@@ -28,11 +28,8 @@ def log_default(message: str) -> None:
 
 def input_paths(config: PipelineConfig, validate: bool = False):
     if not config.scan_preparation.enabled:
-<<<<<<< Updated upstream
         if not (config.paths.edited_left_ear or config.paths.edited_right_ear):
             return config.paths.left_ear, config.paths.right_ear
-=======
->>>>>>> Stashed changes
         from .MeshEditing import reviewed_inputs
         return reviewed_inputs(config, validate=validate)
     settings = config.scan_preparation
@@ -232,12 +229,9 @@ def preprocessing_input_paths(config: PipelineConfig, logger: Logger) -> tuple[P
         if config.manual_ppm.enabled:
             if manual_path is None:
                 raise ValueError(f'Fit the {side} ear before running manual PPM preprocessing.')
-<<<<<<< Updated upstream
             parameters = getattr(config.manual_ppm, f"{side}_parameters")
             if parameters is None or not parameters.is_file():
                 raise ValueError(f"Refit the {side} ear: the saved fit parameters are missing.")
-=======
->>>>>>> Stashed changes
             if not manual_path.is_file():
                 raise FileNotFoundError(f"Saved manual {side} PPM fit is missing: {manual_path}")
             selected = manual_path

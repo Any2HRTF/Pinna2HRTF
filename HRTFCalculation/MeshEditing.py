@@ -201,11 +201,7 @@ def reviewed_inputs(config, validate=True):
         if not selected:
             results.append(None)
             continue
-<<<<<<< Updated upstream
         reviewed = getattr(settings, reviewed_attr) if settings.enabled else getattr(config.paths, f"edited_{side}_ear")
-=======
-        reviewed = getattr(settings, reviewed_attr)
->>>>>>> Stashed changes
         base = folder / f'{side.title()}.stl' if settings.enabled else getattr(config.paths, side + '_ear')
         if reviewed is None:
             results.append(base)

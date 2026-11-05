@@ -138,11 +138,7 @@ enum ArtifactScanner {
         let path = side == .left ? project.leftEar : project.rightEar
         guard !path.isEmpty else { return nil }
         if earReviewIsCurrent(project, side: side, inspection: inspection),
-<<<<<<< Updated upstream
            let edited = project.scanPreparation.earEdit(side) {
-=======
-           let edited = side == .left ? project.scanPreparation.reviewedLeftPath : project.scanPreparation.reviewedRightPath {
->>>>>>> Stashed changes
             return URL(fileURLWithPath: edited)
         }
         return URL(fileURLWithPath: path)

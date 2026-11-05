@@ -27,14 +27,21 @@ struct MeshViewerView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HStack {
-                    Text("Viewing").foregroundStyle(.secondary)
-                    Menu {
-                        ForEach(store.artifacts.filter(\.exists)) { artifact in
-                            Button(artifact.title) { store.openArtifact(artifact) }
+                    Picker("Viewing", selection: Binding<URL?>(
+                        get: { store.selectedMesh },
+                        set: { url in
+                            if let artifact = store.artifacts.first(where: { $0.exists && $0.url == url }) {
+                                store.openArtifact(artifact)
+                            }
                         }
-                    } label: {
-                        Text(store.artifacts.first(where: { $0.url == store.selectedMesh })?.title ?? "Choose preview")
-                    }.disabled(store.isPlacingMicrophone)
+                    )) {
+                        Text("Choose preview").tag(Optional<URL>.none)
+                        ForEach(store.artifacts.filter(\.exists)) { artifact in
+                            Text(artifact.title).tag(Optional(artifact.url))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(store.isPlacingMicrophone)
                     Spacer()
                 }.padding(10)
                 Divider()

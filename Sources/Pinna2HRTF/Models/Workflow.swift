@@ -17,11 +17,7 @@ enum WorkflowStep: Int, CaseIterable, Identifiable {
     }
 }
 
-<<<<<<< Updated upstream
 enum EarModelMethod: String, Codable, CaseIterable, Identifiable {
-=======
-enum EarModelMethod: String, CaseIterable, Identifiable {
->>>>>>> Stashed changes
     case mesh2ppm, manual, none
     var id: String { rawValue }
     var title: String {
@@ -29,7 +25,6 @@ enum EarModelMethod: String, CaseIterable, Identifiable {
     }
 }
 
-<<<<<<< Updated upstream
 extension ProjectSettings {
     mutating func selectEarModel(_ method: EarModelMethod) {
         manualPPMFitting.selectedMethod = method
@@ -55,8 +50,6 @@ extension ProjectRecord {
     }
 }
 
-=======
->>>>>>> Stashed changes
 struct WorkflowAction {
     var title: String
     var step: WorkflowStep
@@ -67,7 +60,6 @@ struct WorkflowAction {
 
 @MainActor
 extension AppStore {
-<<<<<<< Updated upstream
     var earModelMethod: EarModelMethod? { selectedProject?.workflowMethod }
 
     func selectEarModelMethod(_ method: EarModelMethod) {
@@ -76,30 +68,6 @@ extension AppStore {
     }
 
     var workflowSides: [EarSide] { selectedProject?.includedEars ?? [] }
-=======
-    var earModelMethod: EarModelMethod? {
-        guard let p = selectedProject else { return nil }
-        let automatic = p.settings.inference.usePredictionsForPreprocessing
-        let manual = p.settings.manualPPMFitting.useForPreprocessing
-        return automatic && manual ? nil : manual ? .manual : automatic ? .mesh2ppm : EarModelMethod.none
-    }
-
-    func selectEarModelMethod(_ method: EarModelMethod) {
-        guard !selectedProjectIsRunning else { return }
-        updateSelectedProject {
-            $0.settings.inference.usePredictionsForPreprocessing = method == .mesh2ppm
-            $0.settings.manualPPMFitting.useForPreprocessing = method == .manual
-        }
-    }
-
-    var workflowSides: [EarSide] {
-        guard let p = selectedProject else { return [] }
-        return EarSide.allCases.filter { side in
-            p.scanPreparation.enabled ? (side == .left ? p.scanPreparation.prepareLeft : p.scanPreparation.prepareRight) :
-                !(side == .left ? p.leftEar : p.rightEar).isEmpty
-        }
-    }
->>>>>>> Stashed changes
 
     var workflowInputIssue: String? {
         guard let p = selectedProject else { return "Create or select a project" }
@@ -140,17 +108,12 @@ extension AppStore {
     }
 
     func performWorkflowAction() {
-<<<<<<< Updated upstream
         if let id = selectedProjectID, runningProcesses[id] != nil { stopRunningProcess(); return }
         guard !selectedProjectIsRunning else { return }
-=======
-        if selectedProjectIsRunning { stopRunningProcess(); return }
->>>>>>> Stashed changes
         let action = workflowNextAction
         workflowStep = action.step
         workflowRevealRequest = UUID()
         guard action.enabled else { return }
-<<<<<<< Updated upstream
         if action.step == .results && action.stage == nil, let project = selectedProject {
             NSWorkspace.shared.open(ArtifactScanner.postprocessingDirectory(for: project))
         } else if let side = action.fit { beginManualPPMFitting(side) }
@@ -173,19 +136,6 @@ extension AppStore {
         if step == .model {
             if earModelMethod == nil { return "Choose method" }
             if earModelMethod == EarModelMethod.none { return "Not needed" }
-=======
-        if let side = action.fit { beginManualPPMFitting(side) }
-        else if let stage = action.stage, canRun(stage: stage) { run(stage: stage) }
-    }
-
-    func workflowStatus(_ step: WorkflowStep) -> String {
-        guard let project = selectedProject else { return "Needs input" }
-        if step == .inputs { return workflowInputIssue == nil ? "Complete" : "Needs input" }
-        if step == .prepare && !project.scanPreparation.enabled { return "Optional inspection / editing" }
-        if step == .model {
-            if earModelMethod == nil { return "Choose method" }
-            if earModelMethod == EarModelMethod.none { return "Not needed · direct meshes" }
->>>>>>> Stashed changes
             if earModelMethod == .manual {
                 let count = workflowSides.filter { selectedProjectStatus?.validFitSides.contains($0) ?? false }.count
                 return !workflowSides.isEmpty && count == workflowSides.count ? "Complete" : "Needs fit · \(count)/\(workflowSides.count)"
