@@ -140,6 +140,7 @@ final class GeneratedOutputManifest {
             try reconcile(&doc)
             try save(doc)
             for (relative, entry) in doc.Files {
+                if relative.hasPrefix("MeshEdits/") || relative.hasPrefix("Manual PPM/") { continue }
                 if let from, entry.Stage.order < from.order { continue }
                 guard let url = safePath(relative, protectingInputs: false) else { result.errors += 1; continue }
                 guard safePath(relative) != nil else { result.protectedInputs += 1; continue }
@@ -198,11 +199,6 @@ final class GeneratedOutputManifest {
 
     private func reconcile(_ doc: inout Document) throws {
         let current = try scan()
-        for relative in current.files.keys {
-            guard doc.Files[relative] == nil, let stage = classifyOutput(relative), let url = safePath(relative) else { continue }
-            var entry = try fingerprint(url); entry.Stage = stage
-            doc.Files[relative] = entry
-        }
         removeMissing(&doc)
         try trackDirectories(&doc, directories: current.directories)
     }
@@ -233,7 +229,7 @@ final class GeneratedOutputManifest {
         if match(path, #"^HRTF/Upsampled/HRIR_[^/]+/(hrtf_Nd=[0-5](_dense)?\.sofa|upsampling_report\.(txt|mat)|upsampling\.json)$"#) { return .postprocessing }
         if match(path, #"^HRTF/\.pinna2hrtf-upsampling-[a-z0-9_]{8}/(plan\.json|Upsampled/HRIR_[^/]+/(hrtf_Nd=[0-5](_dense)?\.sofa|upsampling_report\.(txt|mat)|upsampling\.json))$"#) { return .postprocessing }
         if match(path, #"^Manual PPM/((Left|Right)\.(stl|json|blend[0-9]*)|PPM\.blend[0-9]*|Templates/[0-9a-f-]{36}-PPM\.blend[0-9]*)$"#) { return .preprocessing }
-        if match(path, #"^MeshEdits/((Left|Right)\.(stl|json)|AlignedScan\.(ply|json))$"#) { return .scanPreparation }
+        if match(path, #"^MeshEdits/((Individual)?(Left|Right)\.(stl|json)|AlignedScan\.(ply|json))$"#) { return .scanPreparation }
         if match(path, #"^Prepared/inference\.json$"#) { return .inference }
         if match(path, #"^Prepared/preprocessing\.json$"#) { return .preprocessing }
         if match(path, #"^Prepared/(Left\.stl|Right\.stl|mesh_preparation\.json)$"#) { return .scanPreparation }

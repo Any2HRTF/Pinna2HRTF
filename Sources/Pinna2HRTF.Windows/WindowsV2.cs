@@ -44,7 +44,14 @@ public partial class MainWindow
         settings["postprocessing.output_folder"] = new(sofaFolderBox, p => p.Settings.Postprocessing?.OutputFolder, (p,v) => (p.Settings.Postprocessing ??= new()).OutputFolder = v.Trim(), "");
     }
 
-    static string SofaDirectory(ProjectRecord p) => string.IsNullOrWhiteSpace(p.Settings.Postprocessing?.OutputFolder) ? Path.Combine(p.SaveLocation, "HRTF") : Path.GetFullPath(p.Settings.Postprocessing.OutputFolder,p.SaveLocation);
+    static string SofaDirectory(ProjectRecord p)
+    {
+        var folder = p.Settings.Postprocessing?.OutputFolder;
+        if (string.IsNullOrWhiteSpace(folder)) return Path.Combine(p.SaveLocation, "HRTF");
+        if (Path.IsPathFullyQualified(folder)) return Path.GetFullPath(folder);
+        if (string.IsNullOrWhiteSpace(p.SaveLocation) || !Path.IsPathFullyQualified(p.SaveLocation)) return "";
+        return Path.GetFullPath(folder, p.SaveLocation);
+    }
     string? SourceEar(ProjectRecord p, string side, ArtifactInspection? inspection = null)
     {
         var scan = p.Settings.ScanPreparation;

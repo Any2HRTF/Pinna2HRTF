@@ -726,7 +726,7 @@ final class AppStore: ObservableObject {
     private func confirmResetOutputs() -> Bool {
         let alert = NSAlert()
         alert.messageText = "Reset generated outputs?"
-        alert.informativeText = "Remove generated results, manual PPM fits and their parameters, Blender files and archived templates, ear edits, and scan alignments? Original inputs, microphone positions, settings, logs, and modified or unrelated files are kept."
+        alert.informativeText = "Remove generated pipeline results? Original inputs, saved ear edits, scan alignments, manual PPM fits, microphone positions, settings, logs, and modified or unrelated files are kept."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Reset outputs")
         alert.addButton(withTitle: "Cancel")

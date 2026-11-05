@@ -21,6 +21,9 @@ APP_DISPLAY_VERSION="2.0 beta"
 APP_ARTIFACT_VERSION="2.0-beta"
 if git -C "$ROOT" rev-parse --verify HEAD >/dev/null 2>&1; then
   GIT_HEAD="$(git -C "$ROOT" rev-parse --short HEAD)"
+  if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]]; then
+    GIT_HEAD="$GIT_HEAD-dirty"
+  fi
   APP_BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD)"
 else
   GIT_HEAD="source-snapshot"

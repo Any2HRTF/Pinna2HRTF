@@ -595,7 +595,7 @@ def preprocess():
     parser.add_argument('--ear-canal-closer-mode', choices=['legacy', 'interpolated'], default='legacy')
     parser.add_argument('--head-radius', type=float, default=None, help='Deprecated alias for --ear-distance; removed in a future release.')
     parser.add_argument('--ear-distance', type=float, help='Mean ear distance from head center in mm; preserves left/right asymmetry.')
-    parser.add_argument('--min-frequency', type=int, default=1000)
+    parser.add_argument('--min-frequency', type=int, default=0)
     parser.add_argument('--max-frequency', type=int, default=24000)
     parser.add_argument('--frequency-step-count', type=int, default=129)
     parser.add_argument('--source-face-count', type=int, default=6)

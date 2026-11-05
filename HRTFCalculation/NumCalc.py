@@ -76,6 +76,8 @@ def _terminate(process: subprocess.Popen) -> None:
 
 
 def run_local_numcalc(project_path: Path | list[Path], numcalc_path: Path, max_ram_load_gb: float | None, ram_safety_factor: float, max_cpu_load: int, max_instances: int, starting_order: str, wait_time: int, adaptive_fmm_length: bool) -> None:
+    if max_instances < 1:
+        raise ValueError("max_instances must be at least 1")
     executable = resolve_numcalc_executable(numcalc_path)
     adaptive_arguments = ["-adapt_fmmlength"] if adaptive_fmm_length else []
     running = []

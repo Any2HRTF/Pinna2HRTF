@@ -88,9 +88,9 @@ enum ProjectConfigDocument {
             "inference": ["enabled", "model_config_file", "model_checkpoint", "target_left_folder", "target_right_folder", "prediction_left_folder", "prediction_right_folder", "use_predictions_for_preprocessing"],
             "ui": ["ear_model_method"],
             "manual_ppm": ["enabled", "left_mesh", "right_mesh", "left_parameters", "right_parameters", "left_blend", "right_blend", "left_source", "right_source", "left_source_identity", "right_source_identity", "template_blend"],
-            "preprocessing": ["title", "ear_distance", "min_frequency", "max_frequency", "frequency_step_count", "source_assignment_face_count", "source_position_input_left", "source_position_input_right", "mesh_min_edge_length", "mesh_max_edge_length", "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite", "skip_mesh_grading"],
-            "numcalc": ["max_instances", "max_cpu_load", "adaptive_fmm_length"],
-            "postprocessing": ["output_sofa_dir", "normalize", "level_offset_db", "resample_hrirs", "sampling_rate", "spatial_upsampling", "spatial_subdivisions", "spatial_normalize", "matlab_executable", "amt_path"]
+            "preprocessing": ["title", "ear_distance", "head_radius", "min_frequency", "max_frequency", "frequency_step_count", "source_assignment_face_count", "source_position_input_left", "source_position_input_right", "mesh_min_edge_length", "mesh_max_edge_length", "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite", "skip_mesh_grading"],
+            "numcalc": ["mode", "max_instances", "max_cpu_load", "adaptive_fmm_length"],
+            "postprocessing": ["overwrite", "output_sofa_dir", "normalize", "level_offset_db", "resample_hrirs", "sampling_rate", "spatial_upsampling", "spatial_subdivisions", "spatial_normalize", "matlab_executable", "amt_path"]
         ]
         for (section, keys) in editable {
             var values = saved[section] as? [String: Any] ?? current[section] as? [String: Any] ?? [:]

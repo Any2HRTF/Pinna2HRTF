@@ -221,6 +221,11 @@ public partial class MainWindow
             }
             return;
         }
+        if (action.Step == 4 && action.Stage == null && selectedProject is { } resultProject) {
+            var folder = SofaDirectory(resultProject);
+            if (Directory.Exists(folder)) OpenExternal(folder);
+            return;
+        }
         if (action.Fit != null) _ = TryOpenPPMFittingAsync(action.Fit);
         else if (action.Stage != null && StageCanRun(action.Stage, selectedProject)) RunStage(action.Stage);
     }

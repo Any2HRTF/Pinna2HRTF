@@ -357,11 +357,41 @@ def slurm_worker_text(config: PipelineConfig) -> str:
 
 def collect_sofa_files(projects: list[Path], output_dir: Path) -> None:
     import mesh2hrtf as m2h
+    if not projects:
+        raise ValueError("No projects were provided for SOFA export")
     if len(projects) == 2:
-        m2h.merge_sofa_files([str(project) for project in projects], savedir=str(output_dir))
-    else:
-        for source in (projects[0] / "Output2HRTF").glob("*.sofa"):
+        # Mesh2HRTF treats both directory and file paths as glob patterns.
+        # Staging under generated names also handles literal glob characters.
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix="pinna-sofa-merge-") as temporary:
+            staged = []
+            names = []
+            for index, project in enumerate(projects):
+                source_dir = project / "Output2HRTF"
+                files = sorted(source_dir.glob("*.sofa"))
+                if not files:
+                    raise ValueError(f"No SOFA files found in {source_dir}")
+                folder = Path(temporary) / str(index)
+                folder.mkdir()
+                for source in files:
+                    shutil.copy2(source, folder / source.name)
+                staged.append(str(folder))
+                names.append({source.name for source in files})
+            if names[0] != names[1]:
+                raise ValueError("Left and right projects contain different SOFA files")
+            m2h.merge_sofa_files(staged, savedir=str(output_dir))
+            expected = {Path(name).stem + "_merged.sofa" for name in names[0]}
+            missing = [name for name in expected if not (output_dir / name).is_file()]
+            if missing:
+                raise ValueError("SOFA merge did not produce: " + ", ".join(sorted(missing)))
+    elif len(projects) == 1:
+        files = sorted((projects[0] / "Output2HRTF").glob("*.sofa"))
+        if not files:
+            raise ValueError(f"No SOFA files found for {projects[0]}")
+        for source in files:
             shutil.copy2(source, output_dir / source.name)
+    else:
+        raise ValueError("SOFA export requires one or two projects")
 
 
 def inspect_sofa_files(output_dir: Path) -> None:
@@ -560,6 +590,22 @@ def _publish_export(staging, destination, overwrite, project_root=None) -> list[
     return [target for target, _ in installed]
 
 
+def validate_hrir_frequencies(project: Path) -> None:
+    """Reject frequency vectors that cannot map onto the HRIR FFT bins."""
+    import numpy as np
+
+    with (project / "parameters.json").open(encoding="utf-8") as stream:
+        parameters = json.load(stream)
+    if not parameters.get("computeHRIRs", False):
+        return
+    frequencies = np.asarray(parameters["frequencies"], dtype=float).reshape(-1)
+    if len(frequencies) < 2 or not np.all(np.isfinite(frequencies)):
+        raise ValueError(f"Invalid HRIR frequency vector in {project}")
+    spacing = np.diff(frequencies)
+    if np.any(spacing <= 0) or not np.allclose(spacing, spacing[0], atol=0.1, rtol=0) or not np.isclose(frequencies[0], spacing[0], atol=0.1, rtol=0):
+        raise ValueError(f"HRIR frequencies in {project} must begin at one frequency step and be evenly spaced")
+
+
 def _export_postprocessing(config, output_dir, logger):
     import mesh2hrtf as m2h
     from .Preprocessing import snapshot_generated_outputs, claim_generated_outputs
@@ -567,6 +613,7 @@ def _export_postprocessing(config, output_dir, logger):
     snapshots = {project: snapshot_generated_outputs(project) for project in projects}
     for project in projects:
         emit_live_event(f"Converting {project.name} results")
+        validate_hrir_frequencies(project)
         m2h.output2hrtf(str(project))
     if config.postprocessing.resample_hrirs:
         from .Postprocessing.postprocessing import resample_hrir_files
@@ -652,6 +699,7 @@ def sofa_cli() -> None:
     if not projects:
         raise SystemExit("At least one project is required")
     for project in projects:
+        validate_hrir_frequencies(project)
         m2h.output2hrtf(str(project))
     collect_sofa_files(projects, output_dir)
     inspect_sofa_files(output_dir)

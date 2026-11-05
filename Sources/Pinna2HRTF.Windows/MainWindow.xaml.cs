@@ -1530,6 +1530,7 @@ public partial class MainWindow : Window
 
     void EndScanAlignment()
     {
+        if (alignmentSaving) return;
         alignmentSessionProject = null;
         scanAlignmentMode = false;
         ClearAlignmentPreview();
@@ -1541,6 +1542,7 @@ public partial class MainWindow : Window
 
     void ResetScanAlignmentPicks()
     {
+        if (alignmentSaving) return;
         ClearAlignmentPreview();
         if (meshViewport.Items != null)
             foreach (var marker in scanAlignmentMarkerVisuals) meshViewport.Items.Remove(marker);
@@ -3679,7 +3681,23 @@ public partial class MainWindow : Window
     bool IsRightMesh(string path) => path.Contains("right", StringComparison.OrdinalIgnoreCase);
     ManualMicrophonePosition? ManualPosition(ProjectRecord project, string side) => side == "left" ? project.Settings.Preprocessing.SourcePositionInputLeft : project.Settings.Preprocessing.SourcePositionInputRight;
     bool ValidManualPosition(ProjectRecord project, string side) => PositionMatchesMesh(ManualPosition(project, side), PreprocessingMesh(project, side));
-    void InvalidateManualPositions(ProjectRecord project) { if (!ValidManualPosition(project, "left")) project.Settings.Preprocessing.SourcePositionInputLeft = null; if (!ValidManualPosition(project, "right")) project.Settings.Preprocessing.SourcePositionInputRight = null; }
+    void InvalidateManualPositions(ProjectRecord project)
+    {
+        foreach (var side in new[] { "left", "right" })
+        {
+            var position = ManualPosition(project, side);
+            if (position == null) continue;
+            var mesh = PreprocessingMesh(project, side);
+            // Missing or still-pending fingerprints must not erase saved positions.
+            if (string.IsNullOrWhiteSpace(mesh)) continue;
+            var identity = MeshIdentity(mesh);
+            if (string.IsNullOrEmpty(identity)) continue;
+            if (SamePath(position.MeshPath, mesh) && position.MeshIdentity == identity &&
+                double.IsFinite(position.X) && double.IsFinite(position.Y) && double.IsFinite(position.Z)) continue;
+            if (side == "left") project.Settings.Preprocessing.SourcePositionInputLeft = null;
+            else project.Settings.Preprocessing.SourcePositionInputRight = null;
+        }
+    }
     string MeshIdentity(string path) { try { var file = new FileInfo(path); return Path.GetFullPath(path).ToLowerInvariant() + ":" + file.Length + ":" + file.LastWriteTimeUtc.Ticks + ":" + FileFingerprints.Hash(path); } catch { return ""; } }
 
     System.Numerics.Vector3? MicrophonePosition(string meshPath)

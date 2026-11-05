@@ -212,6 +212,7 @@ internal sealed class GeneratedOutputManifest
                 var cleanupAncestors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var pair in doc.Files.ToArray())
                 {
+                    if (pair.Key.StartsWith("MeshEdits/", StringComparison.OrdinalIgnoreCase) || pair.Key.StartsWith("Manual PPM/", StringComparison.OrdinalIgnoreCase)) continue;
                     if (from != null && pair.Value.Stage < from) continue;
                     AddDirectoryAncestors(cleanupAncestors, pair.Key);
                     var path = SafePath(pair.Key, false);
@@ -322,15 +323,6 @@ internal sealed class GeneratedOutputManifest
     void Reconcile(Document doc)
     {
         var scan = Scan(false);
-        foreach (var pair in scan.Files)
-        {
-            // A mismatch on an existing entry remains protected; never rebaseline it.
-            if (doc.Files.ContainsKey(pair.Key) || ClassifyOutput(pair.Key) is not { } stage) continue;
-            var path = SafePath(pair.Key);
-            if (path == null) continue;
-            try { var entry = Fingerprint(path); entry.Stage = stage; doc.Files[pair.Key] = entry; }
-            catch (IOException) { /* Still being copied or written: retry on next reconciliation. */ }
-        }
         foreach (var path in doc.Files.Keys.ToArray())
             if (SafePath(path) is string full && !File.Exists(full)) doc.Files.Remove(path);
         TrackDirectories(doc, scan.Directories);
@@ -408,7 +400,7 @@ internal sealed class GeneratedOutputManifest
         path = path.Replace('\\', '/');
         bool Match(string pattern) => Regex.IsMatch(path, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         if (Match(@"^Prepared/((Left|Right)\.stl|mesh_preparation\.json|inference\.json|preprocessing\.json)$") ||
-            Match(@"^MeshEdits/((Left|Right)\.(stl|json)|AlignedScan\.(ply|json))$") ||
+            Match(@"^MeshEdits/((Individual)?(Left|Right)\.(stl|json)|AlignedScan\.(ply|json))$") ||
             Match(@"^Manual PPM/((Left|Right)\.(stl|json|blend[0-9]*)|Templates/[^/]+\.blend)$")) return OutputStage.ScanPreparation;
         if (path.Equals(".pinna2hrtf-postprocessing-receipt.json", StringComparison.OrdinalIgnoreCase)) return OutputStage.Postprocessing;
         if (path.Equals(".pinna2hrtf-inference-receipt.json", StringComparison.OrdinalIgnoreCase)) return OutputStage.Inference;

@@ -203,7 +203,7 @@ class NumCalcConfig(BaseModel):
     ram_safety_factor: float = 1.05
     starting_order: Literal["high", "low", "alternate"] = "alternate"
     wait_time: int = 15
-    max_instances: int = 1
+    max_instances: int = Field(default=1, ge=1)
     max_cpu_load: int = 90
     memory: str = "64G"
     partition: str = "c"

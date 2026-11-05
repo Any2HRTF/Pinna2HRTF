@@ -130,6 +130,7 @@ def _exact_cut(head, ear, side, contains_radius=0.5):
         y_mask = face_centroids[:, 1] <= 0
     head.update_faces(~(inside_mask & y_mask))
     head.remove_unreferenced_vertices()
+    head.merge_vertices()
     components = head.split(only_watertight=False)
     if len(components) > 1:
         head = max(components, key=lambda c: len(c.faces))
