@@ -3,24 +3,44 @@ import SwiftUI
 struct WorkflowFooter: View {
     @ObservedObject var store: AppStore
     private var runningNow: Bool { store.selectedProjectID.flatMap { store.runningProcesses[$0] } != nil }
+
+    private func runTitle(_ stage: Stage) -> String {
+        switch stage {
+        case .scanPreparation: "Prepare ears"
+        case .inference: "Run inference"
+        case .preprocessing: "Run preprocessing"
+        case .numcalc: "Run NumCalc"
+        case .postprocessing: "Run postprocessing"
+        }
+    }
+
     var body: some View {
-        let action = store.workflowNextAction
-        let running = runningNow
-        let reason = action.stage.flatMap { store.runUnavailableReason(stage: $0) }
-        let failed = action.stage.map { store.stageStates[$0] == .failed } ?? false
-        let title = reason != nil ? "Review " + action.step.title.lowercased()
-            : failed ? "Retry " + (action.stage?.title ?? action.title) : action.title
+        let stage = store.workflowStep.stage
+        let reason = stage.flatMap { store.runUnavailableReason(stage: $0) }
         VStack(alignment: .leading, spacing: 8) {
-            if store.selectedProjectIsRunning { ProgressView(); Text("Processing…").font(.caption) }
-            if failed && reason == nil { Text("The previous run failed. Review the stage inputs before retrying.").font(.caption) }
-            if let reason, !store.selectedProjectIsRunning {
+            if store.selectedProjectIsRunning {
+                ProgressView()
+                Text("Processing…").font(.caption)
+            } else if let reason {
                 Text(reason).font(.caption).foregroundStyle(.secondary)
             }
-            Button(running ? "Stop" : title) { store.performWorkflowAction() }
-                .buttonStyle(.borderedProminent)
-                .disabled(store.selectedProject == nil || (!running && (store.selectedProjectIsRunning || !action.enabled)))
-            Button("Reset outputs…", role: .destructive) { store.confirmResetSelectedProjectOutputs() }
-                .disabled(store.selectedProject == nil || store.selectedProjectIsRunning)
+            HStack(spacing: 8) {
+                if !runningNow {
+                    Button("Reset outputs…", role: .destructive) { store.confirmResetSelectedProjectOutputs() }
+                        .disabled(store.selectedProject == nil || store.selectedProjectIsRunning)
+                }
+                Spacer(minLength: 0)
+                if runningNow {
+                    Button("Stop") { store.stopRunningProcess() }
+                }
+                if let stage {
+                    Button(runTitle(stage)) { store.run(stage: stage) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.blue)
+                        .disabled(!store.canRun(stage: stage))
+                }
+            }
+            .controlSize(.small)
         }.frame(maxWidth: .infinity, alignment: .leading)
         .task(id: store.selectedProjectID) {
             while !Task.isCancelled {

@@ -42,7 +42,6 @@ struct ProjectInspectorView: View {
             if store.selectedProject?.scanPreparation.enabled == true {
                 Button("Align scan…") { store.beginScanAlignment() }
                 Text("Use an already aligned scan, or align it here before preparing ears.").font(.caption).foregroundStyle(.secondary)
-                stageAction(.scanPreparation)
                 DisclosureGroup("Advanced settings · scan preparation") {
                     LabeledTextField("Target edge (mm)", helpID: "scan.target_edge", text: scanTextBinding(\.targetEdgeMM))
                     LabeledTextField("Left crop margin (mm)", helpID: "scan.left_margin", text: scanTextBinding(\.leftMarginMM))
@@ -89,7 +88,6 @@ struct ProjectInspectorView: View {
             } else if store.earModelMethod == .mesh2ppm {
                 Text("Generate PPM geometry automatically.").font(.caption)
                 ModelPicker(selection: modelNameBinding, options: store.modelOptions, helpID: "inference.model")
-                stageAction(.inference)
             } else if store.earModelMethod == EarModelMethod.none {
                 Text("Using ear meshes directly. Required mesh preprocessing still runs.").font(.caption)
             } else {
@@ -150,13 +148,11 @@ struct ProjectInspectorView: View {
                     LabeledTextField("Gamma opposite", helpID: "mesh_grading.gamma_opposite", text: preprocessingBinding(\.meshGammaOpposite))
                 }
             }
-            stageAction(.preprocessing)
         case .calculate:
             Text(store.selectedProjectStatus?.numcalcStatus ?? "Checking project files…").font(.caption)
             LabeledTextField("Parallel instances", helpID: "numcalc.parallel_instances", text: numcalcBinding(\.maxInstances))
             LabeledTextField("CPU limit (%)", helpID: "numcalc.cpu_limit", text: numcalcBinding(\.maxCPULoad))
             SettingToggle(title: "Adaptive FMM expansion length", helpID: "numcalc.adaptive_fmm", isOn: numcalcBoolBinding(\.adaptiveFmmLength))
-            stageAction(.numcalc)
         case .results:
             SettingToggle(title: "Apply level offset", helpID: "postprocessing.normalize", isOn: postprocessingNormalizeBinding)
             if postprocessingNormalizeBinding.wrappedValue {
@@ -174,16 +170,10 @@ struct ProjectInspectorView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             PathField("SOFA output folder (optional)", helpID: "postprocessing.output_folder", text: postprocessingOutputFolderBinding, mode: .directory)
-            stageAction(.postprocessing)
             Button("Open output folder") {
                 if let p = store.selectedProject { NSWorkspace.shared.open(ArtifactScanner.postprocessingDirectory(for: p)) }
             }
         }
-    }
-
-    @ViewBuilder func stageAction(_ stage: Stage) -> some View {
-        Button("Run \(stage.title)") { store.run(stage: stage) }.disabled(!store.canRun(stage: stage))
-        if let reason = store.runUnavailableReason(stage: stage) { Text(reason).font(.caption).foregroundStyle(.secondary) }
     }
 
     var requiredPanel: some View {
