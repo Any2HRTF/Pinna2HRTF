@@ -217,13 +217,13 @@ def preprocessing_input_signature(config: PipelineConfig) -> dict:
     return {"format": "pinna2hrtf-preprocessing-inputs-v1", "ears": ears}
 
 
-def validate_preprocessing_inputs(config: PipelineConfig, logger: Logger) -> None:
+def validate_preprocessing_inputs(config: PipelineConfig, logger: Logger, allow_legacy: bool = False) -> None:
     path = config.paths.output_dir / PREPROCESSING_INPUT_RECEIPT
     if not path.exists():
-        # Older desktop releases have their own validated receipts. Keep those
-        # files intact; new preprocessing runs always create this shared receipt.
-        logger("Legacy preprocessing has no shared input receipt; use the desktop application's input validation before exporting.")
-        return
+        if allow_legacy:
+            logger("Legacy preprocessing has no shared input receipt; the desktop application's validated stage receipt is required before resuming NumCalc.")
+            return
+        raise ValueError("This legacy project has no shared preprocessing input receipt. Validate and rerun preprocessing with the current inputs before config-based SOFA export. Existing results are preserved.")
     recorded = json.loads(path.read_text(encoding="utf-8"))
     current = preprocessing_input_signature(config)
     if recorded.get("format") != current["format"] or any(recorded.get("ears", {}).get(side) != value for side, value in current["ears"].items()):
@@ -316,7 +316,7 @@ def run_numcalc(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
         from .ScanPreparation import validate_stage
         validate_stage(config, "preprocessing")
     if not dry_run:
-        validate_preprocessing_inputs(config, logger)
+        validate_preprocessing_inputs(config, logger, allow_legacy=True)
     if config.numcalc.mode == "slurm":
         run_numcalc_slurm(config, dry_run, logger)
     else:
