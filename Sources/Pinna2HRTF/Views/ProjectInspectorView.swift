@@ -13,10 +13,14 @@ struct ProjectInspectorView: View {
                         HStack {
                             Text("\(step.rawValue + 1). \(step.title)")
                             Spacer(minLength: 4)
-                            Label(store.workflowStatus(step), systemImage: store.workflowSymbol(step)).font(.caption).foregroundStyle(.secondary)
-                        }.padding(.horizontal, 10).padding(.vertical, 5)
+                            Label(store.workflowStatus(step), systemImage: store.workflowSymbol(step))
+                                .font(.caption)
+                                .foregroundStyle(statusColor(store.workflowStatus(step)))
+                        }.padding(.horizontal, 10)
+                            .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
                             .background(store.workflowStep == step ? Color.accentColor.opacity(0.14) : Color.clear)
                             .clipShape(RoundedRectangle(cornerRadius: 5))
+                            .contentShape(Rectangle())
                     }.buttonStyle(.plain)
                         .accessibilityAddTraits(store.workflowStep == step ? .isSelected : [])
                 }
@@ -33,6 +37,14 @@ struct ProjectInspectorView: View {
             WorkflowFooter(store: store).padding(12)
         }
         .onChange(of: store.earDistanceFocusRequest) { _ in store.workflowStep = .simulation }
+    }
+
+    private func statusColor(_ status: String) -> Color {
+        if status == "Complete" { return .green }
+        if status == "Failed" { return .red }
+        if status == "Needs rerun" || status == "Stopped" || status.hasPrefix("Needs") || status == "Choose method" { return .orange }
+        if status == "Ready" || status.hasPrefix("Running") { return .blue }
+        return .secondary
     }
 
     @ViewBuilder var stageContent: some View {
