@@ -39,7 +39,11 @@ public partial class MainWindow
         var output = settings.Enabled ? Path.Combine(project.SaveLocation, "Prepared", side == "left" ? "Left.stl" : "Right.stl") : side == "left" ? project.LeftEar : project.RightEar;
         var report = Path.Combine(project.SaveLocation, "Prepared", "mesh_preparation.json");
         var destination = Path.Combine(project.SaveLocation, "MeshEdits", (settings.Enabled ? "" : "Individual") + (side == "left" ? "Left.stl" : "Right.stl"));
+<<<<<<< Updated upstream
         var reviewed = settings.EarEdit(side);
+=======
+        var reviewed = side == "left" ? settings.ReviewedLeft : settings.ReviewedRight;
+>>>>>>> Stashed changes
         var source = EarReviewIsCurrent(project, side) && !string.IsNullOrWhiteSpace(reviewed) ? reviewed : output;
         string generation;
         try

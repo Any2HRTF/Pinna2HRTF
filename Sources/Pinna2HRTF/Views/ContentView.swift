@@ -11,7 +11,11 @@ struct ContentView: View {
         .navigationTitle(store.selectedProject?.name ?? "Pinna2HRTF")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+<<<<<<< Updated upstream
                 if !inspectorPresented { Button(store.selectedProjectIsRunning ? "Show progress" : store.workflowNextAction.title) { inspectorPresented = true } }
+=======
+                if !inspectorPresented { Button(store.workflowNextAction.title) { store.performWorkflowAction() } }
+>>>>>>> Stashed changes
                 Button {
                     withAnimation { logExpanded.toggle() }
                 } label: {

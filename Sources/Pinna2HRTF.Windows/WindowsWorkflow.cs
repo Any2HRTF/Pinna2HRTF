@@ -22,7 +22,10 @@ public partial class MainWindow
     readonly List<(string Side, StackPanel Row, TextBlock Status, Button Fit)> workflowFitRows = [];
     readonly Button workflowCompact = new() { Content = "Show workflow", MaxWidth = 260 };
     readonly ProgressBar workflowProgress = new() { IsIndeterminate = true, Visibility = Visibility.Collapsed };
+<<<<<<< Updated upstream
     ScrollViewer workflowScroll = new();
+=======
+>>>>>>> Stashed changes
     bool updatingWorkflow;
     int workflowStep;
 
@@ -30,6 +33,7 @@ public partial class MainWindow
         ? side == "left" ? p.Settings.ScanPreparation.PrepareLeft : p.Settings.ScanPreparation.PrepareRight
         : !string.IsNullOrWhiteSpace(side == "left" ? p.LeftEar : p.RightEar));
 
+<<<<<<< Updated upstream
     static string? CurrentEarModel(ProjectRecord project)
     {
         var settings = project.Settings;
@@ -39,6 +43,8 @@ public partial class MainWindow
         return "manual";
     }
 
+=======
+>>>>>>> Stashed changes
     TextBlock WorkflowText(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = mutedTextBrush, FontSize = 12 };
     Button WorkflowButton(string title, RoutedEventHandler action) { var b = new Button { Content = title }; b.Click += action; return b; }
 
@@ -52,6 +58,7 @@ public partial class MainWindow
         outer.RowDefinitions.Add(new() { Height = GridLength.Auto });
         outer.Children.Add(new TextBlock { Text = "Workflow", FontSize = 20, FontWeight = FontWeights.SemiBold, Margin = new Thickness(14, 10, 14, 6) });
         for (var i = 0; i < 6; i++) {
+<<<<<<< Updated upstream
             var row = new Grid { ColumnSpacing = 8 };
             row.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
@@ -60,6 +67,12 @@ public partial class MainWindow
             workflowStates[i].VerticalAlignment = VerticalAlignment.Center;
             row.Children.Add(workflowStates[i]);
             workflowNavigation.Items.Add(new ListBoxItem { Content = row, HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(8, 3, 8, 3) });
+=======
+            var row = new StackPanel { Spacing = 1 };
+            row.Children.Add(new TextBlock { Text = $"{i + 1}. {WorkflowTitles[i]}", FontWeight = FontWeights.SemiBold });
+            row.Children.Add(workflowStates[i]);
+            workflowNavigation.Items.Add(new ListBoxItem { Content = row, HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(10, 4, 10, 4) });
+>>>>>>> Stashed changes
             workflowPages[i].Children.Add(new TextBlock { Text = WorkflowTitles[i], FontSize = 18, FontWeight = FontWeights.SemiBold });
         }
         AutomationProperties.SetName(workflowNavigation, "Workflow stages");
@@ -68,7 +81,10 @@ public partial class MainWindow
         var host = new Grid { Margin = new Thickness(14, 12, 14, 12) };
         foreach (var page in workflowPages) host.Children.Add(page);
         var scroll = new ScrollViewer { Content = host, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+<<<<<<< Updated upstream
         workflowScroll = scroll;
+=======
+>>>>>>> Stashed changes
         Grid.SetRow(scroll, 2); outer.Children.Add(scroll);
 
         var input = workflowPages[0];
@@ -108,7 +124,11 @@ public partial class MainWindow
             var edit = WorkflowButton("Edit...", async (_, _) => await EditPreparedEarAsync(side));
             actions.Children.Add(inspect); actions.Children.Add(edit); row.Children.Add(actions);
             var original = WorkflowButton("Use original ear", (_, _) => { if (selectedProject is { } p && !ProjectBusy(p.Id)) {
+<<<<<<< Updated upstream
                 p.Settings.ScanPreparation.SetEarEdit(side, null);
+=======
+                if (side == "left") p.Settings.ScanPreparation.ReviewedLeft = null; else p.Settings.ScanPreparation.ReviewedRight = null;
+>>>>>>> Stashed changes
                 InvalidateManualPositions(p); Persist(); RefreshArtifacts(); RefreshPipelineStatus();
             }}); row.Children.Add(original); prepare.Children.Add(row);
             workflowEarRows.Add((side, row, status, inspect, edit, original));
@@ -117,7 +137,12 @@ public partial class MainWindow
         model.Children.Add(WorkflowText("One method applies to every included ear."));
         workflowMethod.SelectionChanged += (_, _) => {
             if (updatingWorkflow || loading || selectedProject is not { } p || ProjectBusy(p.Id) || workflowMethod.SelectedIndex < 0) return;
+<<<<<<< Updated upstream
             p.Settings.SelectEarModel(new[] { "mesh2ppm", "manual", "none" }[workflowMethod.SelectedIndex]);
+=======
+            p.Settings.Inference.UsePredictionsForPreprocessing = workflowMethod.SelectedIndex == 0;
+            p.Settings.ManualPPM.Enabled = workflowMethod.SelectedIndex == 1;
+>>>>>>> Stashed changes
             InvalidateManualPositions(p); Persist(); LoadSelectedProject(); RefreshArtifacts(); RefreshPipelineStatus();
         };
         AddExpander(workflowInference, "Advanced settings - model", [AddSettingPanel("Model", "inference.model", modelPicker)]);
@@ -146,6 +171,7 @@ public partial class MainWindow
             AddSettingPanel("Spatial upsampling", "postprocessing.spatial_upsampling", spatialUpsamplingBox), AddSettingPanel("Subdivisions (0-5)", "postprocessing.spatial_subdivisions", spatialSubdivisionsBox), AddSettingPanel("Normalize spatial output", "postprocessing.spatial_normalize", spatialNormalizeBox)]);
         results.Children.Add(WorkflowButton("Open output folder", (_, _) => { if (selectedProject is { } p && Directory.Exists(SofaDirectory(p))) OpenExternal(SofaDirectory(p)); }));
         results.Children.Add(WorkflowText("Use Viewing above the viewer to inspect generated meshes, plots and pressure fields."));
+<<<<<<< Updated upstream
         var stages = Stage.GetValues();
         for (var index = 0; index < stages.Length; index++) {
             var stage = stages[index];
@@ -166,6 +192,27 @@ public partial class MainWindow
         footer.Children.Add(workflowProgress);
         footer.Children.Add(pipelineHintText);
         footer.Children.Add(runAllButton);
+=======
+        // Reuse the existing run/stop handlers and status controls, grouped by task.
+        var oldStages = BuildStagesPane();
+        var oldStack = (StackPanel)oldStages.Child;
+        for (var i = 0; i < 5; i++) {
+            var stage = Stage.GetValues()[i];
+            var target = i == 0 ? workflowPreparation : i == 1 ? workflowInference : workflowPages[i + 1];
+            oldStack.Children.OfType<Grid>().First(row => row.Children.Contains(stageButtons[i])).Children.Remove(stageButtons[i]);
+            stageButtons[i].Content = "Run " + stage.Title; stageButtons[i].Width = double.NaN;
+            target.Children.Add(stageButtons[i]); target.Children.Add(workflowReasons[i]);
+        }
+        var footer = new StackPanel { Spacing = 8, Margin = new Thickness(14, 8, 14, 12) };
+        foreach (var element in new FrameworkElement[] { runAllButton, pipelineHintText, numCalcStatusText }) {
+            if (oldStack.Children.Contains(element)) oldStack.Children.Remove(element);
+            else oldStack.Children.OfType<Grid>().First(row => row.Children.Contains(element)).Children.Remove(element);
+            footer.Children.Add(element);
+        }
+        runAllButton.Click -= RunAllClicked; runAllButton.Click += (_, _) => PerformWorkflowAction();
+        footer.Children.Insert(0, workflowProgress);
+        footer.Children.Add(WorkflowButton("Reset outputs...", ResetOutputsClicked));
+>>>>>>> Stashed changes
         Grid.SetRow(footer, 3); outer.Children.Add(footer);
         settingsPaneBorder.Child = outer; RegisterSettingControls();
         SelectWorkflowStep(0); return settingsPaneBorder;
@@ -194,11 +241,16 @@ public partial class MainWindow
         if (scanAlignmentMode) return new("Finish scan alignment", 1);
         if (WorkflowInputIssue(p) is string input) return new(input, 0);
         if (p.Settings.ScanPreparation.Enabled && !StageIsComplete(Stage.ScanPreparation, p, inspection)) return new("Prepare ears", 1, Stage.ScanPreparation);
+<<<<<<< Updated upstream
         if (WorkflowSides(p).Any(side => p.Settings.ScanPreparation.EarEdit(side) != null && !EarReviewIsCurrent(p, side, inspection))) return new("Review outdated ear edit", 1);
         if (p.Settings.ScanPreparation.Enabled && p.Settings.ScanPreparation.RequireManualReview &&
             WorkflowSides(p).FirstOrDefault(side => !EarReviewIsCurrent(p, side, inspection)) is string reviewSide)
             return new($"Review {reviewSide} ear", 1);
         if (CurrentEarModel(p) == null) return new("Choose one ear modelling method", 2);
+=======
+        if (WorkflowSides(p).Any(side => (side == "left" ? p.Settings.ScanPreparation.ReviewedLeft : p.Settings.ScanPreparation.ReviewedRight) != null && !EarReviewIsCurrent(p, side, inspection))) return new("Review outdated ear edit", 1);
+        if (p.Settings.ManualPPM.Enabled && p.Settings.Inference.UsePredictionsForPreprocessing) return new("Choose one ear modelling method", 2);
+>>>>>>> Stashed changes
         if (p.Settings.ManualPPM.Enabled && WorkflowSides(p).FirstOrDefault(side => !FitIsCurrent(p, side)) is string missing) return new($"Fit {missing} ear", 2, Fit: missing);
         var next = AutomaticStages(p).FirstOrDefault(stage => !StageIsComplete(stage, p, inspection));
         if (next == null) return new("Open results", 5);
@@ -210,6 +262,7 @@ public partial class MainWindow
         var action = NextWorkflowAction(); SelectWorkflowStep(action.Step);
         if (!macInspectorVisible) ToggleMacInspector();
         if (!action.Enabled) return;
+<<<<<<< Updated upstream
         if (action.Step == 0 && selectedProject is { } project) {
             if (string.IsNullOrWhiteSpace(project.SaveLocation)) BrowseSaveLocationClicked(this, new RoutedEventArgs());
             else if (project.Settings.ScanPreparation.Enabled && !File.Exists(project.Settings.ScanPreparation.ScanPath)) BrowseScanClicked(this, new RoutedEventArgs());
@@ -220,6 +273,8 @@ public partial class MainWindow
             }
             return;
         }
+=======
+>>>>>>> Stashed changes
         if (action.Fit != null) _ = TryOpenPPMFittingAsync(action.Fit);
         else if (action.Stage != null && StageCanRun(action.Stage, selectedProject)) RunStage(action.Stage);
     }
@@ -229,22 +284,34 @@ public partial class MainWindow
         try {
             var p = selectedProject; var scan = p?.Settings.ScanPreparation.Enabled == true; var busy = p == null || ProjectBusy(p.Id);
             workflowSource.SelectedIndex = scan ? 0 : 1;
+<<<<<<< Updated upstream
             workflowMethod.SelectedIndex = (p == null ? null : CurrentEarModel(p)) switch {
                 "mesh2ppm" => 0, "manual" => 1, "none" => 2, _ => -1
             };
+=======
+            workflowMethod.SelectedIndex = p == null ? -1 : p.Settings.ManualPPM.Enabled && p.Settings.Inference.UsePredictionsForPreprocessing ? -1 : p.Settings.ManualPPM.Enabled ? 1 : p.Settings.Inference.UsePredictionsForPreprocessing ? 0 : 2;
+>>>>>>> Stashed changes
             workflowEarInputs.Visibility = scan ? Visibility.Collapsed : Visibility.Visible;
             workflowScanInputs.Visibility = workflowPreparation.Visibility = scan ? Visibility.Visible : Visibility.Collapsed;
             workflowInference.Visibility = workflowMethod.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
             workflowManual.Visibility = workflowMethod.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
             workflowDirect.Visibility = workflowMethod.SelectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
+<<<<<<< Updated upstream
             workflowScroll.IsEnabled = !busy;
+=======
+            foreach (var control in settingControls.Values) control.IsEnabled = !busy;
+>>>>>>> Stashed changes
             workflowSource.IsEnabled = workflowMethod.IsEnabled = !busy;
             var sides = p == null ? [] : WorkflowSides(p).ToArray();
             foreach (var row in workflowEarRows) {
                 row.Row.Visibility = sides.Contains(row.Side) ? Visibility.Visible : Visibility.Collapsed;
                 var ready = p != null && (!scan || StageIsComplete(Stage.ScanPreparation, p, inspection)) && SourceEar(p, row.Side, inspection) != null;
                 row.Inspect.IsEnabled = row.Edit.IsEnabled = ready && !busy;
+<<<<<<< Updated upstream
                 var saved = p != null && p.Settings.ScanPreparation.EarEdit(row.Side) != null;
+=======
+                var saved = p != null && (row.Side == "left" ? p.Settings.ScanPreparation.ReviewedLeft : p.Settings.ScanPreparation.ReviewedRight) != null;
+>>>>>>> Stashed changes
                 row.Original.Visibility = saved ? Visibility.Visible : Visibility.Collapsed;
                 row.Status.Text = saved ? EarReviewIsCurrent(p!, row.Side, inspection) ? "Saved edit in use" : "Saved edit outdated" : ready ? "Ready - editing optional" : "Prepare or choose an ear first";
                 // Editing an outdated reviewed mesh must reopen its original source.
@@ -262,6 +329,7 @@ public partial class MainWindow
                 workflowReasons[i].Text = p == null ? "Select a project" : StageUnavailableReason(stage, p, inspection) ?? "Ready";
                 stageButtons[i].Content = p != null && runs.TryGetValue(p.Id, out var active) && active.Stage == stage ? "Stop" : "Run " + stage.Title;
             }
+<<<<<<< Updated upstream
             if (!scan) workflowStates[1].Text = "Optional";
             if (workflowMethod.SelectedIndex == 2) workflowStates[2].Text = "Not needed";
             if (workflowMethod.SelectedIndex == -1) workflowStates[2].Text = "Choose method";
@@ -287,6 +355,18 @@ public partial class MainWindow
             workflowProgress.Visibility = p != null && runs.ContainsKey(p.Id) ? Visibility.Visible : Visibility.Collapsed;
             pipelineHintText.Text = reason ?? (p == null ? "Select a project" : next.Fit != null ? "Manual fit required" : next.Stage != null ? "Ready" : runs.ContainsKey(p.Id) ? "Running" : "Next action");
             if (retry && reason == null) pipelineHintText.Text = next.Stage!.Title + " failed. Review its inputs before retrying.";
+=======
+            if (!scan) workflowStates[1].Text = "Optional inspection / editing";
+            if (workflowMethod.SelectedIndex == 2) workflowStates[2].Text = "Not needed - direct meshes";
+            if (workflowMethod.SelectedIndex == -1) workflowStates[2].Text = "Choose method";
+            if (workflowMethod.SelectedIndex == 1) workflowStates[2].Text = p != null && sides.All(side => FitIsCurrent(p, side)) && sides.Length > 0 ? "Complete" : "Needs fit";
+            var next = NextWorkflowAction(inspection);
+            runAllButton.Content = next.Title; runAllButton.IsEnabled = next.Enabled && (!busy || p != null && runs.ContainsKey(p.Id));
+            workflowCompact.Content = next.Title;
+            workflowCompact.Visibility = macInspectorVisible ? Visibility.Collapsed : Visibility.Visible;
+            workflowProgress.Visibility = p != null && runs.ContainsKey(p.Id) ? Visibility.Visible : Visibility.Collapsed;
+            pipelineHintText.Text = next.Stage != null && p != null ? StageUnavailableReason(next.Stage, p, inspection) ?? "Ready" : next.Title;
+>>>>>>> Stashed changes
             pipelineHintText.Visibility = Visibility.Visible;
         } finally { updatingWorkflow = false; }
     }

@@ -49,17 +49,29 @@ enum ProjectValidation {
             errors.append(("mesh_grading.max_edge_length", "Max edge length must be at least the min edge length."))
         }
         if project.settings.manualPPMFitting.useForPreprocessing {
+<<<<<<< Updated upstream
             for side in project.includedEars {
+=======
+            for side in EarSide.allCases where !(side == .left ? project.pipelineLeftEar : project.pipelineRightEar).isEmpty {
+>>>>>>> Stashed changes
                 if ArtifactScanner.validManualPPMFittingMesh(for: project, side: side, inspection: inspection) == nil {
                     errors.append(("manual_ppm.\(side.rawValue)", "Fit the \(side.rawValue) ear: manual mode requires a current saved fit for every included ear."))
                 }
             }
         }
+<<<<<<< Updated upstream
         if project.workflowMethod == nil {
             errors.append(("manual_ppm.method", "Choose one ear modelling method in Ear model."))
         }
         for side in EarSide.allCases where !project.pipelineEar(for: side, inspection: inspection).isEmpty {
             let reviewed = project.scanPreparation.earEdit(side)
+=======
+        if project.settings.manualPPMFitting.useForPreprocessing && project.settings.inference.usePredictionsForPreprocessing {
+            errors.append(("manual_ppm.method", "Choose one ear modelling method in Ear model."))
+        }
+        for side in EarSide.allCases where !project.pipelineEar(for: side, inspection: inspection).isEmpty {
+            let reviewed = side == .left ? project.scanPreparation.reviewedLeftPath : project.scanPreparation.reviewedRightPath
+>>>>>>> Stashed changes
             if reviewed != nil && !ArtifactScanner.earReviewIsCurrent(project, side: side, inspection: inspection) {
                 errors.append(("ear_edit.\(side.rawValue)", "The saved \(side.rawValue) ear edit is outdated. Edit again or use the original ear in Prepare ears."))
             }

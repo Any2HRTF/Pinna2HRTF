@@ -51,7 +51,11 @@ public partial class MainWindow
         if (!scan.Enabled) {
             var path = side == "left" ? p.LeftEar : p.RightEar;
             if (!File.Exists(path)) return null;
+<<<<<<< Updated upstream
             var edited = scan.EarEdit(side);
+=======
+            var edited = side == "left" ? scan.ReviewedLeft : scan.ReviewedRight;
+>>>>>>> Stashed changes
             return EarReviewIsCurrent(p, side, inspection) ? edited : path;
         }
         if (!(side == "left" ? scan.PrepareLeft : scan.PrepareRight) || !ScanPreparationOutputsCurrent(p, inspection)) return null;

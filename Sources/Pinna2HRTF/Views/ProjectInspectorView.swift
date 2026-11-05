@@ -13,7 +13,11 @@ struct ProjectInspectorView: View {
                         HStack {
                             Text("\(step.rawValue + 1). \(step.title)")
                             Spacer(minLength: 4)
+<<<<<<< Updated upstream
                             Label(store.workflowStatus(step), systemImage: store.workflowSymbol(step)).font(.caption).foregroundStyle(.secondary)
+=======
+                            Text(store.workflowStatus(step)).font(.caption).foregroundStyle(.secondary)
+>>>>>>> Stashed changes
                         }.padding(.horizontal, 10).padding(.vertical, 5)
                             .background(store.workflowStep == step ? Color.accentColor.opacity(0.14) : Color.clear)
                             .clipShape(RoundedRectangle(cornerRadius: 5))
@@ -44,6 +48,10 @@ struct ProjectInspectorView: View {
                 Text("Use an already aligned scan, or align it here before preparing ears.").font(.caption).foregroundStyle(.secondary)
                 stageAction(.scanPreparation)
                 DisclosureGroup("Advanced settings · scan preparation") {
+<<<<<<< Updated upstream
+=======
+                SettingsDisclosure("Scan preparation", systemImage: "bandage") {
+>>>>>>> Stashed changes
                     LabeledTextField("Target edge (mm)", helpID: "scan.target_edge", text: scanTextBinding(\.targetEdgeMM))
                     LabeledTextField("Left crop margin (mm)", helpID: "scan.left_margin", text: scanTextBinding(\.leftMarginMM))
                     LabeledTextField("Right crop margin (mm)", helpID: "scan.right_margin", text: scanTextBinding(\.rightMarginMM))
@@ -53,6 +61,10 @@ struct ProjectInspectorView: View {
                         .font(.caption).foregroundStyle(.secondary)
 
                 }
+<<<<<<< Updated upstream
+=======
+                }
+>>>>>>> Stashed changes
             }
             Text("Inspect and optionally edit each ear. Original input files are preserved.").font(.caption).foregroundStyle(.secondary)
             ForEach(store.workflowSides) { side in
@@ -67,12 +79,20 @@ struct ProjectInspectorView: View {
                         Button("Edit…") { store.beginEarEditing(side) }
                     }.disabled(!(store.selectedProjectStatus?.fittableSides.contains(side) ?? false))
                     if let p = store.selectedProject,
+<<<<<<< Updated upstream
                        (p.scanPreparation.earEdit(side)) != nil {
+=======
+                       (side == .left ? p.scanPreparation.reviewedLeftPath : p.scanPreparation.reviewedRightPath) != nil {
+>>>>>>> Stashed changes
                         Text(ArtifactScanner.earReviewIsCurrent(p, side: side) ? "Saved edit in use" : "Saved edit outdated").font(.caption)
                         Button("Use original ear") {
                             store.updateSelectedProject {
                                 var scan = $0.scanPreparation
+<<<<<<< Updated upstream
                                 scan.setEarEdit(nil, side: side)
+=======
+                                if side == .left { scan.reviewedLeftPath = nil } else { scan.reviewedRightPath = nil }
+>>>>>>> Stashed changes
                                 $0.settings.scanPreparation = scan
                             }
                         }
@@ -158,6 +178,10 @@ struct ProjectInspectorView: View {
         case .calculate:
             Text(store.selectedProjectStatus?.numcalcStatus ?? "Checking project files…").font(.caption)
             DisclosureGroup("Advanced settings · calculation") {
+<<<<<<< Updated upstream
+=======
+                SettingsDisclosure("NumCalc", systemImage: "cpu") {
+>>>>>>> Stashed changes
                     LabeledTextField("Parallel instances", helpID: "numcalc.parallel_instances", text: numcalcBinding(\.maxInstances))
                     LabeledTextField("CPU limit (%)", helpID: "numcalc.cpu_limit", text: numcalcBinding(\.maxCPULoad))
                     SettingToggle(title: "Adaptive FMM expansion length", helpID: "numcalc.adaptive_fmm", isOn: numcalcBoolBinding(\.adaptiveFmmLength))
@@ -166,6 +190,10 @@ struct ProjectInspectorView: View {
             stageAction(.numcalc)
         case .results:
             DisclosureGroup("Advanced settings · results") {
+<<<<<<< Updated upstream
+=======
+                SettingsDisclosure("Postprocessing", systemImage: "slider.horizontal.3") {
+>>>>>>> Stashed changes
                     PathField("SOFA output folder (optional)", helpID: "postprocessing.output_folder", text: postprocessingOutputFolderBinding, mode: .directory)
                     SettingToggle(title: "Apply level offset", helpID: "postprocessing.normalize", isOn: postprocessingNormalizeBinding)
                     LabeledTextField("Level offset (dB)", helpID: "postprocessing.level_offset", text: postprocessingLevelOffsetBinding, fieldEnabled: postprocessingNormalizeBinding.wrappedValue)
@@ -183,6 +211,42 @@ struct ProjectInspectorView: View {
             stageAction(.postprocessing)
             Button("Open output folder") {
                 if let p = store.selectedProject { NSWorkspace.shared.open(ArtifactScanner.postprocessingDirectory(for: p)) }
+            }
+            ForEach(store.artifacts.filter(\.exists)) { artifact in
+                Button(artifact.title) { store.openArtifact(artifact) }.buttonStyle(.link)
+            }
+<<<<<<< Updated upstream
+        }
+    }
+
+    @ViewBuilder func stageAction(_ stage: Stage) -> some View {
+        Button("Run \(stage.title)") { store.run(stage: stage) }.disabled(!store.canRun(stage: stage))
+        if let reason = store.runUnavailableReason(stage: stage) { Text(reason).font(.caption).foregroundStyle(.secondary) }
+    }
+
+    var requiredPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            LabeledTextField("Project name", helpID: "project.name", text: projectStringBinding(\.name))
+            PathField("Save location", helpID: "project.save_location", text: projectStringBinding(\.saveLocation), mode: .directory, showsOpenButton: true)
+            Picker("Input source", selection: scanBoolBinding(\.enabled)) {
+                Text("Full-head scan").tag(true)
+                Text("Individual ear meshes").tag(false)
+            }.pickerStyle(.radioGroup)
+            if store.selectedProject?.scanPreparation.enabled == true {
+                PathField("Full-head scan", helpID: "scan.path", text: scanTextBinding(\.scanPath), mode: .file)
+                Toggle("Prepare left ear", isOn: scanBoolBinding(\.prepareLeft))
+                Toggle("Prepare right ear", isOn: scanBoolBinding(\.prepareRight))
+                Text("Align and extract ears in Prepare ears.").font(.caption)
+            } else {
+                PathField("Left ear", helpID: "project.left_ear", text: projectStringBinding(\.leftEar), mode: .file)
+                PathField("Right ear", helpID: "project.right_ear", text: projectStringBinding(\.rightEar), mode: .file)
+                Text("Choose at least one ear. Inspection and editing are available in Prepare ears.").font(.caption)
+            }
+        }
+=======
+            stageAction(.postprocessing)
+            Button("Open output folder") {
+                if let p = store.selectedProject { NSWorkspace.shared.open(URL(fileURLWithPath: p.saveLocation)) }
             }
             ForEach(store.artifacts.filter(\.exists)) { artifact in
                 Button(artifact.title) { store.openArtifact(artifact) }.buttonStyle(.link)
@@ -214,6 +278,7 @@ struct ProjectInspectorView: View {
                 Text("Choose at least one ear. Inspection and editing are available in Prepare ears.").font(.caption)
             }
         }
+>>>>>>> Stashed changes
     }
 
     func validationMessage(_ id: String) -> String? {

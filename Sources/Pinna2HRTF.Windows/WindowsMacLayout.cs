@@ -23,6 +23,12 @@ public partial class MainWindow
 #endif
     Grid? macSettingsDivider;
     TextBlock? macProjectTitle;
+<<<<<<< Updated upstream
+=======
+    readonly List<Grid> macStageRows = [];
+    readonly List<Action> macPathUpdates = [];
+    readonly List<(string Side, TextBlock Status)> macFitStatuses = [];
+>>>>>>> Stashed changes
     ToggleButton? macLogToggle, macInspectorToggle;
     bool macInspectorVisible = true, macSidebarReady;
 
@@ -147,10 +153,162 @@ public partial class MainWindow
         RefreshMacPresentation();
     }
 
+<<<<<<< Updated upstream
+=======
+    void ArrangeMacInspector(StackPanel settings, Grid outer, ScrollViewer scroll, Border stages)
+    {
+        var sections = settings.Children.OfType<Expander>().ToDictionary(e => (string)e.Header);
+        FrameworkElement Row(Control control) => settings.Children.OfType<Grid>().Single(row => row.Children.Contains(control));
+        var name = Row(projectNameBox); var left = Row(leftEarBox); var right = Row(rightEarBox); var save = Row(saveLocationBox); var inference = Row(usePredictionsBox);
+        var evaluation = ((StackPanel)sections["Mesh2HRTF"].Content).Children.OfType<Grid>().Single(row => row.Children.Contains(evaluationGridBox));
+        var scan = (StackPanel)sections["Optional scan preparation"].Content; var scanChildren = scan.Children.Cast<FrameworkElement>().ToArray(); scan.Children.Clear();
+        var manual = (StackPanel)sections["Manual PPM Fit"].Content; var manualChildren = manual.Children.Cast<FrameworkElement>().ToArray(); manual.Children.Clear();
+        var sofa = (StackPanel)sections["SOFA destination"].Content; var sofaRow = (FrameworkElement)sofa.Children[0]; sofa.Children.Clear();
+        settings.Children.Clear(); settings.Margin = new Thickness(14, 0, 14, 14);
+        macEarInputs = new StackPanel { Spacing = 8 }; Unparent(left); Unparent(right); macEarInputs.Children.Add(left); macEarInputs.Children.Add(right);
+        macEarInputs.Children.Add(new TextBlock { Text = "Choose at least one ear mesh.", FontSize = 11, Foreground = mutedTextBrush });
+        macScanInputs = new StackPanel { Spacing = 6 };
+        foreach (var item in scanChildren.Skip(1).Take(4)) { Unparent(item); macScanInputs.Children.Add(item); }
+        MacSection(settings, "Inputs", new[] { name, scanChildren[0], macEarInputs, macScanInputs, save, inference });
+        var manualRows = new List<FrameworkElement> { new TextBlock { Text = "Fit a parametric model to either ear.", FontSize = 11, Foreground = mutedTextBrush } };
+        foreach (var (side, button) in new[] { ("left", (Button)manualChildren[0]), ("right", (Button)manualChildren[1]) })
+        {
+            Unparent(button);
+            button.Content = "Fit…"; button.MinWidth = 50; AutomationProperties.SetName(button, "Fit " + side + " ear");
+            var row = new Grid(); row.ColumnDefinitions.Add(new()); row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+            var label = new StackPanel(); label.Children.Add(new TextBlock { Text = side == "left" ? "Left ear" : "Right ear", FontSize = 13 });
+            var status = new TextBlock { Text = "Not fitted", FontSize = 11, Foreground = mutedTextBrush }; label.Children.Add(status); macFitStatuses.Add((side, status));
+            row.Children.Add(label); Grid.SetColumn(button, 1); row.Children.Add(button); manualRows.Add(row);
+        }
+        Unparent(manualChildren[2]); manualRows.Add(manualChildren[2]); MacSection(settings, "Manual PPM Fit", manualRows);
+        var processing = new[] { sections["Scan preparation settings"], sections["Mesh2PPM"], sections["Mesh2HRTF"], sections["Mesh Grading"], sections["NumCalc"] };
+        processing[0].Header = "Scan Preparation";
+        MacSection(settings, "Processing", processing);
+        ((StackPanel)sections["Postprocessing"].Content).Children.Insert(0, sofaRow);
+        MacSection(settings, "Results", new[] { sections["Postprocessing"] });
+        foreach (var section in processing.Append(sections["Postprocessing"])) { section.Margin = new Thickness(0); section.MinHeight = 36; section.FontSize = 13; }
+        outer.RowDefinitions.Insert(0, new() { Height = new GridLength(48) }); Grid.SetRow(scroll, 1); Grid.SetRow(stages, 2);
+        outer.Children.Add(new Border { BorderBrush = borderBrush, BorderThickness = new Thickness(0, 0, 0, 1), Padding = new Thickness(16, 0, 16, 0),
+            Child = new TextBlock { Text = "Workflow", FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center } });
+        scanPreparationEnabledBox.Checked += (_, _) => RefreshMacPresentation(); scanPreparationEnabledBox.Unchecked += (_, _) => RefreshMacPresentation();
+        // All event bindings remain on the original native controls.
+        foreach (var box in settingControls.Values.OfType<TextBox>()) { box.FontSize = 12; box.Padding = new Thickness(7, 3, 7, 3); }
+        MacPath((Grid)left, leftEarBox, false); MacPath((Grid)right, rightEarBox, false);
+        MacPath((Grid)save, saveLocationBox, true, true); MacPath((Grid)scanChildren[1], scanPathBox, false);
+        MacPath((Grid)sofaRow, sofaFolderBox, true); MacPath(evaluation, evaluationGridBox, true);
+        ArrangeMacPipeline(stages);
+    }
+
+    void MacPath(Grid row, TextBox box, bool folder, bool openOnClick = false)
+    {
+        box.Visibility = Visibility.Collapsed;
+        foreach (var browse in row.Children.OfType<Button>()) browse.Visibility = Visibility.Collapsed;
+        var line = new Grid { ColumnSpacing = 6 }; line.ColumnDefinitions.Add(new()); line.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        var filename = new TextBlock { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, HorizontalAlignment = HorizontalAlignment.Left };
+        var edit = new Button { Content = filename, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(0), MinWidth = 0, MinHeight = 26, Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0) };
+        AutomationProperties.SetName(edit, openOnClick ? "Open save location" : "Edit " + box.Tag + " path");
+        async Task EditPath()
+        {
+            var project = selectedProject;
+            var input = new TextBox { Text = box.Text, MinWidth = 300, AcceptsReturn = false };
+            var dialog = new ContentDialog { Title = "Edit path", Content = input, PrimaryButtonText = "Apply", CloseButtonText = "Cancel", XamlRoot = Root.XamlRoot };
+            if (await dialog.ShowAsync() == ContentDialogResult.Primary && project == selectedProject) { box.Text = input.Text; await CommitSettingInputAsync(box); }
+        }
+        edit.Click += async (_, _) =>
+        {
+            if (!openOnClick) { await EditPath(); return; }
+            try
+            {
+                var location = ExistingPickerFolder(box.Text);
+                if (location != null) System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(location) { UseShellExecute = true });
+            }
+            catch (Exception error) { AppendLog(error.Message); }
+        };
+        if (openOnClick)
+        {
+            var menu = new MenuFlyout(); var editPath = new MenuFlyoutItem { Text = "Edit path…" };
+            editPath.Click += async (_, _) => await EditPath(); menu.Items.Add(editPath); edit.ContextFlyout = menu;
+        }
+        var choose = new Button { Content = "Choose…", Padding = new Thickness(6, 2, 6, 2), MinHeight = 26, FontSize = 12 };
+        if (openOnClick) AutomationProperties.SetName(choose, "Choose save location");
+        choose.Click += async (_, _) =>
+        {
+            var project = selectedProject;
+            var selected = folder ? await PickFolderAsync(box.Text) : await PickFileAsync(box.Text);
+            if (selected != null && project == selectedProject) { box.Text = selected; await CommitSettingInputAsync(box); }
+        };
+        line.Children.Add(edit); Grid.SetColumn(choose, 1); line.Children.Add(choose);
+        void Update()
+        {
+            var path = box.Text.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            filename.Text = string.IsNullOrWhiteSpace(path) ? folder ? "No location selected" : "No file selected" : Path.GetFileName(path);
+            ToolTipService.SetToolTip(edit, box.Text + (openOnClick
+                ? Directory.Exists(box.Text) ? "\nClick to open this folder. Right-click to edit the path." : "\nFolder not created yet; opens its existing parent. Right-click to edit the path."
+                : "\nClick to edit the full path"));
+            edit.IsEnabled = choose.IsEnabled = box.IsEnabled;
+        }
+        macPathUpdates.Add(Update);
+        box.RegisterPropertyChangedCallback(TextBox.TextProperty, (_, _) => Update());
+        box.RegisterPropertyChangedCallback(Control.IsEnabledProperty, (_, _) => Update()); Update();
+        Grid.SetRow(line, 1); Grid.SetColumnSpan(line, 2); row.Children.Add(line);
+    }
+
+    void MacRunNextClicked(object sender, RoutedEventArgs args)
+    {
+        if (selectedProject != null && runs.ContainsKey(selectedProject.Id)) { StopClicked(sender, args); return; }
+        RunNextClicked(sender, args);
+    }
+
+    void ArrangeMacPipeline(Border stages)
+    {
+        var stack = (StackPanel)stages.Child;
+        stack.Children.Insert(0, new TextBlock { Text = "Pipeline", FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 2, 0, 6) });
+        foreach (var (stage, index) in Stage.GetValues().Select((stage, index) => (stage, index)))
+        {
+            var button = stageButtons[index]; var row = stack.Children.OfType<Grid>().Single(row => row.Children.Contains(button));
+            row.Children.Clear(); row.ColumnDefinitions.Clear();
+            var content = new Grid { ColumnSpacing = 10 }; content.ColumnDefinitions.Add(new() { Width = new GridLength(20) }); content.ColumnDefinitions.Add(new());
+            content.Children.Add(new FontIcon { Glyph = "\uE768", FontSize = 12, Foreground = mutedTextBrush });
+            var text = new StackPanel { Spacing = 1 }; text.Children.Add(new TextBlock { Text = stage.Title, FontSize = 12 });
+            Unparent(stageStatus[index]); stageStatus[index].Margin = new Thickness(0); stageStatus[index].FontSize = 10; text.Children.Add(stageStatus[index]); Grid.SetColumn(text, 1); content.Children.Add(text);
+            button.Content = content; button.Width = double.NaN; button.HorizontalAlignment = HorizontalAlignment.Stretch;
+            button.HorizontalContentAlignment = HorizontalAlignment.Stretch; button.Background = new SolidColorBrush(Colors.Transparent); button.BorderThickness = new Thickness(0);
+            button.Padding = new Thickness(5, 3, 5, 3); button.MinHeight = 37; row.Children.Add(button); macStageRows.Add(row);
+            AutomationProperties.SetName(button, "Run " + stage.Title);
+        }
+        runAllButton.Click -= RunAllClicked; runAllButton.Click += MacRunNextClicked;
+        var statusRow = stack.Children.OfType<Grid>().Single(row => row.Children.Contains(numCalcStatusText));
+        var reset = statusRow.Children.OfType<Button>().Single(); statusRow.Children.Remove(reset);
+        var more = new Button { Content = new FontIcon { Glyph = "\uE712", FontSize = 16 }, Width = 34, Height = 34, Padding = new Thickness(5), Margin = new Thickness(8, 8, 0, 0) };
+        var menu = new MenuFlyout(); menu.Items.Add(MenuItem("Reset Outputs…", ResetOutputsClicked)); menu.Items.Add(MenuItem("Run All", RunAllClicked)); more.Flyout = menu;
+        AutomationProperties.SetName(more, "Pipeline actions");
+        var actions = new Grid(); actions.ColumnDefinitions.Add(new()); actions.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        stack.Children.Remove(runAllButton); actions.Children.Add(runAllButton); Grid.SetColumn(more, 1); actions.Children.Add(more); stack.Children.Add(actions);
+        pipelineHintText.MaxLines = 2;
+    }
+
+>>>>>>> Stashed changes
     void RefreshMacPresentation(ArtifactInspection? inspection = null)
     {
         if (!MacLayout) return;
         if (macProjectTitle != null) macProjectTitle.Text = selectedProject?.Name ?? "Pinna2HRTF";
+<<<<<<< Updated upstream
+=======
+        var scan = scanPreparationEnabledBox.IsChecked == true;
+        if (macEarInputs != null) macEarInputs.Visibility = scan ? Visibility.Collapsed : Visibility.Visible;
+        if (macScanInputs != null) macScanInputs.Visibility = scan ? Visibility.Visible : Visibility.Collapsed;
+        if (macStageRows.Count > 0) macStageRows[0].Visibility = scan ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var (side, text) in macFitStatuses)
+            text.Text = selectedProject?.Settings.ManualPPM.For(side) == null ? "Not fitted" : FitIsCurrent(selectedProject, side) ? "Saved fit available" : "Source changed; refit required";
+        if (selectedProject != null && macStageRows.Count > 0)
+        {
+            var next = AutomaticStages(selectedProject).FirstOrDefault(stage => !StageIsComplete(stage, selectedProject, inspection));
+            var running = runs.ContainsKey(selectedProject.Id);
+            runAllButton.Content = running ? "Stop" : next != null ? "Run " + next.Title : "Complete";
+            if (running) runAllButton.IsEnabled = true;
+        }
+>>>>>>> Stashed changes
         if (macLogToggle != null) macLogToggle.IsChecked = !logCollapsed;
         if (macInspectorToggle != null) macInspectorToggle.IsChecked = macInspectorVisible;
         if (macLogToggle != null) ToolTipService.SetToolTip(macLogToggle, logCollapsed ? "Show Live Log (Ctrl+L)" : "Hide Live Log (Ctrl+L)");
