@@ -176,20 +176,23 @@ public partial class MainWindow
         toolRow.Children.Add(selectToolButton); toolRow.Children.Add(planeToolButton);
         panel.Children.Add(new TextBlock { Text = Path.GetFileName(source) + " · Original mesh is preserved", FontSize = 12, Foreground = mutedTextBrush, TextWrapping = TextWrapping.Wrap });
         panel.Children.Add(toolRow);
-        var selectionPanel = new StackPanel { Spacing = 8 };
-        selectionPanel.Children.Add(new TextBlock { Text = "Draw a closed lasso around faces to remove. Click toggles one face. Red faces are selected.", TextWrapping = TextWrapping.Wrap, FontSize = 12 });
-        selectionPanel.Children.Add(new TextBlock { Text = "Triangle edges stay visible to make face selection easier.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Opacity = 0.8 });
+        var selectionPanel = new StackPanel { Spacing = 10 };
+        selectionPanel.Children.Add(new TextBlock { Text = "Select faces to remove", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        selectionPanel.Children.Add(new TextBlock { Text = "Click a face or draw a closed lasso. Selected faces appear red.", TextWrapping = TextWrapping.Wrap, FontSize = 12 });
         var throughToggle = new CheckBox { Content = "Select through mesh" };
         var addToggle = new CheckBox { Content = "Add to current selection" };
         selectionPanel.Children.Add(throughToggle); selectionPanel.Children.Add(addToggle);
         var selectionStatus = new TextBlock { Text = "0 faces selected", FontFamily = new FontFamily("Consolas"), FontSize = 12 };
         selectionPanel.Children.Add(selectionStatus);
-        var deleteButton = new Button { Content = "Delete Selected Faces", IsEnabled = false };
-        var clearButton = new Button { Content = "Clear Selection", IsEnabled = false };
-        selectionPanel.Children.Add(deleteButton); selectionPanel.Children.Add(clearButton);
-        var invertButton = new Button { Content = "Invert Selection" };
-
-        selectionPanel.Children.Add(invertButton);
+        var deleteButton = new Button { Content = "Remove selected faces", IsEnabled = false, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var clearButton = new Button { Content = "Clear", IsEnabled = false, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var invertButton = new Button { Content = "Invert", HorizontalAlignment = HorizontalAlignment.Stretch };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(clearButton, "Clear selection");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(invertButton, "Invert selection");
+        var selectionActions = new Grid { ColumnSpacing = 8 };
+        selectionActions.ColumnDefinitions.Add(new()); selectionActions.ColumnDefinitions.Add(new());
+        selectionActions.Children.Add(clearButton); Grid.SetColumn(invertButton, 1); selectionActions.Children.Add(invertButton);
+        selectionPanel.Children.Add(selectionActions); selectionPanel.Children.Add(deleteButton);
         var planePanel = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
         planePanel.Children.Add(new TextBlock { Text = "The preview fits the mesh at the cut. The cut extends through the mesh; the red side is removed.", TextWrapping = TextWrapping.Wrap, FontSize = 12 });
         var normalBoxes = new[] { new TextBox { Text = "0", PlaceholderText = "X", Header = "Normal X" }, new TextBox { Text = "1", PlaceholderText = "Y", Header = "Normal Y" }, new TextBox { Text = "0", PlaceholderText = "Z", Header = "Normal Z" } };
@@ -227,12 +230,13 @@ public partial class MainWindow
         var cutButton = new Button { Content = "Apply Open Cut" };
         planePanel.Children.Add(cutButton);
         panel.Children.Add(selectionPanel); panel.Children.Add(planePanel);
-        var historyRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var undoButton = new Button { Content = "Undo", IsEnabled = false };
-        var redoButton = new Button { Content = "Redo", IsEnabled = false };
-        historyRow.Children.Add(undoButton); historyRow.Children.Add(redoButton); panel.Children.Add(historyRow);
+        var historyRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        var undoButton = NavigationHelp.Command("Undo"); undoButton.IsEnabled = false;
+        var redoButton = NavigationHelp.Command("Redo"); redoButton.IsEnabled = false;
+        historyRow.Children.Add(undoButton); historyRow.Children.Add(redoButton);
         var largestButton = new Button { Content = "Keep Largest Component" };
-        panel.Children.Add(largestButton);
+        var cleanup = new Expander { Header = "Mesh cleanup", Content = largestButton, IsExpanded = false, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        panel.Children.Add(cleanup);
         var message = new TextBlock { Text = "Loading mesh…", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = mutedTextBrush };
         panel.Children.Add(message);
         var errorText = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Colors.Firebrick), Visibility = Visibility.Collapsed };
@@ -244,10 +248,11 @@ public partial class MainWindow
         windowRoot.RowDefinitions.Add(new RowDefinition());
         windowRoot.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var header = new Grid { Padding = new Thickness(12, 4, 0, 4), MinHeight = 54 };
+        header.ColumnDefinitions.Add(new()); header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         var drag = new Grid();
         drag.Children.Add(new TextBlock { Text = editorWindow.Title, FontSize = 14,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
-        header.Children.Add(drag); windowRoot.Children.Add(header);
+        header.Children.Add(drag); Grid.SetColumn(historyRow, 1); header.Children.Add(historyRow); windowRoot.Children.Add(header);
         Grid.SetRow(root, 1);
         windowRoot.Children.Add(root);
         var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(12), HorizontalAlignment = HorizontalAlignment.Right };
@@ -509,6 +514,15 @@ public partial class MainWindow
         };
         undoButton.Click += async (_, _) => await LoadHistoryAsync(currentIndex - 1);
         redoButton.Click += async (_, _) => await LoadHistoryAsync(currentIndex + 1);
+        foreach (var (key, modifiers, delta) in new[] {
+            (VirtualKey.Z, VirtualKeyModifiers.Control, -1),
+            (VirtualKey.Y, VirtualKeyModifiers.Control, 1),
+            (VirtualKey.Z, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift, 1) })
+        {
+            var accelerator = new KeyboardAccelerator { Key = key, Modifiers = modifiers };
+            accelerator.Invoked += async (_, args) => { args.Handled = true; await LoadHistoryAsync(currentIndex + delta); };
+            windowRoot.KeyboardAccelerators.Add(accelerator);
+        }
         viewport.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, e) =>
         {
             if (navigate || planePanel.Visibility == Visibility.Visible || isBusy) return;

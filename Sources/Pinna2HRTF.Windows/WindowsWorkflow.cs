@@ -17,6 +17,8 @@ public partial class MainWindow
     readonly RadioButtons workflowSource = new() { Header = "Input source", MaxColumns = 1, ItemsSource = new[] { "Full-head scan", "Individual ear meshes" } };
     readonly RadioButtons workflowMethod = new() { Header = "Ear modelling method", MaxColumns = 1, ItemsSource = new[] { "Mesh2PPM", "Manual PPM fitting", "No PPM" } };
     readonly StackPanel workflowEarInputs = new() { Spacing = 8 }, workflowScanInputs = new() { Spacing = 8 }, workflowPreparation = new() { Spacing = 8 }, workflowManual = new() { Spacing = 8 }, workflowInference = new() { Spacing = 8 };
+    FrameworkElement? workflowLevelOffset, workflowSamplingRate;
+    readonly StackPanel workflowSpatial = new() { Spacing = 8 };
     readonly TextBlock workflowDirect = new() { Text = "Using ear meshes directly. Required mesh preprocessing still runs.", TextWrapping = TextWrapping.Wrap };
     readonly List<(string Side, StackPanel Row, TextBlock Status, Button Inspect, Button Edit, Button Original)> workflowEarRows = [];
     readonly List<(string Side, StackPanel Row, TextBlock Status, Button Fit)> workflowFitRows = [];
@@ -39,7 +41,7 @@ public partial class MainWindow
         return "manual";
     }
 
-    static string WorkflowStageTitle(Stage stage) => WorkflowTitles[Math.Max(1, Array.IndexOf(Stage.GetValues(), stage))];
+    static string WorkflowStageTitle(Stage stage) => stage == Stage.ScanPreparation ? "Prepare ears" : stage == Stage.Inference ? "Mesh2PPM" : WorkflowTitles[Math.Max(1, Array.IndexOf(Stage.GetValues(), stage))];
 
     TextBlock WorkflowText(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = mutedTextBrush, FontSize = 12 };
     Button WorkflowButton(string title, RoutedEventHandler action) { var b = new Button { Content = title }; b.Click += action; return b; }
@@ -57,7 +59,7 @@ public partial class MainWindow
             var row = new Grid { ColumnSpacing = 8 };
             row.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
-            row.Children.Add(new TextBlock { Text = $"{i + 1}. {WorkflowTitles[i]}", VerticalAlignment = VerticalAlignment.Center });
+            row.Children.Add(new TextBlock { Text = $"{i + 1}. {WorkflowTitles[i]}", VerticalAlignment = VerticalAlignment.Center, Foreground = primaryTextBrush });
             Grid.SetColumn(workflowStates[i], 1);
             workflowStates[i].VerticalAlignment = VerticalAlignment.Center;
             row.Children.Add(workflowStates[i]);
@@ -92,12 +94,11 @@ public partial class MainWindow
         workflowPreparation.Children.Add(alignScanButton); alignScanButton.Click += BeginScanAlignmentClicked;
         workflowPreparation.Children.Add(WorkflowText("Use an aligned scan, or align it here before preparing ears."));
         AddExpander(workflowPreparation, "Advanced settings - scan preparation", [
-            AddSettingPanel("Crop rotation (degrees)", "scan_preparation.rotation", scanRotationBox),
             AddSettingPanel("Target edge length (mm)", "scan_preparation.target_edge", targetEdgeBox),
             AddSettingPanel("Left crop margin (mm)", "scan_preparation.left_margin", leftMarginBox),
             AddSettingPanel("Right crop margin (mm)", "scan_preparation.right_margin", rightMarginBox),
             AddSettingPanel("Inner crop limit (mm)", "scan_preparation.side_min", sideMinBox),
-            AddSettingPanel("Outer crop limit (mm)", "scan_preparation.side_max", sideMaxBox), requireReviewBox]);
+            AddSettingPanel("Outer crop limit (mm)", "scan_preparation.side_max", sideMaxBox), WorkflowText("Use an aligned scan in mm. A saved, current ear edit is used automatically.")]);
         requireReviewBox.Click += (_, _) => { if (!loading && selectedProject is { } p) { p.Settings.ScanPreparation.RequireManualReview = requireReviewBox.IsChecked == true; Persist(); RefreshPipelineStatus(); } };
         prepare.Children.Add(WorkflowText("Inspect and optionally edit each ear. Original files are preserved."));
         foreach (var side in new[] { "left", "right" }) {
@@ -121,7 +122,8 @@ public partial class MainWindow
             p.Settings.SelectEarModel(new[] { "mesh2ppm", "manual", "none" }[workflowMethod.SelectedIndex]);
             InvalidateManualPositions(p); Persist(); LoadSelectedProject(); RefreshArtifacts(); RefreshPipelineStatus();
         };
-        AddExpander(workflowInference, "Advanced settings - model", [AddSettingPanel("Model", "inference.model", modelPicker)]);
+        workflowInference.Children.Add(WorkflowText("Generate PPM geometry automatically."));
+        workflowInference.Children.Add(AddSettingPanel("Model", "inference.model", modelPicker));
         model.Children.Add(workflowInference); model.Children.Add(workflowManual); model.Children.Add(workflowDirect);
         foreach (var side in new[] { "left", "right" }) {
             var row = new StackPanel { Spacing = 4 }; var status = WorkflowText(""); row.Children.Add(status);
@@ -130,21 +132,31 @@ public partial class MainWindow
         }
         workflowManual.Children.Add(WorkflowText("Save a current fit for every included ear to continue."));
         var simulation = workflowPages[2]; simulation.Children.Add(GeometryPanel());
-        simulation.Children.Add(WorkflowText("Microphone positions: automatic by default. Adjust only when needed."));
+        simulation.Children.Add(new TextBlock { Text = "Microphone positions", FontWeight = FontWeights.SemiBold });
+        simulation.Children.Add(WorkflowText("Automatic positioning remains the default; adjust only when needed."));
         simulation.Children.Add(placeLeftButtonHost!); simulation.Children.Add(placeRightButtonHost!);
-        AddExpander(simulation, "Advanced settings - preprocessing", [
-            PathSettingPanel("Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked),
-            AddSettingPanel("Min frequency", "mesh2hrtf.min_frequency", minFrequencyBox), AddSettingPanel("Max frequency", "mesh2hrtf.max_frequency", maxFrequencyBox),
-            AddSettingPanel("Frequency steps", "mesh2hrtf.frequency_steps", frequencyStepsBox), AddSettingPanel("Microphone faces", "mesh2hrtf.microphone_faces", microphoneFacesBox),
+        simulation.Children.Add(PathSettingPanel("Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked));
+        AddSetting(simulation, "Min frequency", "mesh2hrtf.min_frequency", minFrequencyBox);
+        AddSetting(simulation, "Max frequency", "mesh2hrtf.max_frequency", maxFrequencyBox);
+        AddSetting(simulation, "Frequency steps", "mesh2hrtf.frequency_steps", frequencyStepsBox);
+        AddSetting(simulation, "Microphone faces", "mesh2hrtf.microphone_faces", microphoneFacesBox);
+        AddExpander(simulation, "Advanced mesh grading", [WorkflowText("Required safety step"),
             AddSettingPanel("Min edge length", "mesh_grading.min_edge_length", meshMinEdgeBox), AddSettingPanel("Max edge length", "mesh_grading.max_edge_length", meshMaxEdgeBox),
             AddSettingPanel("Max error", "mesh_grading.max_error", meshMaxErrorBox), AddSettingPanel("Gamma", "mesh_grading.gamma", meshGammaBox), AddSettingPanel("Gamma opposite", "mesh_grading.gamma_opposite", meshGammaOppositeBox)]);
-        AddExpander(workflowPages[3], "Advanced settings - calculation", [AddSettingPanel("Parallel instances", "numcalc.parallel_instances", maxInstancesBox), AddSettingPanel("CPU limit (%)", "numcalc.cpu_limit", maxCpuLoadBox), AddSettingPanel("Adaptive FMM expansion length", "numcalc.adaptive_fmm", adaptiveFmmLengthBox)]);
+        numCalcStatusText = WorkflowText(""); workflowPages[3].Children.Add(numCalcStatusText);
+        AddSetting(workflowPages[3], "Parallel instances", "numcalc.parallel_instances", maxInstancesBox);
+        AddSetting(workflowPages[3], "CPU limit (%)", "numcalc.cpu_limit", maxCpuLoadBox);
+        AddSetting(workflowPages[3], "Adaptive FMM expansion length", "numcalc.adaptive_fmm", adaptiveFmmLengthBox);
         var results = workflowPages[4];
-        AddExpander(results, "Advanced settings - results", [
-            PathSettingPanel("SOFA folder (optional)", "postprocessing.output_folder", sofaFolderBox, async (_, _) => { var path = await PickFolderAsync(sofaFolderBox.Text); if (path != null) sofaFolderBox.Text = path; }),
-            AddSettingPanel("Normalize HRTFs", "postprocessing.normalize", normalizeHrtfsBox), AddSettingPanel("Level offset (dB)", "postprocessing.level_offset", levelOffsetBox),
-            AddSettingPanel("Resample HRIRs", "postprocessing.resample_hrirs", resampleHrirsBox), AddSettingPanel("Sampling rate (Hz)", "postprocessing.sampling_rate", samplingRateBox),
-            AddSettingPanel("Spatial upsampling", "postprocessing.spatial_upsampling", spatialUpsamplingBox), AddSettingPanel("Subdivisions (0-5)", "postprocessing.spatial_subdivisions", spatialSubdivisionsBox), AddSettingPanel("Normalize spatial output", "postprocessing.spatial_normalize", spatialNormalizeBox)]);
+        AddSetting(results, "Apply level offset", "postprocessing.normalize", normalizeHrtfsBox);
+        workflowLevelOffset = AddSettingPanel("Level offset (dB)", "postprocessing.level_offset", levelOffsetBox); results.Children.Add(workflowLevelOffset);
+        AddSetting(results, "Resample HRIRs", "postprocessing.resample_hrirs", resampleHrirsBox);
+        workflowSamplingRate = AddSettingPanel("Sampling rate (Hz)", "postprocessing.sampling_rate", samplingRateBox); results.Children.Add(workflowSamplingRate);
+        AddSetting(results, "Spatially upsample HRTFs", "postprocessing.spatial_upsampling", spatialUpsamplingBox);
+        AddSetting(workflowSpatial, "Subdivision level (0–5)", "postprocessing.spatial_subdivisions", spatialSubdivisionsBox);
+        AddSetting(workflowSpatial, "Normalize to frontal reference", "postprocessing.spatial_normalize", spatialNormalizeBox);
+        workflowSpatial.Children.Add(WorkflowText("Adds source directions while preserving arrival times. Results are saved in Upsampled; originals are kept.")); results.Children.Add(workflowSpatial);
+        results.Children.Add(PathSettingPanel("SOFA output folder (optional)", "postprocessing.output_folder", sofaFolderBox, async (_, _) => { var path = await PickFolderAsync(sofaFolderBox.Text); if (path != null) sofaFolderBox.Text = path; }));
         results.Children.Add(WorkflowButton("Open output folder", (_, _) => { if (selectedProject is { } p && Directory.Exists(SofaDirectory(p))) OpenExternal(SofaDirectory(p)); }));
         results.Children.Add(WorkflowText("Use Viewing above the viewer to inspect generated meshes, plots and pressure fields."));
         var stages = Stage.GetValues();
@@ -162,8 +174,6 @@ public partial class MainWindow
         runAllButton = WorkflowButton("Continue", (_, _) => PerformWorkflowAction());
         runAllButton.HorizontalAlignment = HorizontalAlignment.Stretch;
         pipelineHintText = WorkflowText("");
-        numCalcStatusText = WorkflowText("");
-        workflowPages[3].Children.Add(numCalcStatusText);
         footer.Children.Add(workflowProgress);
         footer.Children.Add(pipelineHintText);
         footer.Children.Add(runAllButton);
@@ -266,7 +276,9 @@ public partial class MainWindow
                 var stage = Stage.GetValues()[i];
                 if (i != 1) workflowStates[Math.Max(1, i)].Text = p == null ? "Needs input" : stageStatus[i].Text;
                 workflowReasons[i].Text = p == null ? "Select a project" : StageUnavailableReason(stage, p, inspection) ?? "Ready";
-                stageButtons[i].Content = p != null && runs.TryGetValue(p.Id, out var active) && active.Stage == stage ? "Stop" : "Run " + WorkflowStageTitle(stage);
+                var stopping = p != null && runs.TryGetValue(p.Id, out var active) && active.Stage == stage;
+                stageButtons[i].Content = stopping ? "Stop" : "Run " + WorkflowStageTitle(stage);
+                StyleWorkflowRun(stageButtons[i], stopping);
             }
             if (!scan) workflowStates[1].Text = "Optional";
             if (p != null && (!scan || StageIsComplete(Stage.ScanPreparation, p, inspection))) {
@@ -283,6 +295,10 @@ public partial class MainWindow
                 var symbol = label switch { "Complete" => "\u2713", "Failed" or "Needs rerun" => "!", "Not needed" or "Optional" => "\u2013",
                     "Ready" => "\u25B7", "Running\u2026" => "\u25B6", _ => "\u25CB" };
                 workflowStates[index].Text = $"{symbol}  {label}";
+                workflowStates[index].Foreground = WorkflowStatusBrush(label);
+                var item = (ListBoxItem)workflowNavigation.Items[index];
+                var selected = new SolidColorBrush(Root.ActualTheme == ElementTheme.Dark ? ColorHelper.FromArgb(255, 43, 61, 80) : ColorHelper.FromArgb(255, 224, 238, 251));
+                foreach (var key in new[] { "ListBoxItemBackgroundSelected", "ListBoxItemBackgroundSelectedPointerOver", "ListBoxItemBackgroundSelectedPressed" }) item.Resources[key] = selected;
                 AutomationProperties.SetName((ListBoxItem)workflowNavigation.Items[index], $"{WorkflowTitles[index]}, {label}");
             }
             var next = NextWorkflowAction(inspection);
@@ -291,11 +307,36 @@ public partial class MainWindow
             var retry = p != null && next.Stage != null && FailedStages(p.Id).Contains(next.Stage);
             if (retry && reason == null) runAllButton.Content = "Retry " + WorkflowStageTitle(next.Stage!);
             workflowCompact.Content = runAllButton.Content;
+            StyleWorkflowRun(runAllButton, p != null && runs.ContainsKey(p.Id));
+            StyleWorkflowRun(workflowCompact, p != null && runs.ContainsKey(p.Id));
+            if (workflowLevelOffset != null) workflowLevelOffset.Visibility = normalizeHrtfsBox.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            if (workflowSamplingRate != null) workflowSamplingRate.Visibility = resampleHrirsBox.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            workflowSpatial.Visibility = spatialUpsamplingBox.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             workflowCompact.Visibility = macInspectorVisible ? Visibility.Collapsed : Visibility.Visible;
             workflowProgress.Visibility = p != null && runs.ContainsKey(p.Id) ? Visibility.Visible : Visibility.Collapsed;
             pipelineHintText.Text = reason ?? (p == null ? "Select a project" : next.Fit != null ? "Manual fit required" : next.Stage != null ? "Ready" : runs.ContainsKey(p.Id) ? "Running" : "Next action");
             if (retry && reason == null) pipelineHintText.Text = next.Stage!.Title + " failed. Review its inputs before retrying.";
             pipelineHintText.Visibility = Visibility.Visible;
         } finally { updatingWorkflow = false; }
+    }
+
+    Brush WorkflowStatusBrush(string status)
+    {
+        var dark = Root.ActualTheme == ElementTheme.Dark;
+        if (status == "Complete") return new SolidColorBrush(dark ? ColorHelper.FromArgb(255, 108, 203, 95) : ColorHelper.FromArgb(255, 15, 123, 15));
+        if (status == "Failed") return new SolidColorBrush(dark ? ColorHelper.FromArgb(255, 255, 153, 164) : ColorHelper.FromArgb(255, 196, 43, 28));
+        if (status is "Needs rerun" or "Stopped" or "Choose method" || status.StartsWith("Needs")) return new SolidColorBrush(dark ? ColorHelper.FromArgb(255, 255, 179, 71) : ColorHelper.FromArgb(255, 157, 83, 0));
+        if (status == "Ready" || status.StartsWith("Running")) return new SolidColorBrush(dark ? ColorHelper.FromArgb(255, 96, 175, 255) : ColorHelper.FromArgb(255, 0, 95, 184));
+        return mutedTextBrush;
+    }
+
+    static void StyleWorkflowRun(Button button, bool stop)
+    {
+        if (Application.Current.Resources.TryGetValue("AccentButtonStyle", out var style)) button.Style = (Style)style;
+        var colour = stop ? ColorHelper.FromArgb(255, 196, 43, 28) : ColorHelper.FromArgb(255, 0, 95, 184);
+        var brush = new SolidColorBrush(colour);
+        button.Background = brush; button.Foreground = new SolidColorBrush(Colors.White);
+        foreach (var key in new[] { "AccentButtonBackground", "AccentButtonBackgroundPointerOver", "AccentButtonBackgroundPressed" }) button.Resources[key] = brush;
+        foreach (var key in new[] { "AccentButtonForeground", "AccentButtonForegroundPointerOver", "AccentButtonForegroundPressed" }) button.Resources[key] = new SolidColorBrush(Colors.White);
     }
 }

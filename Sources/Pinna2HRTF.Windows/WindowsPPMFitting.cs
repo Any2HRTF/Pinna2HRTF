@@ -243,18 +243,14 @@ public partial class MainWindow
                     { if (syncing || busy) return; draggingControl = id; PushHistory(history, new(values)); future.Clear(); }), true);
                     slider.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, _) => draggingControl = null), true);
                     slider.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler((_, _) => draggingControl = null), true);
-                    number.ValueChanged += (_, args) =>
+                    NumberBoxEditing.Attach(number, (UIElement)editor.Window.Content, editor.NavigationButton,
+                        () => values[id], value =>
                     {
                         // Merely focusing a value formatted to two decimals must
                         // not replace a saved parameter with its rounded display.
                         var displayed = formatter.ParseDouble(formatter.FormatDouble(values[id])) ?? values[id];
-                        if (!syncing && !busy && catalog.ShouldCommitNumber(id, args.NewValue, displayed)) slider.Value = args.NewValue;
-                    };
-                    number.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) =>
-                    {
-                        if (e.Key != global::Windows.System.VirtualKey.Escape) return;
-                        syncing = true; number.Text = formatter.FormatDouble(values[id]); number.Value = values[id]; syncing = false; e.Handled = true;
-                    }), true);
+                        if (!syncing && !busy && catalog.ShouldCommitNumber(id, value, displayed)) slider.Value = value;
+                    }, text => formatter.ParseDouble(text), value => formatter.FormatDouble(value));
                     return row;
                 }
                 var globalPanel = new StackPanel { Spacing = 12 };
