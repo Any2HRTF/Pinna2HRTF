@@ -108,6 +108,16 @@ struct ScanPreparationSettings: Codable, Equatable {
     var rotationDegrees = "0"
     var originalScanPath: String?
     var requireManualReview: Bool?
+    var individualLeftEdit: String?
+    var individualRightEdit: String?
+    func earEdit(_ side: EarSide) -> String? {
+        enabled ? (side == .left ? reviewedLeftPath : reviewedRightPath) : (side == .left ? individualLeftEdit : individualRightEdit)
+    }
+    mutating func setEarEdit(_ path: String?, side: EarSide) {
+        if enabled {
+            if side == .left { reviewedLeftPath = path } else { reviewedRightPath = path }
+        } else if side == .left { individualLeftEdit = path } else { individualRightEdit = path }
+    }
     var reviewedLeftPath: String?
     var reviewedRightPath: String?
     var prepareLeft = true
@@ -130,6 +140,7 @@ struct InferenceSettings: Codable, Equatable {
 }
 
 struct ManualPPMFittingSettings: Codable, Equatable {
+    var selectedMethod: EarModelMethod?
     var useForPreprocessing = false
     var templateBlendPath: String?
     var leftMeshPath: String?
@@ -161,7 +172,7 @@ struct ManualPPMFittingSettings: Codable, Equatable {
                 rightSourcePath = nil; rightSourceIdentity = nil
             }
         }
-        if leftMeshPath == nil && rightMeshPath == nil { useForPreprocessing = false }
+        // Keep the selected method when generated fits are reset.
         if let templateBlendPath, !FileManager.default.fileExists(atPath: templateBlendPath) {
             self.templateBlendPath = nil
         }
@@ -321,7 +332,7 @@ extension ProjectRecord {
         // A project's saved fits are outputs when explicitly resetting that
         // project; fits used by any other project remain protected inputs.
         if id != resettingProjectID {
-            paths += [scan.reviewedLeftPath ?? "", scan.reviewedRightPath ?? ""]
+            paths += [scan.reviewedLeftPath ?? "", scan.reviewedRightPath ?? "", scan.individualLeftEdit ?? "", scan.individualRightEdit ?? ""]
             let fitting = settings.manualPPMFitting
             paths += [fitting.leftMeshPath ?? "", fitting.rightMeshPath ?? "",
                       fitting.leftParametersPath ?? "", fitting.rightParametersPath ?? "",
@@ -333,6 +344,8 @@ extension ProjectRecord {
     mutating func reconcileAfterOutputReset() {
         settings.manualPPMFitting.reconcileAfterOutputReset()
         if var scan = settings.scanPreparation {
+            if let path = scan.individualLeftEdit, !FileManager.default.fileExists(atPath: path) { scan.individualLeftEdit = nil }
+            if let path = scan.individualRightEdit, !FileManager.default.fileExists(atPath: path) { scan.individualRightEdit = nil }
             if let path = scan.reviewedLeftPath, !FileManager.default.fileExists(atPath: path) { scan.reviewedLeftPath = nil }
             if let path = scan.reviewedRightPath, !FileManager.default.fileExists(atPath: path) { scan.reviewedRightPath = nil }
             if !FileManager.default.fileExists(atPath: scan.scanPath), let original = scan.originalScanPath {
@@ -348,7 +361,7 @@ extension ProjectRecord {
     var pipelineRightEar: String { pipelineEar(for: .right) }
 
     func pipelineEar(for side: EarSide, inspection: ArtifactScanner.Inspection = .init()) -> String {
-        guard scanPreparation.enabled else { return side == .left ? leftEar : rightEar }
+        guard scanPreparation.enabled else { return ArtifactScanner.sourceEar(for: self, side: side, inspection: inspection)?.path ?? "" }
         return ArtifactScanner.preparedEarURL(for: side, in: self, inspection: inspection)?.path ?? ""
     }
 }

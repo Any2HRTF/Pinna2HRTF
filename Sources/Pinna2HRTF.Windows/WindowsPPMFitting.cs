@@ -357,7 +357,7 @@ public partial class MainWindow
                 files[fit.Mesh] = await File.ReadAllBytesAsync(generated, lifetime.Token); files[fit.Blend] = await File.ReadAllBytesAsync(blend, lifetime.Token); files[fit.Parameters] = System.Text.Encoding.UTF8.GetBytes(json);
                 await PublishEditorFilesAsync(project, files, lifetime.Token, expectedInputs: new() { [source] = identity[(identity.LastIndexOf(':') + 1)..] });
                 if(side=="left")project.Settings.ManualPPM.Left=fit;else project.Settings.ManualPPM.Right=fit;
-                project.Settings.ManualPPM.TemplateBlend=templateCopy;project.Settings.ManualPPM.Enabled=true;project.Settings.Inference.UsePredictionsForPreprocessing=false;
+                project.Settings.ManualPPM.TemplateBlend=templateCopy;project.Settings.SelectEarModel("manual");
                 project.Settings.Preprocessing.SourcePositionInputLeft=null;project.Settings.Preprocessing.SourcePositionInputRight=null;
                 Persist();if(selectedProject==project){LoadSelectedProject();RefreshArtifacts();}RefreshPipelineStatus();if(!lifetime.IsCancellationRequested)editor.Status.Text="Manual fit saved and selected for preprocessing.";
             }

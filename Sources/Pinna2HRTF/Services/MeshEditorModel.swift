@@ -195,6 +195,7 @@ final class MeshEditorModel: ObservableObject {
                 "source": versions[currentVersion].path, "original_source": request.originalSource.path,
                 "original_sha256": originalSHA256, "destination": request.destination.path,
                 "operations": Array(operations.prefix(currentVersion))]
+            if let side = request.side { command["side"] = side.rawValue }
             if let side = request.side, let report = request.preparedReport, let generation = request.preparedGeneration {
                 command["side"] = side.rawValue
                 command["prepared_report"] = report.path

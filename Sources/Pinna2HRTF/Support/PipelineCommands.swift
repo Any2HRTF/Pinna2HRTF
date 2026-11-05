@@ -124,7 +124,7 @@ struct ProjectInspectorCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .sidebar) {
-            Button(commands?.isInspectorPresented == true ? "Hide Inspector" : "Show Inspector") {
+            Button(commands?.isInspectorPresented == true ? "Hide Workflow" : "Show Workflow") {
                 commands?.toggleInspector()
             }
             .keyboardShortcut("i", modifiers: [.command, .option])

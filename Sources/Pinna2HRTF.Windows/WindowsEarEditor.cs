@@ -25,27 +25,28 @@ public partial class MainWindow
     async Task EditPreparedEarAsync(string side)
     {
         var project = selectedProject;
-        if (project == null || ProjectBusy(project.Id) || !project.Settings.ScanPreparation.Enabled) return;
+        if (project == null || ProjectBusy(project.Id) || string.IsNullOrWhiteSpace(project.SaveLocation)) return;
         using var reservation = projectOperations.TryReserve(project.Id);
         if (reservation == null) return;
-        if (!ScanPreparationOutputsCurrent(project))
+        if (project.Settings.ScanPreparation.Enabled && !ScanPreparationOutputsCurrent(project))
         {
             AppendLog("Run Scan Preparation successfully before reviewing a prepared ear.", project.Id);
             return;
         }
         var settings = project.Settings.ScanPreparation;
-        var selected = side == "left" ? settings.PrepareLeft : settings.PrepareRight;
+        var selected = settings.Enabled ? (side == "left" ? settings.PrepareLeft : settings.PrepareRight) : File.Exists(side == "left" ? project.LeftEar : project.RightEar);
         if (!selected) return;
-        var output = Path.Combine(project.SaveLocation, "Prepared", side == "left" ? "Left.stl" : "Right.stl");
+        var output = settings.Enabled ? Path.Combine(project.SaveLocation, "Prepared", side == "left" ? "Left.stl" : "Right.stl") : side == "left" ? project.LeftEar : project.RightEar;
         var report = Path.Combine(project.SaveLocation, "Prepared", "mesh_preparation.json");
-        var destination = Path.Combine(project.SaveLocation, "MeshEdits", side == "left" ? "Left.stl" : "Right.stl");
-        var reviewed = side == "left" ? settings.ReviewedLeft : settings.ReviewedRight;
+        var destination = Path.Combine(project.SaveLocation, "MeshEdits", (settings.Enabled ? "" : "Individual") + (side == "left" ? "Left.stl" : "Right.stl"));
+        var reviewed = settings.EarEdit(side);
         var source = EarReviewIsCurrent(project, side) && !string.IsNullOrWhiteSpace(reviewed) ? reviewed : output;
         string generation;
         try
         {
-            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(report));
-            generation = document.RootElement.GetProperty("generation").GetString() ?? throw new InvalidDataException("Preparation generation is missing.");
+            generation = "";
+            if (settings.Enabled) { using var document = JsonDocument.Parse(await File.ReadAllTextAsync(report)); generation = document.RootElement.GetProperty("generation").GetString() ?? throw new InvalidDataException("Preparation generation is missing."); }
+            else report = "";
         }
         catch (Exception error)
         {
@@ -55,7 +56,7 @@ public partial class MainWindow
 
         var resultPath = await ShowWindowsEarEditorAsync(source, output, destination, report, generation, side, project);
         if (resultPath == null) return;
-        if (side == "left") settings.ReviewedLeft = resultPath; else settings.ReviewedRight = resultPath;
+        settings.SetEarEdit(side, resultPath);
         project.Settings.Preprocessing.SourcePositionInputLeft = null;
         project.Settings.Preprocessing.SourcePositionInputRight = null;
         Persist();
@@ -689,8 +690,18 @@ public partial class MainWindow
         try
         {
             var settings = project.Settings.ScanPreparation;
-            var reviewed = side == "left" ? settings.ReviewedLeft : settings.ReviewedRight;
+            var reviewed = settings.EarEdit(side);
             if (string.IsNullOrWhiteSpace(reviewed) || !File.Exists(reviewed)) return false;
+            if (!settings.Enabled)
+            {
+                var original = side == "left" ? project.LeftEar : project.RightEar;
+                if (!File.Exists(original)) return false;
+                var receipt = inspection.Document(Path.ChangeExtension(reviewed, ".json"));
+                return receipt.GetProperty("kind").GetString() == "ear" && receipt.GetProperty("side").GetString() == side &&
+                    !receipt.TryGetProperty("generation", out _) &&
+                    receipt.GetProperty("source_sha256").GetString() == inspection.Digest(original) &&
+                    receipt.GetProperty("output_sha256").GetString() == inspection.Digest(reviewed);
+            }
             var folder = Path.Combine(project.SaveLocation, "Prepared");
             var reportRoot = inspection.Document(Path.Combine(folder, "mesh_preparation.json"));
             var receiptRoot = inspection.Document(Path.ChangeExtension(reviewed, ".json"));

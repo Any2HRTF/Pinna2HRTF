@@ -76,6 +76,7 @@ enum PipelineConfigWriter {
         // Unexposed settings use the pipeline's defaults; imported overrides are merged separately.
         return [
             "paths": [
+                "edited_left_ear": nullable(scan.individualLeftEdit), "edited_right_ear": nullable(scan.individualRightEdit),
                 "left_ear": path(project.leftEar), "right_ear": path(project.rightEar),
                 "output_dir": project.saveLocation, "external_deps_dir": environment.externalDir,
                 "numcalc_executable": environment.numcalcExecutable,
@@ -100,6 +101,7 @@ enum PipelineConfigWriter {
                 "prediction_left_folder": inference.predictionLeftFolder, "prediction_right_folder": inference.predictionRightFolder,
                 "use_predictions_for_preprocessing": inference.usePredictionsForPreprocessing
             ],
+            "ui": ["ear_model_method": nullable(project.settings.manualPPMFitting.selectedMethod?.rawValue)],
             "manual_ppm": [
                 "enabled": manual.useForPreprocessing,
                 "left_mesh": nullable(manual.leftMeshPath), "right_mesh": nullable(manual.rightMeshPath),

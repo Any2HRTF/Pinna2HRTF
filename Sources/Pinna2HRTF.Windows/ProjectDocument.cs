@@ -79,12 +79,14 @@ internal static class ProjectDocument
             ("left_margin_mm", scan.LeftMarginMM), ("right_margin_mm", scan.RightMarginMM),
             ("side_min_mm", scan.SideMinMM), ("side_max_mm", scan.SideMaxMM) }) Set("scan_preparation", pair.Item1, Number(pair.Item2));
         Set("scan_preparation", "require_manual_review", scan.RequireManualReview);
+        Set("paths", "edited_left_ear", PathValue(scan.IndividualLeftEdit)); Set("paths", "edited_right_ear", PathValue(scan.IndividualRightEdit));
         Set("scan_preparation", "reviewed_left", PathValue(scan.ReviewedLeft)); Set("scan_preparation", "reviewed_right", PathValue(scan.ReviewedRight));
         Set("inference", "enabled", inf.UsePredictionsForPreprocessing && !manual.Enabled);
         Set("inference", "model_config_file", inf.ModelConfig); Set("inference", "model_checkpoint", inf.ModelCheckpoint);
         Set("inference", "target_left_folder", inf.TargetLeftFolder); Set("inference", "target_right_folder", inf.TargetRightFolder);
         Set("inference", "prediction_left_folder", inf.PredictionLeftFolder); Set("inference", "prediction_right_folder", inf.PredictionRightFolder);
         Set("inference", "use_predictions_for_preprocessing", inf.UsePredictionsForPreprocessing);
+        Set("ui", "ear_model_method", p.Settings.EarModelMethod);
         Set("manual_ppm", "enabled", manual.Enabled); Set("manual_ppm", "template_blend", PathValue(manual.TemplateBlend));
         foreach (var side in new[] { "left", "right" })
         {
@@ -149,12 +151,14 @@ internal static class ProjectDocument
         scan.LeftMarginMM = S("scan_preparation", "left_margin_mm", "20"); scan.RightMarginMM = S("scan_preparation", "right_margin_mm", "10");
         scan.SideMinMM = S("scan_preparation", "side_min_mm", "30"); scan.SideMaxMM = S("scan_preparation", "side_max_mm", "110");
         scan.RequireManualReview = Flag("scan_preparation", "require_manual_review");
+        scan.IndividualLeftEdit = Text("paths", "edited_left_ear"); scan.IndividualRightEdit = Text("paths", "edited_right_ear");
         scan.ReviewedLeft = Text("scan_preparation", "reviewed_left"); scan.ReviewedRight = Text("scan_preparation", "reviewed_right");
         inf.UsePredictionsForPreprocessing = Flag("inference", "use_predictions_for_preprocessing");
         inf.ModelConfig = S("inference", "model_config_file", inf.ModelConfig); inf.ModelCheckpoint = S("inference", "model_checkpoint", inf.ModelCheckpoint);
         inf.TargetLeftFolder = S("inference", "target_left_folder", inf.TargetLeftFolder); inf.TargetRightFolder = S("inference", "target_right_folder", inf.TargetRightFolder);
         inf.PredictionLeftFolder = S("inference", "prediction_left_folder", inf.PredictionLeftFolder); inf.PredictionRightFolder = S("inference", "prediction_right_folder", inf.PredictionRightFolder);
         var manual = p.Settings.ManualPPM; manual.Enabled = Flag("manual_ppm", "enabled"); manual.TemplateBlend = Text("manual_ppm", "template_blend");
+        if (Text("ui", "ear_model_method") is string method) p.Settings.SelectEarModel(method);
         foreach (var side in new[] { "left", "right" })
         {
             var mesh = Text("manual_ppm", side + "_mesh");

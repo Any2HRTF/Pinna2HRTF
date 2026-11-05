@@ -26,6 +26,18 @@ struct MeshViewerView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                HStack {
+                    Text("Viewing").foregroundStyle(.secondary)
+                    Menu {
+                        ForEach(store.artifacts.filter(\.exists)) { artifact in
+                            Button(artifact.title) { store.openArtifact(artifact) }
+                        }
+                    } label: {
+                        Text(store.artifacts.first(where: { $0.url == store.selectedMesh })?.title ?? "Choose preview")
+                    }.disabled(store.isPlacingMicrophone)
+                    Spacer()
+                }.padding(10)
+                Divider()
                 viewer
                 Divider()
                 logPanel
@@ -82,15 +94,6 @@ struct MeshViewerView: View {
         }
         .overlay(alignment: .topTrailing) {
             VStack(alignment: .trailing, spacing: 8) {
-                if let project = store.selectedProject,
-                   let mesh = store.selectedMesh,
-                   let side = ArtifactScanner.preparedEarSide(for: mesh, in: project) {
-                    Button("Edit \(side.title) Ear…") { store.beginEarEditing(side) }
-                        .modifier(ViewerGlassButtonStyle())
-                        .controlSize(.regular)
-                        .help("Edit the selected prepared ear")
-                        .disabled(store.selectedProjectIsRunning)
-                }
                 if store.selectedMesh != nil && store.selectedImage == nil && store.selectedPressure == nil {
                     Button(action: store.resetSelectedMeshView) {
                         Label("Reset view", systemImage: "arrow.counterclockwise")

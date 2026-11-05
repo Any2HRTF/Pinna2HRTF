@@ -48,6 +48,8 @@ class PathsConfig(BaseModel):
 
     # No implicit demo ears: a one-ear project saved with exclude_none must
     # reload as a one-ear project.
+    edited_left_ear: Path | None = None
+    edited_right_ear: Path | None = None
     left_ear: Path | None = None
     right_ear: Path | None = None
     output_dir: Path = Field(default_factory=lambda: worktree_root() / "Data" / "temp" / "GuiRun")
@@ -239,6 +241,7 @@ class PostprocessingConfig(BaseModel):
 class UIConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    ear_model_method: Literal["mesh2ppm", "manual", "none"] | None = None
     last_opened_config: Path | None = None
     last_opened_project: Path | None = None
     mesh_background: str = "white"
@@ -259,6 +262,10 @@ class PipelineConfig(BaseModel):
 
     def resolved(self, base_dir: Path | None = None) -> "PipelineConfig":
         clone = self.model_copy(deep=True)
+        method = clone.ui.ear_model_method
+        if method is not None:
+            clone.manual_ppm.enabled = method == "manual"
+            clone.inference.enabled = clone.inference.use_predictions_for_preprocessing = method == "mesh2ppm"
         base = Path(base_dir or Path.cwd()).resolve()
         for section_name in ("paths", "scan_preparation", "inference", "manual_ppm", "postprocessing", "ui"):
             section = getattr(clone, section_name)

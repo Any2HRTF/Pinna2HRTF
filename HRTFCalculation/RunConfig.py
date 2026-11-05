@@ -28,7 +28,10 @@ def log_default(message: str) -> None:
 
 def input_paths(config: PipelineConfig, validate: bool = False):
     if not config.scan_preparation.enabled:
-        return config.paths.left_ear, config.paths.right_ear
+        if not (config.paths.edited_left_ear or config.paths.edited_right_ear):
+            return config.paths.left_ear, config.paths.right_ear
+        from .MeshEditing import reviewed_inputs
+        return reviewed_inputs(config, validate=validate)
     settings = config.scan_preparation
     if not settings.prepare_left and not settings.prepare_right:
         raise ValueError("Select at least one ear to prepare.")
@@ -208,6 +211,8 @@ def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
 
 
 def preprocessing_input_paths(config: PipelineConfig, logger: Logger) -> tuple[Path | None, Path | None]:
+    if config.manual_ppm.enabled and config.inference.use_predictions_for_preprocessing:
+        raise ValueError('Choose one ear modelling method: Mesh2PPM, manual PPM, or no PPM.')
     left, right = input_paths(config, validate=True)
     if config.scan_preparation.enabled and config.inference.use_predictions_for_preprocessing and not config.manual_ppm.enabled:
         from .ScanPreparation import validate_stage
@@ -221,16 +226,22 @@ def preprocessing_input_paths(config: PipelineConfig, logger: Logger) -> tuple[P
             inputs.append(None)
             continue
         selected = source
-        if config.manual_ppm.enabled and manual_path is not None:
+        if config.manual_ppm.enabled:
+            if manual_path is None:
+                raise ValueError(f'Fit the {side} ear before running manual PPM preprocessing.')
+            parameters = getattr(config.manual_ppm, f"{side}_parameters")
+            if parameters is None or not parameters.is_file():
+                raise ValueError(f"Refit the {side} ear: the saved fit parameters are missing.")
             if not manual_path.is_file():
                 raise FileNotFoundError(f"Saved manual {side} PPM fit is missing: {manual_path}")
             selected = manual_path
             logger(f"Using manually fitted {side} PPM for preprocessing: {manual_path}")
         elif config.inference.use_predictions_for_preprocessing:
             predicted = predicted_stl(config.paths.output_dir / folder_name, source.stem)
-            if predicted is not None:
-                selected = predicted
-                logger(f"Using inferred {side} ear for preprocessing: {predicted}")
+            if predicted is None:
+                raise FileNotFoundError(f"Run Mesh2PPM inference for the {side} ear before preprocessing.")
+            selected = predicted
+            logger(f"Using inferred {side} ear for preprocessing: {predicted}")
         inputs.append(selected)
     return inputs[0], inputs[1]
 

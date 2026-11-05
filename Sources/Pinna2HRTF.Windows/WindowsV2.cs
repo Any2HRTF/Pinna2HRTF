@@ -10,7 +10,6 @@ public partial class MainWindow
 {
     bool meshPointerIsPrimary;
     readonly TextBox scanRotationBox = new(), targetEdgeBox = new(), leftMarginBox = new(), rightMarginBox = new(), sideMinBox = new(), sideMaxBox = new(), sofaFolderBox = new();
-    readonly CheckBox useManualFitsBox = new() { Content = "Use saved manual fits" };
     readonly CheckBox requireReviewBox = new() { Content = "Require ear review before continuing" };
     readonly HashSet<Window> editorWindows = [];
     readonly Dictionary<Guid,string> stagedSofaOutputs = [];
@@ -33,33 +32,6 @@ public partial class MainWindow
     }
 
 
-    void AddV2Settings(StackPanel settings)
-    {
-        AddSpatialSettings(settings);
-        AddExpander(settings, "Scan preparation settings", [
-            AddSettingPanel("Crop rotation (degrees)", "scan_preparation.rotation", scanRotationBox),
-            AddSettingPanel("Target edge length (mm)", "scan_preparation.target_edge", targetEdgeBox),
-            AddSettingPanel("Left crop margin (mm)", "scan_preparation.left_margin", leftMarginBox),
-            AddSettingPanel("Right crop margin (mm)", "scan_preparation.right_margin", rightMarginBox),
-            AddSettingPanel("Inner crop limit (mm)", "scan_preparation.side_min", sideMinBox),
-            AddSettingPanel("Outer crop limit (mm)", "scan_preparation.side_max", sideMaxBox), requireReviewBox]);
-        var left = new Button { Content = "Fit Left Ear…" }; left.Click += async (_, _) => await TryOpenPPMFittingAsync("left");
-        var right = new Button { Content = "Fit Right Ear…" }; right.Click += async (_, _) => await TryOpenPPMFittingAsync("right");
-        AddExpander(settings, "Manual PPM Fit", [left, right, useManualFitsBox]);
-        AddExpander(settings, "SOFA destination", [PathSettingPanel("SOFA folder (optional)", "postprocessing.output_folder", sofaFolderBox,
-            async (_, _) => { var path = await PickFolderAsync(sofaFolderBox.Text); if (path != null) sofaFolderBox.Text = path; })]);
-        requireReviewBox.Click += (_, _) => { if (!loading && selectedProject is { } p) { p.Settings.ScanPreparation.RequireManualReview = requireReviewBox.IsChecked == true; Persist(); RefreshPipelineStatus(); } };
-        useManualFitsBox.Click += async (_, _) =>
-        {
-            if (loading || selectedProject is not { } p || runs.ContainsKey(p.Id)) return;
-            var enabled = useManualFitsBox.IsChecked == true;
-            if (HasOutputsFrom(Stage.Preprocessing, p) && !await ConfirmOutputChangeAsync(p)) { LoadSelectedProject(); return; }
-            p.Settings.ManualPPM.Enabled = enabled;
-            if (enabled) p.Settings.Inference.UsePredictionsForPreprocessing = false;
-            Persist(); LoadSelectedProject(); RefreshArtifacts(); RefreshPipelineStatus();
-        };
-    }
-
     void AddV2TextSettings(Dictionary<string, TextSetting> settings)
     {
         settings["postprocessing.spatial_subdivisions"] = new(spatialSubdivisionsBox, p => p.Settings.Postprocessing?.SpatialSubdivisions, (p,v) => (p.Settings.Postprocessing ??= new()).SpatialSubdivisions = v, "3");
@@ -76,7 +48,12 @@ public partial class MainWindow
     string? SourceEar(ProjectRecord p, string side, ArtifactInspection? inspection = null)
     {
         var scan = p.Settings.ScanPreparation;
-        if (!scan.Enabled) { var path = side == "left" ? p.LeftEar : p.RightEar; return File.Exists(path) ? path : null; }
+        if (!scan.Enabled) {
+            var path = side == "left" ? p.LeftEar : p.RightEar;
+            if (!File.Exists(path)) return null;
+            var edited = scan.EarEdit(side);
+            return EarReviewIsCurrent(p, side, inspection) ? edited : path;
+        }
         if (!(side == "left" ? scan.PrepareLeft : scan.PrepareRight) || !ScanPreparationOutputsCurrent(p, inspection)) return null;
         var reviewed = side == "left" ? scan.ReviewedLeft : scan.ReviewedRight;
         if (EarReviewIsCurrent(p, side, inspection)) return reviewed;
@@ -101,6 +78,7 @@ public partial class MainWindow
         if (!ownAligned) yield return scan.ScanPath;
         if (p.Id != resetting)
         {
+            yield return scan.IndividualLeftEdit ?? ""; yield return scan.IndividualRightEdit ?? "";
             yield return scan.ReviewedLeft ?? ""; yield return scan.ReviewedRight ?? "";
             yield return p.Settings.ManualPPM.TemplateBlend ?? "";
             foreach (var fit in new[] { p.Settings.ManualPPM.Left, p.Settings.ManualPPM.Right }.OfType<ManualFit>())
@@ -111,6 +89,8 @@ public partial class MainWindow
     void ReconcileEditorReferences(ProjectRecord p)
     {
         var scan = p.Settings.ScanPreparation;
+        if (!File.Exists(scan.IndividualLeftEdit)) scan.IndividualLeftEdit = null;
+        if (!File.Exists(scan.IndividualRightEdit)) scan.IndividualRightEdit = null;
         if (!File.Exists(scan.ReviewedLeft)) scan.ReviewedLeft = null;
         if (!File.Exists(scan.ReviewedRight)) scan.ReviewedRight = null;
         if (!File.Exists(scan.ScanPath) && File.Exists(scan.OriginalScanPath)) { scan.ScanPath = scan.OriginalScanPath; scan.OriginalScanPath = ""; }
@@ -118,7 +98,7 @@ public partial class MainWindow
         if (manual.Left is { } l && !File.Exists(l.Mesh)) manual.Left = null;
         if (manual.Right is { } r && !File.Exists(r.Mesh)) manual.Right = null;
         if (!File.Exists(manual.TemplateBlend)) manual.TemplateBlend = null;
-        if (manual.Left == null && manual.Right == null) manual.Enabled = false;
+        // Resetting generated files keeps the project method and prompts for missing fits.
         InvalidateManualPositions(p);
     }
 

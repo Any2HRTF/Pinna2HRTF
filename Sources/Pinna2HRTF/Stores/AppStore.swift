@@ -24,6 +24,8 @@ final class AppStore: ObservableObject {
     private var subscriptions = Set<AnyCancellable>()
     private var projectsChangePending = false
 
+    @Published var workflowStep: WorkflowStep = .inputs
+    @Published var workflowRevealRequest = UUID()
     @Published var meshEditorRequest: MeshEditorRequest?
     @Published var meshEditorError: String?
     @Published var ppmFittingRequest: PPMFittingRequest?
@@ -454,6 +456,20 @@ final class AppStore: ObservableObject {
 
     func beginEarEditing(_ side: EarSide) {
         guard let project = selectedProject, !selectedProjectIsRunning else { return }
+        guard !project.saveLocation.isEmpty else { meshEditorError = "Choose a save location first."; return }
+        if let conflict = outputLocationConflict(for: project) { meshEditorError = conflict; return }
+        if !project.scanPreparation.enabled {
+            let path = side == .left ? project.leftEar : project.rightEar
+            guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else {
+                meshEditorError = "Choose an existing ear mesh first."; return
+            }
+            let base = URL(fileURLWithPath: path)
+            let source = ArtifactScanner.sourceEar(for: project, side: side) ?? base
+            meshEditorRequest = MeshEditorRequest(projectID: project.id, source: source, originalSource: base,
+                destination: URL(fileURLWithPath: project.saveLocation).appendingPathComponent("MeshEdits/Individual\(side.title).stl"),
+                side: side, preparedGeneration: nil, preparedReport: nil)
+            return
+        }
         guard ArtifactScanner.scanPreparationIsCurrent(project) else {
             meshEditorError = "Run Scan Preparation successfully first."; return
         }
@@ -465,7 +481,7 @@ final class AppStore: ObservableObject {
             meshEditorError = "The scan preparation report is missing."; return
         }
         let base = root.appendingPathComponent("Prepared/\(side.title).stl")
-        let reviewed = side == .left ? project.scanPreparation.reviewedLeftPath : project.scanPreparation.reviewedRightPath
+        let reviewed = project.scanPreparation.earEdit(side)
         let source = ArtifactScanner.earReviewIsCurrent(project, side: side) ? reviewed.map { URL(fileURLWithPath: $0) } ?? base : base
         meshEditorRequest = MeshEditorRequest(projectID: project.id, source: source, originalSource: base,
             destination: root.appendingPathComponent("MeshEdits/\(side.title).stl"), side: side,
@@ -526,6 +542,7 @@ final class AppStore: ObservableObject {
                        sourceIdentity: request.sourceIdentity,
                        for: request.side)
         if !templateBlendPath.isEmpty { fitting.templateBlendPath = templateBlendPath }
+        fitting.selectedMethod = .manual
         fitting.useForPreprocessing = true
         project.settings.manualPPMFitting = fitting
         project.settings.inference.usePredictionsForPreprocessing = false
@@ -541,8 +558,7 @@ final class AppStore: ObservableObject {
         var project = projects[index]
         var scan = project.scanPreparation
         if let side = request.side {
-            if side == .left { scan.reviewedLeftPath = request.destination.path }
-            else { scan.reviewedRightPath = request.destination.path }
+            scan.setEarEdit(request.destination.path, side: side)
         } else {
             scan.originalScanPath = request.originalSource.path
             scan.scanPath = request.destination.path
@@ -683,7 +699,7 @@ final class AppStore: ObservableObject {
     nonisolated static func hasGeneratedOutputs(_ project: ProjectRecord) -> Bool {
         let fitting = project.settings.manualPPMFitting
         if [fitting.leftMeshPath, fitting.rightMeshPath, fitting.leftParametersPath, fitting.rightParametersPath,
-            fitting.leftBlendPath, fitting.rightBlendPath, project.scanPreparation.reviewedLeftPath,
+            fitting.leftBlendPath, fitting.rightBlendPath, project.scanPreparation.individualLeftEdit, project.scanPreparation.individualRightEdit, project.scanPreparation.reviewedLeftPath,
             project.scanPreparation.reviewedRightPath, project.scanPreparation.originalScanPath == nil
                 ? nil : project.scanPreparation.scanPath].compactMap({ $0 }).contains(where: { FileManager.default.fileExists(atPath: $0) }) { return true }
         guard (!project.pipelineLeftEar.isEmpty || !project.pipelineRightEar.isEmpty) && !project.saveLocation.isEmpty else { return false }

@@ -128,6 +128,8 @@ def execute(request):
         report = dict(source_path=str(source.resolve()), source_sha256=request['original_sha256'], source_identity=identity(source),
                       kind=request['kind'], operations=request.get('operations', []), metrics=checks)
         if request['kind'] == 'ear':
+            report['side'] = request['side']
+        if request['kind'] == 'ear' and request.get('prepared_report'):
             prepared = json.loads(Path(request['prepared_report']).read_text())
             if prepared['generation'] != request['prepared_generation']:
                 raise ValueError('Scan preparation changed while editing. Reopen the prepared ear.')
@@ -194,11 +196,13 @@ def reviewed_inputs(config, validate=True):
         ('left', settings.prepare_left, 'reviewed_left'),
         ('right', settings.prepare_right, 'reviewed_right'),
     ):
+        if not settings.enabled:
+            selected = getattr(config.paths, side + '_ear') is not None
         if not selected:
             results.append(None)
             continue
-        reviewed = getattr(settings, reviewed_attr)
-        base = folder / f'{side.title()}.stl'
+        reviewed = getattr(settings, reviewed_attr) if settings.enabled else getattr(config.paths, f"edited_{side}_ear")
+        base = folder / f'{side.title()}.stl' if settings.enabled else getattr(config.paths, side + '_ear')
         if reviewed is None:
             results.append(base)
             continue
@@ -206,7 +210,7 @@ def reviewed_inputs(config, validate=True):
         if validate:
             try:
                 if report is None:
-                    report = json.loads((folder / 'mesh_preparation.json').read_text())
+                    report = json.loads((folder / 'mesh_preparation.json').read_text()) if settings.enabled else {'generation': None}
                 receipt = json.loads(path.with_suffix('.json').read_text())
                 current = (receipt.get('kind') == 'ear' and receipt.get('side') == side and
                            receipt.get('generation') == report['generation'] and

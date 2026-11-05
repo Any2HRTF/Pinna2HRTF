@@ -111,8 +111,7 @@ enum ArtifactScanner {
     }
 
     static func preprocessingMesh(for project: ProjectRecord, side: EarSide, inspection: Inspection = Inspection()) -> URL? {
-        if project.settings.manualPPMFitting.useForPreprocessing,
-           project.settings.manualPPMFitting.meshPath(for: side) != nil {
+        if project.settings.manualPPMFitting.useForPreprocessing {
             return validManualPPMFittingMesh(for: project, side: side, inspection: inspection)
         }
         let sourcePath = side == .left ? project.pipelineEar(for: .left, inspection: inspection) : project.pipelineEar(for: .right, inspection: inspection)
@@ -137,7 +136,12 @@ enum ArtifactScanner {
             return preparedEarURL(for: side, in: project, inspection: inspection)
         }
         let path = side == .left ? project.leftEar : project.rightEar
-        return path.isEmpty ? nil : URL(fileURLWithPath: path)
+        guard !path.isEmpty else { return nil }
+        if earReviewIsCurrent(project, side: side, inspection: inspection),
+           let edited = project.scanPreparation.earEdit(side) {
+            return URL(fileURLWithPath: edited)
+        }
+        return URL(fileURLWithPath: path)
     }
 
     static func validManualPPMFittingMesh(for project: ProjectRecord, side: EarSide, inspection: Inspection = Inspection()) -> URL? {
@@ -229,7 +233,6 @@ enum ArtifactScanner {
         case .preprocessing:
             return !sides.isEmpty && sides.allSatisfy { side in
                 if project.settings.manualPPMFitting.useForPreprocessing,
-                   let savedMesh = project.settings.manualPPMFitting.meshPath(for: side), !savedMesh.isEmpty,
                    validManualPPMFittingMesh(for: project, side: side, inspection: inspection) == nil { return false }
                 return fileHasData(output.appendingPathComponent("Projects/\(side.title)/parameters.json"), inspection: inspection)
                     && fileHasData(output.appendingPathComponent("Intermediates/\(side.title)/graded_head.ply"), inspection: inspection)
@@ -294,9 +297,20 @@ enum ArtifactScanner {
 
     static func earReviewIsCurrent(_ project: ProjectRecord, side: EarSide, inspection: Inspection = Inspection()) -> Bool {
         let scan = project.scanPreparation
-        guard let path = side == .left ? scan.reviewedLeftPath : scan.reviewedRightPath else { return false }
+        guard let path = scan.earEdit(side) else { return false }
         let folder = URL(fileURLWithPath: project.saveLocation, isDirectory: true).appendingPathComponent("Prepared")
         let baseEar = folder.appendingPathComponent("\(side.title).stl")
+        if !scan.enabled {
+            let original = side == .left ? project.leftEar : project.rightEar
+            guard !original.isEmpty,
+                  let receipt = inspection.document(URL(fileURLWithPath: path).deletingPathExtension().appendingPathExtension("json")),
+                  receipt["kind"] as? String == "ear", receipt["side"] as? String == side.rawValue,
+                  receipt["generation"] == nil,
+                  let sourceStamp = receipt["source_identity"] as? [String: Any],
+                  let outputStamp = receipt["output_identity"] as? [String: Any] else { return false }
+            return matchesStamp(URL(fileURLWithPath: original), sourceStamp, inspection: inspection) &&
+                matchesStamp(URL(fileURLWithPath: path), outputStamp, inspection: inspection)
+        }
         guard let report = inspection.document(folder.appendingPathComponent("mesh_preparation.json")),
               let generation = report["generation"] as? String,
               let ears = report["ears"] as? [String: [String: Any]],
@@ -314,7 +328,7 @@ enum ArtifactScanner {
         let scan = project.scanPreparation
         guard scan.enabled, side == .left ? scan.prepareLeft : scan.prepareRight else { return nil }
         if earReviewIsCurrent(project, side: side, inspection: inspection),
-           let reviewed = side == .left ? scan.reviewedLeftPath : scan.reviewedRightPath {
+           let reviewed = scan.earEdit(side) {
             return URL(fileURLWithPath: reviewed)
         }
         return URL(fileURLWithPath: project.saveLocation, isDirectory: true).appendingPathComponent("Prepared/\(side.title).stl")

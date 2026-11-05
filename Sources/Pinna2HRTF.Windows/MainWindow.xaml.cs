@@ -75,7 +75,6 @@ public partial class MainWindow : Window
     readonly Dictionary<string, Control> settingControls = [];
     readonly Dictionary<string, TextSetting> textSettings;
     readonly List<Button> stageButtons = [];
-    readonly List<TextBlock> stageStatusLabels = [];
     readonly List<Expander> settingSections = [];
     readonly List<Element3D> sceneLights = [];
     readonly List<MeshGeometryModel3D> meshVisuals = [];
@@ -211,7 +210,6 @@ public partial class MainWindow : Window
     readonly CheckBox scanPreparationEnabledBox = new();
     readonly CheckBox prepareLeftEarBox = new() { IsChecked = true };
     readonly CheckBox prepareRightEarBox = new() { IsChecked = true };
-    readonly Button editPreparedEarButton = new() { Content = "Edit Ear…", Visibility = Visibility.Collapsed, MinHeight = 30 };
     readonly Button alignScanButton = new() { Content = "Align scan with nose and ears" };
     readonly Button applyScanAlignmentButton = new() { Content = "Apply Alignment", IsEnabled = false };
     readonly CheckBox adaptiveFmmLengthBox = new();
@@ -346,6 +344,7 @@ public partial class MainWindow : Window
         Grid.SetColumn(center, 2);
         contentGrid.Children.Add(center);
         var settingsSplitter = BuildSplitter(true, SettingsSplitterDragged);
+        macSettingsDivider = settingsSplitter;
         Grid.SetColumn(settingsSplitter, 3);
         contentGrid.Children.Add(settingsSplitter);
         var settings = BuildSettingsPane();
@@ -412,6 +411,12 @@ public partial class MainWindow : Window
         menu.HorizontalAlignment = HorizontalAlignment.Left;
         Grid.SetColumn(menu, 1);
         titleBar.Children.Add(menu);
+        if (!MacLayout) {
+            titleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            workflowCompact.Click += (_, _) => PerformWorkflowAction();
+            workflowCompact.Margin = new Thickness(4, 8, 8, 8);
+            Grid.SetColumn(workflowCompact, 2); titleBar.Children.Add(workflowCompact);
+        }
         windowChrome?.Dispose(); windowChrome = new WindowChrome(this, Root, titleBar, titleBar);
         return titleBar;
     }
@@ -493,6 +498,10 @@ public partial class MainWindow : Window
         help.Items.Add(MenuItem("About Pinna2HRTF", ShowAboutClicked));
         bar.Items.Add(project);
         bar.Items.Add(pipeline);
+        var view = new MenuBarItem { Title = "View" };
+        view.Items.Add(MenuItem("Show/hide workflow", (_, _) => ToggleMacInspector()));
+        view.Items.Add(MenuItem("Show/hide activity", (_, _) => SetLogCollapsed(!logCollapsed, true)));
+        bar.Items.Add(view);
         bar.Items.Add(help);
         return bar;
     }
@@ -604,7 +613,7 @@ public partial class MainWindow : Window
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var titlePanel = new StackPanel();
-        titlePanel.Children.Add(new TextBlock { Text = "Preview", FontSize = 18, FontWeight = FontWeights.SemiBold });
+        titlePanel.Children.Add(new TextBlock { Text = "Viewing", FontSize = 18, FontWeight = FontWeights.SemiBold });
         selectedArtifactText = new TextBlock { Text = "Select a file to preview", FontSize = 12, Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)), TextTrimming = TextTrimming.CharacterEllipsis };
         titlePanel.Children.Add(selectedArtifactText);
         header.Children.Add(titlePanel);
@@ -615,14 +624,10 @@ public partial class MainWindow : Window
         placeRightButtonHost = MicButtonHost(placeRightButton);
         placeLeftButton.Click += (_, _) => BeginPlacement("left");
         placeRightButton.Click += (_, _) => BeginPlacement("right");
-        pickerPanel.Children.Add(placeLeftButtonHost);
-        pickerPanel.Children.Add(placeRightButtonHost);
-        pickerPanel.Children.Add(editPreparedEarButton);
-        editPreparedEarButton.Click += async (_, _) =>
-        {
-            if (selectedProject != null && selectedArtifactPath != null && PreparedEarSideForPath(selectedProject, selectedArtifactPath) is string side)
-                await EditPreparedEarAsync(side);
-        };
+
+
+
+        AutomationProperties.SetName(artifactPicker, "Viewing");
         artifactPicker.Width = 230;
         artifactPicker.MinHeight = 30;
         artifactPicker.ItemsSource = artifacts;
@@ -808,48 +813,7 @@ public partial class MainWindow : Window
         if (persist) SaveUiState();
     }
 
-    Border BuildSettingsPane()
-    {
-        settingsPaneBorder = new Border { CornerRadius = new CornerRadius(8), Background = secondarySurfaceBrush, BorderBrush = borderBrush, BorderThickness = new Thickness(1, 0, 0, 0) };
-        var pane = settingsPaneBorder;
-        var outer = new Grid();
-        outer.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        outer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, HorizontalContentAlignment = HorizontalAlignment.Stretch };
-        var settings = new StackPanel { Margin = new Thickness(12, 10, 12, 10), HorizontalAlignment = HorizontalAlignment.Stretch };
-        settings.Children.Add(new TextBlock { Text = "Project", FontSize = 20, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) });
-        AddSetting(settings, "Project name", "project.name", projectNameBox);
-        AddPathSetting(settings, "Left ear (optional)", "project.left_ear", leftEarBox, BrowseLeftEarClicked);
-        AddPathSetting(settings, "Right ear (optional)", "project.right_ear", rightEarBox, BrowseRightEarClicked);
-        AddPathSetting(settings, "Save location", "project.save_location", saveLocationBox, BrowseSaveLocationClicked);
-        settings.Children.Add(new TextBlock { Text = "Choose ear meshes or prepare ears from a full-head scan.", Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)), Margin = new Thickness(0, 3, 0, 4) });
-        AddExpander(settings, "Optional scan preparation", [
-            AddSettingPanel("Prepare ears from a full-head scan", "scan_preparation.enabled", scanPreparationEnabledBox, "Prepare ears from a full-head scan"),
-            PathSettingPanel("Full-head scan mesh", "scan_preparation.scan_path", scanPathBox, BrowseScanClicked),
-            alignScanButton,
-            AddSettingPanel("Prepare left ear", "scan_preparation.prepare_left", prepareLeftEarBox, "Prepare left ear"),
-            AddSettingPanel("Prepare right ear", "scan_preparation.prepare_right", prepareRightEarBox, "Prepare right ear"),
-            new TextBlock { Text = "Use an externally aligned scan (X forward, Y left, Z up), or align it here with the nose tip and ear-canal entrances. Preparation crops, remeshes, and repairs the selected ears. Editing prepared ears is optional; saved current edits are used automatically. Mesh2PPM inference can be enabled separately.", TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 4, 0, 0), Foreground = mutedTextBrush }
-        ]);
-        alignScanButton.Click += BeginScanAlignmentClicked;
-
-        AddSetting(settings, "Use Mesh2PPM", "project.use_bezierppm", usePredictionsBox, "Use Mesh2PPM");
-        AddV2Settings(settings);
-        AddExpander(settings, "Mesh2PPM", [AddSettingPanel("Model", "inference.model", modelPicker)]);
-        AddExpander(settings, "Mesh2HRTF", [PathSettingPanel("Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked), GeometryPanel(), AddSettingPanel("Min frequency", "mesh2hrtf.min_frequency", minFrequencyBox), AddSettingPanel("Max frequency", "mesh2hrtf.max_frequency", maxFrequencyBox), AddSettingPanel("Frequency steps (minimum 2)", "mesh2hrtf.frequency_steps", frequencyStepsBox), AddSettingPanel("Microphone faces", "mesh2hrtf.microphone_faces", microphoneFacesBox)]);
-        AddExpander(settings, "Mesh Grading", [AddSettingPanel("Min edge length", "mesh_grading.min_edge_length", meshMinEdgeBox), AddSettingPanel("Max edge length", "mesh_grading.max_edge_length", meshMaxEdgeBox), AddSettingPanel("Max error", "mesh_grading.max_error", meshMaxErrorBox), AddSettingPanel("Gamma", "mesh_grading.gamma", meshGammaBox), AddSettingPanel("Gamma opposite", "mesh_grading.gamma_opposite", meshGammaOppositeBox)]);
-        AddExpander(settings, "NumCalc", [AddSettingPanel("Parallel instances", "numcalc.parallel_instances", maxInstancesBox), AddSettingPanel("CPU limit (%)", "numcalc.cpu_limit", maxCpuLoadBox), AddSettingPanel("Adaptive FMM expansion length", "numcalc.adaptive_fmm", adaptiveFmmLengthBox, "Adaptive FMM expansion length")]);
-        AddExpander(settings, "Postprocessing", [AddSettingPanel("Normalize HRTFs", "postprocessing.normalize", normalizeHrtfsBox, "Normalize HRTFs"), AddSettingPanel("Level offset (dB)", "postprocessing.level_offset", levelOffsetBox), AddSettingPanel("Resample HRIRs", "postprocessing.resample_hrirs", resampleHrirsBox, "Resample HRIRs"), AddSettingPanel("Sampling rate (Hz)", "postprocessing.sampling_rate", samplingRateBox)]);
-        scroll.Content = settings;
-        outer.Children.Add(scroll);
-        var stages = BuildStagesPane();
-        Grid.SetRow(stages, 1);
-        outer.Children.Add(stages);
-        pane.Child = outer;
-        RegisterSettingControls();
-        if (MacLayout) ArrangeMacInspector(settings, outer, scroll, stages);
-        return pane;
-    }
+    Border BuildSettingsPane() => BuildWorkflowPane();
 
     void AddSetting(StackPanel parent, string label, string id, Control control, string? checkBoxText = null)
     {
@@ -978,77 +942,6 @@ public partial class MainWindow : Window
         parent.Children.Add(expander);
     }
 
-    void UpdatePreparedEarEditButton(ArtifactInspection? inspection = null)
-    {
-        inspection ??= new ArtifactInspection();
-        var project = selectedProject;
-        var side = project != null && selectedArtifactPath != null ? PreparedEarSideForPath(project, selectedArtifactPath) : null;
-        editPreparedEarButton.Visibility = side == null ? Visibility.Collapsed : Visibility.Visible;
-        editPreparedEarButton.IsEnabled = side != null && project != null && ScanPreparationOutputsCurrent(project, inspection) && !runs.ContainsKey(project.Id);
-        ToolTipService.SetToolTip(editPreparedEarButton, side == null ? null : EarReviewIsCurrent(project!, side, inspection) ? "Edit the reviewed prepared ear" : "Review this prepared ear before continuing");
-    }
-
-    string? PreparedEarSideForPath(ProjectRecord project, string path)
-    {
-        var settings = project.Settings.ScanPreparation;
-        if (!settings.Enabled || string.IsNullOrWhiteSpace(project.SaveLocation)) return null;
-        foreach (var (side, selected, reviewed) in new[]
-        {
-            ("left", settings.PrepareLeft, settings.ReviewedLeft),
-            ("right", settings.PrepareRight, settings.ReviewedRight)
-        })
-        {
-            if (!selected) continue;
-            var prepared = Path.Combine(project.SaveLocation, "Prepared", side == "left" ? "Left.stl" : "Right.stl");
-            if (SamePath(path, prepared)) return side;
-            if (EarReviewIsCurrent(project, side) && !string.IsNullOrWhiteSpace(reviewed) && SamePath(path, reviewed)) return side;
-        }
-        return null;
-    }
-
-    Border BuildStagesPane()
-    {
-        var border = new Border { BorderBrush = borderBrush, BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(14, 8, 14, 12) };
-        var stack = new StackPanel();
-        var stages = Stage.GetValues();
-        for (var i = 0; i < stages.Length; i++)
-        {
-            var row = new Grid { Margin = new Thickness(0, 1, 0, 1), HorizontalAlignment = HorizontalAlignment.Stretch };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.Children.Add(new TextBlock { Text = stages[i].Title, VerticalAlignment = VerticalAlignment.Center });
-            Grid.SetColumn(stageStatus[i], 1);
-            stageStatus[i].Margin = new Thickness(8, 0, 10, 0);
-            stageStatus[i].FontSize = 11;
-            stageStatus[i].VerticalAlignment = VerticalAlignment.Center;
-            row.Children.Add(stageStatus[i]);
-            var button = new Button { Content = "Run", Width = 62, Padding = new Thickness(8, 3, 8, 3), Tag = stages[i] };
-            button.Click += StageButtonClicked;
-            stageButtons.Add(button);
-            Grid.SetColumn(button, 2);
-            row.Children.Add(button);
-            stack.Children.Add(row);
-        }
-        runAllButton = new Button { Content = "Run All", Height = 34, Margin = new Thickness(0, 8, 0, 0), Background = new SolidColorBrush(ColorHelper.FromArgb(255, 111, 159, 156)), Foreground = new SolidColorBrush(Colors.White), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center };
-        runAllButton.Click += RunAllClicked;
-        stack.Children.Add(runAllButton);
-        pipelineHintText = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 6, 0, 0), Visibility = Visibility.Collapsed };
-        stack.Children.Add(pipelineHintText);
-        var statusRow = new Grid { Margin = new Thickness(0, 6, 0, 0) };
-        statusRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        statusRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        numCalcStatusText = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 105, 113, 125)) };
-        statusRow.Children.Add(numCalcStatusText);
-        var reset = new Button { Content = "Reset Outputs", Padding = new Thickness(10, 3, 10, 3), FontSize = 11 };
-        reset.Click += ResetOutputsClicked;
-        Grid.SetColumn(reset, 1);
-        statusRow.Children.Add(reset);
-        stack.Children.Add(statusRow);
-        border.Child = stack;
-        return border;
-    }
-
     void RegisterSettingControls()
     {
         settingControls["project.name"] = projectNameBox;
@@ -1074,7 +967,8 @@ public partial class MainWindow : Window
     void RenameProjectFromContext(ProjectRecord project)
     {
         SelectProjectFromContext(project);
-        if (MacLayout && !macInspectorVisible) ToggleMacInspector();
+        if (!macInspectorVisible) ToggleMacInspector();
+        SelectWorkflowStep(0);
         DispatcherQueue.TryEnqueue(() => { projectNameBox.StartBringIntoView(); projectNameBox.Focus(FocusState.Keyboard); projectNameBox.SelectAll(); });
     }
 
@@ -1100,8 +994,6 @@ public partial class MainWindow : Window
         scanPathBox.Text = project?.Settings.ScanPreparation.ScanPath ?? "";
         prepareLeftEarBox.IsChecked = project?.Settings.ScanPreparation.PrepareLeft ?? true;
         prepareRightEarBox.IsChecked = project?.Settings.ScanPreparation.PrepareRight ?? true;
-        UpdatePreparedEarEditButton();
-        useManualFitsBox.IsChecked = project?.Settings.ManualPPM.Enabled ?? false;
         requireReviewBox.IsChecked = project?.Settings.ScanPreparation.RequireManualReview ?? false;
         usePredictionsBox.IsChecked = project?.Settings.Inference.UsePredictionsForPreprocessing ?? false;
         evaluationGridBox.Text = project?.Settings.Preprocessing.EvaluationGrid ?? "";
@@ -1132,6 +1024,7 @@ public partial class MainWindow : Window
         RebaseSettingInputs();
         RestoreSettingDrafts(project);
         RefreshGeometry();
+        RefreshWorkflow();
     }
 
     Stage? SettingResetStage(string id)
@@ -1938,6 +1831,10 @@ public partial class MainWindow : Window
                 list.Add(new Artifact(useReviewed ? $"Reviewed {side} ear" : $"Prepared {side} ear", useReviewed ? reviewed! : prepared, side));
             }
         }
+        if (!project.Settings.ScanPreparation.Enabled)
+            foreach (var side in WorkflowSides(project))
+                if (EarReviewIsCurrent(project, side, inspection) && SourceEar(project, side, inspection) is string edited)
+                    list.Add(new Artifact($"Edited {side} ear", edited, side));
         if (!string.IsNullOrWhiteSpace(project.LeftEar))
         {
             list.Add(new Artifact("Input left ear", project.LeftEar, "left"));
@@ -2005,7 +1902,6 @@ public partial class MainWindow : Window
         selectedArtifactSide = ArtifactSide(artifact);
         RememberSelectedArtifact(artifact.Path);
         selectedArtifactText.Text = Path.GetFileName(artifact.Path);
-        UpdatePreparedEarEditButton();
         UpdatePlacementButtons();
         if (artifact.IsImage)
         {
@@ -2512,12 +2408,7 @@ public partial class MainWindow : Window
     void RunPostprocessingClicked(object sender, RoutedEventArgs e) => RunOrStop(Stage.Postprocessing);
     void RunOrStop(Stage stage) { if (selectedProject != null && runs.TryGetValue(selectedProject.Id, out var active) && active.Stage == stage) StopProject(selectedProject); else RunStage(stage); }
 
-    void RunNextClicked(object sender, RoutedEventArgs e)
-    {
-        if (selectedProject == null) return;
-        var next = AutomaticStages(selectedProject).FirstOrDefault(x => !StageIsComplete(x, selectedProject));
-        if (next != null) RunStage(next, selectedProject);
-    }
+    void RunNextClicked(object sender, RoutedEventArgs e) => PerformWorkflowAction();
 
     void RunAllClicked(object sender, RoutedEventArgs e)
     {
@@ -2804,8 +2695,8 @@ public partial class MainWindow : Window
         var prepared = Clone(project);
         if (prepared.InputHandling == InputHandling.Copy)
         {
-            if (!string.IsNullOrWhiteSpace(project.LeftEar)) prepared.LeftEar = await Task.Run(() => CopyInput(project.LeftEar, Path.Combine(project.SaveLocation, "Input", "Left")));
-            if (!string.IsNullOrWhiteSpace(project.RightEar)) prepared.RightEar = await Task.Run(() => CopyInput(project.RightEar, Path.Combine(project.SaveLocation, "Input", "Right")));
+            if (!prepared.Settings.ScanPreparation.Enabled && !string.IsNullOrWhiteSpace(project.LeftEar)) prepared.LeftEar = await Task.Run(() => CopyInput(project.LeftEar, Path.Combine(project.SaveLocation, "Input", "Left")));
+            if (!prepared.Settings.ScanPreparation.Enabled && !string.IsNullOrWhiteSpace(project.RightEar)) prepared.RightEar = await Task.Run(() => CopyInput(project.RightEar, Path.Combine(project.SaveLocation, "Input", "Right")));
             if (prepared.Settings.ScanPreparation.Enabled && !string.IsNullOrWhiteSpace(project.Settings.ScanPreparation.ScanPath))
                 prepared.Settings.ScanPreparation.ScanPath = await Task.Run(() => CopyInput(project.Settings.ScanPreparation.ScanPath, Path.Combine(project.SaveLocation, "Input", "Scan")));
             RebaseManualPosition(prepared.Settings.Preprocessing.SourcePositionInputLeft, project.LeftEar, prepared.LeftEar);
@@ -3156,7 +3047,7 @@ public partial class MainWindow : Window
     {
         inspection ??= new ArtifactInspection();
         if (selectedProject != null) _ = ReconcileOutputsAsync(selectedProject);
-        if (selectedProject == null) { RefreshNumCalcStatus(inspection); return; }
+        if (selectedProject == null) { RefreshNumCalcStatus(inspection); RefreshWorkflow(inspection); return; }
         var stages = Stage.GetValues();
         for (var i = 0; i < stages.Length; i++)
         {
@@ -3183,10 +3074,10 @@ public partial class MainWindow : Window
         pipelineHintText.Text = hint ?? "";
         pipelineHintText.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
         UpdatePlacementButtons();
-        UpdatePreparedEarEditButton(inspection);
         RefreshProjectRows(inspection);
         RefreshNumCalcStatus(inspection);
         if (MacLayout) RefreshMacPresentation(inspection);
+        RefreshWorkflow(inspection);
     }
 
     bool InferenceIsAutomatic(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing && !project.Settings.ManualPPM.Enabled;
@@ -3201,7 +3092,7 @@ public partial class MainWindow : Window
         if (scanAlignmentMode && alignmentSessionProject == project.Id) return "Save or cancel scan alignment before running a stage.";
         if (SettingDraftError(project) is string draftError) return draftError;
         if (ProjectDocument.ValidationError(project) is string validation) return validation;
-        if (project.Settings.ManualPPM.Enabled && project.Settings.ManualPPM.Left == null && project.Settings.ManualPPM.Right == null) return "Fit at least one ear before enabling saved manual fits.";
+        if (stage != Stage.ScanPreparation && CurrentEarModel(project) == null) return "Choose one ear modelling method in Ear model.";
         if (projectOperations.Contains(project.Id) || OwnedProcess.HasProjectActivity(project.Id)) return "Wait for the project operation or editor to finish.";
         if (outputOperations.Contains(project.Id)) return "Wait for project outputs to finish updating.";
         if (runs.ContainsKey(project.Id)) return "Wait for the running stage to finish.";
@@ -3229,10 +3120,14 @@ public partial class MainWindow : Window
             if (!project.Settings.ScanPreparation.PrepareLeft && !project.Settings.ScanPreparation.PrepareRight) return "Select an ear to prepare.";
             return null;
         }
-        if ((!string.IsNullOrWhiteSpace(project.LeftEar) && !File.Exists(project.LeftEar)) || (!string.IsNullOrWhiteSpace(project.RightEar) && !File.Exists(project.RightEar))) return "An input ear file is missing. Select it again.";
+        if (!project.Settings.ScanPreparation.Enabled && ((!string.IsNullOrWhiteSpace(project.LeftEar) && !File.Exists(project.LeftEar)) || (!string.IsNullOrWhiteSpace(project.RightEar) && !File.Exists(project.RightEar)))) return "An input ear file is missing. Select it again.";
         if (project.Settings.ScanPreparation.Enabled && !ScanPreparationOutputsCurrent(project, inspection)) return "Run Scan Preparation with the current settings first.";
         if (project.Settings.ScanPreparation.Enabled && project.Settings.ScanPreparation.RequireManualReview && new[] { "left", "right" }.Any(side => SourceEar(project, side, inspection) != null && !EarReviewIsCurrent(project, side, inspection))) return "Review the prepared ears before continuing.";
-        if (project.Settings.ManualPPM.Enabled && new[] { "left", "right" }.Any(side => project.Settings.ManualPPM.For(side) != null && !FitIsCurrent(project, side))) return "A saved manual fit is stale; refit or disable saved fits.";
+        foreach (var side in WorkflowSides(project)) {
+            var reviewed = project.Settings.ScanPreparation.EarEdit(side);
+            if (reviewed != null && !EarReviewIsCurrent(project, side, inspection)) return $"The {side} ear edit is outdated. Edit again or use the original in Prepare ears.";
+            if (project.Settings.ManualPPM.Enabled && !FitIsCurrent(project, side)) return $"Fit the {side} ear: manual mode requires a current saved fit for every included ear.";
+        }
         if (stage == Stage.Inference)
         {
             if (!InferenceIsAutomatic(project)) return "Enable Use Mesh2PPM and select at least one input ear.";
@@ -3480,7 +3375,6 @@ public partial class MainWindow : Window
         viewerPlaceholder.Foreground = mutedTextBrush;
         numCalcStatusText.Foreground = mutedTextBrush;
         pipelineHintText.Foreground = mutedTextBrush;
-        foreach (var label in stageStatusLabels) label.Foreground = mutedTextBrush;
         foreach (var row in projectRows.Values)
         {
             row.Name.Foreground = primaryTextBrush;
@@ -3747,8 +3641,8 @@ public partial class MainWindow : Window
 
     string? PreprocessingMesh(ProjectRecord project, string side)
     {
-        if (project.Settings.ManualPPM.Enabled && project.Settings.ManualPPM.For(side) is { } fit)
-            return FitIsCurrent(project, side) ? fit.Mesh : null;
+        if (project.Settings.ManualPPM.Enabled)
+            return FitIsCurrent(project, side) ? project.Settings.ManualPPM.For(side)?.Mesh : null;
         return InferenceIsAutomatic(project) ? PredictionMesh(project, side) : SourceEar(project, side);
     }
 

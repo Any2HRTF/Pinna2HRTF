@@ -49,17 +49,19 @@ enum ProjectValidation {
             errors.append(("mesh_grading.max_edge_length", "Max edge length must be at least the min edge length."))
         }
         if project.settings.manualPPMFitting.useForPreprocessing {
-            var hasValidFit = false
-            for side in EarSide.allCases where !(side == .left ? project.pipelineLeftEar : project.pipelineRightEar).isEmpty {
-                guard let path = project.settings.manualPPMFitting.meshPath(for: side), !path.isEmpty else { continue }
-                if ArtifactScanner.validManualPPMFittingMesh(for: project, side: side, inspection: inspection) != nil {
-                    hasValidFit = true
-                } else {
-                    errors.append(("manual_ppm.\(side.rawValue)", "The saved \(side.rawValue) PPM fit is missing or no longer matches its source ear."))
+            for side in project.includedEars {
+                if ArtifactScanner.validManualPPMFittingMesh(for: project, side: side, inspection: inspection) == nil {
+                    errors.append(("manual_ppm.\(side.rawValue)", "Fit the \(side.rawValue) ear: manual mode requires a current saved fit for every included ear."))
                 }
             }
-            if !hasValidFit {
-                errors.append(("manual_ppm.fit", "Fit at least one ear with the manual PPM editor before selecting manual preprocessing."))
+        }
+        if project.workflowMethod == nil {
+            errors.append(("manual_ppm.method", "Choose one ear modelling method in Ear model."))
+        }
+        for side in EarSide.allCases where !project.pipelineEar(for: side, inspection: inspection).isEmpty {
+            let reviewed = project.scanPreparation.earEdit(side)
+            if reviewed != nil && !ArtifactScanner.earReviewIsCurrent(project, side: side, inspection: inspection) {
+                errors.append(("ear_edit.\(side.rawValue)", "The saved \(side.rawValue) ear edit is outdated. Edit again or use the original ear in Prepare ears."))
             }
         }
         let scan = project.scanPreparation
@@ -79,9 +81,10 @@ enum ProjectValidation {
         }
         guard let stage else { return errors }
         return errors.filter { issue in
+            if stage != .scanPreparation && issue.id == "manual_ppm.method" { return true }
             switch stage {
             case .scanPreparation: return issue.id.hasPrefix("scan.")
-            case .inference: return issue.id.hasPrefix("scan.")
+            case .inference: return issue.id.hasPrefix("scan.") || issue.id.hasPrefix("ear_edit.") || issue.id == "manual_ppm.method"
             case .preprocessing: return !issue.id.hasPrefix("postprocessing.") && !issue.id.hasPrefix("numcalc.")
             case .numcalc: return issue.id.hasPrefix("numcalc.")
             case .postprocessing: return issue.id.hasPrefix("postprocessing.")

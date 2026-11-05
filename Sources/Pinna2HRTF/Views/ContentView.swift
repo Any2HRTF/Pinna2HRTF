@@ -11,45 +11,7 @@ struct ContentView: View {
         .navigationTitle(store.selectedProject?.name ?? "Pinna2HRTF")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                Menu {
-                    ForEach(store.artifacts.filter(\.exists)) { artifact in
-                        Button {
-                            store.openArtifact(artifact)
-                        } label: {
-                            Label(artifact.title, systemImage: artifact.url == store.selectedMesh ? "checkmark" : artifact.systemImage)
-                        }
-                    }
-                } label: {
-                    Label(store.artifacts.first(where: { $0.url == store.selectedMesh })?.title ?? "Preview", systemImage: "list.bullet.rectangle")
-                }
-                .labelStyle(.titleAndIcon)
-                .accessibilityLabel(store.artifacts.first(where: { $0.url == store.selectedMesh })?.title ?? "Preview")
-                .help("Choose a File to Preview")
-                .disabled(store.selectedProject == nil || store.isPlacingMicrophone)
-            }
-            if #available(macOS 26.0, *) {
-                ToolbarSpacer(.fixed, placement: .primaryAction)
-            }
-            ToolbarItemGroup(placement: .primaryAction) {
-                Menu {
-                ForEach(EarSide.allCases) { side in
-                    Button {
-                        store.beginMicrophonePlacement(side)
-                    } label: {
-                        Label("Place \(side.title) Mic", systemImage: "scope")
-                    }
-                    .labelStyle(.titleAndIcon)
-                    .help("Place \(side.title) Microphone")
-                    .disabled(store.selectedProjectIsRunning || store.isPlacingMicrophone || !(store.selectedProjectStatus?.pipelineSides.contains(side) ?? false))
-                }
-                } label: { Label("Microphone", systemImage: "scope") }
-                .accessibilityLabel("Microphone")
-                .help("Place a microphone on the left or right ear")
-            }
-            if #available(macOS 26.0, *) {
-                ToolbarSpacer(.fixed, placement: .primaryAction)
-            }
-            ToolbarItemGroup(placement: .primaryAction) {
+                if !inspectorPresented { Button(store.selectedProjectIsRunning ? "Show progress" : store.workflowNextAction.title) { inspectorPresented = true } }
                 Button {
                     withAnimation { logExpanded.toggle() }
                 } label: {
@@ -59,9 +21,9 @@ struct ContentView: View {
                 Button {
                     withAnimation { inspectorPresented.toggle() }
                 } label: {
-                    Label(inspectorPresented ? "Hide project settings" : "Show project settings", systemImage: "sidebar.right")
+                    Label(inspectorPresented ? "Hide workflow" : "Show workflow", systemImage: "sidebar.right")
                 }
-                .help(inspectorPresented ? "Hide project settings" : "Show project settings")
+                .help(inspectorPresented ? "Hide workflow" : "Show workflow")
             }
         }
         .alert("Project list recovery", isPresented: $store.registryRecoveryPresented) {
@@ -70,6 +32,7 @@ struct ContentView: View {
         } message: {
             Text(store.registryStore.recoveryMessage ?? store.persistenceMessage ?? "The original project list will be preserved before recovery.")
         }
+        .onChange(of: store.workflowRevealRequest) { _ in inspectorPresented = true }
         .sheet(item: editorPresentation) { editor in
             switch editor {
             case .duplicate(let request):
@@ -147,7 +110,7 @@ struct ContentView: View {
         return PipelineCommandContext(
             canRemoveProject: store.canRemoveSelectedProject,
             canDuplicateProject: selectedProject != nil && !store.selectedProjectIsRunning,
-            canRunProject: store.canRunNextStage(),
+            canRunProject: selectedProject != nil && !store.selectedProjectIsRunning && store.workflowNextAction.enabled,
             canRunStage: { stage in store.canRun(stage: stage) },
             canStopProject: selectedProjectIsRunning,
             canResetProject: selectedProject != nil && !store.selectedProjectIsRunning,
@@ -163,7 +126,7 @@ struct ContentView: View {
             importProject: { store.importProject() },
             duplicateProject: { store.duplicateSelectedProject() },
             removeProject: { store.removeSelectedProject() },
-            runNextStage: { store.runNextStage() },
+            runNextStage: { store.performWorkflowAction() },
             runStage: { store.run(stage: $0) },
             stopProject: { store.stopRunningProcess() },
             resetProject: { store.confirmResetSelectedProjectOutputs() },
