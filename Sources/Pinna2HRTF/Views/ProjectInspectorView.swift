@@ -163,6 +163,10 @@ struct ProjectInspectorView: View {
             }
             stageAction(.numcalc)
         case .results:
+            SettingToggle(title: "Apply level offset", helpID: "postprocessing.normalize", isOn: postprocessingNormalizeBinding)
+            if postprocessingNormalizeBinding.wrappedValue {
+                LabeledTextField("Level offset (dB)", helpID: "postprocessing.level_offset", text: postprocessingLevelOffsetBinding)
+            }
             SettingToggle(title: "Resample HRIRs", helpID: "postprocessing.resample_hrirs", isOn: postprocessingResampleBinding)
             if postprocessingResampleBinding.wrappedValue {
                 LabeledTextField("Sampling rate (Hz)", helpID: "postprocessing.sampling_rate", text: postprocessingSamplingRateBinding)
@@ -175,14 +179,9 @@ struct ProjectInspectorView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             PathField("SOFA output folder (optional)", helpID: "postprocessing.output_folder", text: postprocessingOutputFolderBinding, mode: .directory)
-            SettingToggle(title: "Apply level offset", helpID: "postprocessing.normalize", isOn: postprocessingNormalizeBinding)
-            LabeledTextField("Level offset (dB)", helpID: "postprocessing.level_offset", text: postprocessingLevelOffsetBinding, fieldEnabled: postprocessingNormalizeBinding.wrappedValue)
             stageAction(.postprocessing)
             Button("Open output folder") {
                 if let p = store.selectedProject { NSWorkspace.shared.open(ArtifactScanner.postprocessingDirectory(for: p)) }
-            }
-            ForEach(store.artifacts.filter(\.exists)) { artifact in
-                Button(artifact.title) { store.openArtifact(artifact) }.buttonStyle(.link)
             }
         }
     }
