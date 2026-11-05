@@ -90,7 +90,7 @@ extension AppStore {
         if isCheckingProjectFiles { return .init(title: "Checking project files…", step: workflowStep, enabled: false) }
         if let p = selectedProject, p.scanPreparation.enabled,
            !(selectedProjectStatus?.completed.contains(.scanPreparation) ?? false) {
-            return .init(title: "Prepare ears", step: .prepare, stage: .scanPreparation)
+            return .init(title: "Prepare ears", step: .prepare, stage: .scanPreparation, enabled: canRun(stage: .scanPreparation))
         }
         if let issue = selectedValidationIssues.first(where: { $0.id.hasPrefix("ear_edit.") }) {
             return .init(title: issue.message, step: .prepare)
@@ -102,7 +102,7 @@ extension AppStore {
         }
         if let stage = nextStage {
             let step = stage == .inference ? WorkflowStep.prepare : WorkflowStep.allCases.first(where: { $0.stage == stage })
-            if let step { return .init(title: "Run \(stage.title)", step: step, stage: stage) }
+            if let step { return .init(title: "Run \(stage.title)", step: step, stage: stage, enabled: canRun(stage: stage)) }
         }
         return .init(title: "Open results", step: .results)
     }
@@ -120,8 +120,7 @@ extension AppStore {
         else if let stage = action.stage, canRun(stage: stage) { run(stage: stage) }
     }
 
-    func workflowSymbol(_ step: WorkflowStep) -> String {
-        let state = workflowStatus(step)
+    func workflowSymbol(for state: String) -> String {
         if state == "Complete" { return "checkmark.circle" }
         if state == "Failed" || state == "Needs rerun" { return "exclamationmark.triangle" }
         if state.hasPrefix("Not needed") || state.hasPrefix("Optional") { return "minus.circle" }

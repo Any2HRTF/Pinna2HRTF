@@ -13,6 +13,7 @@ struct ProjectStatusSnapshot {
     let preprocessingNeedsRerun: Bool
     let fittableSides: Set<EarSide>
     let validFitSides: Set<EarSide>
+    let currentEarEdits: Set<EarSide>
     let pipelineSides: Set<EarSide>
     let checkingSolverResults: Bool
 
@@ -93,6 +94,7 @@ struct ProjectStatusSnapshot {
             return FileManager.default.fileExists(atPath: source.path)
         })
         let validFits = Set(EarSide.allCases.filter { ArtifactScanner.validManualPPMFittingMesh(for: project, side: $0, inspection: inspection) != nil })
+        let currentEdits = Set(EarSide.allCases.filter { !isCancelled() && ArtifactScanner.earReviewIsCurrent(project, side: $0, inspection: inspection) })
         let artifacts = ArtifactScanner.artifacts(for: project, inspection: inspection, includeSolverResults: includeSolverResults).map { artifact in
             var cached = artifact
             cached.cachedExists = FileManager.default.fileExists(atPath: artifact.url.path)
@@ -101,7 +103,7 @@ struct ProjectStatusSnapshot {
         return Self(project: project, environment: environment, artifacts: artifacts, states: states, completed: completed,
                     unavailableReasons: reasons, issues: issues,
                     numcalcStatus: includeSolverResults ? ArtifactScanner.numcalcStatus(for: project, inspection: inspection) : "NumCalc: checking results…",
-                    preprocessingNeedsRerun: needsRerun, fittableSides: fittable, validFitSides: validFits, pipelineSides: pipelineSides, checkingSolverResults: !includeSolverResults)
+                    preprocessingNeedsRerun: needsRerun, fittableSides: fittable, validFitSides: validFits, currentEarEdits: currentEdits, pipelineSides: pipelineSides, checkingSolverResults: !includeSolverResults)
     }
 
     static func unavailableReason(_ stage: Stage, project: ProjectRecord, environment: EnvironmentConfig,

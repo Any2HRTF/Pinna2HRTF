@@ -9,13 +9,14 @@ struct ProjectInspectorView: View {
             Text("Workflow").font(.headline).padding(12)
             VStack(spacing: 2) {
                 ForEach(WorkflowStep.allCases) { step in
+                    let status = store.workflowStatus(step)
                     Button { store.workflowStep = step } label: {
                         HStack {
                             Text("\(step.rawValue + 1). \(step.title)")
                             Spacer(minLength: 4)
-                            Label(store.workflowStatus(step), systemImage: store.workflowSymbol(step))
+                            Label(status, systemImage: store.workflowSymbol(for: status))
                                 .font(.caption)
-                                .foregroundStyle(statusColor(store.workflowStatus(step)))
+                                .foregroundStyle(statusColor(status))
                         }.padding(.horizontal, 10)
                             .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
                             .background(store.workflowStep == step ? Color.accentColor.opacity(0.14) : Color.clear)
@@ -79,7 +80,7 @@ struct ProjectInspectorView: View {
                     }.disabled(!(store.selectedProjectStatus?.fittableSides.contains(side) ?? false))
                     if let p = store.selectedProject,
                        (p.scanPreparation.earEdit(side)) != nil {
-                        Text(ArtifactScanner.earReviewIsCurrent(p, side: side) ? "Saved edit in use" : "Saved edit outdated").font(.caption)
+                        Text(store.selectedProjectStatus.map { $0.currentEarEdits.contains(side) ? "Saved edit in use" : "Saved edit outdated" } ?? "Checking saved edit…").font(.caption)
                         Button("Use original ear") {
                             store.updateSelectedProject {
                                 var scan = $0.scanPreparation
