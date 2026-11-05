@@ -39,7 +39,12 @@ def input_paths(config: PipelineConfig, validate: bool = False):
         from .ScanPreparation import validate_prepared
         validate_prepared(config)
     from .MeshEditing import reviewed_inputs
-    return reviewed_inputs(config, validate=validate)
+    paths = reviewed_inputs(config, validate=validate)
+    if validate and settings.require_manual_review:
+        for side, path, reviewed in zip(("left", "right"), paths, (settings.reviewed_left, settings.reviewed_right)):
+            if path is not None and reviewed is None:
+                raise ValueError(f"Review the prepared {side} ear before continuing")
+    return paths
 
 
 def run_scan_preparation(config, dry_run, logger, force=False):
@@ -188,6 +193,43 @@ def archive_legacy_outputs(output_dir: Path, names: Iterable[str], inputs: Itera
     return backup_root
 
 
+PREPROCESSING_INPUT_RECEIPT = ".pinna2hrtf-preprocessing-inputs-v1.json"
+
+
+def preprocessing_input_signature(config: PipelineConfig) -> dict:
+    from .FileIdentity import cached_sha256
+    settings = config.preprocessing.model_dump(mode="json")
+    for key in ("enabled", "title", "pictures", "write_intermediates"):
+        settings.pop(key, None)
+    grid = Path(config.paths.evaluation_grid)
+    if not grid.is_absolute():
+        grid = config.paths.mesh2hrtf_path / "Mesh2Input" / "EvaluationGrids" / "Data" / grid
+    grid_hashes = {name: cached_sha256(grid / name) for name in ("Nodes.txt", "Elements.txt")}
+    ears = {}
+    for side, source in zip(("left", "right"), preprocessing_input_paths(config, lambda _: None)):
+        if source is None:
+            continue
+        effective = dict(settings)
+        other = "right" if side == "left" else "left"
+        effective.pop("source_position_" + other, None)
+        effective.pop("source_position_input_" + other, None)
+        ears[side] = {"mesh_sha256": cached_sha256(source), "settings": effective, "grid": grid_hashes}
+    return {"format": "pinna2hrtf-preprocessing-inputs-v1", "ears": ears}
+
+
+def validate_preprocessing_inputs(config: PipelineConfig, logger: Logger) -> None:
+    path = config.paths.output_dir / PREPROCESSING_INPUT_RECEIPT
+    if not path.exists():
+        # Older desktop releases have their own validated receipts. Keep those
+        # files intact; new preprocessing runs always create this shared receipt.
+        logger("Legacy preprocessing has no shared input receipt; use the desktop application's input validation before exporting.")
+        return
+    recorded = json.loads(path.read_text(encoding="utf-8"))
+    current = preprocessing_input_signature(config)
+    if recorded.get("format") != current["format"] or any(recorded.get("ears", {}).get(side) != value for side, value in current["ears"].items()):
+        raise ValueError("Preprocessing inputs or settings changed. Run preprocessing with the current inputs before NumCalc or SOFA export.")
+
+
 def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
     emit_live_event("Preparing ear meshes and building the head model")
     logger(f"Running preprocessing into {config.paths.output_dir}")
@@ -195,6 +237,7 @@ def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
         return
     from .Preprocessing import run_preprocessing_pipeline
     left_path, right_path = preprocessing_input_paths(config, logger)
+    signature = preprocessing_input_signature(config)
     run_preprocessing_pipeline(
         left_path=left_path,
         right_path=right_path,
@@ -205,6 +248,12 @@ def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
         preprocessing=config.preprocessing,
         logger=logger,
     )
+    if signature != preprocessing_input_signature(config):
+        raise ValueError("Preprocessing inputs changed while the mesh was being built. Rerun preprocessing.")
+    receipt = config.paths.output_dir / PREPROCESSING_INPUT_RECEIPT
+    temporary = receipt.with_suffix(".tmp")
+    temporary.write_text(json.dumps(signature, sort_keys=True), encoding="utf-8")
+    os.replace(temporary, receipt)
     if config.scan_preparation.enabled:
         from .ScanPreparation import record_stage
         record_stage(config, "preprocessing", [path / "NumCalc/source_1/NC.inp" for path in project_dirs(config)])
@@ -266,6 +315,8 @@ def run_numcalc(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
         input_paths(config, validate=True)
         from .ScanPreparation import validate_stage
         validate_stage(config, "preprocessing")
+    if not dry_run:
+        validate_preprocessing_inputs(config, logger)
     if config.numcalc.mode == "slurm":
         run_numcalc_slurm(config, dry_run, logger)
     else:
@@ -356,34 +407,20 @@ def slurm_worker_text(config: PipelineConfig) -> str:
 
 
 def collect_sofa_files(projects: list[Path], output_dir: Path) -> None:
-    import mesh2hrtf as m2h
     if not projects:
         raise ValueError("No projects were provided for SOFA export")
     if len(projects) == 2:
-        # Mesh2HRTF treats both directory and file paths as glob patterns.
-        # Staging under generated names also handles literal glob characters.
-        import tempfile
-        with tempfile.TemporaryDirectory(prefix="pinna-sofa-merge-") as temporary:
-            staged = []
-            names = []
-            for index, project in enumerate(projects):
-                source_dir = project / "Output2HRTF"
-                files = sorted(source_dir.glob("*.sofa"))
-                if not files:
-                    raise ValueError(f"No SOFA files found in {source_dir}")
-                folder = Path(temporary) / str(index)
-                folder.mkdir()
-                for source in files:
-                    shutil.copy2(source, folder / source.name)
-                staged.append(str(folder))
-                names.append({source.name for source in files})
-            if names[0] != names[1]:
-                raise ValueError("Left and right projects contain different SOFA files")
-            m2h.merge_sofa_files(staged, savedir=str(output_dir))
-            expected = {Path(name).stem + "_merged.sofa" for name in names[0]}
-            missing = [name for name in expected if not (output_dir / name).is_file()]
-            if missing:
-                raise ValueError("SOFA merge did not produce: " + ", ".join(sorted(missing)))
+        # The pinned Mesh2HRTF merger accepts literal file paths internally.
+        # Pair by filename here to bypass its glob-based directory discovery.
+        from mesh2hrtf.Output2HRTF.merge_sofa_files import _merge_sofa_files
+        ears = [{source.name: source for source in (project / "Output2HRTF").glob("*.sofa")} for project in projects]
+        if not ears[0] or set(ears[0]) != set(ears[1]):
+            raise ValueError("Left and right projects must contain matching, non-empty SOFA file sets")
+        for name in sorted(ears[0]):
+            target = output_dir / (Path(name).stem + "_merged.sofa")
+            _merge_sofa_files((str(ears[0][name]), str(ears[1][name])), str(target))
+            if not target.is_file():
+                raise ValueError(f"SOFA merge did not produce {target}")
     elif len(projects) == 1:
         files = sorted((projects[0] / "Output2HRTF").glob("*.sofa"))
         if not files:
@@ -416,6 +453,7 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
     if config.postprocessing.spatial_upsampling:
         from .Postprocessing.spatial_upsampling import resolve_dependencies
         resolve_dependencies(config.postprocessing)
+    validate_preprocessing_inputs(config, logger)
     root = config.paths.output_dir.resolve()
     destination = output_dir.resolve()
     protected = [root / name for name in ("Input", "Projects", "Intermediates", "Prepared", "Manual PPM", "MeshEdits", "Logs", ".pinna2hrtf")]

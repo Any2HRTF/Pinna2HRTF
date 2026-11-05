@@ -254,6 +254,7 @@ public partial class MainWindow
         footer.Children.Add(saveButton); footer.Children.Add(cancelButton);
         Grid.SetRow(footer, 2); windowRoot.Children.Add(footer);
         editorWindow.Content = windowRoot;
+        ProtectEditorClose(editorWindow, () => isBusy && !session.IsCancellationRequested, () => savedPath == null && currentIndex > 0);
         var chrome = new WindowChrome(editorWindow, windowRoot, header, drag, minimumWidth: 900, minimumHeight: 640);
         void Appearance()
         {

@@ -276,9 +276,7 @@ enum ArtifactScanner {
               report["status"] as? String == "completed",
               let signature = report["signature"] as? [String: Any],
               let settings = signature["settings"] as? [String: Any],
-              let ears = report["ears"] as? [String: [String: Any]],
-              settings["prepare_left"] as? Bool == scan.prepareLeft,
-              settings["prepare_right"] as? Bool == scan.prepareRight else { return false }
+              let ears = report["ears"] as? [String: [String: Any]] else { return false }
         let numbers = [("rotation_degrees", scan.rotationDegrees), ("target_edge_mm", scan.targetEdgeMM),
                        ("left_margin_mm", scan.leftMarginMM), ("right_margin_mm", scan.rightMarginMM),
                        ("side_min_mm", scan.sideMinMM), ("side_max_mm", scan.sideMaxMM)]
@@ -490,6 +488,31 @@ enum PreprocessingSignature {
                         inspection: ArtifactScanner.Inspection = .init()) -> Bool {
         let next = current ?? capture(project, inspection: inspection)
         if saved == next { return true }
+        // A receipt for both ears also covers a later selection of either ear.
+        if let oldData = saved.data(using: .utf8), let newData = next.data(using: .utf8),
+           var previous = try? JSONSerialization.jsonObject(with: oldData) as? [String: Any],
+           var selected = try? JSONSerialization.jsonObject(with: newData) as? [String: Any],
+           var oldScan = previous["scanPreparation"] as? [String: Any],
+           var newScan = selected["scanPreparation"] as? [String: Any] {
+            var covered = true
+            for side in EarSide.allCases {
+                let key = side == .left ? "prepareLeft" : "prepareRight"
+                let enabled = side == .left ? project.scanPreparation.prepareLeft : project.scanPreparation.prepareRight
+                if enabled && oldScan[key] as? Bool != true { covered = false }
+                oldScan.removeValue(forKey: key); newScan.removeValue(forKey: key)
+                if !enabled {
+                    for name in ["inputs", "preprocessing"] {
+                        var oldValues = previous[name] as? [String: Any] ?? [:]
+                        var newValues = selected[name] as? [String: Any] ?? [:]
+                        let keys = name == "inputs" ? [side.rawValue, "fitted_" + side.rawValue, "predicted_" + side.rawValue] : [side == .left ? "sourcePositionInputLeft" : "sourcePositionInputRight"]
+                        for key in keys { oldValues.removeValue(forKey: key); newValues.removeValue(forKey: key) }
+                        previous[name] = oldValues; selected[name] = newValues
+                    }
+                }
+            }
+            previous["scanPreparation"] = oldScan; selected["scanPreparation"] = newScan
+            if covered && encoded(previous) == encoded(selected) { return true }
+        }
         // Early receipts contain seven fields; later ones add three manual-fit
         // fields and an optional scan-settings field.
         // Never blindly accept a legacy receipt or re-baseline genuinely changed settings.
@@ -613,8 +636,11 @@ enum PreprocessingSignature {
 
     private static func gridPath(_ value: String?) -> String {
         let value = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return value.isEmpty || value == "Default"
-            ? Defaults.pipelineRoot.appendingPathComponent("HRTFCalculation/Preprocessing/Resources/ARIGrid").path : value
+        let name = value.isEmpty ? "Default" : value
+        if !name.contains("/") {
+            return Defaults.pipelineRoot.appendingPathComponent("External/src/Mesh2HRTF/mesh2hrtf/Mesh2Input/EvaluationGrids/Data").appendingPathComponent(name).path
+        }
+        return name
     }
 
     static func fileFingerprint(_ path: String) -> String { fingerprint(path, inspection: .init()) }

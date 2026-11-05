@@ -372,7 +372,7 @@ internal sealed class GeneratedOutputManifest
             OutputStage.Inference => Match(@"^Intermediates(/(Left|Right))?$") ||
                 Match(@"^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)$"),
             OutputStage.Preprocessing => Match(@"^Intermediates(/(Left|Right))?$") ||
-                Match(@"^Projects(/(Left|Right)(/.*)?)?$") || path.Equals(".pinna2hrtf-preprocessing-signature", StringComparison.OrdinalIgnoreCase),
+                Match(@"^Projects(/(Left|Right)(/.*)?)?$") || (path.Equals(".pinna2hrtf-preprocessing-signature", StringComparison.OrdinalIgnoreCase) || Match(@"^\.pinna2hrtf-preprocessing-(mac-v2|windows-v3|inputs-v1)\.json$")),
             OutputStage.Numcalc => Match(@"^Projects/(Left|Right)/NumCalc/source_[0-9]+/be\.out(/be\.[0-9]+)?$"),
             OutputStage.Postprocessing => Match(@"^HRTF(/.*)?$") || Match(@"^Projects/(Left|Right)/Output2HRTF(/.*)?$"),
             _ => false
@@ -412,7 +412,7 @@ internal sealed class GeneratedOutputManifest
         if (Match(@"^Intermediates/(Left|Right)/(input_ear\.stl|source_landmark\.json|closed_ear\.stl|cut_head\.stl|stitched_head\.stl|graded_head\.ply|dummy_head\.stl)$") ||
             Match(@"^Intermediates/dummy_head\.stl$") ||
             Match(@"^Projects/(Left|Right)/(\.pinna2hrtf-export\.json|parameters\.json|3d Model\.blend[0-9]*|NumCalc/source_[0-9]+/NC\.inp|(ObjectMeshes|EvaluationGrids)/[^/]+/(Nodes|Elements)\.txt)$") ||
-            path.Equals(".pinna2hrtf-preprocessing-signature", StringComparison.OrdinalIgnoreCase)) return OutputStage.Preprocessing;
+            (path.Equals(".pinna2hrtf-preprocessing-signature", StringComparison.OrdinalIgnoreCase) || Match(@"^\.pinna2hrtf-preprocessing-(mac-v2|windows-v3|inputs-v1)\.json$"))) return OutputStage.Preprocessing;
         if (Match(@"^Projects/(Left|Right)/NumCalc/source_[0-9]+/(NC[0-9]+-[0-9]+_log\.txt|NC([0-9]+-[0-9]+|from[0-9]+|until[0-9]+)?\.out|Memory\.txt|be\.out/be\.[0-9]+/(pBoundary|pEvalGrid|vBoundary|vEvalGrid))$")) return OutputStage.Numcalc;
         if (Match(@"^(HRTF|Projects/(Left|Right)/Output2HRTF)/(HRIR|HRTF)_[^/]+\.(sofa|png|jpg|jpeg|pdf)$") ||
             Match(@"^Projects/(Left|Right)/Output2HRTF/(report_source_[0-9]+\.csv|report_issues\.(txt|csv))$")) return OutputStage.Postprocessing;
@@ -429,7 +429,7 @@ internal sealed class GeneratedOutputManifest
         relative.Split('/')[0].Equals("Projects", StringComparison.OrdinalIgnoreCase) || relative.Split('/')[0].Equals("HRTF", StringComparison.OrdinalIgnoreCase) ||
         Regex.IsMatch(relative, @"^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)(/|$)", RegexOptions.IgnoreCase) ||
         relative.Equals("Results Inference.csv", StringComparison.OrdinalIgnoreCase) ||
-        relative.Equals(".pinna2hrtf-preprocessing-signature", StringComparison.OrdinalIgnoreCase) ||
+        Regex.IsMatch(relative, @"^\.pinna2hrtf-preprocessing-(signature|(mac-v2|windows-v3|inputs-v1)\.json)$", RegexOptions.IgnoreCase) ||
         relative.Equals(".pinna2hrtf_native_run.yaml", StringComparison.OrdinalIgnoreCase);
 
     string? SafePath(string relative, bool protectingInputs = true)

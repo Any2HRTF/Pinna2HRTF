@@ -74,7 +74,7 @@ final class PressureFieldModel: ObservableObject {
             import json, sys
             from HRTFCalculation.PressureField import execute
             print(json.dumps(execute(json.load(sys.stdin)), allow_nan=False))
-            """, input: input)
+            """, input: input, timeout: 300, operation: "Pressure field loading")
             return try JSONDecoder().decode(type, from: data)
         }.value
     }

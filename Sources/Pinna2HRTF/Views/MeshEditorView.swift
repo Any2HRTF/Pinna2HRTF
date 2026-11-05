@@ -15,7 +15,7 @@ struct MeshEditorView: View {
     }
 
     private func closeEditor() {
-        if model.canUndo || !model.landmarks.isEmpty || !model.selectedFaces.isEmpty {
+        if model.hasUnsavedSelection || model.canUndo || !model.landmarks.isEmpty || !model.selectedFaces.isEmpty {
             let alert = NSAlert()
             alert.messageText = "Discard unsaved mesh changes?"
             alert.addButton(withTitle: "Keep editing")

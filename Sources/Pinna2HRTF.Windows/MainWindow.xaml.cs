@@ -268,13 +268,13 @@ public partial class MainWindow : Window
         viewerStatePath = Path.Combine(appData, "viewer-state.json");
         uiStatePath = Path.Combine(appData, "ui-state.json");
         logsPath = Path.Combine(appData, "logs.json");
-        Directory.CreateDirectory(appData);
+        EnsureStateDirectory(appData);
         WriteRuntimeInfo();
-        Directory.CreateDirectory(Path.Combine(appData, "Cache", "matplotlib"));
-        Directory.CreateDirectory(Path.Combine(appData, "Cache", "python"));
-        Directory.CreateDirectory(Path.Combine(appData, "Blender", "config"));
-        Directory.CreateDirectory(Path.Combine(appData, "Blender", "scripts"));
-        Directory.CreateDirectory(Path.Combine(appData, "Blender", "datafiles"));
+        EnsureStateDirectory(Path.Combine(appData, "Cache", "matplotlib"));
+        EnsureStateDirectory(Path.Combine(appData, "Cache", "python"));
+        EnsureStateDirectory(Path.Combine(appData, "Blender", "config"));
+        EnsureStateDirectory(Path.Combine(appData, "Blender", "scripts"));
+        EnsureStateDirectory(Path.Combine(appData, "Blender", "datafiles"));
         LoadSettingHelp();
         LoadRegistry();
         LoadProjectLogs();
@@ -1595,7 +1595,7 @@ public partial class MainWindow : Window
             return;
         }
         InvalidateManualPositions(project);
-        if(PreprocessingFilesPresent(project) && !File.Exists(Path.Combine(project.SaveLocation,".pinna2hrtf-preprocessing-signature")))HeadGeometry.AtomicWrite(Path.Combine(project.SaveLocation,".pinna2hrtf-preprocessing-signature"),PreprocessingStamp(project));
+        if(PreprocessingFilesPresent(project) && !File.Exists(Path.Combine(project.SaveLocation,WindowsPreprocessingReceipt)))HeadGeometry.AtomicWrite(Path.Combine(project.SaveLocation,WindowsPreprocessingReceipt),PreprocessingStamp(project));
         if (ExistingProjectRoot(folder) is { } duplicate) { SelectProjectFromContext(duplicate); return; }
         if (shutdownCleanupDone || projectsBeingRemoved.Count != 0) return;
         projects.Add(project);
@@ -2429,13 +2429,20 @@ public partial class MainWindow : Window
 
     void RunNextClicked(object sender, RoutedEventArgs e) => PerformWorkflowAction();
 
-    void RunAllClicked(object sender, RoutedEventArgs e)
+    void RunAllClicked(object sender, RoutedEventArgs e) =>
+        _ = ObserveUiTaskAsync(RunAllAsync(), "Run all", selectedProject);
+
+    async Task RunAllAsync()
     {
-        if (selectedProject == null) return;
-        var stages = AutomaticStages(selectedProject).Where(x => !StageIsComplete(x, selectedProject)).ToList();
-        if (stages.Count == 0) { AppendLog("All stages complete.", selectedProject.Id); return; }
-        queuedStages[selectedProject.Id] = new Queue<Stage>(stages.Skip(1));
-        RunStage(stages[0], selectedProject, true);
+        var project = selectedProject;
+        if (project == null || ProjectBusy(project.Id)) return;
+        var revision = StatusRevision(project);
+        await RefreshStatusSnapshotAsync(project, true);
+        if (shutdownCleanupDone || selectedProject != project || StatusRevision(project) != revision) return;
+        var stages = AutomaticStages(project).Where(stage => !StageIsComplete(stage, project)).ToList();
+        if (stages.Count == 0) { AppendLog("All stages complete.", project.Id); return; }
+        queuedStages[project.Id] = new Queue<Stage>(stages.Skip(1));
+        await RunStageAsync(stages[0], project, true);
     }
 
     void RunStage(Stage stage, ProjectRecord? targetProject = null, bool continueQueued = false) =>
@@ -2481,7 +2488,8 @@ public partial class MainWindow : Window
                 project.Settings.Preprocessing.SourcePositionInputRight = null;
                 Persist();
             }
-            if(stage==Stage.Preprocessing||stage==Stage.Inference)runInputStamps[project.Id]=stage==Stage.Preprocessing?PreprocessingStamp(project):InferenceStamp(project);
+            if (stage == Stage.Preprocessing || stage == Stage.Inference)
+                runInputStamps[project.Id] = await Task.Run(() => stage == Stage.Preprocessing ? PreprocessingStamp(project) : InferenceStamp(project));
             var preparedProject=Clone(project);
             if(stage==Stage.Postprocessing && HasExternalSofa(project))
             {
@@ -2556,7 +2564,7 @@ public partial class MainWindow : Window
             {
                 if((stage==Stage.Preprocessing||stage==Stage.Inference)&&runInputStamps.TryGetValue(project.Id,out var originalStamp)&&originalStamp!=(stage==Stage.Preprocessing?PreprocessingStamp(project):InferenceStamp(project)))throw new IOException("Project inputs or settings changed while the stage was running; rerun it.");
                 if(stage==Stage.Inference)HeadGeometry.AtomicWrite(Path.Combine(project.SaveLocation,".pinna2hrtf-inference-signature"),InferenceStamp(project));
-                if(stage==Stage.Preprocessing && PreprocessingFilesPresent(project)) HeadGeometry.AtomicWrite(Path.Combine(project.SaveLocation,".pinna2hrtf-preprocessing-signature"),PreprocessingStamp(project));
+                if(stage==Stage.Preprocessing && PreprocessingFilesPresent(project)) HeadGeometry.AtomicWrite(Path.Combine(project.SaveLocation,WindowsPreprocessingReceipt),PreprocessingStamp(project));
                 if(stage==Stage.Postprocessing&&stagedSofaOutputs.TryGetValue(project.Id,out var staging))
                 {
                     await RequestPythonAsync("HRTFCalculation.DesktopBridge",new{action="validate_outputs",paths=Directory.GetFiles(staging,"*.sofa")});
@@ -3162,6 +3170,7 @@ public partial class MainWindow : Window
             return File.Exists(Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf", "Mesh2Input", "mesh2input.py")) ? null : "The Mesh2HRTF export tools are missing.";
         }
         if (stage == Stage.Numcalc) return !StageIsComplete(Stage.Preprocessing, project, inspection) ? "Run Preprocessing first." : File.Exists(environment.NumCalcExecutable) ? null : "The NumCalc executable is missing.";
+        if (stage == Stage.Postprocessing && !StageIsComplete(Stage.Preprocessing, project, inspection)) return "Run preprocessing with the current inputs and settings first.";
         return stage == Stage.Postprocessing && StageIsComplete(Stage.Numcalc, project, inspection) ? null : "Run NumCalc first.";
     }
 
@@ -3220,7 +3229,7 @@ public partial class MainWindow : Window
             if(report.GetProperty("status").GetString()!="completed"||report.GetProperty("signature").GetProperty("source_sha256").GetString()!=inspection.Digest(scan.ScanPath))return false;
             var recorded=System.Text.Json.Nodes.JsonNode.Parse(report.GetProperty("signature").GetProperty("settings").GetRawText())!.AsObject();
             var expected=ProjectDocument.Build(project,environment)["scan_preparation"]!.AsObject();
-            foreach(var key in new[]{"require_manual_review","reviewed_left","reviewed_right","scan_path","original_scan_path"}) {recorded.Remove(key);expected.Remove(key);}
+            foreach(var key in new[]{"require_manual_review","reviewed_left","reviewed_right","scan_path","original_scan_path","prepare_left","prepare_right"}) {recorded.Remove(key);expected.Remove(key);}
             // The default polygon is YAML-only, and is preserved on import.
             if(!expected.ContainsKey("crop_polygon_xz"))recorded.Remove("crop_polygon_xz");
             if(!ProjectDocument.SameJson(recorded,expected))return false;
@@ -3481,7 +3490,10 @@ public partial class MainWindow : Window
                     HeadGeometry.AtomicWrite(registryPath, migrated);
                 }
             }
-            catch (Exception error) { registrySavingBlocked = true; AppendLog("Project list could not be migrated; the original file is protected: " + error.Message); }
+            catch (Exception error) {
+                registrySavingBlocked = true;
+                ReportStateError("The project list could not be loaded. The original file is protected. Changes from this session are saved to " + registryPath + ".recovery.json.\n" + error.Message);
+            }
         }
         registry.Folders ??= [];
         projects.Clear();
@@ -3612,10 +3624,10 @@ public partial class MainWindow : Window
         ? Path.Combine(directory, "Activity.log")
         : null;
 
-    static string TechnicalLogPath(ProjectRecord project, Stage stage, Guid runId, DateTime startedAt)
+    string TechnicalLogPath(ProjectRecord project, Stage stage, Guid runId, DateTime startedAt)
     {
         var directory = ProjectLogDirectory(project)
-            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Pinna2HRTF", "Logs", project.Id.ToString("D"));
+            ?? Path.Combine(appData, "Logs", project.Id.ToString("D"));
         var filename = $"{startedAt.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)}-{stage.Value}-{runId.ToString("N")[..8]}.log";
         return Path.Combine(directory, filename);
     }
@@ -3634,11 +3646,38 @@ public partial class MainWindow : Window
         catch { return null; }
     }
 
+    bool stateWarningVisible;
+    void ReportStateError(string message)
+    {
+        System.Diagnostics.Debug.WriteLine(message);
+        if (stateWarningVisible || shutdownCleanupDone) return;
+        stateWarningVisible = true;
+        DispatcherQueue.TryEnqueue(async () => {
+            try { await ShowDialogAsync(new ContentDialog { Title = "Could not save app state", Content = message, CloseButtonText = "OK" }); }
+            finally { stateWarningVisible = false; }
+        });
+    }
+    void EnsureStateDirectory(string path)
+    {
+        try { Directory.CreateDirectory(path); }
+        catch (Exception error) { ReportStateError(path + "\n" + error.Message); }
+    }
+    void SaveStateFile(string path, string text)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+        try { HeadGeometry.AtomicWrite(path, text); }
+        catch (Exception error) { ReportStateError(path + "\n" + error.Message); }
+    }
+
     void Persist()
     {
-        if (registrySavingBlocked) return;
+        if (registrySavingBlocked) {
+            var recovery = new ProjectRegistry { Projects = projects.ToList(), SelectedProjectID = selectedProject?.Id, Environment = environment, Folders = registry.Folders };
+            SaveStateFile(registryPath + ".recovery.json", JsonSerializer.Serialize(recovery, jsonOptions));
+            return;
+        }
         registry = new ProjectRegistry { Projects = projects.ToList(), SelectedProjectID = selectedProject?.Id, Environment = environment, Folders = registry.Folders };
-        if (!string.IsNullOrWhiteSpace(registryPath)) HeadGeometry.AtomicWrite(registryPath, JsonSerializer.Serialize(registry, jsonOptions));
+        SaveStateFile(registryPath, JsonSerializer.Serialize(registry, jsonOptions));
     }
 
     void LoadViewerStates()
@@ -3646,9 +3685,9 @@ public partial class MainWindow : Window
         if (!File.Exists(viewerStatePath)) return;
         try { foreach (var pair in JsonSerializer.Deserialize<Dictionary<Guid, ProjectViewerState>>(File.ReadAllText(viewerStatePath), jsonOptions) ?? []) viewerStates[pair.Key] = pair.Value; } catch { viewerStates.Clear(); }
     }
-    void SaveViewerStates() { if (!string.IsNullOrWhiteSpace(viewerStatePath)) File.WriteAllText(viewerStatePath, JsonSerializer.Serialize(viewerStates, jsonOptions)); }
+    void SaveViewerStates() { SaveStateFile(viewerStatePath, JsonSerializer.Serialize(viewerStates, jsonOptions)); }
     void LoadUiState() { if (!File.Exists(uiStatePath)) return; try { var state = JsonSerializer.Deserialize<WindowUiState>(File.ReadAllText(uiStatePath), jsonOptions); if (state != null) { projectsExpandedWidth = state.ProjectsWidth; liveLogExpandedHeight = state.LiveLogHeight; settingsExpandedWidth = state.SettingsWidth; } } catch { } }
-    void SaveUiState() { if (!string.IsNullOrWhiteSpace(uiStatePath)) File.WriteAllText(uiStatePath, JsonSerializer.Serialize(new WindowUiState { ProjectsWidth = projectsExpandedWidth, LiveLogHeight = liveLogExpandedHeight, SettingsWidth = settingsExpandedWidth }, jsonOptions)); }
+    void SaveUiState() { SaveStateFile(uiStatePath, JsonSerializer.Serialize(new WindowUiState { ProjectsWidth = projectsExpandedWidth, LiveLogHeight = liveLogExpandedHeight, SettingsWidth = settingsExpandedWidth }, jsonOptions)); }
     string FindPackageRoot() { var current = new DirectoryInfo(AppContext.BaseDirectory); while (current != null) { if (File.Exists(Path.Combine(current.FullName, "pyproject.toml")) && Directory.Exists(Path.Combine(current.FullName, "HRTFCalculation"))) return current.FullName; current = current.Parent; } return AppContext.BaseDirectory; }
     EnvironmentConfig DefaultEnvironment()
     {

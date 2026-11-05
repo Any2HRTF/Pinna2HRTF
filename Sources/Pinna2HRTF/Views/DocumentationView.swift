@@ -83,7 +83,7 @@ private struct DocumentationPage: NSViewRepresentable {
                   selection != page else { return }
             selection = page
         }
-        func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
             guard let url = action.request.url else { decisionHandler(.cancel); return }
             if url.isFileURL {
                 let path = url.standardizedFileURL.path

@@ -39,7 +39,7 @@ uv run Pinna2HRTF preprocessing --config pinna2hrtf.yaml
 uv run Pinna2HRTF numcalc --config pinna2hrtf.yaml</code></pre>
       <p>Run multiple selected stages by repeating <code>--stage</code>. An explicitly selected stage runs even when its YAML <code>enabled</code> value is false. Add <code>--dry-run</code> to inspect a config-based run without executing the stages. YAML runs write left and right simulation projects under <code>Projects/Left</code> and <code>Projects/Right</code> in the output folder.</p>
       <h3>Postprocessing defaults</h3><p>YAML postprocessing normalizes output with a −30 dB level offset and replaces its output folder by default. Set <code>postprocessing.normalize: false</code> to skip normalization, <code>postprocessing.overwrite: false</code> to preserve an existing output folder, or <code>postprocessing.resample_hrirs: true</code> to resample HRIR files. Resampling defaults to 48,000 Hz. It changes HRIRs only; HRTF files are not resampled. Direct SOFA commands without a YAML config do not apply the level offset.</p>
-      <h3>Slurm</h3><p>Set <code>numcalc.mode: slurm</code> and configure the cluster partition, QoS, memory, time limit, and array concurrency in the YAML file. The Slurm worker skips existing frequency output folders; remove incomplete step folders before resubmitting.</p>
+      <h3>Slurm</h3><p>Set <code>numcalc.mode: slurm</code> and configure the cluster partition, QoS, memory, time limit, and array concurrency in the YAML file. The Slurm worker verifies completion of each frequency step, skips complete steps, and reruns incomplete steps when resubmitted. Preserve the project folder and its generated-output records when resuming.</p>
       <h2 id="scan-preparation-from-yaml">Scan preparation from YAML</h2><p>Enable <code>scan_preparation</code>, choose a scan and explicit crop rotation, and select the ears. The <a href="scan-preparation.html">scan guide</a> explains alignment, orientation checks, manual review, and provenance.</p>
       <pre><code>scan_preparation:
   enabled: true
@@ -51,7 +51,7 @@ uv run Pinna2HRTF numcalc --config pinna2hrtf.yaml</code></pre>
   require_manual_review: false
   reviewed_left: null
   reviewed_right: null</code></pre>
-      <h2 id="run-individual-stages-without-yaml">Run individual stages without YAML</h2><p>Every stage has command-line options. Use its help flag to see them. For example:</p><pre><code>uv run Pinna2HRTF scan-preparation --help
+      <h2 id="run-individual-stages-without-yaml">Run individual stages without YAML</h2><p>Scan preparation requires a YAML configuration. The remaining stages also provide standalone command-line options. Use each help flag to see its supported inputs. For example:</p><pre><code>uv run Pinna2HRTF scan-preparation --help
 uv run Pinna2HRTF preprocessing --help
 uv run Pinna2HRTF numcalc --help</code></pre>
       <p>Keep a separate output folder for each experiment and inspect the geometry and source placement after preprocessing before starting a long simulation.</p>

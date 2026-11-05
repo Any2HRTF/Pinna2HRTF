@@ -16,6 +16,35 @@ public partial class MainWindow
             try { AppendLog(operation + " failed: " + error, project?.Id); if (!shutdownCleanupDone) RefreshPipelineStatus(); } catch { }
         }
     }
+    void ProtectEditorClose(Microsoft.UI.Xaml.Window window, Func<bool> busy, Func<bool> dirty)
+    {
+        var confirmed = false;
+        var prompting = false;
+        window.AppWindow.Closing += async (_, args) =>
+        {
+            if (confirmed || shutdownCleanupDone) return;
+            if (busy()) { args.Cancel = true; return; }
+            if (!dirty()) return;
+            args.Cancel = true;
+            if (prompting) return;
+            prompting = true;
+            try
+            {
+                var dialog = new Microsoft.UI.Xaml.Controls.ContentDialog {
+                    Title = "Discard unsaved changes?", PrimaryButtonText = "Discard",
+                    CloseButtonText = "Keep editing", DefaultButton = Microsoft.UI.Xaml.Controls.ContentDialogButton.Close,
+                    XamlRoot = ((Microsoft.UI.Xaml.FrameworkElement)window.Content).XamlRoot
+                };
+                if (await dialog.ShowAsync() == Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary)
+                {
+                    confirmed = true;
+                    window.Close();
+                }
+            }
+            finally { prompting = false; }
+        };
+    }
+
     void WriteRuntimeInfo()
     {
         try

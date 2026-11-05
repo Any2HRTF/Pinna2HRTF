@@ -114,6 +114,8 @@ def cut_eararea_projected_footprint(head, ear, projected_cut_margin=10.0, side='
 
 
 def _exact_cut(head, ear, side, contains_radius=0.5):
+    ear = ear.copy()
+    ear.merge_vertices()
     entities = ear.outline().entities
     if len(entities) == 0:
         raise Exception("The ear mesh has no boundary loop. Check for non-manifolds!")

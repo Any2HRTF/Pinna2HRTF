@@ -85,7 +85,7 @@ enum PipelineConfigWriter {
             ],
             "scan_preparation": [
                 "enabled": scan.enabled, "scan_path": path(scan.scanPath), "original_scan_path": nullable(scan.originalScanPath),
-                "rotation_degrees": number(scan.rotationDegrees), "require_manual_review": false,
+                "rotation_degrees": number(scan.rotationDegrees), "require_manual_review": scan.requireManualReview ?? false,
                 "reviewed_left": nullable(scan.reviewedLeftPath), "reviewed_right": nullable(scan.reviewedRightPath),
                 "prepare_left": scan.prepareLeft, "prepare_right": scan.prepareRight,
                 "target_edge_mm": number(scan.targetEdgeMM, fallback: 0.75),

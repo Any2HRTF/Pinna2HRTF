@@ -235,8 +235,10 @@ def interpolate(ir, positions, fs, subdivisions=3, normalize=True, logger=print)
     aligned=minimum_phase(ir)
     for ch in range(2):
         aligned[:,ch]=np.roll(aligned[:,ch],int(matlab_round(parameters[ch,4]*fs)),axis=-1)
-    aligned=np.concatenate((aligned,np.zeros((1,2,ir.shape[-1]))))
-    pos=np.concatenate((positions,[[0,-90,positions[0,2]]]))
+    pos = positions.copy()
+    if not np.any(np.isclose(positions[:, 1], -90, atol=1e-8, rtol=0)):
+        aligned = np.concatenate((aligned, np.zeros((1, 2, ir.shape[-1]))))
+        pos = np.concatenate((positions, [[0, -90, positions[0, 2]]]))
     points=spherical_to_cartesian(pos)
     faces=boundary_faces(points)
     dense,_=subdivide(points,faces,subdivisions,np.mean(pos[:,2]))

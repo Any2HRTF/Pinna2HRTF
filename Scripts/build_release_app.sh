@@ -92,6 +92,25 @@ if [[ -n "$SDK_SWIFT_VERSION" ]]; then
   SWIFT_COMPATIBILITY_FLAGS=(-Xswiftc -interface-compiler-version -Xswiftc "$SDK_SWIFT_VERSION")
 fi
 
+
+# Check SwiftUI compiler plugins before spending time packaging the runtime.
+SDK_DIRECT_FLAGS=()
+if [[ -n "$SDK_SWIFT_VERSION" ]]; then
+  SDK_DIRECT_FLAGS=(-interface-compiler-version "$SDK_SWIFT_VERSION")
+fi
+cat > "$STAGE_ROOT/sdk-probe.swift" <<'SWIFTPROBE'
+import SwiftUI
+struct SDKProbe: View {
+    @State private var enabled = false
+    var body: some View { Text(enabled ? "On" : "Off") }
+}
+SWIFTPROBE
+if ! xcrun swiftc -typecheck -sdk "$SDK_PATH" -module-cache-path /private/tmp/pinna2hrtf-clang-cache "${SDK_DIRECT_FLAGS[@]}" "$STAGE_ROOT/sdk-probe.swift" > "$STAGE_ROOT/sdk-probe.log" 2>&1; then
+  cat "$STAGE_ROOT/sdk-probe.log" >&2
+  echo "The selected SDK/compiler cannot compile SwiftUI. Install the macOS 26.5 SDK or set PINNA2HRTF_MACOS_SDK to a compatible SDK." >&2
+  exit 1
+fi
+
 cd "$ROOT"
 CLANG_MODULE_CACHE_PATH="/private/tmp/pinna2hrtf-clang-cache" \
 SWIFTPM_HOME="/private/tmp/pinna2hrtf-swiftpm-cache" \

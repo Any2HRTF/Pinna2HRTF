@@ -52,6 +52,9 @@ final class PPMFittingModel: ObservableObject {
 
     func cancel() { previewWorkerTask?.cancel(); pythonWorker?.cancel() }
 
+    private var savedControlValues: [String: Double] = [:]
+    var hasUnsavedChanges: Bool { !controls.isEmpty && controlValues != savedControlValues }
+
     var canSave: Bool { !busy && !isUpdatingPreview && !controls.isEmpty && !parameters.isEmpty }
 
     var globalControls: [PPMFittingControl] { controls.filter { $0.section == "global" } }
@@ -75,6 +78,7 @@ final class PPMFittingModel: ObservableObject {
             }
             try await initialize(usingSavedParameters: request.savedParameters)
             try loadTarget()
+            savedControlValues = controlValues
             message = "Adjust a control to update the PPM preview. Fit globally, then local bone controls, then shape keys."
         } catch {
             self.error = error.localizedDescription
@@ -222,6 +226,7 @@ final class PPMFittingModel: ObservableObject {
                 try FilePublication.publish([(generated, request.destinationMesh), (generatedBlend, request.destinationBlend), (generatedParameters, request.destinationParameters)])
             }.value
             try installPPM(at: generated, isAlreadyMirrored: request.side == .right)
+            savedControlValues = controlValues
             message = "Saved the fitted PPM for the \(request.side.rawValue) ear."
             return true
         } catch {

@@ -239,7 +239,7 @@ final class GeneratedOutputManifest {
         if match(path, #"^Intermediates/(Left|Right)/(input_ear\.stl|source_landmark\.json|closed_ear\.stl|cut_head\.stl|stitched_head\.stl|graded_head\.ply|dummy_head\.stl)$"#) ||
             match(path, #"^Intermediates/dummy_head\.stl$"#) ||
             match(path, #"^Projects/(Left|Right)/(parameters\.json|3d Model\.blend[0-9]*|NumCalc/source_[0-9]+/NC\.inp|(ObjectMeshes|EvaluationGrids)/[^/]+/(Nodes|Elements)\.txt)$"#) ||
-            match(path, #"^\.pinna2hrtf-preprocessing-signature$"#) { return .preprocessing }
+            match(path, #"^\.pinna2hrtf-preprocessing-(signature|(mac-v2|windows-v3|inputs-v1)\.json)$"#) { return .preprocessing }
         if match(path, #"^Projects/(Left|Right)/NumCalc/source_[0-9]+/(NC[0-9]+-[0-9]+_log\.txt|NC([0-9]+-[0-9]+|from[0-9]+|until[0-9]+)?\.out|Memory\.txt|be\.out/be\.[0-9]+/(pBoundary|pEvalGrid|vBoundary|vEvalGrid))$"#) { return .numcalc }
         if match(path, #"^(HRTF|Projects/(Left|Right)/Output2HRTF)/(HRIR|HRTF)_[^/]+\.(sofa|png|jpg|jpeg|pdf)$"#) ||
             match(path, #"^Projects/(Left|Right)/Output2HRTF/(report_source_[0-9]+\.csv|report_issues\.(txt|csv))$"#) { return .postprocessing }
@@ -274,7 +274,7 @@ final class GeneratedOutputManifest {
     private func safePath(_ relative: String, protectingInputs: Bool = true) -> URL? {
         let parts = relative.split(separator: "/", omittingEmptySubsequences: false)
         guard !relative.contains(":"), !relative.contains("\\"), !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." || $0.hasSuffix(" ") || $0.hasSuffix(".") }),
-            (outputPrefix?.hasPrefix(relative + "/") == true || Self.match(normalizedOutput(relative), #"^(Prepared|Intermediates|Projects|HRTF|Manual PPM|MeshEdits)(/|$)|^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)(/|$)|^Results Inference\.csv$|^\.pinna2hrtf(-preprocessing-signature|_native_run\.yaml|-(inference|postprocessing)-receipt\.json)$"#)) else { return nil }
+            (outputPrefix?.hasPrefix(relative + "/") == true || Self.match(normalizedOutput(relative), #"^(Prepared|Intermediates|Projects|HRTF|Manual PPM|MeshEdits)(/|$)|^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)(/|$)|^Results Inference\.csv$|^\.pinna2hrtf(-preprocessing-(signature|(mac-v2|windows-v3|inputs-v1)\.json)|_native_run\.yaml|-(inference|postprocessing)-receipt\.json)$"#)) else { return nil }
         let url = root.appendingPathComponent(relative)
         let candidate = Self.canonicalPath(url.path).lowercased()
         guard url.path.hasPrefix(root.path + "/"),

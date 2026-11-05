@@ -56,6 +56,14 @@ struct ProjectInspectorView: View {
                 Button("Align scan…") { store.beginScanAlignment() }
                 Text("Use an already aligned scan, or align it here before preparing ears.").font(.caption).foregroundStyle(.secondary)
                 DisclosureGroup("Advanced settings · scan preparation") {
+                    Toggle("Require ear review before continuing", isOn: Binding(
+                        get: { store.selectedProject?.scanPreparation.requireManualReview ?? false },
+                        set: { value in store.updateSelectedProject { project in
+                            var scan = project.scanPreparation
+                            scan.requireManualReview = value
+                            project.settings.scanPreparation = scan
+                        } }
+                    ))
                     LabeledTextField("Target edge (mm)", helpID: "scan.target_edge", text: scanTextBinding(\.targetEdgeMM))
                     LabeledTextField("Left crop margin (mm)", helpID: "scan.left_margin", text: scanTextBinding(\.leftMarginMM))
                     LabeledTextField("Right crop margin (mm)", helpID: "scan.right_margin", text: scanTextBinding(\.rightMarginMM))

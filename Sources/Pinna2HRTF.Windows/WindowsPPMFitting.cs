@@ -125,6 +125,10 @@ public partial class MainWindow
         var history = new Stack<Dictionary<string,double>>(); var future = new Stack<Dictionary<string,double>>();
         var sliders = new Dictionary<string,Slider>(); var syncing = false; var busy = false; var revision = 0; var previewRunning = false;
         var numbers = new List<NumberBox>();
+        string? savedControls = null;
+        string CurrentControls() => JsonSerializer.Serialize(values.OrderBy(pair => pair.Key).ToArray());
+        ProtectEditorClose(editor.Window, () => busy && !lifetime.IsCancellationRequested,
+            () => savedControls != null && savedControls != CurrentControls());
         string? draggingControl=null;
         void PushHistory(Stack<Dictionary<string,double>> stack,Dictionary<string,double> snapshot)
         {
@@ -359,6 +363,7 @@ public partial class MainWindow
                 if(side=="left")project.Settings.ManualPPM.Left=fit;else project.Settings.ManualPPM.Right=fit;
                 project.Settings.ManualPPM.TemplateBlend=templateCopy;project.Settings.SelectEarModel("manual");
                 project.Settings.Preprocessing.SourcePositionInputLeft=null;project.Settings.Preprocessing.SourcePositionInputRight=null;
+                savedControls = CurrentControls();
                 Persist();if(selectedProject==project){LoadSelectedProject();RefreshArtifacts();}RefreshPipelineStatus();if(!lifetime.IsCancellationRequested)editor.Status.Text="Manual fit saved and selected for preprocessing.";
             }
             catch(Exception error){if(!lifetime.IsCancellationRequested)editor.Status.Text=error.Message;}
@@ -368,7 +373,7 @@ public partial class MainWindow
         try
         {
             var result=await worker.ExecuteAsync(new {action="initialize",template_blend=template,saved_parameters=savedParameters??"",target_mesh=source,mesh_data=preview,mirror_y=side=="right"},lifetime.Token);
-            if(!lifetime.IsCancellationRequested){Install(result,true);editor.ResetCamera(side=="right");editor.Status.Text="Adjust global alignment, convex features and concave details, then save.";}
+            if(!lifetime.IsCancellationRequested){Install(result,true);savedControls=CurrentControls();editor.ResetCamera(side=="right");editor.Status.Text="Adjust global alignment, convex features and concave details, then save.";}
         }
         catch(Exception error){if(!lifetime.IsCancellationRequested)editor.Status.Text=error.Message;}
         await closed.Task;

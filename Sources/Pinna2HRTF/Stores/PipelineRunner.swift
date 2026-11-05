@@ -257,7 +257,7 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
         let output = URL(fileURLWithPath: project.saveLocation)
         try? FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         try? ArtifactScanner.preprocessingSignature(for: project)
-            .write(to: output.appendingPathComponent(".pinna2hrtf-preprocessing-signature"), atomically: true, encoding: .utf8)
+            .write(to: output.appendingPathComponent(".pinna2hrtf-preprocessing-mac-v2.json"), atomically: true, encoding: .utf8)
     }
 
     // MARK: Stopping

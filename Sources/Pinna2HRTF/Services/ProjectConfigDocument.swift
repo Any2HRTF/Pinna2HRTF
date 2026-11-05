@@ -18,7 +18,7 @@ enum ProjectConfigDocument {
 
     /// Runs a short Python helper. Registered with the process launcher so it is
     /// stopped on quit, and stopped if it takes longer than `timeout`.
-    static func runPython(_ script: String, input: Data, arguments: [String] = [], timeout: TimeInterval = 60) throws -> Data {
+    static func runPython(_ script: String, input: Data, arguments: [String] = [], timeout: TimeInterval = 60, operation: String = "Python operation") throws -> Data {
         guard let pythonURL else { throw ProjectValidation.Failure(message: "The bundled Python runtime is unavailable.") }
         let fm = FileManager.default
         let temporary = fm.temporaryDirectory.appendingPathComponent("pinna-config-\(UUID().uuidString)")
@@ -46,11 +46,11 @@ enum ProjectConfigDocument {
         try ProcessLauncher.shared.launch(process)
         if exited.wait(timeout: .now() + timeout) == .timedOut {
             ProcessTreeTerminator.terminate(process)
-            throw ProjectValidation.Failure(message: "Reading project data took longer than \(Int(timeout)) seconds and was stopped.")
+            throw ProjectValidation.Failure(message: "\(operation) took longer than \(Int(timeout)) seconds and was stopped.")
         }
         guard process.terminationStatus == 0 else {
             let detail = (try? String(contentsOf: errorURL, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Unknown error"
-            throw ProjectValidation.Failure(message: "Could not read or validate project data: \(detail)")
+            throw ProjectValidation.Failure(message: "\(operation) failed: \(detail)")
         }
         return try Data(contentsOf: outputURL)
     }

@@ -196,7 +196,11 @@ def run_local_numcalc(project_path: Path | list[Path], numcalc_path: Path, max_r
                     )
                 log_path = source_dir / f"NC{step}-{step}_log.txt"
                 log_file = log_path.open("w", encoding="utf-8")
-                process = subprocess.Popen([str(executable), *adaptive_arguments, "-istart", str(step), "-iend", str(step)], cwd=source_dir, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=os.name != "nt")
+                import sys
+                command = [sys.executable, str(Path(__file__).with_name("SolverProcess.py")),
+                           str(os.getpid()), str(psutil.Process().create_time()), str(executable),
+                           *adaptive_arguments, "-istart", str(step), "-iend", str(step)]
+                process = subprocess.Popen(command, cwd=source_dir, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=os.name != "nt")
                 running.append((process, log_file, ram, project, source_dir, step, frequency))
                 last_start = time.monotonic()
                 print(f"Started {project.name}, step {step}, {frequency:g} Hz, estimated {ram:.2f} GB", flush=True)

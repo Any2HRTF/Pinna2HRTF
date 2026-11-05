@@ -16,6 +16,13 @@ struct PPMFittingView: View {
     }
 
     private func closeEditor() {
+        if model.hasUnsavedChanges {
+            let alert = NSAlert()
+            alert.messageText = "Discard unsaved PPM changes?"
+            alert.addButton(withTitle: "Keep editing")
+            alert.addButton(withTitle: "Discard")
+            guard alert.runModal() == .alertSecondButtonReturn else { return }
+        }
         model.cancel()
         dismiss()
     }
@@ -41,7 +48,7 @@ struct PPMFittingView: View {
         } footer: {
             footer
         }
-        .interactiveDismissDisabled(model.busy || model.isUpdatingPreview)
+        .interactiveDismissDisabled(true)
         .task { await model.open() }
     }
 

@@ -9,6 +9,8 @@ final class MeshEditorModel: ObservableObject {
         case landmarks = "Landmarks", selection = "Select Faces", plane = "Cutting Plane"
         var id: String { rawValue }
     }
+    private let originalPrepareLeft: Bool
+    private let originalPrepareRight: Bool
     @Published var request: MeshEditorRequest
     let scene = SCNScene()
     let workspace = URL(fileURLWithPath: "/private/tmp/pinna-mesh-editor-\(UUID().uuidString)")
@@ -52,9 +54,13 @@ final class MeshEditorModel: ObservableObject {
 
     init(request: MeshEditorRequest) {
         self.request = request
+        self.originalPrepareLeft = request.prepareLeft
+        self.originalPrepareRight = request.prepareRight
         self.tool = request.isAlignment ? .landmarks : .selection
     }
     deinit { try? FileManager.default.removeItem(at: workspace) }
+
+    var hasUnsavedSelection: Bool { request.prepareLeft != originalPrepareLeft || request.prepareRight != originalPrepareRight }
 
     var tools: [Tool] { request.isAlignment ? [.landmarks] : [.selection, .plane] }
     var canUndo: Bool { !busy && currentVersion > 0 }
@@ -106,7 +112,7 @@ final class MeshEditorModel: ObservableObject {
             import sys, json
             from HRTFCalculation.MeshEditing import execute
             print(json.dumps(execute(json.load(sys.stdin)), allow_nan=False))
-            """, input: data)
+            """, input: data, timeout: 600, operation: "Mesh editing")
         }.value
         guard let result = try JSONSerialization.jsonObject(with: response) as? [String: Any] else {
             throw ProjectValidation.Failure(message: "The mesh editor returned unreadable data.")

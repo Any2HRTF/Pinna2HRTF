@@ -432,7 +432,14 @@ def validate_prepared(config):
     """Check provenance and actual serialized topology before consuming outputs."""
     folder = config.paths.output_dir / "Prepared"
     report = json.loads((folder / "mesh_preparation.json").read_text())
-    if report.get("status") != "completed" or report.get("signature") != preparation_signature(config.scan_preparation):
+    signature = report.get("signature", {})
+    recorded = dict(signature.get("settings", {}))
+    current = preparation_signature(config.scan_preparation)
+    expected = dict(current["settings"])
+    for key in ("scan_path", "prepare_left", "prepare_right"):
+        recorded.pop(key, None)
+        expected.pop(key, None)
+    if report.get("status") != "completed" or recorded != expected or signature.get("source_sha256") != current["source_sha256"]:
         raise ValueError("Scan preparation is out of date; run Scan Preparation again.")
     for side, path in zip(("left", "right"), prepared_paths(config)):
         if path is None:
@@ -526,7 +533,8 @@ def validate_stage(config, stage):
         raise ValueError(f"Run {stage} again after Scan Preparation.")
     from .MeshEditing import reviewed_inputs
     actual_inputs = {side: sha256(path) for side, path in zip(("left", "right"), reviewed_inputs(config)) if path is not None}
-    if receipt.get("input_ears", actual_inputs if not any((config.scan_preparation.reviewed_left, config.scan_preparation.reviewed_right)) else None) != actual_inputs:
+    recorded_inputs = receipt.get("input_ears", actual_inputs if not any((config.scan_preparation.reviewed_left, config.scan_preparation.reviewed_right)) else None)
+    if recorded_inputs is None or any(recorded_inputs.get(side) != digest for side, digest in actual_inputs.items()):
         raise ValueError(f"The ear edits changed; run {stage} again.")
     if stage == "inference" and receipt.get("settings") != config.inference.model_dump(mode="json"):
         raise ValueError("Inference settings changed; run inference again.")

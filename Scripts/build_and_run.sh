@@ -15,7 +15,17 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PREPARE_SCRIPT="$ROOT_DIR/Scripts/prepare_external_tools.sh"
 RELEASE_SCRIPT="$ROOT_DIR/Scripts/build_release_app.sh"
 
-pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+if pgrep -x "$APP_NAME" >/dev/null; then
+  osascript -e 'tell application "Pinna2HRTF" to quit'
+  for attempt in {1..30}; do
+    if ! pgrep -x "$APP_NAME" >/dev/null; then break; fi
+    sleep 1
+  done
+  if pgrep -x "$APP_NAME" >/dev/null; then
+    echo "Pinna2HRTF is still open. Save work and close it before rebuilding." >&2
+    exit 1
+  fi
+fi
 
 bash "$PREPARE_SCRIPT"
 BUILD_OUTPUT="$(bash "$RELEASE_SCRIPT")"

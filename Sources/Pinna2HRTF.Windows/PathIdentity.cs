@@ -37,7 +37,11 @@ internal sealed record PathIdentity(string Path, string Id)
         while (!Directory.Exists(parent))
         {
             tail.Push(System.IO.Path.GetFileName(parent));
-            parent = System.IO.Path.GetDirectoryName(parent) ?? throw new IOException("The path has no available parent.");
+            var next = System.IO.Path.GetDirectoryName(parent);
+            // An offline drive has no resolvable ancestor. Keep its absolute
+            // spelling for overlap checks; the selected project validates availability.
+            if (next == null) return full;
+            parent = next;
         }
         return tail.Aggregate(Read(parent).Path, System.IO.Path.Combine);
     }

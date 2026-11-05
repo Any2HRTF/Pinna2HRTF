@@ -41,6 +41,7 @@ struct ProjectStatusSnapshot {
     var summary: String {
         if project.stageOutcomes?.values.contains(.failed) == true { return "Latest run failed · previous results may remain" }
         if project.stageOutcomes?.values.contains(.stopped) == true { return "Task stopped · previous results may remain" }
+        if preprocessingNeedsRerun { return "Simulation needs preprocessing" }
         if completed.contains(.postprocessing) { return "HRTFs ready" }
         if completed.contains(.numcalc) { return "Simulation complete" }
         if completed.contains(.preprocessing) { return "Simulation ready" }
@@ -51,9 +52,7 @@ struct ProjectStatusSnapshot {
     static func savedSummary(for project: ProjectRecord) -> String {
         if project.stageOutcomes?.values.contains(.failed) == true { return "Latest run failed · previous results may remain" }
         if project.stageOutcomes?.values.contains(.stopped) == true { return "Task stopped · previous results may remain" }
-        if project.stageOutcomes?[Stage.postprocessing.rawValue] == .done { return "HRTFs ready" }
-        if project.stageOutcomes?[Stage.numcalc.rawValue] == .done { return "Simulation complete" }
-        if project.stageOutcomes?[Stage.preprocessing.rawValue] == .done { return "Simulation ready" }
+        if project.stageOutcomes?.values.contains(.done) == true { return "Checking saved results…" }
         return URL(fileURLWithPath: project.saveLocation, isDirectory: true).lastPathComponent
     }
 
@@ -63,16 +62,18 @@ struct ProjectStatusSnapshot {
         let completed = Set(Stage.allCases.filter { (includeSolverResults || $0 != .numcalc) && !isCancelled() && ArtifactScanner.stageIsComplete($0, project: project, inspection: inspection) })
         let states = ArtifactScanner.stageStates(for: project, runningStage: nil, failedStages: [], inspection: inspection, completedStages: completed)
         let issues = ProjectValidation.issues(for: project, inspection: inspection)
-        let signatureURL = URL(fileURLWithPath: project.saveLocation, isDirectory: true).appendingPathComponent(".pinna2hrtf-preprocessing-signature", isDirectory: false)
+        let signatureURL = URL(fileURLWithPath: project.saveLocation, isDirectory: true).appendingPathComponent(".pinna2hrtf-preprocessing-mac-v2.json", isDirectory: false)
+        let legacySignatureURL = URL(fileURLWithPath: project.saveLocation, isDirectory: true).appendingPathComponent(".pinna2hrtf-preprocessing-signature", isDirectory: false)
+        let existingSignatureURL = FileManager.default.fileExists(atPath: signatureURL.path) ? signatureURL : legacySignatureURL
         var needsRerun = false
         if completed.contains(.preprocessing), !project.saveLocation.isEmpty {
             let signature = ArtifactScanner.preprocessingSignature(for: project, inspection: inspection)
-            if let saved = try? String(contentsOf: signatureURL, encoding: .utf8) {
+            if let saved = try? String(contentsOf: existingSignatureURL, encoding: .utf8) {
                 needsRerun = !PreprocessingSignature.matches(saved, project: project, current: signature, inspection: inspection)
-                if !needsRerun && saved != signature {
-                    try? signature.write(to: signatureURL, atomically: true, encoding: .utf8)
+                if !needsRerun && existingSignatureURL != signatureURL {
+                    try? saved.write(to: signatureURL, atomically: true, encoding: .utf8)
                 }
-            } else if !FileManager.default.fileExists(atPath: signatureURL.path) {
+            } else if !FileManager.default.fileExists(atPath: existingSignatureURL.path) {
                 needsRerun = true
             }
         }
@@ -118,6 +119,11 @@ struct ProjectStatusSnapshot {
         if project.scanPreparation.enabled && stage != .scanPreparation && (!isComplete(.scanPreparation) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.scanPreparation.rawValue] ?? .ready)) {
             return "Run Scan Preparation successfully with the current scan settings first."
         }
+        if stage != .scanPreparation && project.scanPreparation.enabled && project.scanPreparation.requireManualReview == true {
+            for side in project.includedEars where !ArtifactScanner.earReviewIsCurrent(project, side: side, inspection: inspection) {
+                return "Review the prepared \(side.rawValue) ear before continuing."
+            }
+        }
         let requiredInputs = project.scanPreparation.enabled ? [project.scanPreparation.scanPath] : [project.leftEar, project.rightEar]
         for path in requiredInputs where !path.isEmpty {
             if !FileManager.default.fileExists(atPath: path) { return "Input not found: \(URL(fileURLWithPath: path).lastPathComponent). Choose the file again." }
@@ -147,13 +153,17 @@ struct ProjectStatusSnapshot {
             if !isComplete(.preprocessing) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.preprocessing.rawValue] ?? .ready) { return "Run preprocessing successfully first." }
             if !FileManager.default.isExecutableFile(atPath: environment.numcalcExecutable) { return Defaults.isPackagedApp ? "NumCalc not found. Reinstall the app." : "NumCalc not found. Check the tool path." }
         case .postprocessing:
+            if !isComplete(.preprocessing) { return "Run preprocessing with the current inputs and settings first." }
             let outputURL = ArtifactScanner.postprocessingDirectory(for: project).standardizedFileURL
             let rootURL = URL(fileURLWithPath: project.saveLocation, isDirectory: true).standardizedFileURL
             let output = (resolveOutputLocations ? outputURL.resolvingSymlinksInPath() : outputURL).path
             let root = (resolveOutputLocations ? rootURL.resolvingSymlinksInPath() : rootURL).path
             if !output.hasPrefix(root + "/") { return "Choose a SOFA output subfolder inside this project folder." }
             let protected = ["Input", "Projects", "Intermediates", "Prepared", "Manual PPM", "MeshEdits", "Logs", ".pinna2hrtf"].map { root + "/" + $0 } + project.protectedOutputInputs()
-            if protected.contains(where: { path in output == path || output.hasPrefix(path + "/") || path.hasPrefix(output + "/") }) {
+            if protected.contains(where: { path in
+                let target = output.lowercased(), protectedPath = path.lowercased()
+                return target == protectedPath || target.hasPrefix(protectedPath + "/") || protectedPath.hasPrefix(target + "/")
+            }) {
                 return "Choose a separate SOFA folder that does not contain inputs or project work."
             }
             if !isComplete(.numcalc) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.numcalc.rawValue] ?? .ready) { return "Finish NumCalc successfully first." }

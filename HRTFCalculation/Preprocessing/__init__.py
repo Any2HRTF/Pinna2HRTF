@@ -554,6 +554,8 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             mesh2input_main(
                 head=str(graded[side]), title=settings.title, source_type=source_types[side], filepath=str(projects[side]), mesh2hrtf_path=str(mesh2hrtf_path), evaluationGrids=str(evaluation_grid), method=settings.method, pictures=settings.pictures, reference=settings.reference, computeHRIRs=settings.compute_hrirs, unit=settings.unit, speedOfSound=settings.speed_of_sound, densityOfMedium=settings.air_density, materialSearchPaths=settings.material_search_paths, min_frequency=settings.min_frequency, max_frequency=settings.max_frequency, frequency_vector_type=settings.frequency_vector_type, frequency_step_count=settings.frequency_step_count, tolerance=settings.source_assignment_tolerance, source_position=landmarks[side]["position"], source_assignment_mode=settings.source_assignment_mode, source_face_count=settings.source_assignment_face_count,
             )
+            from ..RunConfig import validate_hrir_frequencies
+            validate_hrir_frequencies(projects[side])
             if os.name == "nt":
                 from .src.solver_paths import normalize_solver_grid_paths
                 normalize_solver_grid_paths(projects[side])

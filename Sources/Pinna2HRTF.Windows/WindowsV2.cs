@@ -46,11 +46,14 @@ public partial class MainWindow
 
     static string SofaDirectory(ProjectRecord p)
     {
-        var folder = p.Settings.Postprocessing?.OutputFolder;
-        if (string.IsNullOrWhiteSpace(folder)) return Path.Combine(p.SaveLocation, "HRTF");
-        if (Path.IsPathFullyQualified(folder)) return Path.GetFullPath(folder);
-        if (string.IsNullOrWhiteSpace(p.SaveLocation) || !Path.IsPathFullyQualified(p.SaveLocation)) return "";
-        return Path.GetFullPath(folder, p.SaveLocation);
+        try {
+            var folder = p.Settings.Postprocessing?.OutputFolder;
+            if (string.IsNullOrWhiteSpace(folder)) return Path.Combine(p.SaveLocation, "HRTF");
+            if (Path.IsPathFullyQualified(folder)) return Path.GetFullPath(folder);
+            if (string.IsNullOrWhiteSpace(p.SaveLocation) || !Path.IsPathFullyQualified(p.SaveLocation)) return "";
+            return Path.GetFullPath(folder, p.SaveLocation);
+        }
+        catch (Exception error) when (error is ArgumentException or NotSupportedException or PathTooLongException) { return ""; }
     }
     string? SourceEar(ProjectRecord p, string side, ArtifactInspection? inspection = null)
     {
@@ -114,7 +117,31 @@ public partial class MainWindow
         var selected=new[]{"left","right"}.Where(side=>SourceEar(p,side)!=null).ToArray();
         return selected.Length>0&&selected.All(side=>new[]{Path.Combine(p.SaveLocation,"Projects",side=="left"?"Left":"Right","parameters.json"),Path.Combine(p.SaveLocation,"Intermediates",side=="left"?"Left":"Right","graded_head.ply")}.All(path=>File.Exists(path)&&new FileInfo(path).Length>0));
     }
+    const string WindowsPreprocessingReceipt = ".pinna2hrtf-preprocessing-windows-v3.json";
     string PreprocessingStamp(ProjectRecord p)
+    {
+        var config = ProjectDocument.Build(p, environment);
+        var preprocessing = config["preprocessing"]!.DeepClone().AsObject();
+        foreach (var key in new[] { "enabled", "title", "pictures", "write_intermediates" }) preprocessing.Remove(key);
+        var grid = p.Settings.Preprocessing.EvaluationGrid;
+        if (string.IsNullOrWhiteSpace(grid)) grid = "Default";
+        if (!Path.IsPathFullyQualified(grid)) grid = Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf", "Mesh2Input", "EvaluationGrids", "Data", grid);
+        var ears = new JsonObject();
+        foreach (var side in WorkflowSides(p))
+        {
+            var settings = preprocessing.DeepClone().AsObject();
+            settings.Remove("source_position_input_" + (side == "left" ? "right" : "left"));
+            var mesh = PreprocessingMesh(p, side);
+            ears[side] = new JsonObject {
+                ["settings"] = settings,
+                ["mesh_sha256"] = mesh == null ? "" : FileDigest(mesh),
+                ["grid_nodes"] = File.Exists(Path.Combine(grid, "Nodes.txt")) ? FileDigest(Path.Combine(grid, "Nodes.txt")) : "unavailable",
+                ["grid_elements"] = File.Exists(Path.Combine(grid, "Elements.txt")) ? FileDigest(Path.Combine(grid, "Elements.txt")) : "unavailable"
+            };
+        }
+        return new JsonObject { ["format"] = "pinna2hrtf-preprocessing-windows-v3", ["ears"] = ears }.ToJsonString();
+    }
+    string LegacyPreprocessingStamp(ProjectRecord p)
     {
         var inputs=new[]{"left","right"}.Select(side=>PreprocessingMesh(p,side)).Select(path=>path==null?"":MeshIdentity(path)).ToArray();
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new{p.Settings.Preprocessing,p.Settings.Inference,p.Settings.ManualPPM,p.Settings.ScanPreparation,inputs}))));
@@ -131,8 +158,19 @@ public partial class MainWindow
     }
     bool PreprocessingStampIsCurrent(ProjectRecord p)
     {
-        var path=Path.Combine(p.SaveLocation,".pinna2hrtf-preprocessing-signature");
-        return File.Exists(path)&&File.ReadAllText(path)==PreprocessingStamp(p);
+        var path = Path.Combine(p.SaveLocation, WindowsPreprocessingReceipt);
+        if (!File.Exists(path)) {
+            var legacy = Path.Combine(p.SaveLocation, ".pinna2hrtf-preprocessing-signature");
+            return File.Exists(legacy) && File.ReadAllText(legacy) == LegacyPreprocessingStamp(p);
+        }
+        try {
+            var recorded = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+            var current = JsonNode.Parse(PreprocessingStamp(p))!.AsObject();
+            if (recorded["format"]?.GetValue<string>() != "pinna2hrtf-preprocessing-windows-v3") return false;
+            var oldEars = recorded["ears"]!.AsObject();
+            return current["ears"]!.AsObject().All(ear => oldEars.TryGetPropertyValue(ear.Key, out var saved) && ProjectDocument.SameJson(saved, ear.Value));
+        }
+        catch { return false; }
     }
     bool SofaFilesPresent(ProjectRecord p)
     {
@@ -159,6 +197,7 @@ public partial class MainWindow
     string? SofaConflict(ProjectRecord p)
     {
         var destination=SofaDirectory(p);
+        if (string.IsNullOrWhiteSpace(destination)) return "Choose a project save location before a relative SOFA folder.";
         if(Path.GetFullPath(destination)==Path.GetPathRoot(Path.GetFullPath(destination)))return "Choose a SOFA folder below a drive root.";
         foreach(var other in projects.Where(o=>o.Id!=p.Id&&!string.IsNullOrWhiteSpace(o.SaveLocation)))
             if(ContainsPath(other.SaveLocation,destination)||ContainsPath(destination,other.SaveLocation)||ContainsPath(SofaDirectory(other),destination)||ContainsPath(destination,SofaDirectory(other)))return "Choose a SOFA destination separate from other projects.";
@@ -192,8 +231,12 @@ public partial class MainWindow
             var duplicate = JsonSerializer.Deserialize<ProjectRecord>(result.GetProperty("project").GetRawText(), jsonOptions) ?? throw new IOException("The project copy returned no data.");
             // Fingerprints include platform timestamps; rebase valid fitting
             // references to their copied source without accepting stale originals.
-            foreach (var side in new[] { "left", "right" })
-                if (FitIsCurrent(original, side) && duplicate.Settings.ManualPPM.For(side) is { } fit) fit.SourceIdentity = MeshIdentity(fit.Source);
+            await Task.Run(() => {
+                using var fresh = FileFingerprints.Fresh();
+                foreach (var side in new[] { "left", "right" })
+                    if (FitIsCurrent(original, side) && duplicate.Settings.ManualPPM.For(side) is { } fit)
+                        fit.SourceIdentity = MeshIdentity(fit.Source);
+            });
             RecordCreatedFolder(duplicate); duplicate.InputHandling = original.InputHandling;
             projects.Add(duplicate); selectedProject = duplicate; failedStages[duplicate.Id] = [];
             Persist(); LoadSelectedProject(); RefreshProjectList(); RefreshArtifacts(); RefreshPipelineStatus();
