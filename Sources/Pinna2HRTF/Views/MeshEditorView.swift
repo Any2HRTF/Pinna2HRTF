@@ -6,16 +6,14 @@ struct MeshEditorView: View {
     @StateObject private var model: MeshEditorModel
     @Environment(\.dismiss) private var dismiss
     let saved: (MeshEditorRequest) -> Void
-    let savedSelection: (MeshEditorRequest) -> Void
 
-    init(request: MeshEditorRequest, saved: @escaping (MeshEditorRequest) -> Void, savedSelection: @escaping (MeshEditorRequest) -> Void) {
+    init(request: MeshEditorRequest, saved: @escaping (MeshEditorRequest) -> Void) {
         _model = StateObject(wrappedValue: MeshEditorModel(request: request))
         self.saved = saved
-        self.savedSelection = savedSelection
     }
 
     private func closeEditor() {
-        if model.hasUnsavedSelection || model.canUndo || !model.landmarks.isEmpty || !model.selectedFaces.isEmpty {
+        if model.canUndo || !model.landmarks.isEmpty || !model.selectedFaces.isEmpty {
             let alert = NSAlert()
             alert.messageText = "Discard unsaved mesh changes?"
             alert.addButton(withTitle: "Keep editing")
@@ -46,18 +44,6 @@ struct MeshEditorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if model.request.isAlignment {
-                        Text("Ears to prepare").font(.subheadline.weight(.semibold))
-                        Toggle("Prepare left ear", isOn: $model.request.prepareLeft)
-                        Toggle("Prepare right ear", isOn: $model.request.prepareRight)
-                        if !model.request.prepareLeft && !model.request.prepareRight {
-                            Text("Choose at least one ear to prepare.").font(.caption).foregroundStyle(.orange)
-                        }
-                        Button("Save ear selection") {
-                            savedSelection(model.request)
-                            dismiss()
-                        }
-                        .disabled(!model.request.prepareLeft && !model.request.prepareRight)
-                        Divider()
                         alignmentControls
 
                     } else {

@@ -83,7 +83,7 @@ public partial class MainWindow
         AddPathSetting(workflowEarInputs, "Right ear (optional)", "project.right_ear", rightEarBox, BrowseRightEarClicked);
         workflowEarInputs.Children.Add(WorkflowText("Choose at least one ear. Inspect and edit in Prepare ears.")); input.Children.Add(workflowEarInputs);
         AddPathSetting(workflowScanInputs, "Full-head scan", "scan_preparation.scan_path", scanPathBox, BrowseScanClicked);
-        workflowScanInputs.Children.Add(WorkflowText("Choose ears in Align scan, then extract them in Prepare ears."));
+        workflowScanInputs.Children.Add(WorkflowText("Choose ears beside Align scan, then extract them in Prepare ears."));
         input.Children.Add(workflowScanInputs);
         workflowSource.SelectionChanged += (_, _) => {
             if (updatingWorkflow || loading || selectedProject is not { } p || ProjectBusy(p.Id)) return;
@@ -91,7 +91,23 @@ public partial class MainWindow
             Persist(); LoadSelectedProject(); RefreshArtifacts(); RefreshPipelineStatus();
         };
         var prepare = workflowPages[1]; prepare.Children.Add(workflowPreparation);
-        workflowPreparation.Children.Add(alignScanButton); alignScanButton.Click += BeginScanAlignmentClicked;
+        var alignmentRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        alignmentRow.Children.Add(alignScanButton); alignScanButton.Click += BeginScanAlignmentClicked;
+        var prepareLabel = WorkflowText("Prepare"); prepareLabel.VerticalAlignment = VerticalAlignment.Center;
+        alignmentRow.Children.Add(prepareLabel);
+        foreach (var (side, box) in new[] { ("left", prepareLeftEarBox), ("right", prepareRightEarBox) }) {
+            box.Content = side == "left" ? "Left" : "Right";
+            box.MinWidth = 0; box.MinHeight = 28; box.VerticalAlignment = VerticalAlignment.Center;
+            AutomationProperties.SetName(box, "Prepare " + side + " ear");
+            box.Click += (_, _) => {
+                if (loading || updatingWorkflow || selectedProject is not { } project || ProjectBusy(project.Id)) return;
+                if (side == "left") project.Settings.ScanPreparation.PrepareLeft = box.IsChecked == true;
+                else project.Settings.ScanPreparation.PrepareRight = box.IsChecked == true;
+                Persist(); LoadSelectedProject(); RefreshArtifacts(); RefreshPipelineStatus();
+            };
+            alignmentRow.Children.Add(box);
+        }
+        workflowPreparation.Children.Add(alignmentRow);
         workflowPreparation.Children.Add(WorkflowText("Use an aligned scan, or align it here before preparing ears."));
         AddExpander(workflowPreparation, "Advanced settings - scan preparation", [
             AddSettingPanel("Target edge length (mm)", "scan_preparation.target_edge", targetEdgeBox),
@@ -103,12 +119,12 @@ public partial class MainWindow
         prepare.Children.Add(WorkflowText("Inspect and optionally edit each ear. Original files are preserved."));
         foreach (var side in new[] { "left", "right" }) {
             var row = new StackPanel { Spacing = 6 };
-            row.Children.Add(new TextBlock { Text = $"{side} ear", FontWeight = FontWeights.SemiBold });
-            var status = WorkflowText(""); row.Children.Add(status);
-            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            actions.Children.Add(new TextBlock { Text = $"{char.ToUpperInvariant(side[0]) + side[1..]} ear", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+            var status = WorkflowText("");
             var inspect = WorkflowButton("Inspect", (_, _) => { if (selectedProject is { } p && SourceEar(p, side) is string path) OpenArtifact(new Artifact($"{side} ear", path, side)); });
             var edit = WorkflowButton("Edit...", async (_, _) => await EditPreparedEarAsync(side));
-            actions.Children.Add(inspect); actions.Children.Add(edit); row.Children.Add(actions);
+            actions.Children.Add(inspect); actions.Children.Add(edit); row.Children.Add(actions); row.Children.Add(status);
             var original = WorkflowButton("Use original ear", (_, _) => { if (selectedProject is { } p && !ProjectBusy(p.Id)) {
                 p.Settings.ScanPreparation.SetEarEdit(side, null);
                 InvalidateManualPositions(p); Persist(); RefreshArtifacts(); RefreshPipelineStatus();

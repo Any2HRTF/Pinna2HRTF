@@ -53,7 +53,14 @@ struct ProjectInspectorView: View {
         case .inputs: requiredPanel
         case .prepare:
             if store.selectedProject?.scanPreparation.enabled == true {
-                Button("Align scan…") { store.beginScanAlignment() }
+                HStack(spacing: 8) {
+                    Button("Align scan…") { store.beginScanAlignment() }
+                    Text("Prepare").font(.caption).foregroundStyle(.secondary)
+                    Toggle("Left", isOn: scanBoolBinding(\.prepareLeft))
+                        .toggleStyle(.checkbox).fixedSize().accessibilityLabel("Prepare left ear")
+                    Toggle("Right", isOn: scanBoolBinding(\.prepareRight))
+                        .toggleStyle(.checkbox).fixedSize().accessibilityLabel("Prepare right ear")
+                }
                 Text("Use an already aligned scan, or align it here before preparing ears.").font(.caption).foregroundStyle(.secondary)
                 DisclosureGroup("Advanced settings · scan preparation") {
                     Toggle("Require ear review before continuing", isOn: Binding(
@@ -77,15 +84,17 @@ struct ProjectInspectorView: View {
             Text("Inspect and optionally edit each ear. Original input files are preserved.").font(.caption).foregroundStyle(.secondary)
             ForEach(store.workflowSides) { side in
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("\(side.title) ear").fontWeight(.semibold)
-                    HStack {
-                        Button("Inspect") {
-                            if let p = store.selectedProject, let url = ArtifactScanner.sourceEar(for: p, side: side) {
-                                store.openArtifact(Artifact(title: "\(side.title) ear", url: url))
+                    HStack(spacing: 8) {
+                        Text("\(side.title) ear").fontWeight(.semibold)
+                        HStack(spacing: 8) {
+                            Button("Inspect") {
+                                if let p = store.selectedProject, let url = ArtifactScanner.sourceEar(for: p, side: side) {
+                                    store.openArtifact(Artifact(title: "\(side.title) ear", url: url))
+                                }
                             }
-                        }
-                        Button("Edit…") { store.beginEarEditing(side) }
-                    }.disabled(!(store.selectedProjectStatus?.fittableSides.contains(side) ?? false))
+                            Button("Edit…") { store.beginEarEditing(side) }
+                        }.disabled(!(store.selectedProjectStatus?.fittableSides.contains(side) ?? false))
+                    }
                     if let p = store.selectedProject,
                        (p.scanPreparation.earEdit(side)) != nil {
                         Text(store.selectedProjectStatus.map { $0.currentEarEdits.contains(side) ? "Saved edit in use" : "Saved edit outdated" } ?? "Checking saved edit…").font(.caption)
@@ -207,7 +216,7 @@ struct ProjectInspectorView: View {
             }.pickerStyle(.radioGroup)
             if store.selectedProject?.scanPreparation.enabled == true {
                 PathField("Full-head scan", helpID: "scan.path", text: scanTextBinding(\.scanPath), mode: .file)
-                Text("Choose ears in Align scan, then extract them in Prepare ears.").font(.caption)
+                Text("Choose ears beside Align scan, then extract them in Prepare ears.").font(.caption)
             } else {
                 PathField("Left ear", helpID: "project.left_ear", text: projectStringBinding(\.leftEar), mode: .file)
                 PathField("Right ear", helpID: "project.right_ear", text: projectStringBinding(\.rightEar), mode: .file)

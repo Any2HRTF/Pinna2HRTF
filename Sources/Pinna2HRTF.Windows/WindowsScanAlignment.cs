@@ -20,19 +20,17 @@ public partial class MainWindow
     int alignmentGeneration;
     bool alignmentSaving;
     readonly HashSet<string> activeAlignmentWorkspaces = [];
-    readonly CheckBox alignmentPrepareLeft = new() { Content = "Prepare left ear" };
-    readonly CheckBox alignmentPrepareRight = new() { Content = "Prepare right ear" };
     readonly CheckBox coordinateToggle = new() { Content = "Show coordinate system", IsChecked = true };
     readonly List<LineGeometryModel3D> alignmentAxes = [];
 
     void UpdateAlignmentSaveEnabled()
     {
-        if (pendingAlignment != null && alignmentPrepareLeft.IsChecked != true && alignmentPrepareRight.IsChecked != true)
+        if (pendingAlignment != null && prepareLeftEarBox.IsChecked != true && prepareRightEarBox.IsChecked != true)
             scanAlignmentStatus.Text = "Choose at least one ear to prepare.";
         else if (pendingAlignment != null)
             scanAlignmentStatus.Text = "Inspect alignment: X forward, Y left, Z up. Save or cancel.";
         applyScanAlignmentButton.IsEnabled = scanAlignmentLandmarks.Count == 3 &&
-            (pendingAlignment == null || alignmentPrepareLeft.IsChecked == true || alignmentPrepareRight.IsChecked == true);
+            (pendingAlignment == null || prepareLeftEarBox.IsChecked == true || prepareRightEarBox.IsChecked == true);
     }
 
     void ClearAlignmentPreview()
@@ -77,8 +75,8 @@ public partial class MainWindow
         {
             if(pendingAlignment is { } aligned)
             {
-                var prepareLeft = alignmentPrepareLeft.IsChecked == true;
-                var prepareRight = alignmentPrepareRight.IsChecked == true;
+                var prepareLeft = prepareLeftEarBox.IsChecked == true;
+                var prepareRight = prepareRightEarBox.IsChecked == true;
                 if (!prepareLeft && !prepareRight) return;
                 if(alignmentProjectId!=project.Id||alignmentWorkspace==null||alignmentSource==null)throw new IOException("The project changed; restart alignment.");
                 var destination=Path.Combine(originalRoot,"MeshEdits","AlignedScan.ply");

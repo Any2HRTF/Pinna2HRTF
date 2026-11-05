@@ -725,22 +725,6 @@ public partial class MainWindow : Window
         var restartAlignment = new Button { Content = "Restart picks" };
         restartAlignment.Click += (_, _) => ResetScanAlignmentPicks();
         alignmentPanel.Children.Add(scanAlignmentStatus);
-        alignmentPanel.Children.Add(alignmentPrepareLeft);
-        alignmentPanel.Children.Add(alignmentPrepareRight);
-        var saveEarSelection = new Button { Content = "Save ear selection" };
-        saveEarSelection.Click += (_, _) => {
-            if (alignmentSaving || selectedProject is not { } project || projectOperations.Contains(project.Id)) return;
-            var left = alignmentPrepareLeft.IsChecked == true;
-            var right = alignmentPrepareRight.IsChecked == true;
-            if (!left && !right) { scanAlignmentStatus.Text = "Choose at least one ear to prepare."; return; }
-            project.Settings.ScanPreparation.PrepareLeft = left;
-            project.Settings.ScanPreparation.PrepareRight = right;
-            EndScanAlignment();
-            Persist(); LoadSelectedProject(); RefreshArtifacts(); RefreshPipelineStatus();
-        };
-        alignmentPanel.Children.Add(saveEarSelection);
-        alignmentPrepareLeft.Click += (_, _) => UpdateAlignmentSaveEnabled();
-        alignmentPrepareRight.Click += (_, _) => UpdateAlignmentSaveEnabled();
         alignmentPanel.Children.Add(coordinateToggle);
         coordinateToggle.Click += (_, _) => UpdateAlignmentAxes();
         alignmentPanel.Children.Add(restartAlignment);
@@ -1562,8 +1546,8 @@ public partial class MainWindow : Window
         ResetScanAlignmentPicks();
         alignmentSessionProject = project.Id;
         if (placementSide != null) EndPlacement();
-        alignmentPrepareLeft.IsChecked = project.Settings.ScanPreparation.PrepareLeft;
-        alignmentPrepareRight.IsChecked = project.Settings.ScanPreparation.PrepareRight;
+        prepareLeftEarBox.IsChecked = project.Settings.ScanPreparation.PrepareLeft;
+        prepareRightEarBox.IsChecked = project.Settings.ScanPreparation.PrepareRight;
         scanAlignmentMode = true;
         alignScanButton.IsEnabled = false;
         scanAlignmentStatus.Text = "Click nose tip, then left and right ear-canal entrances";

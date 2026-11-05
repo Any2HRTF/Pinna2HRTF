@@ -38,7 +38,7 @@ struct ContentView: View {
             case .duplicate(let request):
                 ProjectDuplicationView(store: store, request: request)
             case .mesh(let request):
-                MeshEditorView(request: request, saved: store.finishMeshEditing, savedSelection: store.finishEarSelection)
+                MeshEditorView(request: request, saved: store.finishMeshEditing)
             case .ppm(let request):
                 PPMFittingView(request: request) { request, templateBlendPath in
                     store.finishManualPPMFitting(request, templateBlendPath: templateBlendPath)

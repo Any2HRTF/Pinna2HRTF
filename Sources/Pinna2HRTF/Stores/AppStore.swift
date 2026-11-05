@@ -554,16 +554,6 @@ final class AppStore: ObservableObject {
         appendLog("Saved the manual \(request.side.rawValue) PPM fit. Preprocessing will use it until the source ear changes.", for: request.projectID)
     }
 
-    func finishEarSelection(_ request: MeshEditorRequest) {
-        guard request.prepareLeft || request.prepareRight else { return }
-        mutateProject(request.projectID) { project in
-            var scan = project.scanPreparation
-            scan.prepareLeft = request.prepareLeft
-            scan.prepareRight = request.prepareRight
-            project.settings.scanPreparation = scan
-        }
-    }
-
     func finishMeshEditing(_ request: MeshEditorRequest) {
         guard let index = projects.firstIndex(where: { $0.id == request.projectID }) else { return }
         var project = projects[index]
