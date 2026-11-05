@@ -25,11 +25,6 @@ struct WorkflowFooter: View {
                 Text(reason).font(.caption).foregroundStyle(.secondary)
             }
             HStack(spacing: 8) {
-                if !runningNow {
-                    Button("Reset outputs…", role: .destructive) { store.confirmResetSelectedProjectOutputs() }
-                        .disabled(store.selectedProject == nil || store.selectedProjectIsRunning)
-                }
-                Spacer(minLength: 0)
                 if runningNow {
                     Button("Stop") { store.stopRunningProcess() }
                 }
@@ -38,6 +33,11 @@ struct WorkflowFooter: View {
                         .buttonStyle(.borderedProminent)
                         .tint(.blue)
                         .disabled(!store.canRun(stage: stage))
+                }
+                Spacer(minLength: 0)
+                if !runningNow {
+                    Button("Reset outputs…", role: .destructive) { store.confirmResetSelectedProjectOutputs() }
+                        .disabled(store.selectedProject == nil || store.selectedProjectIsRunning)
                 }
             }
             .controlSize(.small)
