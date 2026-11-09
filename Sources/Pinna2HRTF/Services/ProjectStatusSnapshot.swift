@@ -146,11 +146,11 @@ struct ProjectStatusSnapshot {
                 }
             }
             if placingMicrophone { return "Finish microphone placement first." }
-            if !FileManager.default.isExecutableFile(atPath: environment.meshGradingExecutable) { return Defaults.isPackagedApp ? "Mesh grading tool not found. Reinstall the app." : "Mesh grading tool not found. Check the tool path." }
+            if !FileManager.default.isExecutableFile(atPath: environment.meshGradingExecutable) { return "Mesh grading tool not found. Check the path in Settings." }
             if !FileManager.default.fileExists(atPath: environment.externalDir + "/src/Mesh2HRTF/mesh2hrtf") { return "Mesh2HRTF dependencies are unavailable." }
         case .numcalc:
             if !isComplete(.preprocessing) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.preprocessing.rawValue] ?? .ready) { return "Run Simulation setup first." }
-            if !FileManager.default.isExecutableFile(atPath: environment.numcalcExecutable) { return Defaults.isPackagedApp ? "NumCalc not found. Reinstall the app." : "NumCalc not found. Check the tool path." }
+            if !FileManager.default.isExecutableFile(atPath: environment.numcalcExecutable) { return "NumCalc not found. Check the path in Settings." }
         case .postprocessing:
             if !isComplete(.preprocessing) { return "Run Simulation setup first." }
             let outputURL = ArtifactScanner.postprocessingDirectory(for: project).standardizedFileURL

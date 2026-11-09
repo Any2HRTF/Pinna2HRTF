@@ -94,7 +94,7 @@ final class AppStore: ObservableObject {
         get { library.selectedProjectID }
         set { library.selectedProjectID = newValue }
     }
-    var environment: EnvironmentConfig { library.environment }
+    var environment: EnvironmentConfig { AppPreferences.effectiveEnvironment(library.environment) }
     var persistenceMessage: String? {
         get { library.persistenceMessage }
         set { library.persistenceMessage = newValue }
@@ -243,6 +243,11 @@ final class AppStore: ObservableObject {
         guard project != projects[index] else { return }
         library.projects[index] = project
         persist()
+    }
+
+    func environmentPreferencesDidChange() {
+        objectWillChange.send()
+        refreshArtifacts()
     }
 
     func updateEnvironment(_ update: (inout EnvironmentConfig) -> Void) {

@@ -132,7 +132,7 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
 
     private func launchProcess(stage: Stage, project: ProjectRecord, configURL: URL, outputs: GeneratedOutputManifest,
                                environment: EnvironmentConfig) async {
-        if AppPreferences.enabled(AppPreferences.notifyCompletion) || AppPreferences.enabled(AppPreferences.notifyFailure) {
+        if AppPreferences.notificationEnabled(AppPreferences.notifyCompletion) || AppPreferences.notificationEnabled(AppPreferences.notifyFailure) {
             configureNotifications()
         }
         let process: Process
@@ -237,7 +237,7 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
         let elapsed = Self.elapsedDescription(since: startedAt)
         if outcome == .done {
             activity?.liveStatusByProject[project.id] = "Completed · \(stage.title)"
-            if AppPreferences.enabled(AppPreferences.notifyCompletion) {
+            if AppPreferences.notificationEnabled(AppPreferences.notifyCompletion) {
                 sendNotification(title: "\(stage.title) complete", body: "\(project.name): \(stage.title) finished successfully.")
             }
             log("\(stage.title) finished in \(elapsed) · outputs verified", for: project.id)
@@ -249,7 +249,7 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
             let cause = validationError ?? "Exit status \(status)."
             let logHint = activity?.technicalLogURLs[project.id].map { "Technical output: \($0.lastPathComponent)." } ?? "Open the technical log for details."
             let detail = "\(cause) \(logHint)"
-            if AppPreferences.enabled(AppPreferences.notifyFailure) {
+            if AppPreferences.notificationEnabled(AppPreferences.notifyFailure) {
                 sendNotification(title: "\(stage.title) failed", body: "\(project.name): \(detail)")
             }
             log("\(stage.title) failed after \(elapsed): \(detail) Previous results are not a successful rerun.", for: project.id)
@@ -470,6 +470,7 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
     }
 
     private func sendFallbackNotification(title: String, body: String) {
+        guard AppPreferences.enabled(AppPreferences.notifyAll) else { return }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = ["-e", "display notification \(Self.appleScriptString(body)) with title \(Self.appleScriptString(title))"]
@@ -481,7 +482,7 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .sound])
+        completionHandler(AppPreferences.enabled(AppPreferences.notifyAll) ? [.banner, .sound] : [])
     }
 
     // MARK: Helpers

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UserNotifications
 
 struct AppSettingsView: View {
     @ObservedObject var store: AppStore
@@ -11,9 +12,13 @@ struct AppSettingsView: View {
     @AppStorage(AppPreferences.frequencySteps) private var frequencySteps = 129
     @AppStorage(AppPreferences.maxInstances) private var maxInstances = 1
     @AppStorage(AppPreferences.maxCPULoad) private var maxCPULoad = 90
+    @AppStorage(AppPreferences.notifyAll) private var notifyAll = true
     @AppStorage(AppPreferences.notifyCompletion) private var notifyCompletion = true
     @AppStorage(AppPreferences.notifyFailure) private var notifyFailure = true
     @AppStorage(AppPreferences.appearance) private var appearance = "system"
+    @AppStorage(AppPreferences.developerMode) private var developerMode = false
+    @AppStorage(AppPreferences.developerNumCalc) private var developerNumCalc = ""
+    @AppStorage(AppPreferences.developerMeshGrading) private var developerMeshGrading = ""
     @State private var invalidGrid = false
 
     var body: some View {
@@ -26,6 +31,12 @@ struct AppSettingsView: View {
         }
         .padding(20)
         .frame(width: 620, height: 450)
+        .onChange(of: developerMode) { _ in store.environmentPreferencesDidChange() }
+        .onChange(of: developerNumCalc) { _ in store.environmentPreferencesDidChange() }
+        .onChange(of: developerMeshGrading) { _ in store.environmentPreferencesDidChange() }
+        .onChange(of: notifyAll) { enabled in
+            if !enabled { UNUserNotificationCenter.current().removeAllPendingNotificationRequests() }
+        }
         .alert("Invalid evaluation grid", isPresented: $invalidGrid) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -113,8 +124,11 @@ struct AppSettingsView: View {
     private var notifications: some View {
         Form {
             Section {
+                Toggle("Allow notifications", isOn: $notifyAll)
                 Toggle("When a stage completes", isOn: $notifyCompletion)
+                    .disabled(!notifyAll)
                 Toggle("When a stage fails", isOn: $notifyFailure)
+                    .disabled(!notifyAll)
             }
         }
         .formStyle(.grouped)
@@ -122,21 +136,22 @@ struct AppSettingsView: View {
 
     private var tools: some View {
         Form {
-            Section {
+            Section("Tools") {
                 toolRow("NumCalc", path: store.environment.numcalcExecutable)
                 toolRow("Mesh grading", path: store.environment.meshGradingExecutable)
                 if !Defaults.isPackagedApp {
                     toolRow("uv", path: store.environment.uvExecutable)
                 }
-            } header: {
-                Text(Defaults.isPackagedApp ? "Bundled tools" : "Development tools")
             }
-            if !Defaults.isPackagedApp {
-                Section("Advanced paths") {
-                    TextField("NumCalc", text: environmentBinding(\.numcalcExecutable))
-                    TextField("Mesh grading", text: environmentBinding(\.meshGradingExecutable))
-                    TextField("uv", text: environmentBinding(\.uvExecutable))
-                    TextField("External dependencies", text: environmentBinding(\.externalDir))
+            Section {
+                Toggle("Developer mode", isOn: $developerMode)
+                if developerMode {
+                    executableSetting("NumCalc", path: $developerNumCalc, defaultPath: store.library.environment.numcalcExecutable)
+                    executableSetting("Mesh grading", path: $developerMeshGrading, defaultPath: store.library.environment.meshGradingExecutable)
+                    if !Defaults.isPackagedApp {
+                        TextField("uv", text: environmentBinding(\.uvExecutable))
+                        TextField("External dependencies", text: environmentBinding(\.externalDir))
+                    }
                 }
             }
         }
@@ -171,6 +186,32 @@ struct AppSettingsView: View {
                 .foregroundStyle(.secondary)
         }
         .help(path)
+    }
+
+    private func executableSetting(_ title: String, path: Binding<String>, defaultPath: String) -> some View {
+        LabeledContent(title) {
+            HStack {
+                TextField("", text: path, prompt: Text(defaultPath))
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("\(title) path")
+                    .help(defaultPath)
+                Button("Choose…") {
+                    let panel = NSOpenPanel()
+                    panel.canChooseFiles = true
+                    panel.canChooseDirectories = false
+                    panel.allowsMultipleSelection = false
+                    if panel.runModal() == .OK, let url = panel.url {
+                        path.wrappedValue = url.path
+                    }
+                }
+                .fixedSize()
+                if !path.wrappedValue.isEmpty {
+                    Button("Reset") { path.wrappedValue = "" }
+                        .fixedSize()
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
     }
 
     private func environmentBinding(_ keyPath: WritableKeyPath<EnvironmentConfig, String>) -> Binding<String> {
