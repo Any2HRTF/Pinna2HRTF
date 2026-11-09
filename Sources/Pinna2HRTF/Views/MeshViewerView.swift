@@ -87,17 +87,11 @@ struct MeshViewerView: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                PersistentSceneView(scene: store.selectedScene, darkMode: colorScheme == .dark, placementMode: store.isPlacingMicrophone, cameraPositionChanged: { [scene = store.selectedScene] position, target, orientation in
+                PersistentSceneView(scene: store.selectedScene, darkMode: colorScheme == .dark, tintMesh: true, placementMode: store.isPlacingMicrophone, cameraPositionChanged: { [scene = store.selectedScene] position, target, orientation in
                     guard store.selectedScene === scene else { return }
                     store.updateCameraPosition(position, target: target, orientation: orientation)
                 }, surfaceSelected: store.previewMicrophonePosition)
                     .id(ObjectIdentifier(store.selectedScene))
-                    .onAppear {
-                        store.updateSceneBackground(darkMode: colorScheme == .dark)
-                    }
-                    .onChange(of: colorScheme) { newColorScheme in
-                        store.updateSceneBackground(darkMode: newColorScheme == .dark)
-                    }
             }
         }
         .frame(maxHeight: .infinity)
@@ -272,6 +266,7 @@ struct MicrophonePlacementSurface: ViewModifier {
 struct PersistentSceneView: NSViewRepresentable {
     let scene: SCNScene
     let darkMode: Bool
+    var tintMesh = false
     let placementMode: Bool
     let cameraPositionChanged: (SCNVector3, SCNVector3, SCNQuaternion) -> Void
     let surfaceSelected: (SCNVector3) -> Void
@@ -287,7 +282,7 @@ struct PersistentSceneView: NSViewRepresentable {
         view.configureNavigation(camera: scene.rootNode.childNodes.first { $0.camera != nil })
         view.allowsCameraControl = true
         view.autoenablesDefaultLighting = false
-        view.backgroundColor = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
+        applyAppearance(to: view)
         view.addGestureRecognizer(NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.selectSurface(_:))))
         context.coordinator.observeCamera(in: viewport)
         return viewport
@@ -310,8 +305,22 @@ struct PersistentSceneView: NSViewRepresentable {
             view.configureNavigation(camera: scene.rootNode.childNodes.first { $0.camera != nil })
             context.coordinator.lastPosition = nil
         }
+        applyAppearance(to: view)
+    }
+
+    private func applyAppearance(to view: SCNView) {
         let background = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
-        if view.backgroundColor != background { view.backgroundColor = background }
+        view.backgroundColor = background
+        scene.background.contents = background
+        if tintMesh {
+            let color = darkMode
+                ? NSColor(calibratedRed: 0.749, green: 0.702, blue: 0.651, alpha: 1)
+                : NSColor(calibratedRed: 0.816, green: 0.773, blue: 0.722, alpha: 1)
+            scene.rootNode.enumerateChildNodes { node, _ in
+                guard node.categoryBitMask == 1 else { return }
+                node.geometry?.firstMaterial?.diffuse.contents = color
+            }
+        }
     }
 
     static func dismantleNSView(_ viewport: MeshSceneViewport, coordinator: Coordinator) {
