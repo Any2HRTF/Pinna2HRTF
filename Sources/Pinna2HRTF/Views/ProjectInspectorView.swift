@@ -219,11 +219,11 @@ struct ProjectInspectorView: View {
             }.pickerStyle(.radioGroup)
             if store.selectedProject?.scanPreparation.enabled == true {
                 PathField("Full-head scan", helpID: "scan.path", text: scanTextBinding(\.scanPath), mode: .file)
-                Text("Choose ears beside Align scan, then extract them in Prepare ears.").font(.caption)
+                Text("Choose which ears to extract in Ear preparation & modelling.").font(.caption)
             } else {
                 PathField("Left ear", helpID: "project.left_ear", text: projectStringBinding(\.leftEar), mode: .file)
                 PathField("Right ear", helpID: "project.right_ear", text: projectStringBinding(\.rightEar), mode: .file)
-                Text("Choose at least one ear. Inspection and editing are available in Prepare ears.").font(.caption)
+                Text("Choose at least one ear. Inspection and editing are available in Ear preparation & modelling.").font(.caption)
             }
         }
     }

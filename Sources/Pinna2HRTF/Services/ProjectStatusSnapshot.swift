@@ -83,7 +83,7 @@ struct ProjectStatusSnapshot {
                                                placingMicrophone: false, inspection: inspection, completed: completed, resolveOutputLocations: false)
         }
         if needsRerun {
-            for stage in [Stage.numcalc, .postprocessing] { reasons[stage] = "Run preprocessing with the current settings first." }
+            for stage in [Stage.numcalc, .postprocessing] { reasons[stage] = "Run Simulation setup first." }
         }
         if !includeSolverResults { reasons[.postprocessing] = "Checking solver results…" }
         let pipelineSides = Set(EarSide.allCases.filter { !project.pipelineEar(for: $0, inspection: inspection).isEmpty })
@@ -116,7 +116,7 @@ struct ProjectStatusSnapshot {
         if project.pipelineEar(for: .left, inspection: inspection).isEmpty && project.pipelineEar(for: .right, inspection: inspection).isEmpty { return "Choose at least one ear mesh." }
         if project.saveLocation.isEmpty { return "Choose a save location." }
         if project.scanPreparation.enabled && stage != .scanPreparation && (!isComplete(.scanPreparation) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.scanPreparation.rawValue] ?? .ready)) {
-            return "Run Scan Preparation successfully with the current scan settings first."
+            return "Run Ear preparation & modelling first."
         }
         if stage != .scanPreparation && project.scanPreparation.enabled && project.scanPreparation.requireManualReview == true {
             for side in project.includedEars where !ArtifactScanner.earReviewIsCurrent(project, side: side, inspection: inspection) {
@@ -136,7 +136,7 @@ struct ProjectStatusSnapshot {
             if !project.settings.inference.usePredictionsForPreprocessing { return "Use Mesh2PPM is turned off." }
             if !FileManager.default.fileExists(atPath: project.settings.inference.modelConfig) || !FileManager.default.fileExists(atPath: project.settings.inference.modelCheckpoint) { return "The selected model or checkpoint is missing." }
         case .preprocessing:
-            if project.settings.inference.usePredictionsForPreprocessing && (!isComplete(.inference) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.inference.rawValue] ?? .ready)) { return "Run Mesh2PPM Inference successfully first." }
+            if project.settings.inference.usePredictionsForPreprocessing && (!isComplete(.inference) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.inference.rawValue] ?? .ready)) { return "Run Ear preparation & modelling first." }
             if project.settings.manualPPMFitting.useForPreprocessing {
                 for side in EarSide.allCases where !(side == .left ? project.pipelineEar(for: .left, inspection: inspection) : project.pipelineEar(for: .right, inspection: inspection)).isEmpty {
                     if let path = project.settings.manualPPMFitting.meshPath(for: side), !path.isEmpty,
@@ -149,10 +149,10 @@ struct ProjectStatusSnapshot {
             if !FileManager.default.isExecutableFile(atPath: environment.meshGradingExecutable) { return Defaults.isPackagedApp ? "Mesh grading tool not found. Reinstall the app." : "Mesh grading tool not found. Check the tool path." }
             if !FileManager.default.fileExists(atPath: environment.externalDir + "/src/Mesh2HRTF/mesh2hrtf") { return "Mesh2HRTF dependencies are unavailable." }
         case .numcalc:
-            if !isComplete(.preprocessing) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.preprocessing.rawValue] ?? .ready) { return "Run preprocessing successfully first." }
+            if !isComplete(.preprocessing) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.preprocessing.rawValue] ?? .ready) { return "Run Simulation setup first." }
             if !FileManager.default.isExecutableFile(atPath: environment.numcalcExecutable) { return Defaults.isPackagedApp ? "NumCalc not found. Reinstall the app." : "NumCalc not found. Check the tool path." }
         case .postprocessing:
-            if !isComplete(.preprocessing) { return "Run preprocessing with the current inputs and settings first." }
+            if !isComplete(.preprocessing) { return "Run Simulation setup first." }
             let outputURL = ArtifactScanner.postprocessingDirectory(for: project).standardizedFileURL
             let rootURL = URL(fileURLWithPath: project.saveLocation, isDirectory: true).standardizedFileURL
             let output = (resolveOutputLocations ? outputURL.resolvingSymlinksInPath() : outputURL).path
@@ -165,7 +165,7 @@ struct ProjectStatusSnapshot {
             }) {
                 return "Choose a separate SOFA folder that does not contain inputs or project work."
             }
-            if !isComplete(.numcalc) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.numcalc.rawValue] ?? .ready) { return "Finish NumCalc successfully first." }
+            if !isComplete(.numcalc) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.numcalc.rawValue] ?? .ready) { return "Run Calculation first." }
         }
         return nil
     }

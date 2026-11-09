@@ -72,8 +72,6 @@ public partial class MainWindow
         {
             if(pendingAlignment is { } aligned)
             {
-                var prepareLeft = prepareLeftEarBox.IsChecked == true;
-                var prepareRight = prepareRightEarBox.IsChecked == true;
                 if(alignmentProjectId!=project.Id||alignmentWorkspace==null||alignmentSource==null)throw new IOException("The project changed; restart alignment.");
                 var destination=Path.Combine(originalRoot,"MeshEdits","AlignedScan.ply");
                 var operation=new Dictionary<string,object>{["action"]="align",["points"]=scanAlignmentLandmarks.Select(p=>new[]{(double)p.X,p.Y,p.Z}).ToArray(),
@@ -84,7 +82,7 @@ public partial class MainWindow
                 if (shutdownCleanupDone || !projects.Contains(project) || project.SaveLocation != originalRoot) return;
                 await PublishEditorFilesAsync(project, new() { [destination] = File.ReadAllBytes(staged), [Path.ChangeExtension(destination, "json")] = File.ReadAllBytes(Path.ChangeExtension(staged, "json")) }, editorLifetime.Token,
                     new() { [destination] = File.GetLastWriteTimeUtc(staged) }, new() { [originalSource!] = originalHash! });
-                var scan=project.Settings.ScanPreparation;scan.PrepareLeft=prepareLeft;scan.PrepareRight=prepareRight;scan.OriginalScanPath=originalSource!;scan.ScanPath=destination;scan.RotationDegrees="0";scan.Enabled=true;scan.ReviewedLeft=null;scan.ReviewedRight=null;
+                var scan=project.Settings.ScanPreparation;scan.OriginalScanPath=originalSource!;scan.ScanPath=destination;scan.RotationDegrees="0";scan.Enabled=true;scan.ReviewedLeft=null;scan.ReviewedRight=null;
                 project.Settings.Preprocessing.SourcePositionInputLeft=null;project.Settings.Preprocessing.SourcePositionInputRight=null;
                 Persist();
                 alignmentSaving = false;

@@ -274,7 +274,7 @@ final class ViewerModel: ObservableObject {
         }
         guard let meshURL = ArtifactScanner.preprocessingMesh(for: project, side: side), let identity = ArtifactScanner.meshIdentity(meshURL) else {
             let inferenceRequired = project.settings.inference.usePredictionsForPreprocessing && !project.pipelineLeftEar.isEmpty && !project.pipelineRightEar.isEmpty
-            microphonePlacementError = inferenceRequired ? "Run Mesh2PPM Inference before placing the \(side.rawValue) microphone." : "The \(side.rawValue) preprocessing mesh could not be opened."
+            microphonePlacementError = inferenceRequired ? "Run Mesh2PPM before placing the \(side.rawValue) microphone." : "The \(side.rawValue) preprocessing mesh could not be opened."
             return
         }
         microphonePlacementSide = side

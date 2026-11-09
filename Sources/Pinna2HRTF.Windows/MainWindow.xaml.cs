@@ -74,7 +74,6 @@ public partial class MainWindow : Window
     readonly Microsoft.UI.Dispatching.DispatcherQueueTimer statusTimer;
     readonly Dictionary<string, Control> settingControls = [];
     readonly Dictionary<string, TextSetting> textSettings;
-    readonly List<Button> stageButtons = [];
     readonly List<Expander> settingSections = [];
     readonly List<Element3D> sceneLights = [];
     readonly List<MeshGeometryModel3D> meshVisuals = [];
@@ -210,7 +209,7 @@ public partial class MainWindow : Window
     readonly CheckBox scanPreparationEnabledBox = new();
     readonly CheckBox prepareLeftEarBox = new() { IsChecked = true };
     readonly CheckBox prepareRightEarBox = new() { IsChecked = true };
-    readonly Button alignScanButton = new() { Content = "Align scan…" };
+    readonly Button alignScanButton = new() { Content = "Align head scan…" };
     readonly Button applyScanAlignmentButton = new() { Content = "Apply Alignment", IsEnabled = false };
     readonly CheckBox adaptiveFmmLengthBox = new();
     readonly CheckBox normalizeHrtfsBox = new();
@@ -225,9 +224,29 @@ public partial class MainWindow : Window
         InitializeComponent();
         textSettings = CreateTextSettings();
         AddV2TextSettings(textSettings);
-        var cancelInteraction=new KeyboardAccelerator{Key=VirtualKey.Escape};
-        cancelInteraction.Invoked+=(_,args)=>{if(placementSide!=null){EndPlacement();args.Handled=true;}else if(scanAlignmentMode){EndScanAlignment();args.Handled=true;}};
-        Root.KeyboardAccelerators.Add(cancelInteraction);
+        Root.KeyDown += (_, args) =>
+        {
+            if (args.Key != VirtualKey.Escape) return;
+            if (placementSide != null) EndPlacement();
+            else if (scanAlignmentMode) EndScanAlignment();
+            else if (workflowStopItem?.IsEnabled == true) StopClicked(this, new RoutedEventArgs());
+            else return;
+            args.Handled = true;
+        };
+        foreach (var (shortcut, action) in new (string, RoutedEventHandler)[]
+        {
+            ("Ctrl+R", RunNextClicked),
+            ("Ctrl+Shift+R", RunAllClicked)
+        })
+        {
+            var accelerator = TryCreateKeyboardAccelerator(shortcut)!;
+            accelerator.Invoked += (_, args) =>
+            {
+                action(this, new RoutedEventArgs());
+                args.Handled = true;
+            };
+            Root.KeyboardAccelerators.Add(accelerator);
+        }
         Root.Loaded += WindowLoaded;
         Root.ActualThemeChanged += (_, _) => UpdateViewerAppearance();
         statusTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
@@ -257,7 +276,7 @@ public partial class MainWindow : Window
 
     void WindowLoaded(object sender, RoutedEventArgs e)
     {
-        if (MacLayout) { projectsExpandedWidth = 240; settingsExpandedWidth = 360; logCollapsed = true; }
+        if (MacLayout) { projectsExpandedWidth = 240; settingsExpandedWidth = 360; }
         BuildInterface();
         packageRoot = FindPackageRoot();
         appData = Environment.GetEnvironmentVariable("PINNA2HRTF_APP_DATA") is string overrideData && Path.IsPathFullyQualified(overrideData) ? overrideData : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), MacReviewStorage ? "Pinna2HRTF-v2-review-macimitation" : "Pinna2HRTF-v2-review");
@@ -440,6 +459,7 @@ public partial class MainWindow : Window
     {
         if (MacLayout && macSidebarReady) { SetMacSidebar(collapsed); if (persist) SaveUiState(); return; }
         projectsCollapsed = collapsed;
+        SyncPaneMenu();
         if (projectsHeader != null) projectsHeader.ColumnSpacing = collapsed ? 0 : 8;
         if (projectsToggle != null)
         {
@@ -478,28 +498,48 @@ public partial class MainWindow : Window
         project.Items.Add(MenuItem("Duplicate Project", DuplicateProjectClicked, "Ctrl+D"));
         project.Items.Add(new MenuFlyoutSeparator());
         project.Items.Add(MenuItem("Delete Project", RemoveProjectClicked, "Delete"));
-        var pipeline = new MenuBarItem { Title = "Pipeline", VerticalAlignment = VerticalAlignment.Center };
-        pipeline.Items.Add(MenuItem("Run All", RunAllClicked));
-        pipeline.Items.Add(MenuItem("Run Next Step", RunNextClicked, "Ctrl+R"));
+        var workflow = new MenuBarItem { Title = "Workflow", VerticalAlignment = VerticalAlignment.Center };
+        var runAll = MenuItem("Run All", RunAllClicked);
+        runAll.KeyboardAcceleratorTextOverride = "Ctrl+Shift+R";
+        workflowRunAllItems.Add(runAll);
+        workflow.Items.Add(runAll);
+        var runNext = MenuItem("Run Next", RunNextClicked);
+        runNext.KeyboardAcceleratorTextOverride = "Ctrl+R";
+        workflow.Items.Add(runNext);
         var run = new MenuFlyoutSubItem { Text = "Run", VerticalAlignment = VerticalAlignment.Center };
-        run.Items.Add(MenuItem("Mesh2PPM Inference", RunInferenceClicked));
-        run.Items.Add(MenuItem("Preprocessing", RunPreprocessingClicked));
-        run.Items.Add(MenuItem("NumCalc", RunNumCalcClicked));
-        run.Items.Add(MenuItem("Postprocessing", RunPostprocessingClicked));
-        pipeline.Items.Add(run);
-        pipeline.Items.Add(new MenuFlyoutSeparator());
-        pipeline.Items.Add(MenuItem("Stop", StopClicked, "Esc"));
-        pipeline.Items.Add(MenuItem("Reset Outputs", ResetOutputsClicked));
+        for (var step = 1; step < WorkflowTitles.Length; step++)
+        {
+            var target = step;
+            var item = MenuItem(WorkflowTitles[step], (_, _) => RunWorkflowStep(target));
+            workflowRunItems[step] = item;
+            run.Items.Add(item);
+        }
+        workflow.Items.Add(run);
+        workflow.Items.Add(new MenuFlyoutSeparator());
+        workflowStopItem = MenuItem("Stop", StopClicked);
+        workflowStopItem.KeyboardAcceleratorTextOverride = "Esc";
+        workflow.Items.Add(workflowStopItem);
+        var reset = MenuItem("Reset Outputs…", ResetOutputsClicked);
+        workflowResetItems.Add(reset);
+        workflow.Items.Add(reset);
         var help = new MenuBarItem { Title = "Help", VerticalAlignment = VerticalAlignment.Center };
         help.Items.Add(MenuItem("Pinna2HRTF Help", OpenDocumentationClicked, "F1"));
         help.Items.Add(MenuItem("Online Documentation", (_, _) => OpenExternal("https://any2hrtf.github.io/Pinna2HRTF/docs/")));
         help.Items.Add(new MenuFlyoutSeparator());
         help.Items.Add(MenuItem("About Pinna2HRTF", ShowAboutClicked));
         bar.Items.Add(project);
-        bar.Items.Add(pipeline);
+        bar.Items.Add(workflow);
         var view = new MenuBarItem { Title = "View" };
-        view.Items.Add(MenuItem("Show/hide workflow", (_, _) => ToggleMacInspector()));
-        view.Items.Add(MenuItem("Show/hide activity", (_, _) => SetLogCollapsed(!logCollapsed, true)));
+        projectsViewItem = new ToggleMenuFlyoutItem { Text = "Show Projects pane" };
+        projectsViewItem.Click += (_, _) => SetProjectsCollapsed(!projectsViewItem.IsChecked, true);
+        workflowViewItem = new ToggleMenuFlyoutItem { Text = "Show Workflow pane" };
+        workflowViewItem.Click += (_, _) => { if (workflowViewItem.IsChecked != macInspectorVisible) ToggleMacInspector(); };
+        logViewItem = new ToggleMenuFlyoutItem { Text = "Show Live Log pane" };
+        logViewItem.Click += (_, _) => SetLogCollapsed(!logViewItem.IsChecked, true);
+        view.Items.Add(projectsViewItem);
+        view.Items.Add(workflowViewItem);
+        view.Items.Add(logViewItem);
+        SyncPaneMenu();
         bar.Items.Add(view);
         bar.Items.Add(help);
         return bar;
@@ -794,6 +834,7 @@ public partial class MainWindow : Window
     void SetLogCollapsed(bool collapsed, bool persist)
     {
         logCollapsed = collapsed;
+        SyncPaneMenu();
         if (logSplitterRow != null) logSplitterRow.Height = new GridLength(collapsed ? 0 : 12);
         if (logSplitter != null) logSplitter.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         if (centerLogRow != null) centerLogRow.Height = new GridLength(collapsed
@@ -887,9 +928,18 @@ public partial class MainWindow : Window
         row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var isSofa = id == "postprocessing.output_folder";
         var labelPanel = new StackPanel { Orientation = Orientation.Horizontal };
         labelPanel.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center });
         var info = InfoButton(id);
+        if (isSofa)
+        {
+            info.Click -= SettingInfoClicked;
+            info.Flyout = new Flyout { Content = new TextBlock {
+                Text = "SOFA files are saved in the HRTF folder inside your save location by default. Choose another folder to save them elsewhere.",
+                MaxWidth = 300, TextWrapping = TextWrapping.Wrap
+            }};
+        }
         labelPanel.Children.Add(info);
         row.Children.Add(labelPanel);
         var browse = new Button { Content = "Choose…", HorizontalAlignment = HorizontalAlignment.Right, MinHeight = 28, Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(6, 0, 0, 0) };
@@ -898,28 +948,67 @@ public partial class MainWindow : Window
         Grid.SetRow(browse, 1);
         row.Children.Add(browse);
         var name = new TextBlock { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, IsTextSelectionEnabled = true };
+        string DisplayPath() => isSofa ? EffectiveSofaPath() ?? "" : box.Text.Trim();
         void UpdateName()
         {
-            var path = box.Text.Trim();
-            name.Text = path.Length == 0 ? "No path selected" : Path.GetFileName(Path.TrimEndingDirectorySeparator(path)) is { Length: > 0 } leaf ? leaf : path;
+            var path = DisplayPath();
+            var leaf = Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
+            name.Text = path.Length == 0
+                ? isSofa && selectedProject is { SaveLocation.Length: > 0 } ? "Invalid output path" :
+                    isSofa ? "Choose a save location first" : "No path selected"
+                : (string.IsNullOrEmpty(leaf) ? path : leaf) + (isSofa && string.IsNullOrWhiteSpace(selectedProject?.Settings.Postprocessing?.OutputFolder) ? " · Default" : "");
             ToolTipService.SetToolTip(name, path);
         }
         box.RegisterPropertyChangedCallback(TextBox.TextProperty, (_, _) => UpdateName()); UpdateName();
         var menu = new MenuFlyout(); var copy = new MenuFlyoutItem { Text = "Copy path" };
-        copy.Click += (_, _) => { var data = new global::Windows.ApplicationModel.DataTransfer.DataPackage(); data.SetText(box.Text); global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data); };
+        copy.Click += (_, _) => { var data = new global::Windows.ApplicationModel.DataTransfer.DataPackage(); var path = DisplayPath(); if (path.Length == 0) return; data.SetText(path); global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data); };
         menu.Items.Add(copy); name.ContextFlyout = menu;
         Grid.SetRow(name, 1); row.Children.Add(name);
         box.HorizontalAlignment = HorizontalAlignment.Stretch;
         box.MinHeight = 28;
         box.Visibility = Visibility.Collapsed;
         var disclosure = new HyperlinkButton { Content = "Show path", FontSize = 12, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Left };
+        FrameworkElement pathContent = box;
+        TextBox focusBox = box;
+        if (isSofa)
+        {
+            var effective = new TextBox { IsReadOnly = true, Header = "Export path" };
+            box.Header = "Custom folder";
+            box.PlaceholderText = "Use the default folder";
+            box.Visibility = Visibility.Visible;
+            var panel = new StackPanel { Spacing = 6, Visibility = Visibility.Collapsed };
+            panel.Children.Add(effective);
+            panel.Children.Add(box);
+            pathContent = panel;
+            focusBox = effective;
+            var reset = new HyperlinkButton { Content = "Use default", FontSize = 12, Padding = new Thickness(0) };
+            reset.Click += async (_, _) => {
+                box.Text = "";
+                await CommitSettingInputAsync(box);
+            };
+            Grid.SetColumn(reset, 1);
+            Grid.SetRow(reset, 2);
+            row.Children.Add(reset);
+            refreshSofaPath = () => {
+                UpdateName();
+                var path = DisplayPath();
+                if (effective.Text != path) effective.Text = path;
+                var hasSaveLocation = !string.IsNullOrWhiteSpace(selectedProject?.SaveLocation);
+                browse.IsEnabled = disclosure.IsEnabled = hasSaveLocation;
+                reset.Visibility = string.IsNullOrWhiteSpace(selectedProject?.Settings.Postprocessing?.OutputFolder)
+                    ? Visibility.Collapsed : Visibility.Visible;
+            };
+        }
         disclosure.Click += (_, _) => {
-            var show = box.Visibility != Visibility.Visible;
-            box.Visibility = show ? Visibility.Visible : Visibility.Collapsed; disclosure.Content = show ? "Hide path" : "Show path";
-            if (show) { box.Focus(FocusState.Programmatic); box.SelectAll(); }
+            var show = pathContent.Visibility != Visibility.Visible;
+            pathContent.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            disclosure.Content = show ? "Hide path" : "Show path";
+            if (show) { focusBox.Focus(FocusState.Programmatic); focusBox.SelectAll(); }
         };
-        Grid.SetRow(disclosure, 2); Grid.SetColumnSpan(disclosure, 2); row.Children.Add(disclosure);
-        Grid.SetRow(box, 3); Grid.SetColumnSpan(box, 2); row.Children.Add(box);
+        Grid.SetRow(disclosure, 2);
+        Grid.SetColumnSpan(disclosure, isSofa ? 1 : 2);
+        row.Children.Add(disclosure);
+        Grid.SetRow(pathContent, 3); Grid.SetColumnSpan(pathContent, 2); row.Children.Add(pathContent);
         if (id == "project.save_location")
         {
             var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right };
@@ -1203,7 +1292,7 @@ public partial class MainWindow : Window
         LoadSelectedProject();
         var dialog = new ContentDialog
         {
-            Title = "Reset pipeline outputs?",
+            Title = "Reset workflow outputs?",
             Content = $"Changing this setting resets {resetStage!.Title} and all following outputs. Input meshes and project settings will be kept.",
             PrimaryButtonText = "Reset and apply",
             CloseButtonText = "Cancel",
@@ -1480,7 +1569,6 @@ public partial class MainWindow : Window
     void ImportProjectClicked(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(ImportProjectAsync(), "Import project", selectedProject);
     void DuplicateProjectClicked(object sender, RoutedEventArgs e) => DuplicateProject();
     void RemoveProjectClicked(object sender, RoutedEventArgs e) => RemoveProject();
-    void StageButtonClicked(object sender, RoutedEventArgs e) { if (sender is Button button && button.Tag is Stage stage) RunOrStop(stage); }
 
     void RemoveProjectFolder(ProjectFolder folder)
     {
@@ -1546,8 +1634,6 @@ public partial class MainWindow : Window
         ResetScanAlignmentPicks();
         alignmentSessionProject = project.Id;
         if (placementSide != null) EndPlacement();
-        prepareLeftEarBox.IsChecked = project.Settings.ScanPreparation.PrepareLeft;
-        prepareRightEarBox.IsChecked = project.Settings.ScanPreparation.PrepareRight;
         scanAlignmentMode = true;
         alignScanButton.IsEnabled = false;
         scanAlignmentStatus.Text = "Click nose tip, then left and right ear-canal entrances";
@@ -2200,7 +2286,7 @@ public partial class MainWindow : Window
             var available = selectedProject != null && PreprocessingMesh(selectedProject, side) != null;
             button.IsEnabled = !mesh2PpmEnabled && placementSide == null && available && selectedProject != null && !runs.ContainsKey(selectedProject.Id);
             var tooltipText = mesh2PpmEnabled ? "Automatic microphone placement is used for Mesh2PPM-inferred meshes." : available ? $"Place the {side} microphone on the mesh used for preprocessing." :
-                selectedProject != null && InferenceIsAutomatic(selectedProject) ? $"Run Mesh2PPM Inference to create the predicted {side} ear first." : $"Select an input {side} ear first.";
+                selectedProject != null && InferenceIsAutomatic(selectedProject) ? $"Run Mesh2PPM to create the predicted {side} ear first." : $"Select an input {side} ear first.";
             if (ToolTipService.GetToolTip(host) is ToolTip tooltip && !string.Equals(tooltip.Content as string, tooltipText, StringComparison.Ordinal))
                 tooltip.Content = tooltipText;
         }
@@ -2226,7 +2312,7 @@ public partial class MainWindow : Window
         var mesh = PreprocessingMesh(project, side);
         if (mesh == null)
         {
-            AppendLog(InferenceIsAutomatic(project) ? $"Run Mesh2PPM Inference before placing the {side} microphone." : $"The input {side} ear is not available.", project.Id);
+            AppendLog(InferenceIsAutomatic(project) ? $"Run Mesh2PPM before placing the {side} microphone." : $"The input {side} ear is not available.", project.Id);
             return;
         }
         placementSide = side;
@@ -2341,7 +2427,7 @@ public partial class MainWindow : Window
         {
             var dialog = new ContentDialog
             {
-                Title = "Reset pipeline outputs?",
+                Title = "Reset workflow outputs?",
                 Content = "Changing the microphone position resets preprocessing and later outputs. Input meshes and Mesh2PPM prediction outputs will be kept.",
                 PrimaryButtonText = "Reset and save",
                 CloseButtonText = "Cancel",
@@ -2448,12 +2534,6 @@ public partial class MainWindow : Window
         SaveViewerStates();
     }
 
-    void RunInferenceClicked(object sender, RoutedEventArgs e) => RunOrStop(Stage.Inference);
-    void RunPreprocessingClicked(object sender, RoutedEventArgs e) => RunOrStop(Stage.Preprocessing);
-    void RunNumCalcClicked(object sender, RoutedEventArgs e) => RunOrStop(Stage.Numcalc);
-    void RunPostprocessingClicked(object sender, RoutedEventArgs e) => RunOrStop(Stage.Postprocessing);
-    void RunOrStop(Stage stage) { if (selectedProject != null && runs.TryGetValue(selectedProject.Id, out var active) && active.Stage == stage) StopProject(selectedProject); else RunStage(stage); }
-
     void RunNextClicked(object sender, RoutedEventArgs e) => PerformWorkflowAction();
 
     void RunAllClicked(object sender, RoutedEventArgs e) =>
@@ -2461,40 +2541,63 @@ public partial class MainWindow : Window
 
     async Task RunAllAsync()
     {
-        var project = selectedProject;
-        if (project == null || ProjectBusy(project.Id)) return;
+        if (selectedProject is not { } project || ProjectBusy(project.Id) || queuedStages.ContainsKey(project.Id)) return;
         var revision = StatusRevision(project);
         await RefreshStatusSnapshotAsync(project, true);
         if (shutdownCleanupDone || selectedProject != project || StatusRevision(project) != revision) return;
-        var stages = AutomaticStages(project).Where(stage => !StageIsComplete(stage, project)).ToList();
-        if (stages.Count == 0) { AppendLog("All stages complete.", project.Id); return; }
-        queuedStages[project.Id] = new Queue<Stage>(stages.Skip(1));
-        await RunStageAsync(stages[0], project, true);
+        var stages = AutomaticStages(project).Where(stage => !StageIsComplete(stage, project)).ToArray();
+        if (stages.Length == 0) { AppendLog("All stages complete.", project.Id); return; }
+        StartWorkflowSequence(project, stages);
     }
 
-    void RunStage(Stage stage, ProjectRecord? targetProject = null, bool continueQueued = false) =>
-        _ = ObserveUiTaskAsync(RunStageAsync(stage, targetProject, continueQueued), stage.Title, targetProject ?? selectedProject);
-
-    async Task RunStageAsync(Stage stage, ProjectRecord? targetProject = null, bool continueQueued = false)
+    void StartWorkflowSequence(ProjectRecord project, Stage[] stages)
     {
-        var project = targetProject ?? selectedProject;
-        if (project == null) return;
+        if (stages.Length == 0 || queuedStages.ContainsKey(project.Id) || !StageCanRun(stages[0], project)) return;
+        var queue = new Queue<Stage>(stages.Skip(1));
+        queuedStages.Add(project.Id, queue);
+        RunStage(stages[0], project, queue);
+        RefreshWorkflow();
+    }
+
+    void RunStage(Stage stage, ProjectRecord project, Queue<Stage> sequence) =>
+        _ = ObserveUiTaskAsync(RunStageAsync(stage, project, sequence), stage.Title, project);
+
+    async Task RunStageAsync(Stage stage, ProjectRecord project, Queue<Stage> sequence)
+    {
+        bool SequenceIsCurrent() => queuedStages.TryGetValue(project.Id, out var pending) && ReferenceEquals(pending, sequence);
+        void ClearSequence()
+        {
+            if (SequenceIsCurrent()) queuedStages.Remove(project.Id);
+        }
         if (ReferenceEquals(project, selectedProject))
             foreach (var box in settingControls.Values.OfType<TextBox>().ToArray())
                 if (HasSettingDraft(box)) await CommitSettingInputAsync(box);
         var preflightRevision = StatusRevision(project);
         await RefreshStatusSnapshotAsync(project, true);
-        if (shutdownCleanupDone || !projects.Contains(project) || StatusRevision(project) != preflightRevision) return;
-        if (stage != Stage.ScanPreparation && !await RecoverStaleReviewAsync(project)) return;
+        if (shutdownCleanupDone || !projects.Contains(project) || StatusRevision(project) != preflightRevision || !SequenceIsCurrent())
+        {
+            ClearSequence();
+            return;
+        }
+        if (stage != Stage.ScanPreparation && !await RecoverStaleReviewAsync(project))
+        {
+            ClearSequence();
+            return;
+        }
+        if (!SequenceIsCurrent()) return;
         if (StageUnavailableReason(stage, project) is string reason)
         {
-            queuedStages.Remove(project.Id);
+            ClearSequence();
             AppendLog($"{stage.Title} cannot start: {reason}", project.Id);
             return;
         }
-        if (!continueQueued) queuedStages.Remove(project.Id);
         var reservation = projectOperations.TryReserve(project.Id);
-        if (reservation == null) { AppendLog("Wait for the project operation to finish.", project.Id); return; }
+        if (reservation == null)
+        {
+            ClearSequence();
+            AppendLog("Wait for the project operation to finish.", project.Id);
+            return;
+        }
         GeneratedOutputManifest? outputStore = null;
         outputOperations.Add(project.Id);
         try
@@ -2525,6 +2628,7 @@ public partial class MainWindow : Window
             }
             var config = await PrepareConfigAsync(preparedProject);
             if (shutdownCleanupDone) { outputStore.ReleaseForRecovery(); return; }
+            if (!SequenceIsCurrent()) return;
             var executable = BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
             var info = GeometryProcess("-m", "HRTFCalculation.CLI", stage.Value, "--config", config);
             ApplyProcessEnvironment(info);
@@ -2566,7 +2670,7 @@ public partial class MainWindow : Window
         finally
         {
             outputOperations.Remove(project.Id);
-            if (!runs.ContainsKey(project.Id)) { reservation.Dispose(); queuedStages.Remove(project.Id); }
+            if (!runs.ContainsKey(project.Id)) { reservation.Dispose(); ClearSequence(); }
             if (!runs.ContainsKey(project.Id) && outputStore != null)
             {
                 try { await Task.Run(outputStore.Complete); }
@@ -2638,7 +2742,10 @@ public partial class MainWindow : Window
         RefreshTechnicalLogButton();
         RefreshArtifacts();
         RefreshGeometry();
-        if (!shutdownCleanupDone && captured && code == 0 && queuedStages.TryGetValue(project.Id, out var queue) && queue.Count > 0) RunStage(queue.Dequeue(), project, true); else queuedStages.Remove(project.Id);
+        if (!shutdownCleanupDone && captured && code == 0 && !run.StopRequested &&
+            queuedStages.TryGetValue(project.Id, out var queue) && queue.Count > 0)
+            RunStage(queue.Dequeue(), project, queue);
+        else queuedStages.Remove(project.Id);
         RefreshPipelineStatus();
     }
 
@@ -2840,15 +2947,15 @@ public partial class MainWindow : Window
     void ResetOutputsClicked(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(ResetOutputsAsync(), "ResetOutputs", selectedProject);
     async Task ResetOutputsAsync()
     {
-        if (selectedProject is not { } project || ProjectBusy(project.Id)) return;
+        if (selectedProject is not { } project || ProjectBusy(project.Id) || queuedStages.ContainsKey(project.Id)) return;
         var dialog = new ContentDialog
         {
-            Title = "Reset pipeline outputs?",
+            Title = "Reset workflow outputs?",
             Content = "Remove generated outputs from all stages? Input meshes, microphone positions, settings and project logs will be kept.",
             PrimaryButtonText = "Reset Outputs", CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close, XamlRoot = Root.XamlRoot
         };
-        if (await ShowDialogAsync(dialog) == ContentDialogResult.Primary) await ResetProjectOutputsAsync(project);
+        if (await ShowDialogAsync(dialog) == ContentDialogResult.Primary && !queuedStages.ContainsKey(project.Id)) await ResetProjectOutputsAsync(project);
     }
 
     async Task<bool> ResetProjectOutputsAsync(ProjectRecord project, Stage? fromStage = null, IDisposable? parent = null)
@@ -3113,20 +3220,8 @@ public partial class MainWindow : Window
             var complete = StageIsComplete(stage, selectedProject, inspection);
             stageStatus[i].Text = skipped ? "Skipped" : running ? "Running…" : failed ? "Failed" : complete ? "Done" : reason != null ? "Blocked" : "Ready";
             stageStatus[i].Foreground = new SolidColorBrush(skipped ? ColorHelper.FromArgb(255, 130, 130, 130) : running ? Colors.DarkOrange : failed ? Colors.Firebrick : complete ? Colors.ForestGreen : Colors.Gray);
-            if (!MacLayout) stageButtons[i].Content = running ? "Stop" : "Run";
-            stageButtons[i].IsEnabled = placementSide == null && (running || reason == null);
             ToolTipService.SetToolTip(stageStatus[i], reason ?? $"{stage.Title} is ready.");
-            ToolTipService.SetToolTip(stageButtons[i], running ? "Stop this stage" : reason ?? $"Run {WorkflowStageTitle(stage)}");
         }
-        var pending = AutomaticStages(selectedProject).Where(x => !StageIsComplete(x, selectedProject, inspection)).ToList();
-        runAllButton.IsEnabled = placementSide == null && pending.Count > 0 && StageCanRun(pending[0], selectedProject, inspection);
-        var preprocessingReason = StageUnavailableReason(Stage.Preprocessing, selectedProject, inspection);
-        var hint = placementSide != null ? "Finish microphone placement with Done or Cancel." :
-            runs.ContainsKey(selectedProject.Id) ? null :
-            preprocessingReason != null ? "Preprocessing: " + preprocessingReason :
-            pending.Count > 0 ? StageUnavailableReason(pending[0], selectedProject, inspection) : null;
-        pipelineHintText.Text = hint ?? "";
-        pipelineHintText.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
         UpdatePlacementButtons();
         RefreshProjectRows(inspection);
         RefreshNumCalcStatus(inspection);
@@ -3146,7 +3241,7 @@ public partial class MainWindow : Window
         if (scanAlignmentMode && alignmentSessionProject == project.Id) return "Save or cancel scan alignment before running a stage.";
         if (SettingDraftError(project) is string draftError) return draftError;
         if (ProjectDocument.ValidationError(project) is string validation) return validation;
-        if (stage != Stage.ScanPreparation && CurrentEarModel(project) == null) return "Choose one ear modelling method in Ear model.";
+        if (stage != Stage.ScanPreparation && CurrentEarModel(project) == null) return "Choose an ear modelling method in Ear preparation & modelling.";
         if (projectOperations.Contains(project.Id) || OwnedProcess.HasProjectActivity(project.Id)) return "Wait for the project operation or editor to finish.";
         if (outputOperations.Contains(project.Id)) return "Wait for project outputs to finish updating.";
         if (runs.ContainsKey(project.Id)) return "Wait for the running stage to finish.";
@@ -3175,11 +3270,11 @@ public partial class MainWindow : Window
             return null;
         }
         if (!project.Settings.ScanPreparation.Enabled && ((!string.IsNullOrWhiteSpace(project.LeftEar) && !File.Exists(project.LeftEar)) || (!string.IsNullOrWhiteSpace(project.RightEar) && !File.Exists(project.RightEar)))) return "An input ear file is missing. Select it again.";
-        if (project.Settings.ScanPreparation.Enabled && !ScanPreparationOutputsCurrent(project, inspection)) return "Run Scan Preparation with the current settings first.";
+        if (project.Settings.ScanPreparation.Enabled && !ScanPreparationOutputsCurrent(project, inspection)) return "Run Ear preparation & modelling first.";
         if (project.Settings.ScanPreparation.Enabled && project.Settings.ScanPreparation.RequireManualReview && new[] { "left", "right" }.Any(side => SourceEar(project, side, inspection) != null && !EarReviewIsCurrent(project, side, inspection))) return "Review the prepared ears before continuing.";
         foreach (var side in WorkflowSides(project)) {
             var reviewed = project.Settings.ScanPreparation.EarEdit(side);
-            if (reviewed != null && !EarReviewIsCurrent(project, side, inspection)) return $"The {side} ear edit is outdated. Edit again or use the original in Prepare ears.";
+            if (reviewed != null && !EarReviewIsCurrent(project, side, inspection)) return $"The {side} ear edit is outdated. Edit again or use the original in Ear preparation & modelling.";
             if (project.Settings.ManualPPM.Enabled && !FitIsCurrent(project, side)) return $"Fit the {side} ear: manual mode requires a current saved fit for every included ear.";
         }
         if (stage == Stage.Inference)
@@ -3189,16 +3284,16 @@ public partial class MainWindow : Window
         }
         if (stage == Stage.Preprocessing)
         {
-            if (PreprocessingBlocked(project, inspection)) return "Run Mesh2PPM Inference to create the predicted input ear(s) first.";
+            if (PreprocessingBlocked(project, inspection)) return "Run Ear preparation & modelling first.";
             if (!File.Exists(environment.MeshGradingExecutable)) return "The Windows mesh-grading tool is missing. Rebuild the app with its external tools.";
             var bin = Path.Combine(environment.ExternalDir, "bin");
             if (new[] { "libpmp.dll", "libpmp_vis.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll" }.Any(name => !File.Exists(Path.Combine(bin, name))))
                 return "The Windows mesh-grading runtime is incomplete. Rebuild the app with its external tools.";
             return File.Exists(Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf", "Mesh2Input", "mesh2input.py")) ? null : "The Mesh2HRTF export tools are missing.";
         }
-        if (stage == Stage.Numcalc) return !StageIsComplete(Stage.Preprocessing, project, inspection) ? "Run Preprocessing first." : File.Exists(environment.NumCalcExecutable) ? null : "The NumCalc executable is missing.";
-        if (stage == Stage.Postprocessing && !StageIsComplete(Stage.Preprocessing, project, inspection)) return "Run preprocessing with the current inputs and settings first.";
-        return stage == Stage.Postprocessing && StageIsComplete(Stage.Numcalc, project, inspection) ? null : "Run NumCalc first.";
+        if (stage == Stage.Numcalc) return !StageIsComplete(Stage.Preprocessing, project, inspection) ? "Run Simulation setup first." : File.Exists(environment.NumCalcExecutable) ? null : "The NumCalc executable is missing.";
+        if (stage == Stage.Postprocessing && !StageIsComplete(Stage.Preprocessing, project, inspection)) return "Run Simulation setup first.";
+        return stage == Stage.Postprocessing && StageIsComplete(Stage.Numcalc, project, inspection) ? null : "Run Calculation first.";
     }
 
     Stage[] AutomaticStages(ProjectRecord project) => [

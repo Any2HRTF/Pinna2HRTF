@@ -4,16 +4,6 @@ struct WorkflowFooter: View {
     @ObservedObject var store: AppStore
     private var runningNow: Bool { store.selectedProjectID.flatMap { store.runningProcesses[$0] } != nil }
 
-    private func runTitle(_ stage: Stage) -> String {
-        switch stage {
-        case .scanPreparation: "Prepare ears"
-        case .inference: "Run inference"
-        case .preprocessing: "Run simulation setup"
-        case .numcalc: "Calculate"
-        case .postprocessing: "SOFA export"
-        }
-    }
-
     var body: some View {
         let stages: [Stage] = store.workflowStep == .prepare
             ? (store.selectedProject?.scanPreparation.enabled == true ? [.scanPreparation] : [])
@@ -31,13 +21,13 @@ struct WorkflowFooter: View {
                     Button("Stop") { store.stopRunningProcess() }
                 }
                 ForEach(stages) { stage in
-                    Button(stages.count > 1 ? (stage == .scanPreparation ? "Prepare" : "Run PPM") : runTitle(stage)) {
+                    Button(stage.workflowRunTitle) {
                         store.run(stage: stage)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.blue)
                     .disabled(!store.canRun(stage: stage))
-                    .help(runTitle(stage))
+                    .help(stage.workflowRunTitle)
                 }
                 Spacer(minLength: 0)
                 if !runningNow {

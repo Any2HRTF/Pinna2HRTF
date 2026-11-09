@@ -61,7 +61,7 @@ enum ProjectValidation {
         for side in EarSide.allCases where !project.pipelineEar(for: side, inspection: inspection).isEmpty {
             let reviewed = project.scanPreparation.earEdit(side)
             if reviewed != nil && !ArtifactScanner.earReviewIsCurrent(project, side: side, inspection: inspection) {
-                errors.append(("ear_edit.\(side.rawValue)", "The saved \(side.rawValue) ear edit is outdated. Edit again or use the original ear in Prepare ears."))
+                errors.append(("ear_edit.\(side.rawValue)", "The saved \(side.rawValue) ear edit is outdated. Edit again or use the original ear in Ear preparation & modelling."))
             }
         }
         let scan = project.scanPreparation

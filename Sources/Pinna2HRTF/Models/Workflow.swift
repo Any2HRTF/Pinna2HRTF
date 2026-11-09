@@ -4,7 +4,7 @@ import AppKit
 enum WorkflowStep: Int, CaseIterable, Identifiable {
     case inputs, prepare, simulation, calculate, results
     var id: Int { rawValue }
-    var title: String { ["Project", "Prepare ears & model", "Simulation setup", "Calculate", "SOFA export"][rawValue] }
+    var title: String { ["Project", "Ear preparation & modelling", "Simulation setup", "Calculation", "SOFA export"][rawValue] }
     var stage: Stage? {
         switch self {
         case .inputs: nil
@@ -49,6 +49,18 @@ extension ProjectRecord {
     }
 }
 
+extension Stage {
+    var workflowRunTitle: String {
+        switch self {
+        case .scanPreparation: "Run \(WorkflowStep.prepare.title)"
+        case .inference: "Run Mesh2PPM"
+        case .preprocessing: "Run \(WorkflowStep.simulation.title)"
+        case .numcalc: "Run \(WorkflowStep.calculate.title)"
+        case .postprocessing: "Run \(WorkflowStep.results.title)"
+        }
+    }
+}
+
 struct WorkflowAction {
     var title: String
     var step: WorkflowStep
@@ -90,7 +102,7 @@ extension AppStore {
         if isCheckingProjectFiles { return .init(title: "Checking project files…", step: workflowStep, enabled: false) }
         if let p = selectedProject, p.scanPreparation.enabled,
            !(selectedProjectStatus?.completed.contains(.scanPreparation) ?? false) {
-            return .init(title: "Prepare ears", step: .prepare, stage: .scanPreparation, enabled: canRun(stage: .scanPreparation))
+            return .init(title: Stage.scanPreparation.workflowRunTitle, step: .prepare, stage: .scanPreparation, enabled: canRun(stage: .scanPreparation))
         }
         if let issue = selectedValidationIssues.first(where: { $0.id.hasPrefix("ear_edit.") }) {
             return .init(title: issue.message, step: .prepare)
@@ -102,7 +114,7 @@ extension AppStore {
         }
         if let stage = nextStage {
             let step = stage == .inference ? WorkflowStep.prepare : WorkflowStep.allCases.first(where: { $0.stage == stage })
-            if let step { return .init(title: step == .calculate ? "Calculate" : step == .results ? "SOFA export" : "Run \(step.title.lowercased())", step: step, stage: stage, enabled: canRun(stage: stage)) }
+            if let step { return .init(title: stage.workflowRunTitle, step: step, stage: stage, enabled: canRun(stage: stage)) }
         }
         return .init(title: "Open results", step: .results)
     }

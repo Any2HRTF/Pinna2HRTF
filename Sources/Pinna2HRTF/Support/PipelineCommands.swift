@@ -71,7 +71,7 @@ struct PipelineCommands: Commands {
                 commands?.toggleLog()
             }
         }
-        CommandMenu("Pipeline") {
+        CommandMenu("Workflow") {
             ForEach(EarSide.allCases) { side in
                 Button("Place \(side.title) Microphone") {
                     commands?.placeMicrophone(side)
@@ -89,7 +89,7 @@ struct PipelineCommands: Commands {
 
             Menu("Run stage") {
                 ForEach(Stage.allCases) { stage in
-                    Button(stage.title) {
+                    Button(stage.workflowRunTitle) {
                     commands?.runStage(stage)
                 }
                     .disabled(commands?.canRunStage(stage) != true)

@@ -9,7 +9,7 @@ namespace Pinna2HRTF.Windows;
 
 public partial class MainWindow
 {
-    static readonly string[] WorkflowTitles = ["Project", "Prepare ears & model", "Simulation setup", "Calculate", "SOFA export"];
+    static readonly string[] WorkflowTitles = ["Project", "Ear preparation & modelling", "Simulation setup", "Calculation", "SOFA export"];
     readonly StackPanel[] workflowPages = Enumerable.Range(0, 5).Select(_ => new StackPanel { Spacing = 10 }).ToArray();
     readonly ListBox workflowNavigation = new() { SelectionMode = SelectionMode.Single };
     readonly TextBlock[] workflowStates = Enumerable.Range(0, 5).Select(_ => new TextBlock { FontSize = 11, TextWrapping = TextWrapping.Wrap }).ToArray();
@@ -25,6 +25,11 @@ public partial class MainWindow
     readonly Button workflowCompact = new() { Content = "Show workflow", MaxWidth = 260 };
     readonly ProgressBar workflowProgress = new() { IsIndeterminate = true, Visibility = Visibility.Collapsed };
     ScrollViewer workflowScroll = new();
+    readonly MenuFlyoutItem?[] workflowRunItems = new MenuFlyoutItem?[5];
+    readonly List<MenuFlyoutItem> workflowRunAllItems = [], workflowResetItems = [];
+    MenuFlyoutItem? workflowRerunItem, workflowStopItem;
+    ToggleMenuFlyoutItem? projectsViewItem, workflowViewItem, logViewItem;
+    Action? refreshSofaPath;
     bool updatingWorkflow;
     int workflowStep;
 
@@ -41,7 +46,7 @@ public partial class MainWindow
         return "manual";
     }
 
-    static string WorkflowStageTitle(Stage stage) => stage == Stage.ScanPreparation ? "Prepare ears" : stage == Stage.Inference ? "Mesh2PPM" : WorkflowTitles[Math.Max(1, Array.IndexOf(Stage.GetValues(), stage))];
+    static string WorkflowStageTitle(Stage stage) => stage == Stage.ScanPreparation ? WorkflowTitles[1] : stage == Stage.Inference ? "Mesh2PPM" : WorkflowTitles[Math.Max(1, Array.IndexOf(Stage.GetValues(), stage))];
 
     TextBlock WorkflowText(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = mutedTextBrush, FontSize = 12 };
     Button WorkflowButton(string title, RoutedEventHandler action) { var b = new Button { Content = title }; b.Click += action; return b; }
@@ -59,7 +64,7 @@ public partial class MainWindow
             var row = new Grid { ColumnSpacing = 8 };
             row.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
-            row.Children.Add(new TextBlock { Text = $"{i + 1}. {WorkflowTitles[i]}", VerticalAlignment = VerticalAlignment.Center, Foreground = primaryTextBrush });
+            row.Children.Add(new TextBlock { Text = $"{i + 1}. {WorkflowTitles[i]}", VerticalAlignment = VerticalAlignment.Center, Foreground = primaryTextBrush, TextWrapping = TextWrapping.Wrap });
             Grid.SetColumn(workflowStates[i], 1);
             workflowStates[i].VerticalAlignment = VerticalAlignment.Center;
             row.Children.Add(workflowStates[i]);
@@ -81,9 +86,9 @@ public partial class MainWindow
         input.Children.Add(workflowSource);
         AddPathSetting(workflowEarInputs, "Left ear (optional)", "project.left_ear", leftEarBox, BrowseLeftEarClicked);
         AddPathSetting(workflowEarInputs, "Right ear (optional)", "project.right_ear", rightEarBox, BrowseRightEarClicked);
-        workflowEarInputs.Children.Add(WorkflowText("Choose at least one ear. Inspect and edit in Prepare ears.")); input.Children.Add(workflowEarInputs);
+        workflowEarInputs.Children.Add(WorkflowText("Choose at least one ear. Inspect and edit in Ear preparation & modelling.")); input.Children.Add(workflowEarInputs);
         AddPathSetting(workflowScanInputs, "Full-head scan", "scan_preparation.scan_path", scanPathBox, BrowseScanClicked);
-        workflowScanInputs.Children.Add(WorkflowText("Choose ears beside Align scan, then extract them in Prepare ears."));
+        workflowScanInputs.Children.Add(WorkflowText("Choose which ears to extract in Ear preparation & modelling."));
         input.Children.Add(workflowScanInputs);
         workflowSource.SelectionChanged += (_, _) => {
             if (updatingWorkflow || loading || selectedProject is not { } p || ProjectBusy(p.Id)) return;
@@ -91,25 +96,35 @@ public partial class MainWindow
             Persist(); LoadSelectedProject(); RefreshArtifacts(); RefreshPipelineStatus();
         };
         var prepare = workflowPages[1]; prepare.Children.Add(workflowPreparation);
-        var alignmentRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        alignmentRow.Children.Add(alignScanButton); alignScanButton.Click += BeginScanAlignmentClicked;
-        var prepareLabel = WorkflowText("Prepare"); prepareLabel.VerticalAlignment = VerticalAlignment.Center;
-        alignmentRow.Children.Add(prepareLabel);
-        foreach (var (side, box) in new[] { ("left", prepareLeftEarBox), ("right", prepareRightEarBox) }) {
-            box.Content = side == "left" ? "Left" : "Right";
-            box.MinWidth = 0; box.MinHeight = 28; box.VerticalAlignment = VerticalAlignment.Center;
-            AutomationProperties.SetName(box, "Prepare " + side + " ear");
-            box.Click += (_, _) => {
+        var scanActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        scanActions.Children.Add(alignScanButton);
+        alignScanButton.Click += BeginScanAlignmentClicked;
+        var ears = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        ears.Children.Add(new TextBlock { Text = "Prepare", VerticalAlignment = VerticalAlignment.Center });
+        foreach (var (box, side) in new[] { (prepareLeftEarBox, "Left"), (prepareRightEarBox, "Right") })
+        {
+            box.Content = side;
+            box.MinWidth = 0;
+            AutomationProperties.SetName(box, $"Prepare {side.ToLowerInvariant()} ear");
+            box.Click += (_, _) =>
+            {
                 if (loading || updatingWorkflow || selectedProject is not { } project || ProjectBusy(project.Id)) return;
-                if (side == "left") project.Settings.ScanPreparation.PrepareLeft = box.IsChecked == true;
+                if (side == "Left") project.Settings.ScanPreparation.PrepareLeft = box.IsChecked == true;
                 else project.Settings.ScanPreparation.PrepareRight = box.IsChecked == true;
-                Persist(); LoadSelectedProject(); RefreshArtifacts(); RefreshPipelineStatus();
+                InvalidateManualPositions(project);
+                Persist();
+                LoadSelectedProject();
+                RefreshArtifacts();
+                RefreshPipelineStatus();
             };
-            alignmentRow.Children.Add(box);
+            ears.Children.Add(box);
         }
-        workflowPreparation.Children.Add(alignmentRow);
+        scanActions.Children.Add(ears);
+        workflowPreparation.SizeChanged += (_, e) => scanActions.Orientation = e.NewSize.Width >= 326
+            ? Orientation.Horizontal : Orientation.Vertical;
+        workflowPreparation.Children.Add(scanActions);
         workflowPreparation.Children.Add(WorkflowText("Use an aligned scan, or align it here before preparing ears."));
-        AddExpander(workflowPreparation, "Advanced settings - scan preparation", [
+        AddExpander(workflowPreparation, "Advanced scan settings", [
             AddSettingPanel("Target edge length (mm)", "scan_preparation.target_edge", targetEdgeBox),
             AddSettingPanel("Left crop margin (mm)", "scan_preparation.left_margin", leftMarginBox),
             AddSettingPanel("Right crop margin (mm)", "scan_preparation.right_margin", rightMarginBox),
@@ -119,18 +134,18 @@ public partial class MainWindow
         prepare.Children.Add(WorkflowText("Inspect and optionally edit each ear. Original files are preserved."));
         foreach (var side in new[] { "left", "right" }) {
             var row = new StackPanel { Spacing = 6 };
-            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            actions.Children.Add(new TextBlock { Text = $"{char.ToUpperInvariant(side[0]) + side[1..]} ear", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
             var status = WorkflowText("");
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
             var inspect = WorkflowButton("Inspect", (_, _) => { if (selectedProject is { } p && SourceEar(p, side) is string path) OpenArtifact(new Artifact($"{side} ear", path, side)); });
             var edit = WorkflowButton("Edit...", async (_, _) => await EditPreparedEarAsync(side));
-            actions.Children.Add(inspect); actions.Children.Add(edit); row.Children.Add(actions); row.Children.Add(status);
+            actions.Children.Add(inspect); actions.Children.Add(edit); row.Children.Add(WorkflowEarRow(side, status, actions));
             var original = WorkflowButton("Use original ear", (_, _) => { if (selectedProject is { } p && !ProjectBusy(p.Id)) {
                 p.Settings.ScanPreparation.SetEarEdit(side, null);
                 InvalidateManualPositions(p); Persist(); RefreshArtifacts(); RefreshPipelineStatus();
             }}); row.Children.Add(original); prepare.Children.Add(row);
             workflowEarRows.Add((side, row, status, inspect, edit, original));
         }
+        prepare.Children.Add(WorkflowDivider());
         var model = prepare; model.Children.Add(workflowMethod);
         model.Children.Add(WorkflowText("One method applies to every included ear."));
         workflowMethod.SelectionChanged += (_, _) => {
@@ -142,8 +157,11 @@ public partial class MainWindow
         workflowInference.Children.Add(AddSettingPanel("Model", "inference.model", modelPicker));
         model.Children.Add(workflowInference); model.Children.Add(workflowManual); model.Children.Add(workflowDirect);
         foreach (var side in new[] { "left", "right" }) {
-            var row = new StackPanel { Spacing = 4 }; var status = WorkflowText(""); row.Children.Add(status);
-            var fit = WorkflowButton($"Fit {side} ear...", async (_, _) => await TryOpenPPMFittingAsync(side)); row.Children.Add(fit);
+            var row = new StackPanel();
+            var status = WorkflowText("");
+            var fit = WorkflowButton("Fit…", async (_, _) => await TryOpenPPMFittingAsync(side));
+            AutomationProperties.SetName(fit, $"Fit {side} ear");
+            row.Children.Add(WorkflowEarRow(side, status, fit));
             workflowManual.Children.Add(row); workflowFitRows.Add((side, row, status, fit));
         }
         workflowManual.Children.Add(WorkflowText("Save a current fit for every included ear to continue."));
@@ -177,18 +195,24 @@ public partial class MainWindow
         AddSetting(workflowSpatial, "Subdivision level (0–5)", "postprocessing.spatial_subdivisions", spatialSubdivisionsBox);
         AddSetting(workflowSpatial, "Normalize to frontal reference", "postprocessing.spatial_normalize", spatialNormalizeBox);
         workflowSpatial.Children.Add(WorkflowText("Adds source directions while preserving arrival times. Results are saved in Upsampled; originals are kept.")); results.Children.Add(workflowSpatial);
-        results.Children.Add(PathSettingPanel("SOFA output folder (optional)", "postprocessing.output_folder", sofaFolderBox, async (_, _) => { var path = await PickFolderAsync(sofaFolderBox.Text); if (path != null) sofaFolderBox.Text = path; }));
-        results.Children.Add(WorkflowButton("Open output folder", (_, _) => { if (selectedProject is { } p && Directory.Exists(SofaDirectory(p))) OpenExternal(SofaDirectory(p)); }));
+        results.Children.Add(PathSettingPanel("SOFA output folder", "postprocessing.output_folder", sofaFolderBox, async (_, _) => {
+            var project = selectedProject;
+            var path = await PickFolderAsync(EffectiveSofaPath());
+            if (path != null && project == selectedProject && project != null && !ProjectBusy(project.Id))
+            {
+                sofaFolderBox.Text = path;
+                await CommitSettingInputAsync(sofaFolderBox);
+            }
+        }));
+        results.Children.Add(WorkflowButton("Open output folder", (_, _) => {
+            if (EffectiveSofaPath() is string path && Directory.Exists(path)) OpenExternal(path);
+        }));
         results.Children.Add(WorkflowText("Use Viewing above the viewer to inspect generated meshes, plots and pressure fields."));
         var stages = Stage.GetValues();
         for (var index = 0; index < stages.Length; index++) {
             var stage = stages[index];
             var target = stage == Stage.ScanPreparation ? workflowPreparation
                 : stage == Stage.Inference ? workflowInference : workflowPages[index];
-            var run = WorkflowButton("Run " + WorkflowStageTitle(stage), StageButtonClicked);
-            run.Tag = stage;
-            stageButtons.Add(run);
-            target.Children.Add(run);
             target.Children.Add(workflowReasons[index]);
         }
         var footer = new StackPanel { Spacing = 6, Margin = new Thickness(14, 8, 14, 12) };
@@ -197,10 +221,99 @@ public partial class MainWindow
         pipelineHintText = WorkflowText("");
         footer.Children.Add(workflowProgress);
         footer.Children.Add(pipelineHintText);
-        footer.Children.Add(runAllButton);
-        Grid.SetRow(footer, 3); outer.Children.Add(footer);
+        var actionsRow = new Grid { ColumnSpacing = 6 };
+        actionsRow.ColumnDefinitions.Add(new());
+        actionsRow.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        actionsRow.Children.Add(runAllButton);
+        var more = new Button { Content = "…", VerticalAlignment = VerticalAlignment.Stretch };
+        AutomationProperties.SetName(more, "More workflow actions");
+        ToolTipService.SetToolTip(more, "More workflow actions");
+        var flyout = new MenuFlyout();
+        var runAll = MenuItem("Run All", RunAllClicked);
+        workflowRunAllItems.Add(runAll);
+        flyout.Items.Add(runAll);
+        workflowRerunItem = MenuItem("Rerun selected step", (_, _) => RunWorkflowStep(workflowStep));
+        flyout.Items.Add(workflowRerunItem);
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        var reset = MenuItem("Reset Outputs…", ResetOutputsClicked);
+        workflowResetItems.Add(reset);
+        flyout.Items.Add(reset);
+        flyout.Opening += (_, _) => RefreshWorkflowCommands();
+        more.Flyout = flyout;
+        Grid.SetColumn(more, 1);
+        actionsRow.Children.Add(more);
+        footer.Children.Add(actionsRow);
+        var footerHost = new Border { BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = borderBrush, Child = footer };
+        Grid.SetRow(footerHost, 3);
+        outer.Children.Add(footerHost);
         settingsPaneBorder.Child = outer; RegisterSettingControls();
         SelectWorkflowStep(0); return settingsPaneBorder;
+    }
+
+    Border WorkflowDivider() => new() { Height = 1, Background = borderBrush, Margin = new Thickness(0, 4, 0, 4) };
+
+    Grid WorkflowEarRow(string side, TextBlock status, FrameworkElement actions)
+    {
+        var row = new Grid { ColumnSpacing = 8 };
+        row.ColumnDefinitions.Add(new());
+        row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        var label = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        label.Children.Add(new TextBlock { Text = side == "left" ? "Left ear" : "Right ear", FontWeight = FontWeights.SemiBold });
+        label.Children.Add(status);
+        row.Children.Add(label);
+        Grid.SetColumn(actions, 1);
+        actions.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(actions);
+        return row;
+    }
+
+    Stage[] WorkflowStepStages(ProjectRecord project, int step) => step switch
+    {
+        1 => [.. AutomaticStages(project).Where(stage => stage == Stage.ScanPreparation || stage == Stage.Inference)],
+        2 => [Stage.Preprocessing],
+        3 => [Stage.Numcalc],
+        4 => [Stage.Postprocessing],
+        _ => []
+    };
+
+    void RunWorkflowStep(int step)
+    {
+        if (selectedProject is not { } project) return;
+        var stages = WorkflowStepStages(project, step);
+        if (stages.Length == 0 || queuedStages.ContainsKey(project.Id) || !StageCanRun(stages[0], project)) return;
+        SelectWorkflowStep(step);
+        if (!macInspectorVisible) ToggleMacInspector();
+        StartWorkflowSequence(project, stages);
+    }
+
+    void RefreshWorkflowCommands(ArtifactInspection? inspection = null)
+    {
+        var project = selectedProject;
+        var sequencePending = project != null && queuedStages.ContainsKey(project.Id);
+        bool CanRunStep(int step) => !sequencePending && project != null && WorkflowStepStages(project, step).FirstOrDefault() is { } stage &&
+            StageCanRun(stage, project, inspection);
+        for (var step = 1; step < workflowRunItems.Length; step++)
+            if (workflowRunItems[step] is { } item) item.IsEnabled = CanRunStep(step);
+        if (workflowRerunItem != null) workflowRerunItem.IsEnabled = CanRunStep(workflowStep);
+        var next = project == null ? null : AutomaticStages(project).FirstOrDefault(stage => !StageIsComplete(stage, project, inspection));
+        foreach (var item in workflowRunAllItems) item.IsEnabled = !sequencePending && next != null && StageCanRun(next, project, inspection);
+        foreach (var item in workflowResetItems) item.IsEnabled = !sequencePending && project != null && !ProjectBusy(project.Id);
+        if (workflowStopItem != null) workflowStopItem.IsEnabled = project != null && (runs.ContainsKey(project.Id) || queuedStages.ContainsKey(project.Id));
+    }
+
+    void SyncPaneMenu()
+    {
+        if (projectsViewItem != null) projectsViewItem.IsChecked = !projectsCollapsed;
+        if (workflowViewItem != null) workflowViewItem.IsChecked = macInspectorVisible;
+        if (logViewItem != null) logViewItem.IsChecked = !logCollapsed;
+    }
+
+    string? EffectiveSofaPath()
+    {
+        if (selectedProject is not { } project || string.IsNullOrWhiteSpace(project.SaveLocation)) return null;
+        try { return SofaDirectory(project); }
+        catch (ArgumentException) { return null; }
+        catch (NotSupportedException) { return null; }
     }
 
     void SelectWorkflowStep(int step)
@@ -221,7 +334,7 @@ public partial class MainWindow
     WorkflowAction NextWorkflowAction(ArtifactInspection? inspection = null)
     {
         if (selectedProject is not { } p) return new("Create or select a project", 0, Enabled: false);
-        if (runs.ContainsKey(p.Id)) return new("Stop", workflowStep);
+        if (runs.ContainsKey(p.Id) || queuedStages.ContainsKey(p.Id)) return new("Stop", workflowStep);
         if (placementSide != null) return new("Finish microphone placement", 2);
         if (scanAlignmentMode) return new("Finish scan alignment", 1);
         if (WorkflowInputIssue(p) is string input) return new(input, p.Settings.ScanPreparation.Enabled && !WorkflowSides(p).Any() && File.Exists(p.Settings.ScanPreparation.ScanPath) && !string.IsNullOrWhiteSpace(p.SaveLocation) ? 1 : 0);
@@ -238,7 +351,7 @@ public partial class MainWindow
     }
     void PerformWorkflowAction()
     {
-        if (selectedProject is { } p && runs.ContainsKey(p.Id)) { StopProject(p); return; }
+        if (selectedProject is { } p && (runs.ContainsKey(p.Id) || queuedStages.ContainsKey(p.Id))) { StopProject(p); return; }
         var action = NextWorkflowAction(); SelectWorkflowStep(action.Step);
         if (!macInspectorVisible) ToggleMacInspector();
         if (!action.Enabled) return;
@@ -258,7 +371,7 @@ public partial class MainWindow
             return;
         }
         if (action.Fit != null) _ = TryOpenPPMFittingAsync(action.Fit);
-        else if (action.Stage != null && StageCanRun(action.Stage, selectedProject)) RunStage(action.Stage);
+        else if (action.Stage is { } stage && selectedProject is { } target) StartWorkflowSequence(target, [stage]);
     }
     void RefreshWorkflow(ArtifactInspection? inspection = null)
     {
@@ -289,17 +402,15 @@ public partial class MainWindow
             }
             foreach (var row in workflowFitRows) {
                 row.Row.Visibility = sides.Contains(row.Side) ? Visibility.Visible : Visibility.Collapsed;
-                row.Status.Text = p != null && FitIsCurrent(p, row.Side) ? $"{row.Side}: complete" : $"{row.Side}: current fit required";
+                row.Status.Text = p != null && FitIsCurrent(p, row.Side) ? "Current fit saved" : "Current fit required";
                 row.Fit.IsEnabled = !busy && p != null && SourceEar(p, row.Side, inspection) != null;
             }
             workflowStates[0].Text = p != null && WorkflowInputIssue(p) == null ? "Complete" : "Needs input";
             for (var i = 0; i < 5; i++) {
                 var stage = Stage.GetValues()[i];
                 if (i != 1) workflowStates[Math.Max(1, i)].Text = p == null ? "Needs input" : stageStatus[i].Text;
-                workflowReasons[i].Text = p == null ? "Select a project" : StageUnavailableReason(stage, p, inspection) ?? "Ready";
-                var stopping = p != null && runs.TryGetValue(p.Id, out var active) && active.Stage == stage;
-                stageButtons[i].Content = stopping ? "Stop" : "Run " + WorkflowStageTitle(stage);
-                StyleWorkflowRun(stageButtons[i], stopping);
+                workflowReasons[i].Text = p == null ? "Select a project" : StageUnavailableReason(stage, p, inspection) ?? "";
+                workflowReasons[i].Visibility = workflowReasons[i].Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
             }
             if (!scan) workflowStates[1].Text = "Optional";
             if (p != null && (!scan || StageIsComplete(Stage.ScanPreparation, p, inspection))) {
@@ -324,20 +435,23 @@ public partial class MainWindow
             }
             var next = NextWorkflowAction(inspection);
             var reason = next.Stage != null && p != null ? StageUnavailableReason(next.Stage, p, inspection) : null;
-            runAllButton.Content = reason == null ? next.Title : "Review " + WorkflowTitles[next.Step].ToLowerInvariant(); runAllButton.IsEnabled = next.Enabled && (!busy || p != null && runs.ContainsKey(p.Id));
+            var stoppable = p != null && (runs.ContainsKey(p.Id) || queuedStages.ContainsKey(p.Id));
+            runAllButton.Content = reason == null ? next.Title : "Review " + WorkflowTitles[next.Step].ToLowerInvariant(); runAllButton.IsEnabled = next.Enabled && (!busy || stoppable);
             var retry = p != null && next.Stage != null && FailedStages(p.Id).Contains(next.Stage);
             if (retry && reason == null) runAllButton.Content = "Retry " + WorkflowStageTitle(next.Stage!);
             workflowCompact.Content = runAllButton.Content;
-            StyleWorkflowRun(runAllButton, p != null && runs.ContainsKey(p.Id));
-            StyleWorkflowRun(workflowCompact, p != null && runs.ContainsKey(p.Id));
+            StyleWorkflowRun(runAllButton, stoppable);
+            StyleWorkflowRun(workflowCompact, stoppable);
             if (workflowLevelOffset != null) workflowLevelOffset.Visibility = normalizeHrtfsBox.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             if (workflowSamplingRate != null) workflowSamplingRate.Visibility = resampleHrirsBox.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             workflowSpatial.Visibility = spatialUpsamplingBox.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             workflowCompact.Visibility = macInspectorVisible ? Visibility.Collapsed : Visibility.Visible;
             workflowProgress.Visibility = p != null && runs.ContainsKey(p.Id) ? Visibility.Visible : Visibility.Collapsed;
-            pipelineHintText.Text = reason ?? (p == null ? "Select a project" : next.Fit != null ? "Manual fit required" : next.Stage != null ? "Ready" : runs.ContainsKey(p.Id) ? "Running" : "Next action");
+            pipelineHintText.Text = reason ?? (p == null ? "Select a project" : next.Fit != null ? "Manual fit required" : next.Stage != null ? "Ready" : stoppable ? "Running" : "Next action");
             if (retry && reason == null) pipelineHintText.Text = next.Stage!.Title + " failed. Review its inputs before retrying.";
             pipelineHintText.Visibility = Visibility.Visible;
+            refreshSofaPath?.Invoke();
+            RefreshWorkflowCommands(inspection);
         } finally { updatingWorkflow = false; }
     }
 

@@ -30,7 +30,7 @@ public partial class MainWindow
         if (reservation == null) return;
         if (project.Settings.ScanPreparation.Enabled && !ScanPreparationOutputsCurrent(project))
         {
-            AppendLog("Run Scan Preparation successfully before reviewing a prepared ear.", project.Id);
+            AppendLog("Run Ear preparation & modelling before reviewing a prepared ear.", project.Id);
             return;
         }
         var settings = project.Settings.ScanPreparation;

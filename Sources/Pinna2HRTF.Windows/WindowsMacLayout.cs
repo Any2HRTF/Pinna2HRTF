@@ -130,6 +130,7 @@ public partial class MainWindow
     void SetMacSidebar(bool collapsed)
     {
         projectsCollapsed = collapsed;
+        SyncPaneMenu();
         if (projectsPaneBorder != null) projectsPaneBorder.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         if (projectsColumn != null) { projectsColumn.MinWidth = collapsed ? 0 : 180; projectsColumn.MaxWidth = 320; projectsColumn.Width = new GridLength(collapsed ? 0 : Math.Clamp(projectsExpandedWidth, 180, 320)); }
         if (projectsSplitterColumn != null) projectsSplitterColumn.Width = new GridLength(collapsed ? 0 : 6);
@@ -140,10 +141,13 @@ public partial class MainWindow
     {
         if (settingsColumn == null || contentGrid == null || settingsPaneBorder == null) return;
         macInspectorVisible = !macInspectorVisible;
+        SyncPaneMenu();
         settingsPaneBorder.Visibility = macInspectorVisible ? Visibility.Visible : Visibility.Collapsed;
         settingsColumn.MinWidth = macInspectorVisible ? 300 : 0;
         settingsColumn.Width = new GridLength(macInspectorVisible ? settingsExpandedWidth : 0);
-        contentGrid.ColumnDefinitions[3].Width = new GridLength(macInspectorVisible ? 6 : 0);
+        var divider = contentGrid.ColumnDefinitions[3];
+        divider.MinWidth = 0;
+        divider.Width = new GridLength(macInspectorVisible ? (MacLayout ? 6 : 12) : 0);
         if (macSettingsDivider != null) macSettingsDivider.Visibility = macInspectorVisible ? Visibility.Visible : Visibility.Collapsed;
         workflowCompact.Visibility = macInspectorVisible ? Visibility.Collapsed : Visibility.Visible;
         RefreshMacPresentation();

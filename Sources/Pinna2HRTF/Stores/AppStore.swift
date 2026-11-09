@@ -472,7 +472,7 @@ final class AppStore: ObservableObject {
             return
         }
         guard ArtifactScanner.scanPreparationIsCurrent(project) else {
-            meshEditorError = "Run Scan Preparation successfully first."; return
+            meshEditorError = "Run Ear preparation & modelling first."; return
         }
         let root = URL(fileURLWithPath: project.saveLocation)
         let reportURL = root.appendingPathComponent("Prepared/mesh_preparation.json")
@@ -495,7 +495,7 @@ final class AppStore: ObservableObject {
             ppmFittingError = "Choose a project save location first."; return
         }
         if project.scanPreparation.enabled && !ArtifactScanner.scanPreparationIsCurrent(project) {
-            ppmFittingError = "Run Scan Preparation successfully with the current scan settings first."; return
+            ppmFittingError = "Run Ear preparation & modelling first."; return
         }
         guard let target = ArtifactScanner.sourceEar(for: project, side: side),
               FileManager.default.fileExists(atPath: target.path),
@@ -652,7 +652,7 @@ final class AppStore: ObservableObject {
             return
         }
         guard !stageBlocked(stage) else {
-            appendLog("Run Mesh2PPM Inference first.")
+            appendLog("Run Mesh2PPM first.")
             return
         }
         if stage == .preprocessing, isPlacingMicrophone {
@@ -716,9 +716,9 @@ final class AppStore: ObservableObject {
     private func confirmRerunPreprocessing() -> Bool {
         let alert = NSAlert()
         alert.messageText = "Preprocessing is out of date"
-        alert.informativeText = "Run preprocessing again before continuing?"
+        alert.informativeText = "Run Simulation setup again before continuing?"
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Run preprocessing")
+        alert.addButton(withTitle: Stage.preprocessing.workflowRunTitle)
         alert.addButton(withTitle: "Cancel")
         return alert.runModal() == .alertFirstButtonReturn
     }
