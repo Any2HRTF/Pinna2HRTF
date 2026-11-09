@@ -43,3 +43,4 @@ include = ["HRTFCalculation*"]
 "HRTFCalculation.Inference" = ["resources/*.csv", "resources/*.pth", "resources/*.stl", "resources/*.yaml"]
 
 "HRTFCalculation.Postprocessing" = ["*.txt"]
+"HRTFCalculation" = ["EvaluationGrids/ARI_Grid/*.txt"]

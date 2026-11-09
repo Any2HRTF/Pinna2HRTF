@@ -636,7 +636,10 @@ enum PreprocessingSignature {
 
     private static func gridPath(_ value: String?) -> String {
         let value = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let name = value.isEmpty ? "Default" : value
+        let name = value.isEmpty ? Defaults.evaluationGrid : value
+        if name == Defaults.evaluationGrid {
+            return Defaults.pipelineRoot.appendingPathComponent("HRTFCalculation/EvaluationGrids/").appendingPathComponent(name).path
+        }
         if !name.contains("/") {
             return Defaults.pipelineRoot.appendingPathComponent("External/src/Mesh2HRTF/mesh2hrtf/Mesh2Input/EvaluationGrids/Data").appendingPathComponent(name).path
         }

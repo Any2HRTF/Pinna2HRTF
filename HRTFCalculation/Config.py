@@ -13,6 +13,10 @@ from .Compatibility import import_legacy_distance, read_settings, annotate_legac
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
+DEFAULT_EVALUATION_GRID = "ARI_Grid"
+BUNDLED_EVALUATION_GRID_PATH = Path(__file__).resolve().parent / "EvaluationGrids" / DEFAULT_EVALUATION_GRID
+
+
 def worktree_root() -> Path:
     candidates = []
     env_root = os.environ.get("PINNA2HRTF_ROOT")
@@ -57,7 +61,7 @@ class PathsConfig(BaseModel):
     mesh2hrtf_path: Path | None = None
     numcalc_executable: Path | None = None
     mesh_grading_executable: Path | None = None
-    evaluation_grid: str = "Default"
+    evaluation_grid: str = DEFAULT_EVALUATION_GRID
 
 
 class ScanPreparationConfig(BaseModel):
@@ -334,7 +338,7 @@ def template_config() -> dict[str, Any]:
         "right_ear": "/path/to/right.stl",
         "output_dir": "runs/example",
         "external_deps_dir": "External",
-        "evaluation_grid": "Default",
+        "evaluation_grid": DEFAULT_EVALUATION_GRID,
     }
     template["inference"]["model_config_file"] = "HRTFCalculation/Inference/resources/Local 3 Views.yaml"
     template["inference"]["model_checkpoint"] = "HRTFCalculation/Inference/resources/Local 3 Views.pth"

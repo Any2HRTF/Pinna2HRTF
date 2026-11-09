@@ -8,6 +8,7 @@ namespace Pinna2HRTF.Windows;
 // controls are replaced; supported YAML-only settings survive every app save.
 internal static class ProjectDocument
 {
+    internal const string DefaultEvaluationGrid = "ARI_Grid";
     internal static double Number(string value) => HeadGeometry.Parse(value);
     internal static bool SameJson(JsonNode? left,JsonNode? right)
     {
@@ -71,7 +72,7 @@ internal static class ProjectDocument
         Set("paths", "external_deps_dir", environment.ExternalDir);
         Set("paths", "numcalc_executable", environment.NumCalcExecutable);
         Set("paths", "mesh_grading_executable", environment.MeshGradingExecutable);
-        Set("paths", "evaluation_grid", string.IsNullOrWhiteSpace(pre.EvaluationGrid) ? "Default" : pre.EvaluationGrid);
+        Set("paths", "evaluation_grid", string.IsNullOrWhiteSpace(pre.EvaluationGrid) ? DefaultEvaluationGrid : pre.EvaluationGrid);
         Set("scan_preparation", "enabled", scan.Enabled); Set("scan_preparation", "scan_path", PathValue(scan.ScanPath));
         Set("scan_preparation", "original_scan_path", PathValue(scan.OriginalScanPath));
         Set("scan_preparation", "prepare_left", scan.PrepareLeft); Set("scan_preparation", "prepare_right", scan.PrepareRight);

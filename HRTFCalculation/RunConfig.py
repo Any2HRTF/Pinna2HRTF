@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from typing import Callable, Iterable
 
-from .Config import PipelineConfig, load_config, save_config, template_config
+from .Config import BUNDLED_EVALUATION_GRID_PATH, DEFAULT_EVALUATION_GRID, PipelineConfig, load_config, save_config, template_config
 from .LiveEvents import emit_live_event
 
 
@@ -202,7 +202,9 @@ def preprocessing_input_signature(config: PipelineConfig) -> dict:
     for key in ("enabled", "title", "pictures", "write_intermediates"):
         settings.pop(key, None)
     grid = Path(config.paths.evaluation_grid)
-    if not grid.is_absolute():
+    if config.paths.evaluation_grid == DEFAULT_EVALUATION_GRID:
+        grid = BUNDLED_EVALUATION_GRID_PATH
+    elif not grid.is_absolute():
         grid = config.paths.mesh2hrtf_path / "Mesh2Input" / "EvaluationGrids" / "Data" / grid
     grid_hashes = {name: cached_sha256(grid / name) for name in ("Nodes.txt", "Elements.txt")}
     ears = {}

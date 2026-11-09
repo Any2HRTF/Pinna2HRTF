@@ -81,7 +81,7 @@ enum PipelineConfigWriter {
                 "output_dir": project.saveLocation, "external_deps_dir": environment.externalDir,
                 "numcalc_executable": environment.numcalcExecutable,
                 "mesh_grading_executable": environment.meshGradingExecutable,
-                "evaluation_grid": grid.isEmpty ? "Default" : grid
+                "evaluation_grid": grid.isEmpty ? Defaults.evaluationGrid : grid
             ],
             "scan_preparation": [
                 "enabled": scan.enabled, "scan_path": path(scan.scanPath), "original_scan_path": nullable(scan.originalScanPath),

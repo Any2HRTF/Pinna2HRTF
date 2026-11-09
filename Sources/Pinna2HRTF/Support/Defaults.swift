@@ -1,6 +1,7 @@
 import Foundation
 
 enum Defaults {
+    static let evaluationGrid = "ARI_Grid"
     static func packageRoot(from filePath: String = #filePath) -> URL {
         let start = URL(fileURLWithPath: filePath).deletingLastPathComponent()
         var current = start

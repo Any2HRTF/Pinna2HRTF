@@ -14,7 +14,7 @@ from pathlib import Path
 from .src.create_head import head
 from .src.ear_canal_closer import ear_canal_closer, estimate_ear_canal_position
 from .src.cut_eararea import cut_eararea, cut_eararea_projected_footprint
-from HRTFCalculation.Config import PreprocessingConfig
+from HRTFCalculation.Config import BUNDLED_EVALUATION_GRID_PATH, DEFAULT_EVALUATION_GRID, PreprocessingConfig
 from HRTFCalculation.Geometry import resolve_geometry, boundary_y, needs_distance_warning
 from HRTFCalculation.LiveEvents import emit_live_event
 
@@ -313,6 +313,8 @@ def reposition_ears_laterally(ears, translations):
 
 def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, mesh2hrtf_path, evaluation_grid, preprocessing=None, output_dir=None, export_path=None, logger=print, confirm_replace_previous=None):
     settings = preprocessing or PreprocessingConfig()
+    if evaluation_grid == DEFAULT_EVALUATION_GRID:
+        evaluation_grid = BUNDLED_EVALUATION_GRID_PATH
     if output_dir is None and export_path is None:
         raise ValueError("output_dir or export_path is required")
     left_path = Path(left_path) if left_path else None
@@ -591,7 +593,7 @@ def preprocess():
     parser.add_argument('--export-path', type=str, required=True,  help='Path to exported Mesh2HRTF Project.')
     parser.add_argument('--mesh-grading-executable', type=str, required=True, help='Path to the mesh_grading executable.')
     parser.add_argument('--Mesh2HRTF-path', type=str, required=True, help='Path to the location of the mesh2hrtf directory.')
-    parser.add_argument('--Mesh2HRTF-Evaluation-Grid', type=str, default='Default', help='Name or path of the evaluation grid to be used for Mesh2HRTF.')
+    parser.add_argument('--Mesh2HRTF-Evaluation-Grid', type=str, default=DEFAULT_EVALUATION_GRID, help='Name or path of the evaluation grid to be used for Mesh2HRTF.')
     parser.add_argument('--ear-cut-clearance-scale', type=float, default=1.3)
     parser.add_argument('--ear-cut-mode', choices=['ellipse', 'projected_footprint', 'exact'], default='ellipse')
     parser.add_argument('--ear-canal-closer-mode', choices=['legacy', 'interpolated'], default='legacy')

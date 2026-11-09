@@ -200,7 +200,9 @@ enum ProjectConfigDocument {
             ("mesh_max_error", \.meshMaxError), ("mesh_gamma", \.meshGamma), ("mesh_gamma_opposite", \.meshGammaOpposite)
         ]
         for (key, path) in preprocessingKeys { if let value = text(pre, key) { project.settings.preprocessing[keyPath: path] = value } }
-        project.settings.preprocessing.evaluationGrid = text(paths, "evaluation_grid").map(relocated)
+        project.settings.preprocessing.evaluationGrid = text(paths, "evaluation_grid").map {
+            $0 == Defaults.evaluationGrid ? $0 : relocated($0)
+        }
         project.settings.preprocessing.earDistance = text(pre, "ear_distance") ?? text(pre, "head_radius")
         project.settings.preprocessing.sourceAssignmentFaceCount = text(pre, "source_assignment_face_count") ?? "6"
         for side in EarSide.allCases {

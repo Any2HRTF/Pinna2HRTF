@@ -52,7 +52,7 @@
   {
     "id": "mesh2hrtf.evaluation_grid",
     "title": "Evaluation grid",
-    "description": "Directions where the sound field is evaluated. Leave empty to use the bundled grid.",
+    "description": "Directions where the sound field is evaluated. Leave empty to use the bundled 91-direction ARI grid.",
     "publications": [
       {
         "title": "Brinkmann et al. (2023)",

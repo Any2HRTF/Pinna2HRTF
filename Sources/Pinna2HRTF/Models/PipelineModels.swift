@@ -338,7 +338,7 @@ extension ProjectRecord {
                       fitting.leftParametersPath ?? "", fitting.rightParametersPath ?? "",
                       fitting.leftBlendPath ?? "", fitting.rightBlendPath ?? "", fitting.templateBlendPath ?? ""]
         }
-        return paths.filter { !$0.isEmpty && $0 != "Default" }
+        return paths.filter { !$0.isEmpty && $0 != "Default" && $0 != Defaults.evaluationGrid }
     }
 
     mutating func reconcileAfterOutputReset() {

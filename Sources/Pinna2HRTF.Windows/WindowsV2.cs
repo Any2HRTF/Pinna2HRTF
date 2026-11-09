@@ -124,8 +124,9 @@ public partial class MainWindow
         var preprocessing = config["preprocessing"]!.DeepClone().AsObject();
         foreach (var key in new[] { "enabled", "title", "pictures", "write_intermediates" }) preprocessing.Remove(key);
         var grid = p.Settings.Preprocessing.EvaluationGrid;
-        if (string.IsNullOrWhiteSpace(grid)) grid = "Default";
-        if (!Path.IsPathFullyQualified(grid)) grid = Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf", "Mesh2Input", "EvaluationGrids", "Data", grid);
+        if (string.IsNullOrWhiteSpace(grid)) grid = ProjectDocument.DefaultEvaluationGrid;
+        if (grid == ProjectDocument.DefaultEvaluationGrid) grid = Path.Combine(packageRoot, "HRTFCalculation", "EvaluationGrids", grid);
+        else if (!Path.IsPathFullyQualified(grid)) grid = Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf", "Mesh2Input", "EvaluationGrids", "Data", grid);
         var ears = new JsonObject();
         foreach (var side in WorkflowSides(p))
         {
