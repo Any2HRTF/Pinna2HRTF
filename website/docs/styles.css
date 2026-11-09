@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
   --page: #eeeeec;
   --paper: #fff;
   --ink: #171717;
@@ -119,3 +119,24 @@ details[open] summary { margin-bottom: 14px; }
 figure { border: 0; background: transparent; }
 figure > a { display: block; }
 figcaption { border-top: 0; padding: 10px 0; }
+
+@media screen and (prefers-color-scheme: dark) {
+  :root {
+    --page: #111315;
+    --paper: #1b1e22;
+    --ink: #f1f2f3;
+    --muted: #b4b8bd;
+    --quiet: #92979d;
+    --rule: #525861;
+    --rule-soft: #373d44;
+    --accent: #ffc928;
+  }
+  a:hover { color: #f5d76e; }
+  .top-nav a:hover, .top-nav a[aria-current="page"] { color: #171717; }
+  .sidebar-links a:hover { color: var(--ink); background: #292e34; }
+  .sidebar-links a[aria-current="page"] { color: var(--ink); background: #433a1c; border-left-color: var(--accent); }
+  .release-note, .callout, pre, th { background: #24292f; }
+  .page-card:hover { color: var(--ink); background: #39321c; }
+  :not(pre) > code { background: #30363d; }
+  .skip-link { color: #171717; background: #f1f2f3; }
+}

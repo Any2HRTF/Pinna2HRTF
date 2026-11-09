@@ -1,5 +1,5 @@
  :root {
-  color-scheme: light;
+  color-scheme: light dark;
   --page: #eeeeec;
   --paper: #fff;
   --ink: #171717;
@@ -209,4 +209,33 @@ h2 { margin-bottom: 0; font-size: 23px; font-weight: 700; letter-spacing: -.035e
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}
+
+@media screen and (prefers-color-scheme: dark) {
+  :root {
+    --page: #111315;
+    --paper: #1b1e22;
+    --ink: #f1f2f3;
+    --muted: #b4b8bd;
+    --quiet: #92979d;
+    --rule: #525861;
+    --rule-soft: #373d44;
+    --accent: #ffc928;
+  }
+  .main-nav a, .button-secondary, .button-download, .copy-button {
+    color: var(--ink);
+    background: #252a30;
+  }
+  .main-nav a:hover, .button-primary, .button-download:hover, .copy-button:hover {
+    color: #171717;
+    background: var(--accent);
+  }
+  .button-primary:hover { color: #171717; background: #ffe279; }
+  .button-secondary:hover { background: #343b43; }
+  .quick-spec-title, .terminal-card { background: #24292f; }
+  .terminal-card pre { color: var(--ink); }
+  .terminal-platforms > div { background: #1b1e22; }
+  .prompt, .text-link span { color: #e8c75b; }
+  .checksum-link:hover, .text-link:hover { color: #f5d76e; }
+  .skip-link { color: #171717; background: #f1f2f3; }
 }

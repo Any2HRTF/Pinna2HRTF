@@ -16,6 +16,9 @@ enum AppPreferences {
     static let developerMode = "preferences.developerMode"
     static let developerNumCalc = "preferences.developerNumCalc"
     static let developerMeshGrading = "preferences.developerMeshGrading"
+    static let developerUV = "preferences.developerUV"
+    static let developerPython = "preferences.developerPython"
+    static let developerExternalDir = "preferences.developerExternalDir"
 
     static func int(_ key: String, fallback: Int, range: ClosedRange<Int>) -> Int {
         let defaults = UserDefaults.standard
@@ -31,18 +34,24 @@ enum AppPreferences {
         enabled(notifyAll) && enabled(key)
     }
 
-    static func effectiveEnvironment(_ base: EnvironmentConfig) -> EnvironmentConfig {
+    static func developerOverride(_ key: String) -> String? {
         let defaults = UserDefaults.standard
-        guard defaults.bool(forKey: developerMode) else { return base }
+        guard defaults.bool(forKey: developerMode),
+              let value = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return nil }
+        return (value as NSString).expandingTildeInPath
+    }
+
+    static func effectiveEnvironment(_ base: EnvironmentConfig) -> EnvironmentConfig {
         var environment = base
-        if let value = defaults.string(forKey: developerNumCalc)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !value.isEmpty {
-            environment.numcalcExecutable = (value as NSString).expandingTildeInPath
+        if let value = developerOverride(developerNumCalc) { environment.numcalcExecutable = value }
+        if let value = developerOverride(developerMeshGrading) { environment.meshGradingExecutable = value }
+        if let value = developerOverride(developerUV) {
+            environment.uvExecutable = value
+            environment.uvIsExplicit = true
         }
-        if let value = defaults.string(forKey: developerMeshGrading)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !value.isEmpty {
-            environment.meshGradingExecutable = (value as NSString).expandingTildeInPath
-        }
+        if let value = developerOverride(developerExternalDir) { environment.externalDir = value }
+        if let value = developerOverride(developerPython) { environment.pythonExecutable = value }
         return environment
     }
 }

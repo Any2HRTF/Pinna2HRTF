@@ -72,9 +72,6 @@ Copy-Item (Join-Path $root "ProjectSettingHelp.json") (Join-Path $dist "ProjectS
 if (Test-Path (Join-Path $windowsProject "Resources\app_icon.ico")) {
     Copy-Item (Join-Path $windowsProject "Resources\app_icon.ico") (Join-Path $dist "app_icon.ico") -Force
 }
-if (Test-Path (Join-Path $root "icon.png")) {
-    Copy-Item (Join-Path $root "icon.png") (Join-Path $dist "icon.png") -Force
-}
 
 if (-not (Test-Path (Join-Path $root "uv.lock"))) {
     throw "uv.lock is required to build the portable Windows app."

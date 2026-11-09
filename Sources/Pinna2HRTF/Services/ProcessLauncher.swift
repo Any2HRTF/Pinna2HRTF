@@ -41,19 +41,29 @@ final class ProcessLauncher: @unchecked Sendable {
 
     static func command(_ command: Command, environment: EnvironmentConfig) throws -> (executable: URL, arguments: [String]) {
         let bundledUV = FileManager.default.isExecutableFile(atPath: environment.uvExecutable)
-        let uv: (URL, [String]) = bundledUV
-            ? (URL(fileURLWithPath: environment.uvExecutable), [])
-            : (URL(fileURLWithPath: "/usr/bin/env"), ["uv"])
+        func uvCommand() throws -> (URL, [String]) {
+            if bundledUV { return (URL(fileURLWithPath: environment.uvExecutable), []) }
+            if environment.uvIsExplicit == true {
+                throw Failure(message: "The selected uv executable is unavailable. Check the path in Settings.")
+            }
+            return (URL(fileURLWithPath: "/usr/bin/env"), ["uv"])
+        }
+        let python = environment.pythonExecutable.map { URL(fileURLWithPath: $0) }
         switch command {
         case .pipelineStage(let stage, let config):
+            if let python { return (python, ["-m", "HRTFCalculation", stage.rawValue, "--config", config.path]) }
             if Defaults.isPackagedApp {
                 return (runtimePythonURL, ["-m", "HRTFCalculation", stage.rawValue, "--config", config.path])
             }
+            let uv = try uvCommand()
             return (uv.0, uv.1 + ["run", "--no-sync", "Pinna2HRTF", stage.rawValue, "--config", config.path])
         case .python(let arguments):
+            if let python { return (python, arguments) }
             if Defaults.isPackagedApp { return (runtimePythonURL, arguments) }
+            let uv = try uvCommand()
             return (uv.0, uv.1 + ["run", "--no-sync", "python"] + arguments)
         case .uvSync:
+            let uv = try uvCommand()
             guard bundledUV || Defaults.which("uv") != nil else {
                 throw Failure(message: "UV is missing. Install uv for development or use the self-contained release app.")
             }

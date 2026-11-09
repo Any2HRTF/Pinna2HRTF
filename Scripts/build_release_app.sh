@@ -179,9 +179,6 @@ if [[ -x "$ICON_DEVELOPER_DIR/usr/bin/actool" ]]; then
     --app-icon Pinna2HRTF --platform macosx --minimum-deployment-target 13.0 --target-device mac \
     "$ROOT/Sources/Pinna2HRTF/Resources/Pinna2HRTF.icon"
 fi
-if [[ -f "$ROOT/icon.png" ]]; then
-  cp "$ROOT/icon.png" "$RESOURCES/icon.png"
-fi
 if [[ -f "$ROOT/ProjectSettingHelp.json" ]]; then
   cp "$ROOT/ProjectSettingHelp.json" "$RESOURCES/ProjectSettingHelp.json"
 fi

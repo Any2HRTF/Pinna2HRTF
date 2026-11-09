@@ -386,9 +386,10 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
 
     private var runtimeProjectIsReady: Bool {
         let package = ProcessLauncher.packageURL
+        let pythonPath = store?.environment.pythonExecutable ?? ProcessLauncher.runtimePythonURL.path
         return FileManager.default.fileExists(atPath: package.appendingPathComponent("HRTFCalculation/RunConfig.py").path) &&
             FileManager.default.fileExists(atPath: package.appendingPathComponent("HRTFCalculation/__main__.py").path) &&
-            FileManager.default.isExecutableFile(atPath: ProcessLauncher.runtimePythonURL.path)
+            FileManager.default.isExecutableFile(atPath: pythonPath)
     }
 
     private func copyPathToolsIntoEnvironment() {

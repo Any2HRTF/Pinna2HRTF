@@ -3,6 +3,8 @@ import AppKit
 import UserNotifications
 
 struct AppSettingsView: View {
+    private enum Tab: Hashable { case general, projects, computing, notifications, tools }
+
     @ObservedObject var store: AppStore
     @AppStorage(AppPreferences.projectDirectory) private var projectDirectory = ""
     @AppStorage(AppPreferences.inputHandling) private var inputHandling = InputHandling.copy.rawValue
@@ -19,21 +21,42 @@ struct AppSettingsView: View {
     @AppStorage(AppPreferences.developerMode) private var developerMode = false
     @AppStorage(AppPreferences.developerNumCalc) private var developerNumCalc = ""
     @AppStorage(AppPreferences.developerMeshGrading) private var developerMeshGrading = ""
+    @AppStorage(AppPreferences.developerUV) private var developerUV = ""
+    @AppStorage(AppPreferences.developerPython) private var developerPython = ""
+    @AppStorage(AppPreferences.developerExternalDir) private var developerExternalDir = ""
     @State private var invalidGrid = false
+    @State private var selectedTab: Tab = .general
+
+    private var windowHeight: CGFloat {
+        let desiredHeight: CGFloat
+        switch selectedTab {
+        case .general: desiredHeight = 190
+        case .projects: desiredHeight = 420
+        case .computing: desiredHeight = 230
+        case .notifications: desiredHeight = 260
+        case .tools: desiredHeight = developerMode ? 720 : 320
+        }
+        return min(desiredHeight, max(190, (NSScreen.main?.visibleFrame.height ?? 820) - 100))
+    }
 
     var body: some View {
-        TabView {
-            general.tabItem { Label("General", systemImage: "gearshape") }
-            projects.tabItem { Label("New Projects", systemImage: "folder.badge.plus") }
-            computing.tabItem { Label("Computing", systemImage: "cpu") }
-            notifications.tabItem { Label("Notifications", systemImage: "bell") }
-            tools.tabItem { Label("Tools", systemImage: "wrench.and.screwdriver") }
+        TabView(selection: $selectedTab) {
+            general.tabItem { Label("General", systemImage: "gearshape") }.tag(Tab.general)
+            projects.tabItem { Label("New Projects", systemImage: "folder.badge.plus") }.tag(Tab.projects)
+            computing.tabItem { Label("Computing", systemImage: "cpu") }.tag(Tab.computing)
+            notifications.tabItem { Label("Notifications", systemImage: "bell") }.tag(Tab.notifications)
+            tools.tabItem { Label("Tools", systemImage: "wrench.and.screwdriver") }.tag(Tab.tools)
         }
         .padding(20)
-        .frame(width: 620, height: 450)
+        .frame(width: 620, height: windowHeight)
+        .animation(.easeInOut(duration: 0.18), value: selectedTab)
+        .animation(.easeInOut(duration: 0.18), value: developerMode)
         .onChange(of: developerMode) { _ in store.environmentPreferencesDidChange() }
         .onChange(of: developerNumCalc) { _ in store.environmentPreferencesDidChange() }
         .onChange(of: developerMeshGrading) { _ in store.environmentPreferencesDidChange() }
+        .onChange(of: developerUV) { _ in store.environmentPreferencesDidChange() }
+        .onChange(of: developerPython) { _ in store.environmentPreferencesDidChange() }
+        .onChange(of: developerExternalDir) { _ in store.environmentPreferencesDidChange() }
         .onChange(of: notifyAll) { enabled in
             if !enabled { UNUserNotificationCenter.current().removeAllPendingNotificationRequests() }
         }
@@ -139,19 +162,20 @@ struct AppSettingsView: View {
             Section("Tools") {
                 toolRow("NumCalc", path: store.environment.numcalcExecutable)
                 toolRow("Mesh grading", path: store.environment.meshGradingExecutable)
-                if !Defaults.isPackagedApp {
-                    toolRow("uv", path: store.environment.uvExecutable)
+                toolRow("Python", path: store.environment.pythonExecutable ?? ProcessLauncher.runtimePythonURL.path)
+                if !Defaults.isPackagedApp || developerMode {
+                    toolRow("uv (development)", path: store.environment.uvExecutable)
                 }
+                directoryRow("Mesh2HRTF", path: URL(fileURLWithPath: store.environment.externalDir).appendingPathComponent("src/Mesh2HRTF/mesh2hrtf").path)
             }
             Section {
                 Toggle("Developer mode", isOn: $developerMode)
                 if developerMode {
                     executableSetting("NumCalc", path: $developerNumCalc, defaultPath: store.library.environment.numcalcExecutable)
                     executableSetting("Mesh grading", path: $developerMeshGrading, defaultPath: store.library.environment.meshGradingExecutable)
-                    if !Defaults.isPackagedApp {
-                        TextField("uv", text: environmentBinding(\.uvExecutable))
-                        TextField("External dependencies", text: environmentBinding(\.externalDir))
-                    }
+                    executableSetting("Python", path: $developerPython, defaultPath: ProcessLauncher.runtimePythonURL.path)
+                    executableSetting("uv", path: $developerUV, defaultPath: store.library.environment.uvExecutable)
+                    directorySetting("External dependencies", path: $developerExternalDir, defaultPath: store.library.environment.externalDir)
                 }
             }
         }
@@ -188,6 +212,18 @@ struct AppSettingsView: View {
         .help(path)
     }
 
+    private func directoryRow(_ title: String, path: String) -> some View {
+        var isDirectory: ObjCBool = false
+        let ready = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+        return HStack {
+            Label(title, systemImage: ready ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .foregroundStyle(ready ? .green : .red)
+            Spacer()
+            Text(ready ? "Available" : "Missing").foregroundStyle(.secondary)
+        }
+        .help(path)
+    }
+
     private func executableSetting(_ title: String, path: Binding<String>, defaultPath: String) -> some View {
         LabeledContent(title) {
             HStack {
@@ -214,14 +250,21 @@ struct AppSettingsView: View {
         .accessibilityElement(children: .contain)
     }
 
-    private func environmentBinding(_ keyPath: WritableKeyPath<EnvironmentConfig, String>) -> Binding<String> {
-        Binding {
-            store.library.environment[keyPath: keyPath]
-        } set: { value in
-            store.library.environment[keyPath: keyPath] = value
-            store.library.persist()
-            store.refreshArtifacts()
+    private func directorySetting(_ title: String, path: Binding<String>, defaultPath: String) -> some View {
+        LabeledContent(title) {
+            HStack {
+                TextField("", text: path, prompt: Text(defaultPath))
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("\(title) path")
+                    .help(defaultPath)
+                Button("Choose…") { chooseDirectory(selection: path) }
+                    .fixedSize()
+                if !path.wrappedValue.isEmpty {
+                    Button("Reset") { path.wrappedValue = "" }.fixedSize()
+                }
+            }
         }
+        .accessibilityElement(children: .contain)
     }
 
     private func chooseDirectory(selection: Binding<String>) {

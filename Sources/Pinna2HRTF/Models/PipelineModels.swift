@@ -100,6 +100,8 @@ struct EnvironmentConfig: Codable, Equatable {
     var numcalcExecutable: String
     var meshGradingExecutable: String
     var externalDir: String
+    var pythonExecutable: String?
+    var uvIsExplicit: Bool?
 }
 
 struct ScanPreparationSettings: Codable, Equatable {

@@ -1,14 +1,10 @@
 # Pinna2HRTF
 
+<img src="website/assets/app-icon.webp" alt="Pinna2HRTF app icon" width="96">
+
 Calculate individualized HRTFs and HRIRs from pinna meshes and export them as SOFA files. Available as a macOS or Windows app and a Python CLI.
 
 [Download](https://github.com/Any2HRTF/Pinna2HRTF/releases) · [Documentation](https://any2hrtf.github.io/Pinna2HRTF/docs/)
-
-## Mac development
-
-Open `Pinna2HRTF.xcodeproj` in Xcode and run the `Pinna2HRTF` scheme. The app uses the Python environment and external tools in the checkout. Set them up with `uv sync --locked --no-dev` and `bash Scripts/prepare_external_tools.sh` when needed.
-
-Build the self-contained app with `bash Scripts/build_release_app.sh`. The script uses the Xcode project when full Xcode is available and supports the Command Line Tools build as a fallback.
 
 ## Citation
 
