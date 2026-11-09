@@ -110,17 +110,18 @@ struct ProjectInspectorView: View {
             }
             Divider().padding(.vertical, 4)
             Picker("Ear modelling method", selection: Binding<EarModelMethod?>(get: { store.earModelMethod }, set: { if let value = $0 { store.selectEarModelMethod(value) } })) {
-                ForEach(EarModelMethod.allCases) { method in Text(method.title).tag(Optional(method)) }
+                ForEach(EarModelMethod.allCases) { method in
+                    HStack(spacing: 5) {
+                        Text(method.title)
+                        SettingHelpButton(helpID: "ear_model.\(method.rawValue)")
+                    }.tag(Optional(method))
+                }
             }.pickerStyle(.radioGroup)
-            Text("One method applies to every included ear.").font(.caption).foregroundStyle(.secondary)
             if store.earModelMethod == .manual {
                 manualPPMPanel
             } else if store.earModelMethod == .mesh2ppm {
-                Text("Generate PPM geometry automatically.").font(.caption)
                 ModelPicker(selection: modelNameBinding, options: store.modelOptions, helpID: "inference.model")
-            } else if store.earModelMethod == EarModelMethod.none {
-                Text("Using ear meshes directly. Required mesh preprocessing still runs.").font(.caption)
-            } else {
+            } else if store.earModelMethod == nil {
                 Text("This project has conflicting methods. Choose one above before continuing.").foregroundStyle(.orange)
             }
         case .simulation:

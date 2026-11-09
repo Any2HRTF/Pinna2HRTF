@@ -337,6 +337,24 @@
     "publications": []
   },
   {
+    "id": "ear_model.mesh2ppm",
+    "title": "Mesh2PPM",
+    "description": "Predicts the parameters of a parametric pinna model from each included ear mesh. The predicted model is used for simulation preprocessing.",
+    "publications": [{ "title": "Pausch et al. (2026)", "url": "https://doi.org/10.1121/10.0043919" }]
+  },
+  {
+    "id": "ear_model.manual",
+    "title": "Manual PPM fitting",
+    "description": "Adjust a parametric pinna model to each included ear mesh, then save the fit for simulation preprocessing. Perfler et al. describe the underlying model, not this editor.",
+    "publications": [{ "title": "Perfler et al. (2025)", "url": "https://doi.org/10.1016/j.compbiomed.2025.109817" }]
+  },
+  {
+    "id": "ear_model.none",
+    "title": "No PPM",
+    "description": "Uses the current ear meshes without replacing them with a parametric model. Mesh preparation for the Mesh2HRTF calculation still runs; the paper provides simulation background.",
+    "publications": [{ "title": "Ziegelwanger et al. (2015)", "url": "https://doi.org/10.1121/1.4922518" }]
+  },
+  {
     "id": "postprocessing.amt_path",
     "title": "Auditory Modeling Toolbox folder",
     "description": "Legacy setting retained for compatibility. Python upsampling does not use AMT.",

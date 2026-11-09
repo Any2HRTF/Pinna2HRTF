@@ -173,6 +173,8 @@ def execute(request):
     result = frame(mesh, request['frame'])
     if action == 'align':
         result['transform'] = matrix.tolist()
+        if request.get('original_source'):
+            result['source_sha256'] = digest(request['original_source'])
         result['alignment_method'] = 'nose_and_ear_entrances'
         result['landmark_labels'] = ['nose_tip', 'left_ear_canal_entrance', 'right_ear_canal_entrance']
     return result

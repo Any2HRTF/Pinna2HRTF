@@ -765,10 +765,16 @@ public partial class MainWindow : Window
         };
         applyScanAlignmentButton.Click += async (_, _) => await ApplyScanAlignmentAsync();
         var cancelAlignment = new Button { Content = "Cancel" };
-        cancelAlignment.Click += (_, _) => EndScanAlignment();
+        cancelAlignment.Click += (_, _) => { EndScanAlignment(); RefreshArtifacts(); };
         var restartAlignment = new Button { Content = "Restart picks" };
-        restartAlignment.Click += (_, _) => ResetScanAlignmentPicks();
-        alignmentPanel.Children.Add(scanAlignmentStatus);
+        restartAlignment.Click += (_, _) => BeginScanAlignmentClicked(this, new RoutedEventArgs());
+        var alignmentMessage = new Grid { ColumnSpacing = 8 };
+        alignmentMessage.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        alignmentMessage.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        alignmentMessage.Children.Add(alignmentLoadingRing);
+        Grid.SetColumn(scanAlignmentStatus, 1);
+        alignmentMessage.Children.Add(scanAlignmentStatus);
+        alignmentPanel.Children.Add(alignmentMessage);
         var alignmentControls = new StackPanel { Spacing = 6 };
         var alignmentActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         alignmentActions.Children.Add(restartAlignment);
@@ -1030,15 +1036,33 @@ public partial class MainWindow : Window
         Grid.SetColumnSpan(disclosure, isSofa ? 1 : 2);
         row.Children.Add(disclosure);
         Grid.SetRow(pathContent, 3); Grid.SetColumnSpan(pathContent, 2); row.Children.Add(pathContent);
-        if (id == "project.save_location")
+        if (id == "project.save_location" || isSofa)
         {
             var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right };
             row.Children.Remove(browse); actions.Children.Add(browse);
             var open = new Button { Content = "Open", MinHeight = 28, Padding = new Thickness(8, 2, 8, 2) };
-            open.Click += (_, _) => { if (Directory.Exists(box.Text)) OpenExternal(box.Text); };
-            box.RegisterPropertyChangedCallback(TextBox.TextProperty, (_, _) => open.IsEnabled = Directory.Exists(box.Text));
-            open.IsEnabled = Directory.Exists(box.Text); actions.Children.Add(open);
+            string? OpenTarget()
+            {
+                var path = isSofa ? EffectiveSofaPath() : box.Text;
+                if (string.IsNullOrWhiteSpace(path)) return null;
+                try { return isSofa ? ExistingPickerFolder(path) : Directory.Exists(path) ? path : null; } catch { return null; }
+            }
+            void UpdateOpen()
+            {
+                var target = OpenTarget();
+                open.IsEnabled = target != null;
+                ToolTipService.SetToolTip(open, target == null ? "Choose a save location first" :
+                    isSofa && !Directory.Exists(EffectiveSofaPath()) ? "Output folder not created yet; open its nearest existing parent" : "Open folder");
+            }
+            open.Click += (_, _) => { if (OpenTarget() is string path) OpenExternal(path); };
+            box.RegisterPropertyChangedCallback(TextBox.TextProperty, (_, _) => UpdateOpen());
+            UpdateOpen(); actions.Children.Add(open);
             Grid.SetRow(actions, 1); Grid.SetColumn(actions, 1); row.Children.Add(actions);
+            if (isSofa)
+            {
+                var previousRefresh = refreshSofaPath;
+                refreshSofaPath = () => { previousRefresh?.Invoke(); UpdateOpen(); };
+            }
         }
         box.Tag = id;
         settingControls[id] = box;
@@ -1656,10 +1680,12 @@ public partial class MainWindow : Window
         alignmentSessionProject = project.Id;
         if (placementSide != null) EndPlacement();
         scanAlignmentMode = true;
+        artifactPicker.IsEnabled = false;
         alignScanButton.IsEnabled = false;
         scanAlignmentStatus.Text = "Click nose tip, then left and right ear-canal entrances";
         scanAlignmentBorder.Visibility = Visibility.Visible;
-        OpenArtifact(new Artifact("Full-head scan alignment", source));
+        SelectAlignmentArtifact(new Artifact("Full-head scan alignment", source));
+        if (currentMesh != null && SamePath(currentMesh.Path, source)) UpdateAlignmentAxes();
     }
 
     void EndScanAlignment()
@@ -1667,10 +1693,13 @@ public partial class MainWindow : Window
         if (alignmentSaving) return;
         alignmentSessionProject = null;
         scanAlignmentMode = false;
+        artifactPicker.IsEnabled = true;
         ClearAlignmentPreview();
         meshViewport.ShowCoordinateSystem = false;
         ResetScanAlignmentPicks();
         scanAlignmentBorder.Visibility = Visibility.Collapsed;
+        alignmentLoadingRing.IsActive = false;
+        alignmentLoadingRing.Visibility = Visibility.Collapsed;
         alignScanButton.IsEnabled = true;
     }
 
@@ -1976,6 +2005,8 @@ public partial class MainWindow : Window
         inspection ??= new ArtifactInspection();
         var list = new List<Artifact>();
         var hrtf = SofaDirectory(project);
+        if (project.Settings.ScanPreparation.Enabled && !string.IsNullOrWhiteSpace(project.Settings.ScanPreparation.ScanPath))
+            list.Add(new Artifact("Full-head scan", project.Settings.ScanPreparation.ScanPath));
         if (project.Settings.ScanPreparation.Enabled && ScanPreparationOutputsCurrent(project, inspection))
         {
             foreach (var (side, selected, reviewed) in new[]
@@ -2058,6 +2089,17 @@ public partial class MainWindow : Window
         OpenArtifact(artifact);
     }
 
+    void SelectAlignmentArtifact(Artifact artifact)
+    {
+        var listed = artifacts.FirstOrDefault(item => SamePath(item.Path, artifact.Path));
+        if (listed == null) { artifacts.Add(artifact); listed = artifact; }
+        refreshingArtifacts = true;
+        try { artifactPicker.SelectedItem = listed; }
+        finally { refreshingArtifacts = false; }
+        if (currentMesh != null && SamePath(currentMesh.Path, listed.Path)) return;
+        OpenArtifact(listed);
+    }
+
     void ArtifactSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!refreshingArtifacts && placementSide == null && artifactPicker.SelectedItem is Artifact artifact)
@@ -2074,7 +2116,8 @@ public partial class MainWindow : Window
         if (currentMesh != null && selectedArtifactPath != null &&
             SamePath(currentMesh.Path, selectedArtifactPath))
             SaveMeshCamera();
-        ResetViewer();
+        if (!(scanAlignmentMode && currentMesh != null && artifact.IsMesh)) ResetViewer();
+        if (scanAlignmentMode && artifact.IsMesh && currentMesh == null) viewerPlaceholder.Text = "Loading head scan…";
         selectedArtifactPath = artifact.Path;
         selectedArtifactSide = ArtifactSide(artifact);
         RememberSelectedArtifact(artifact.Path);
@@ -2102,7 +2145,13 @@ public partial class MainWindow : Window
         meshLoadCancellation = new CancellationTokenSource();
         var cancellation = meshLoadCancellation.Token;
         var generation = ++meshLoadGeneration;
-        RemoveMeshVisuals();
+        if (scanAlignmentMode)
+        {
+            alignmentLoadingRing.IsActive = true;
+            alignmentLoadingRing.Visibility = Visibility.Visible;
+            scanAlignmentStatus.Text = "Loading head scan…";
+        }
+        else RemoveMeshVisuals();
         try
         {
             var loaded = await Task.Run(() => MeshLoader.Load(artifact.Path), cancellation);
@@ -2114,10 +2163,11 @@ public partial class MainWindow : Window
             if (generation != meshLoadGeneration || !SamePath(selectedArtifactPath, artifact.Path)) return;
             if (!viewportReady || meshViewport.RenderHost == null || meshViewport.Items == null)
                 throw new InvalidOperationException("The 3D viewport render host is not ready yet.");
+            RemoveMeshVisuals();
             currentMesh = loaded;
             UpdateAlignmentAxes();
             meshVisual = new MeshGeometryModel3D { Geometry = currentMesh.Geometry, Material = new PhongMaterial { AmbientColor = new Color4(0.18f, 0.22f, 0.22f, 1), DiffuseColor = new Color4(0.48f, 0.68f, 0.66f, 1), EmissiveColor = new Color4(0.035f, 0.045f, 0.045f, 1), SpecularColor = new Color4(0.12f, 0.14f, 0.14f, 1), SpecularShininess = 12 }, CullMode = SharpDX.Direct3D11.CullMode.None };
-            meshVisual.RenderWireframe = string.Equals(Path.GetExtension(artifact.Path), ".ply", StringComparison.OrdinalIgnoreCase);
+            meshVisual.RenderWireframe = false;
             meshVisual.WireframeColor = ColorHelper.FromArgb(65, 31, 56, 56);
             meshViewport.Items.Add(meshVisual);
             meshVisuals.Add(meshVisual);
@@ -2127,7 +2177,7 @@ public partial class MainWindow : Window
             if (!hasSavedCamera)
             {
                 var isStl = string.Equals(Path.GetExtension(artifact.Path), ".stl", StringComparison.OrdinalIgnoreCase);
-                meshViewport.Camera?.ZoomExtents(meshViewport, isStl ? 0 : 80);
+                ZoomExtentsWithoutAlignmentAxes(isStl);
                 if (isStl) ZoomOutMeshCamera(2.8);
             }
             viewerPlaceholder.Visibility = Visibility.Collapsed;
@@ -2135,6 +2185,7 @@ public partial class MainWindow : Window
             resetViewButtonHost.Visibility = Visibility.Visible;
             meshViewport.Visibility = Visibility.Visible;
             UpdatePlacementButtons();
+            if (scanAlignmentMode) scanAlignmentStatus.Text = pendingAlignment == null ? "Click nose tip, then left and right ear-canal entrances" : "Inspect alignment: X forward, Y left, Z up. Save or cancel.";
         }
         catch (OperationCanceledException) { }
         catch (Exception error)
@@ -2146,6 +2197,7 @@ public partial class MainWindow : Window
             viewerPlaceholder.Visibility = Visibility.Visible;
             AppendLog("Cannot open mesh: " + error, selectedProject?.Id);
         }
+        finally { if (generation == meshLoadGeneration) { alignmentLoadingRing.IsActive = false; alignmentLoadingRing.Visibility = Visibility.Collapsed; } }
     }
 
     string SafeReadText(string path)
@@ -2257,7 +2309,7 @@ public partial class MainWindow : Window
             else
                 AppendLog("Could not hit the active mesh at the selected position. Try clicking directly on the mesh surface.", selectedProject?.Id);
         }
-        else if (primaryClick && scanAlignmentMode && mode == MeshPointerMode.Rotate && wasClick && currentMesh != null && meshVisual != null)
+        else if (primaryClick && scanAlignmentMode && !alignmentLoadingRing.IsActive && mode == MeshPointerMode.Rotate && wasClick && currentMesh != null && meshVisual != null)
         {
             var hit = meshViewport.FindHits(point.Position).FirstOrDefault(x => ReferenceEquals(x.ModelHit, meshVisual));
             if (hit != null && scanAlignmentLandmarks.Count < 3)
@@ -2541,6 +2593,14 @@ public partial class MainWindow : Window
         camera.LookDirection = target - camera.Position;
     }
 
+    void ZoomExtentsWithoutAlignmentAxes(bool isStl)
+    {
+        if (meshViewport.Items == null) return;
+        foreach (var axis in alignmentAxes) meshViewport.Items.Remove(axis);
+        try { meshViewport.Camera?.ZoomExtents(meshViewport, isStl ? 0 : 80); }
+        finally { foreach (var axis in alignmentAxes) meshViewport.Items.Add(axis); }
+    }
+
     void ResetViewClicked(object sender, RoutedEventArgs e)
     {
         if (selectedProject == null || selectedArtifactPath == null || currentMesh == null || meshViewport.Items == null)
@@ -2550,7 +2610,7 @@ public partial class MainWindow : Window
         SaveViewerStates();
         ResetMeshCamera();
         var isStl = string.Equals(Path.GetExtension(selectedArtifactPath), ".stl", StringComparison.OrdinalIgnoreCase);
-        meshViewport.Camera?.ZoomExtents(meshViewport, isStl ? 0 : 80);
+        ZoomExtentsWithoutAlignmentAxes(isStl);
         if (isStl) ZoomOutMeshCamera(2.8);
         SaveMeshCamera();
     }

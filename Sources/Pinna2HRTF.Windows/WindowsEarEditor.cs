@@ -218,7 +218,7 @@ public partial class MainWindow
         var undoButton = NavigationHelp.Command("Undo"); undoButton.IsEnabled = false;
         var redoButton = NavigationHelp.Command("Redo"); redoButton.IsEnabled = false;
         historyRow.Children.Add(undoButton); historyRow.Children.Add(redoButton);
-        var largestButton = new Button { Content = "Keep Largest Component" };
+        var largestButton = new Button { Content = "Keep Largest Component", HorizontalAlignment = HorizontalAlignment.Stretch, MinHeight = deleteButton.MinHeight, Padding = deleteButton.Padding };
         panel.Children.Add(largestButton);
         var message = new TextBlock { Text = "Loading mesh…", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = mutedTextBrush };
         panel.Children.Add(message);

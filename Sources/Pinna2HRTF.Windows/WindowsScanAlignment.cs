@@ -21,6 +21,7 @@ public partial class MainWindow
     bool alignmentSaving;
     readonly HashSet<string> activeAlignmentWorkspaces = [];
     readonly CheckBox coordinateToggle = new() { Content = "Show coordinate system", IsChecked = true };
+    readonly ProgressRing alignmentLoadingRing = new() { Width = 20, Height = 20, IsActive = false, Visibility = Visibility.Collapsed };
     readonly List<LineGeometryModel3D> alignmentAxes = [];
 
     void UpdateAlignmentSaveEnabled()
@@ -45,7 +46,7 @@ public partial class MainWindow
         foreach(var axis in alignmentAxes)meshViewport.Items.Remove(axis);alignmentAxes.Clear();
         meshViewport.ShowCoordinateSystem = scanAlignmentMode && coordinateToggle.IsChecked == true;
         if (!scanAlignmentMode || coordinateToggle.IsChecked != true || currentMesh == null) return;
-        var start=currentMesh.ToDisplay(Vector3.Zero);var length=(float)(15*currentMesh.Scale);
+        var start=currentMesh.ToDisplay(Vector3.Zero);var length=(float)(750*currentMesh.Scale);
         foreach(var (direction,color) in new[]{(Vector3.UnitX,Colors.Red),(Vector3.UnitY,Colors.Green),(Vector3.UnitZ,Colors.Blue)})
         {
             var builder=new LineBuilder();builder.AddLine(start,start+direction*length);
@@ -86,7 +87,7 @@ public partial class MainWindow
                 project.Settings.Preprocessing.SourcePositionInputLeft=null;project.Settings.Preprocessing.SourcePositionInputRight=null;
                 Persist();
                 alignmentSaving = false;
-                if (selectedProject == project && session == alignmentGeneration) { EndScanAlignment(); LoadSelectedProject(); RefreshArtifacts(); OpenArtifact(new Artifact("Aligned full-head scan",destination)); }
+                if (selectedProject == project && session == alignmentGeneration) { EndScanAlignment(); LoadSelectedProject(); RememberSelectedArtifact(destination); RefreshArtifacts(); }
                 RefreshPipelineStatus();return;
             }
             if(scanAlignmentLandmarks.Count!=3)return;
@@ -94,19 +95,21 @@ public partial class MainWindow
             alignmentSource=File.Exists(project.Settings.ScanPreparation.OriginalScanPath)?project.Settings.ScanPreparation.OriginalScanPath:project.Settings.ScanPreparation.ScanPath;
             alignmentWorkspace=Path.Combine(Path.GetTempPath(),"pinna-align-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(alignmentWorkspace);
             workspace = alignmentWorkspace; activeAlignmentWorkspaces.Add(workspace); session = alignmentGeneration;
-            var opened=Path.Combine(alignmentWorkspace,"source.ply");var preview=Path.Combine(alignmentWorkspace,"aligned.ply");var frame=Path.Combine(alignmentWorkspace,"frame");
-            var first=await RunMeshEditorPythonAsync(new(){["action"]="open",["source"]=alignmentSource,["original_source"]=alignmentSource,["output"]=opened,["frame"]=frame});
-            if (session != alignmentGeneration || selectedProject != project || shutdownCleanupDone) return;
-            alignmentSourceHash=first.GetProperty("source_sha256").GetString();
-            var result=await RunMeshEditorPythonAsync(new(){["action"]="align",["source"]=opened,["output"]=preview,["frame"]=frame,["points"]=scanAlignmentLandmarks.Select(p=>new[]{(double)p.X,p.Y,p.Z}).ToArray()});
+            var preview=Path.Combine(alignmentWorkspace,"aligned.ply");var frame=Path.Combine(alignmentWorkspace,"frame");
+            scanAlignmentStatus.Text = "Preparing alignment preview…";
+            alignmentLoadingRing.IsActive = true;
+            alignmentLoadingRing.Visibility = Visibility.Visible;
+            var result=await RunMeshEditorPythonAsync(new(){["action"]="align",["source"]=alignmentSource,["original_source"]=alignmentSource,["output"]=preview,["frame"]=frame,["points"]=scanAlignmentLandmarks.Select(p=>new[]{(double)p.X,p.Y,p.Z}).ToArray()});
             if(session != alignmentGeneration || selectedProject!=project || shutdownCleanupDone)return;
+            alignmentSourceHash=result.GetProperty("source_sha256").GetString();
             pendingAlignment=result;
-            OpenArtifact(new Artifact("Alignment preview — unsaved",preview));
+            SelectAlignmentArtifact(new Artifact("Alignment preview — unsaved",preview));
             applyScanAlignmentButton.Content="Save alignment";scanAlignmentStatus.Text="Inspect alignment: X forward, Y left, Z up. Save or cancel.";
         }
         catch(Exception error){AppendLog("Scan alignment: " + error.Message, project.Id); if(selectedProject==project && session==alignmentGeneration)scanAlignmentStatus.Text=error.Message;}
         finally
         {
+            if (session == alignmentGeneration) { alignmentLoadingRing.IsActive = false; alignmentLoadingRing.Visibility = Visibility.Collapsed; }
             alignmentSaving = false;
             if (workspace != null)
             {

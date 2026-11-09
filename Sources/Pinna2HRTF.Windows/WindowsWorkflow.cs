@@ -15,11 +15,10 @@ public partial class MainWindow
     readonly TextBlock[] workflowStates = Enumerable.Range(0, 5).Select(_ => new TextBlock { FontSize = 11, TextWrapping = TextWrapping.Wrap }).ToArray();
     readonly TextBlock[] workflowReasons = Enumerable.Range(0, 5).Select(_ => new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap }).ToArray();
     readonly RadioButtons workflowSource = new() { Header = "Input source", MaxColumns = 1, ItemsSource = new[] { "Full-head scan", "Individual ear meshes" } };
-    readonly RadioButtons workflowMethod = new() { Header = "Ear modelling method", MaxColumns = 1, ItemsSource = new[] { "Mesh2PPM", "Manual PPM fitting", "No PPM" } };
+    readonly RadioButtons workflowMethod = new() { Header = "Ear modelling method", MaxColumns = 1 };
     readonly StackPanel workflowEarInputs = new() { Spacing = 8 }, workflowScanInputs = new() { Spacing = 8 }, workflowPreparation = new() { Spacing = 8 }, workflowManual = new() { Spacing = 8 }, workflowInference = new() { Spacing = 8 };
     FrameworkElement? workflowLevelOffset, workflowSamplingRate;
     readonly StackPanel workflowSpatial = new() { Spacing = 8 };
-    readonly TextBlock workflowDirect = new() { Text = "Using ear meshes directly. Required mesh preprocessing still runs.", TextWrapping = TextWrapping.Wrap };
     readonly List<(string Side, StackPanel Row, TextBlock Status, Button Inspect, Button Edit, Button Original)> workflowEarRows = [];
     readonly List<(string Side, StackPanel Row, TextBlock Status, Button Fit)> workflowFitRows = [];
     readonly Button workflowCompact = new() { Content = "Show workflow", MaxWidth = 260 };
@@ -90,9 +89,20 @@ public partial class MainWindow
         AddPathSetting(workflowScanInputs, "Full-head scan", "scan_preparation.scan_path", scanPathBox, BrowseScanClicked);
         workflowScanInputs.Children.Add(WorkflowText("Choose which ears to extract in Ear preparation & modelling."));
         input.Children.Add(workflowScanInputs);
-        workflowSource.SelectionChanged += (_, _) => {
+        workflowSource.SelectionChanged += async (_, _) => {
             if (updatingWorkflow || loading || selectedProject is not { } p || ProjectBusy(p.Id)) return;
-            p.Settings.ScanPreparation.Enabled = workflowSource.SelectedIndex == 0;
+            var enabled = workflowSource.SelectedIndex == 0;
+            if (enabled == p.Settings.ScanPreparation.Enabled) return;
+            try { await ReconcileOutputsAsync(p, true); }
+            catch { LoadSelectedProject(); AppendLog("Could not inspect output ownership; input source was not changed.", p.Id); return; }
+            if (selectedProject != p || shutdownCleanupDone) return;
+            if (HasOutputsFrom(Stage.ScanPreparation, p))
+            {
+                LoadSelectedProject();
+                var dialog = new ContentDialog { Title = "Reset workflow outputs?", Content = "Changing the input source resets generated outputs. Input meshes and project settings are kept.", PrimaryButtonText = "Reset and switch", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close, XamlRoot = Root.XamlRoot };
+                if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary || selectedProject != p || !await ResetProjectOutputsAsync(p, Stage.ScanPreparation) || selectedProject != p) return;
+            }
+            p.Settings.ScanPreparation.Enabled = enabled;
             Persist(); LoadSelectedProject(); RefreshArtifacts(); RefreshPipelineStatus();
         };
         var prepare = workflowPages[1]; prepare.Children.Add(workflowPreparation);
@@ -146,16 +156,22 @@ public partial class MainWindow
             workflowEarRows.Add((side, row, status, inspect, edit, original));
         }
         prepare.Children.Add(WorkflowDivider());
-        var model = prepare; model.Children.Add(workflowMethod);
-        model.Children.Add(WorkflowText("One method applies to every included ear."));
+        var model = prepare;
+        foreach (var (title, id) in new[] { ("Mesh2PPM", "ear_model.mesh2ppm"), ("Manual PPM fitting", "ear_model.manual"), ("No PPM", "ear_model.none") })
+        {
+            var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+            label.Children.Add(new TextBlock { Text = title, VerticalAlignment = VerticalAlignment.Center });
+            label.Children.Add(InfoButton(id));
+            workflowMethod.Items.Add(label);
+        }
+        model.Children.Add(workflowMethod);
         workflowMethod.SelectionChanged += (_, _) => {
             if (updatingWorkflow || loading || selectedProject is not { } p || ProjectBusy(p.Id) || workflowMethod.SelectedIndex < 0) return;
             p.Settings.SelectEarModel(new[] { "mesh2ppm", "manual", "none" }[workflowMethod.SelectedIndex]);
             InvalidateManualPositions(p); Persist(); LoadSelectedProject(); RefreshArtifacts(); RefreshPipelineStatus();
         };
-        workflowInference.Children.Add(WorkflowText("Generate PPM geometry automatically."));
         workflowInference.Children.Add(AddSettingPanel("Model", "inference.model", modelPicker));
-        model.Children.Add(workflowInference); model.Children.Add(workflowManual); model.Children.Add(workflowDirect);
+        model.Children.Add(workflowInference); model.Children.Add(workflowManual);
         foreach (var side in new[] { "left", "right" }) {
             var row = new StackPanel();
             var status = WorkflowText("");
@@ -204,9 +220,6 @@ public partial class MainWindow
                 await CommitSettingInputAsync(sofaFolderBox);
             }
         }, directory: true));
-        results.Children.Add(WorkflowButton("Open output folder", (_, _) => {
-            if (EffectiveSofaPath() is string path && Directory.Exists(path)) OpenExternal(path);
-        }));
         results.Children.Add(WorkflowText("Use Viewing above the viewer to inspect generated meshes, plots and pressure fields."));
         var stages = Stage.GetValues();
         for (var index = 0; index < stages.Length; index++) {
@@ -386,7 +399,6 @@ public partial class MainWindow
             workflowScanInputs.Visibility = workflowPreparation.Visibility = scan ? Visibility.Visible : Visibility.Collapsed;
             workflowInference.Visibility = workflowMethod.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
             workflowManual.Visibility = workflowMethod.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
-            workflowDirect.Visibility = workflowMethod.SelectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
             workflowScroll.IsEnabled = !busy;
             workflowSource.IsEnabled = workflowMethod.IsEnabled = !busy;
             var sides = p == null ? [] : WorkflowSides(p).ToArray();
