@@ -1,6 +1,7 @@
 name: Deploy GitHub Pages
 
 on:
+  # Republish when website content or this workflow changes.
   push:
     branches: [main, website/landing-page]
     paths:
