@@ -28,7 +28,7 @@ bash Scripts/prepare_external_tools.sh</code></pre>
         <tr><td><code>preprocessing</code></td><td>Build the Mesh2HRTF simulation project.</td><td>One or two ear meshes; creates <code>Projects/</code>.</td></tr>
         <tr><td><code>numcalc</code></td><td>Solve the acoustic simulation locally or through Slurm.</td><td>Prepared simulation project and NumCalc runtime.</td></tr>
         <tr><td><code>sofa</code></td><td>Export HRTF and HRIR data from a Mesh2HRTF simulation project to SOFA files.</td><td>One or two completed simulation projects and an output directory.</td></tr>
-        <tr><td><code>postprocessing</code></td><td>Normalize simulation output and optionally resample HRIRs.</td><td>Exported SOFA files; writes processed files to the output directory.</td></tr>
+        <tr><td><code>postprocessing</code></td><td>Export SOFA files and optionally normalize, resample, or spatially upsample them.</td><td>YAML configuration and completed simulation projects; writes SOFA files to the output directory.</td></tr>
         <tr><td><code>run-config</code></td><td>Run configured stages in sequence or create a YAML template.</td><td>Configuration file; stages selected with <code>--stage</code>.</td></tr>
       </tbody></table></div>
       <h2 id="configure-a-run">Configure a run</h2><p>Create a complete configuration template:</p><pre><code>uv run Pinna2HRTF run-config --write-template pinna2hrtf.yaml</code></pre>
@@ -51,7 +51,7 @@ uv run Pinna2HRTF numcalc --config pinna2hrtf.yaml</code></pre>
   require_manual_review: false
   reviewed_left: null
   reviewed_right: null</code></pre>
-      <h2 id="run-individual-stages-without-yaml">Run individual stages without YAML</h2><p>Scan preparation needs a YAML configuration. All other stages also accept command-line options; <code>--help</code> lists them. For example:</p><pre><code>uv run Pinna2HRTF scan-preparation --help
+      <h2 id="run-individual-stages-without-yaml">Run individual stages without YAML</h2><p>Scan preparation and postprocessing need a YAML configuration. The other stages also accept standalone command-line options; <code>--help</code> lists them. For example:</p><pre><code>uv run Pinna2HRTF scan-preparation --help
 uv run Pinna2HRTF preprocessing --help
 uv run Pinna2HRTF numcalc --help</code></pre>
       <p>Keep a separate output folder for each experiment and inspect the geometry and source placement after preprocessing before starting a long simulation.</p>
