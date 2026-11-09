@@ -66,18 +66,21 @@ struct AppSettingsView: View {
     var body: some View {
         TabView(selection: $selectedPane) {
             ForEach(Pane.allCases, id: \.self) { pane in
-                paneContent(pane)
-                    .fixedSize()
-                    .padding(.horizontal, 40)
-                    .padding(.top, 22)
-                    .padding(.bottom, 26)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { paneHeights[pane] = $0 }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .tabItem { Label(pane.title, systemImage: pane.symbol) }
-                    .tag(pane)
+                ScrollView(.vertical) {
+                    paneContent(pane)
+                        .frame(width: Self.paneWidth - 80, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 40)
+                        .padding(.top, 22)
+                        .padding(.bottom, 26)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { paneHeights[pane] = $0 }
+                }
+                .tabItem { Label(pane.title, systemImage: pane.symbol) }
+                .tag(pane)
             }
         }
-        .frame(width: Self.paneWidth, height: paneHeights[selectedPane] ?? selectedPane.estimatedHeight)
+        .frame(width: Self.paneWidth, height: min(paneHeights[selectedPane] ?? selectedPane.estimatedHeight,
+                                                  max(120, (NSScreen.main?.visibleFrame.height ?? 820) - 120)))
         .animation(.easeInOut(duration: 0.2), value: selectedPane)
         .animation(.easeInOut(duration: 0.2), value: developerMode)
         .onChange(of: developerMode) { _ in store.environmentPreferencesDidChange() }
@@ -177,8 +180,8 @@ struct AppSettingsView: View {
     }
 
     private var tools: some View {
-        Form {
-            Section {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 toolRow("NumCalc:", path: store.environment.numcalcExecutable)
                 toolRow("Mesh grading:", path: store.environment.meshGradingExecutable)
                 toolRow("Python:", path: store.environment.pythonExecutable ?? ProcessLauncher.runtimePythonURL.path)
@@ -187,9 +190,10 @@ struct AppSettingsView: View {
                 }
                 toolRow("Mesh2HRTF:", path: URL(fileURLWithPath: store.environment.externalDir).appendingPathComponent("src/Mesh2HRTF/mesh2hrtf").path, directory: true)
             }
-            Section {
+            Divider().padding(.vertical, 2)
+            VStack(alignment: .leading, spacing: 8) {
                 Toggle("Developer mode", isOn: $developerMode)
-                    .padding(.top, 6)
+                    .padding(.leading, 162)
                 if developerMode {
                     pathSetting("NumCalc:", path: $developerNumCalc, defaultPath: store.library.environment.numcalcExecutable)
                     pathSetting("Mesh grading:", path: $developerMeshGrading, defaultPath: store.library.environment.meshGradingExecutable)
@@ -259,11 +263,12 @@ struct AppSettingsView: View {
         let ready = directory
             ? FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
             : FileManager.default.isExecutableFile(atPath: path)
-        return LabeledContent(title) {
+        return HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .frame(width: 150, alignment: .trailing)
             HStack(spacing: 5) {
-                Image(systemName: ready ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundStyle(ready ? .green : .red)
                 Text(ready ? "Available" : "Missing")
+                    .foregroundStyle(ready ? Color.secondary : Color.red)
             }
             .accessibilityElement(children: .combine)
         }
@@ -272,12 +277,13 @@ struct AppSettingsView: View {
     }
 
     private func pathSetting(_ title: String, path: Binding<String>, defaultPath: String, directory: Bool = false) -> some View {
-        LabeledContent(title) {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .frame(width: 150, alignment: .trailing)
             HStack(spacing: 6) {
                 TextField("", text: path, prompt: Text(defaultPath))
                     .labelsHidden()
-                    .frame(width: 230)
-                    .accessibilityLabel("\(title) path")
+                    .accessibilityLabel("\(title.replacingOccurrences(of: ":", with: "")) path")
                     .help(defaultPath)
                 Button("Choose…") {
                     if directory {
