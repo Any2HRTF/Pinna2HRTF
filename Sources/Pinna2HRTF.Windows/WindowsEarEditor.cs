@@ -94,13 +94,11 @@ public partial class MainWindow
             catch(Exception error) when(error is IOException or JsonException or KeyNotFoundException or InvalidOperationException) { }
         }
         var selectedFaces = new HashSet<int>();
-        var toolBeforeNavigate = "Select Faces";
         var currentIndex = 0;
         var faceCount = 0;
         var originalSha = "";
         string? savedPath = null;
         var isBusy = true;
-        var navigate = false;
         var throughMesh = false;
         var addSelection = false;
         var flipPlane = false;
@@ -141,25 +139,11 @@ public partial class MainWindow
         viewerGrid.Children.Add(viewport);
         var lassoCanvas = new Canvas { IsHitTestVisible = false };
         viewerGrid.Children.Add(lassoCanvas);
-        var navButton = new Button
-        {
-            Content = "Navigate",
-            FontSize = 12,
-            Foreground = viewerHintTextBrush,
-            Background = new SolidColorBrush(Colors.Transparent),
-            BorderThickness = new Thickness(0),
-            Padding = new Thickness(8, 4, 8, 4),
-            MinWidth = 0,
-            MinHeight = 0,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(16),
-            Visibility = Visibility.Visible
-        };
-        var navHost = new Border { CornerRadius = new CornerRadius(5), Background = viewerHintBackgroundBrush, Child = navButton, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(16), IsHitTestVisible = true };
-        navButton.Margin = new Thickness(0);
-        ToolTipService.SetToolTip(navButton, "Temporarily switch to camera navigation (Space)");
-        viewerGrid.Children.Add(navHost);
+        var controls = NavigationHelp.Create();
+        controls.HorizontalAlignment = HorizontalAlignment.Left;
+        controls.VerticalAlignment = VerticalAlignment.Bottom;
+        controls.Margin = new Thickness(16);
+        viewerGrid.Children.Add(controls);
         var resetButton = NavigationHelp.Command("Reset view");
         var resetHost = new Border { CornerRadius = new CornerRadius(5), Background = new SolidColorBrush(Colors.Transparent), Child = resetButton, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(16) };
         viewerGrid.Children.Add(resetHost);
@@ -235,8 +219,7 @@ public partial class MainWindow
         var redoButton = NavigationHelp.Command("Redo"); redoButton.IsEnabled = false;
         historyRow.Children.Add(undoButton); historyRow.Children.Add(redoButton);
         var largestButton = new Button { Content = "Keep Largest Component" };
-        var cleanup = new Expander { Header = "Mesh cleanup", Content = largestButton, IsExpanded = false, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
-        panel.Children.Add(cleanup);
+        panel.Children.Add(largestButton);
         var message = new TextBlock { Text = "Loading mesh…", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = mutedTextBrush };
         panel.Children.Add(message);
         var errorText = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Colors.Firebrick), Visibility = Visibility.Collapsed };
@@ -282,17 +265,13 @@ public partial class MainWindow
             var planeMode = planePanel.Visibility == Visibility.Visible;
             selectToolButton.IsEnabled = !isBusy;
             planeToolButton.IsEnabled = !isBusy;
-            selectionPanel.Visibility = planeMode || navigate ? Visibility.Collapsed : Visibility.Visible;
+            selectionPanel.Visibility = planeMode ? Visibility.Collapsed : Visibility.Visible;
             planePanel.Visibility = planeMode ? Visibility.Visible : Visibility.Collapsed;
             sizePanel.Visibility = planeMode && !fitPlane ? Visibility.Visible : Visibility.Collapsed;
-            toolRow.Visibility = navigate ? Visibility.Collapsed : Visibility.Visible;
-            navHost.Visibility = planeMode ? Visibility.Collapsed : Visibility.Visible;
             lassoCanvas.IsHitTestVisible = false;
             viewport.IsRotationEnabled = !isBusy;
             viewport.IsPanEnabled = !isBusy;
             viewport.IsZoomEnabled = true;
-            navButton.Content = "Navigate";
-            navButton.Background = navigate ? new SolidColorBrush(ColorHelper.FromArgb(35, 48, 112, 110)) : new SolidColorBrush(Colors.Transparent);
             selectToolButton.Background = planeMode ? new SolidColorBrush(Colors.Transparent) : new SolidColorBrush(ColorHelper.FromArgb(35, 48, 112, 110));
             planeToolButton.Background = planeMode ? new SolidColorBrush(ColorHelper.FromArgb(35, 48, 112, 110)) : new SolidColorBrush(Colors.Transparent);
             selectionStatus.Text = $"{selectedFaces.Count} faces selected";
@@ -401,7 +380,6 @@ public partial class MainWindow
         void SetTool(bool planeMode)
         {
             planePanel.Visibility = planeMode ? Visibility.Visible : Visibility.Collapsed;
-            navigate = false;
             UpdateControls();
             if (planeMode) RefreshPlane(); else { if (planeVisual != null) viewport.Items.Remove(planeVisual); planeVisual = null; ClearPlaneMarkers(); }
         }
@@ -479,13 +457,6 @@ public partial class MainWindow
             finally { isBusy = false; UpdateControls(); }
         }
 
-        navButton.Click += (_, _) =>
-        {
-            if (planePanel.Visibility == Visibility.Visible) return;
-            if (!navigate) { toolBeforeNavigate = "Select Faces"; navigate = true; }
-            else { navigate = false; SetTool(toolBeforeNavigate == "Cutting Plane"); }
-            UpdateControls(); viewport.Focus(FocusState.Programmatic);
-        };
         selectToolButton.Click += (_, _) => SetTool(false);
         planeToolButton.Click += (_, _) => SetTool(true);
         resetButton.Click += (_, _) => { if (mesh != null) { var max = (float)Math.Max(mesh.MaximumDimension * 1.7, 120); var camera = new PerspectiveCamera { FieldOfView = 38, Position = new Vector3(0, (side == "right" ? -1 : 1)*max, max * 0.12f), LookDirection = new Vector3(0, (side == "right" ? 1 : -1)*max, -max * 0.12f), UpDirection = Vector3.UnitZ }; viewport.Camera = camera;  } };
@@ -507,10 +478,7 @@ public partial class MainWindow
             var originDisplay = MeshCenter(mesh.Geometry) + normal * (float)(offsetSlider.Value * mesh.Scale);
             var origin = mesh.ToRaw(originDisplay);
             if (await ApplyEditAsync("cut", new Dictionary<string, object> { ["normal"] = new[] { (double)unit.X, unit.Y, unit.Z }, ["origin"] = new[] { (double)origin.X, origin.Y, origin.Z } }))
-            {
-                toolBeforeNavigate = "Cutting Plane"; navigate = true; planePanel.Visibility = Visibility.Collapsed;
-                if (planeVisual != null) viewport.Items.Remove(planeVisual); planeVisual = null; ClearPlaneMarkers(); UpdateControls();
-            }
+                SetTool(false);
         };
         undoButton.Click += async (_, _) => await LoadHistoryAsync(currentIndex - 1);
         redoButton.Click += async (_, _) => await LoadHistoryAsync(currentIndex + 1);
@@ -525,7 +493,7 @@ public partial class MainWindow
         }
         viewport.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, e) =>
         {
-            if (navigate || planePanel.Visibility == Visibility.Visible || isBusy) return;
+            if (planePanel.Visibility == Visibility.Visible || isBusy) return;
             var point = e.GetCurrentPoint(viewport);
             if (!point.Properties.IsLeftButtonPressed) return;
             activePointer = point.PointerId; pointerStart = point.Position; lasso.Clear(); lasso.Add(pointerStart); lassoCanvas.Children.Clear();
@@ -533,7 +501,7 @@ public partial class MainWindow
         }), true);
         viewport.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler((_, e) =>
         {
-            if (navigate || activePointer == uint.MaxValue || e.GetCurrentPoint(viewport).PointerId != activePointer) return;
+            if (activePointer == uint.MaxValue || e.GetCurrentPoint(viewport).PointerId != activePointer) return;
             var point = e.GetCurrentPoint(viewport).Position;
             if (lasso.Count == 0 || Math.Abs(point.X - lasso[^1].X) + Math.Abs(point.Y - lasso[^1].Y) >= 3) lasso.Add(point);
             if (lasso.Count > 1)
@@ -545,7 +513,7 @@ public partial class MainWindow
         }), true);
         viewport.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, e) =>
         {
-            if (navigate || activePointer == uint.MaxValue || e.GetCurrentPoint(viewport).PointerId != activePointer) return;
+            if (activePointer == uint.MaxValue || e.GetCurrentPoint(viewport).PointerId != activePointer) return;
             var end = e.GetCurrentPoint(viewport).Position; var wasClick = Math.Abs(end.X - pointerStart.X) + Math.Abs(end.Y - pointerStart.Y) < 7;
             activePointer = uint.MaxValue; viewport.ReleasePointerCapture(e.Pointer); lassoCanvas.Children.Clear();
             if (wasClick) SelectNearestFace(end); else SelectLasso(lasso);
@@ -553,15 +521,6 @@ public partial class MainWindow
         }), true);
         var navigation = new SharedNavigation(viewport, () => { activePointer = uint.MaxValue; lasso.Clear(); lassoCanvas.Children.Clear(); viewport.ReleasePointerCaptures(); });
         editorWindow.Closed += (_, _) => navigation.Dispose();
-        var space = new KeyboardAccelerator { Key = VirtualKey.Space };
-        space.Invoked += (_, args) =>
-        {
-            if (planePanel.Visibility == Visibility.Visible) return;
-            if (navigate) { navigate = false; SetTool(toolBeforeNavigate == "Cutting Plane"); }
-            else { toolBeforeNavigate = "Select Faces"; navigate = true; }
-            UpdateControls(); args.Handled = true;
-        };
-        root.KeyboardAccelerators.Add(space);
         resetButton.Visibility = Visibility.Visible;
         undoButton.IsEnabled = false; redoButton.IsEnabled = false;
         Task? saveOperation = null;

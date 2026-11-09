@@ -82,7 +82,7 @@ public partial class MainWindow
 
         var input = workflowPages[0];
         AddSetting(input, "Project name", "project.name", projectNameBox);
-        AddPathSetting(input, "Save location", "project.save_location", saveLocationBox, BrowseSaveLocationClicked);
+        AddPathSetting(input, "Save location", "project.save_location", saveLocationBox, BrowseSaveLocationClicked, directory: true);
         input.Children.Add(workflowSource);
         AddPathSetting(workflowEarInputs, "Left ear (optional)", "project.left_ear", leftEarBox, BrowseLeftEarClicked);
         AddPathSetting(workflowEarInputs, "Right ear (optional)", "project.right_ear", rightEarBox, BrowseRightEarClicked);
@@ -136,7 +136,7 @@ public partial class MainWindow
             var row = new StackPanel { Spacing = 6 };
             var status = WorkflowText("");
             var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-            var inspect = WorkflowButton("Inspect", (_, _) => { if (selectedProject is { } p && SourceEar(p, side) is string path) OpenArtifact(new Artifact($"{side} ear", path, side)); });
+            var inspect = WorkflowButton("Inspect", (_, _) => InspectWorkflowEar(side));
             var edit = WorkflowButton("Edit...", async (_, _) => await EditPreparedEarAsync(side));
             actions.Children.Add(inspect); actions.Children.Add(edit); row.Children.Add(WorkflowEarRow(side, status, actions));
             var original = WorkflowButton("Use original ear", (_, _) => { if (selectedProject is { } p && !ProjectBusy(p.Id)) {
@@ -174,7 +174,7 @@ public partial class MainWindow
         AutomationProperties.SetName(placeRightButton, "Adjust right microphone");
         microphoneActions.Children.Add(placeLeftButtonHost!); microphoneActions.Children.Add(placeRightButtonHost!);
         simulation.Children.Add(microphoneActions);
-        simulation.Children.Add(PathSettingPanel("Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked));
+        simulation.Children.Add(PathSettingPanel("Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked, directory: true));
         AddSetting(simulation, "Min frequency", "mesh2hrtf.min_frequency", minFrequencyBox);
         AddSetting(simulation, "Max frequency", "mesh2hrtf.max_frequency", maxFrequencyBox);
         AddSetting(simulation, "Frequency steps", "mesh2hrtf.frequency_steps", frequencyStepsBox);
@@ -194,7 +194,7 @@ public partial class MainWindow
         AddSetting(results, "Spatially upsample HRTFs", "postprocessing.spatial_upsampling", spatialUpsamplingBox);
         AddSetting(workflowSpatial, "Subdivision level (0–5)", "postprocessing.spatial_subdivisions", spatialSubdivisionsBox);
         AddSetting(workflowSpatial, "Normalize to frontal reference", "postprocessing.spatial_normalize", spatialNormalizeBox);
-        workflowSpatial.Children.Add(WorkflowText("Adds source directions while preserving arrival times. Results are saved in Upsampled; originals are kept.")); results.Children.Add(workflowSpatial);
+        results.Children.Add(workflowSpatial);
         results.Children.Add(PathSettingPanel("SOFA output folder", "postprocessing.output_folder", sofaFolderBox, async (_, _) => {
             var project = selectedProject;
             var path = await PickFolderAsync(EffectiveSofaPath());
@@ -203,7 +203,7 @@ public partial class MainWindow
                 sofaFolderBox.Text = path;
                 await CommitSettingInputAsync(sofaFolderBox);
             }
-        }));
+        }, directory: true));
         results.Children.Add(WorkflowButton("Open output folder", (_, _) => {
             if (EffectiveSofaPath() is string path && Directory.Exists(path)) OpenExternal(path);
         }));

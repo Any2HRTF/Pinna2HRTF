@@ -756,20 +756,33 @@ public partial class MainWindow : Window
         placementPanel.Children.Add(donePositionButton);
         placementBorder.Child = placementPanel;
         viewerGrid.Children.Add(placementBorder);
-        scanAlignmentBorder = new Border { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(10, 12, 10, 0), Visibility = Visibility.Collapsed, Background = viewerHintBackgroundBrush, CornerRadius = new CornerRadius(5), Padding = new Thickness(10, 7, 10, 7) };
-        var alignmentPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        scanAlignmentStatus = new TextBlock { Text = "Click nose tip, then left and right ear-canal entrances", VerticalAlignment = VerticalAlignment.Center };
+        scanAlignmentBorder = new Border { HorizontalAlignment = HorizontalAlignment.Stretch, MaxWidth = 800, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(10, 12, 10, 0), Visibility = Visibility.Collapsed, Background = viewerHintBackgroundBrush, CornerRadius = new CornerRadius(5), Padding = new Thickness(10, 7, 10, 7) };
+        var alignmentPanel = new StackPanel { Spacing = 6 };
+        scanAlignmentStatus = new TextBlock
+        {
+            Text = "Click nose tip, then left and right ear-canal entrances",
+            TextWrapping = TextWrapping.Wrap
+        };
         applyScanAlignmentButton.Click += async (_, _) => await ApplyScanAlignmentAsync();
         var cancelAlignment = new Button { Content = "Cancel" };
         cancelAlignment.Click += (_, _) => EndScanAlignment();
         var restartAlignment = new Button { Content = "Restart picks" };
         restartAlignment.Click += (_, _) => ResetScanAlignmentPicks();
         alignmentPanel.Children.Add(scanAlignmentStatus);
-        alignmentPanel.Children.Add(coordinateToggle);
+        var alignmentControls = new StackPanel { Spacing = 6 };
+        var alignmentActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        alignmentActions.Children.Add(restartAlignment);
+        alignmentActions.Children.Add(applyScanAlignmentButton);
+        alignmentActions.Children.Add(cancelAlignment);
         coordinateToggle.Click += (_, _) => UpdateAlignmentAxes();
-        alignmentPanel.Children.Add(restartAlignment);
-        alignmentPanel.Children.Add(applyScanAlignmentButton);
-        alignmentPanel.Children.Add(cancelAlignment);
+        alignmentControls.Children.Add(coordinateToggle);
+        alignmentControls.Children.Add(alignmentActions);
+        alignmentPanel.Children.Add(alignmentControls);
+        alignmentPanel.SizeChanged += (_, e) =>
+        {
+            alignmentControls.Orientation = e.NewSize.Width >= 560 ? Orientation.Horizontal : Orientation.Vertical;
+            alignmentActions.Orientation = e.NewSize.Width >= 340 ? Orientation.Horizontal : Orientation.Vertical;
+        };
         scanAlignmentBorder.Child = alignmentPanel;
         viewerGrid.Children.Add(scanAlignmentBorder);
         previewGrid.Children.Add(meshViewerBackground);
@@ -917,9 +930,9 @@ public partial class MainWindow : Window
         return row;
     }
 
-    void AddPathSetting(StackPanel parent, string label, string id, TextBox box, RoutedEventHandler handler, bool nested = false) => parent.Children.Add(PathSettingPanel(label, id, box, handler));
+    void AddPathSetting(StackPanel parent, string label, string id, TextBox box, RoutedEventHandler handler, bool directory = false) => parent.Children.Add(PathSettingPanel(label, id, box, handler, directory));
 
-    Grid PathSettingPanel(string label, string id, TextBox box, RoutedEventHandler handler)
+    Grid PathSettingPanel(string label, string id, TextBox box, RoutedEventHandler handler, bool directory = false)
     {
         var row = new Grid { Margin = new Thickness(0, 2, 0, 0), HorizontalAlignment = HorizontalAlignment.Stretch };
         row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -953,10 +966,18 @@ public partial class MainWindow : Window
         {
             var path = DisplayPath();
             var leaf = Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
-            name.Text = path.Length == 0
-                ? isSofa && selectedProject is { SaveLocation.Length: > 0 } ? "Invalid output path" :
-                    isSofa ? "Choose a save location first" : "No path selected"
-                : (string.IsNullOrEmpty(leaf) ? path : leaf) + (isSofa && string.IsNullOrWhiteSpace(selectedProject?.Settings.Postprocessing?.OutputFolder) ? " · Default" : "");
+            if (path.Length == 0)
+            {
+                name.Text = id == "mesh2hrtf.evaluation_grid" ? "Default (ARI grid)" :
+                    !isSofa ? "No path selected" :
+                    string.IsNullOrWhiteSpace(selectedProject?.SaveLocation) ? "Choose a save location first" : "Invalid output path";
+            }
+            else
+            {
+                var compact = string.IsNullOrEmpty(leaf) ? path : directory ? @"\" + leaf : leaf;
+                var usesDefault = isSofa && string.IsNullOrWhiteSpace(selectedProject?.Settings.Postprocessing?.OutputFolder);
+                name.Text = usesDefault ? $"Default · {compact}" : compact;
+            }
             ToolTipService.SetToolTip(name, path);
         }
         box.RegisterPropertyChangedCallback(TextBox.TextProperty, (_, _) => UpdateName()); UpdateName();
@@ -1935,7 +1956,7 @@ public partial class MainWindow : Window
         artifacts.Clear();
         foreach (var artifact in ArtifactsFor(selectedProject, inspection).Where(x => x.Exists))
             artifacts.Add(artifact);
-        artifactPicker.SelectedItem = artifacts.FirstOrDefault(x => x.Path == selectedPath) ?? artifacts.FirstOrDefault();
+        artifactPicker.SelectedItem = artifacts.FirstOrDefault(x => SamePath(x.Path, selectedPath)) ?? artifacts.FirstOrDefault();
         refreshingArtifacts = false;
         if (artifactPicker.SelectedItem is Artifact selected)
             OpenArtifact(selected);
@@ -2011,6 +2032,24 @@ public partial class MainWindow : Window
         if (name.Contains("horizontal", StringComparison.OrdinalIgnoreCase)) return "Horizontal HRTF plot";
         if (name.Contains("median", StringComparison.OrdinalIgnoreCase)) return "Median HRTF plot";
         return name;
+    }
+
+    void InspectWorkflowEar(string side)
+    {
+        if (selectedProject is not { } project || placementSide != null || scanAlignmentMode ||
+            SourceEar(project, side) is not string path) return;
+        var artifact = artifacts.FirstOrDefault(item => SamePath(item.Path, path));
+        if (artifact == null)
+        {
+            RememberSelectedArtifact(path);
+            RefreshArtifacts();
+            return;
+        }
+
+        refreshingArtifacts = true;
+        try { artifactPicker.SelectedItem = artifact; }
+        finally { refreshingArtifacts = false; }
+        OpenArtifact(artifact);
     }
 
     void ArtifactSelectionChanged(object sender, SelectionChangedEventArgs e)

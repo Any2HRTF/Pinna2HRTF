@@ -306,7 +306,7 @@
   {
     "id": "postprocessing.spatial_upsampling",
     "title": "Spatial HRTF upsampling",
-    "description": "Create more source directions by interpolating minimum-phase HRIRs with vector-base amplitude weights and restoring fitted arrival times. Sampling rate and HRIR length stay the same. Higher levels take more time and space; default: 3. Original exports are kept; results go in Upsampled.",
+    "description": "Interpolate HRTFs for more source directions and estimate when sound from each new direction reaches each ear. The sampling rate and response length stay the same. The app keeps the original SOFA files and saves the denser set in Upsampled.",
     "publications": [
       {
         "title": "Ziegelwanger & Majdak (2014)",
@@ -317,6 +317,12 @@
         "url": "https://aes2.org/publications/elibrary-page/?id=7853"
       }
     ]
+  },
+  {
+    "id": "postprocessing.spatial_subdivisions",
+    "title": "Subdivision level",
+    "description": "Controls how densely the app adds source directions to the upsampled SOFA file. Level 0 adds no subdivisions. Higher levels add more directions, which take longer to calculate and create larger files. The default is 3.",
+    "publications": []
   },
   {
     "id": "postprocessing.spatial_normalize",

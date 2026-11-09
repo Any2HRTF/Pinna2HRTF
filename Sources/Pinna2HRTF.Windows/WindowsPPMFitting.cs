@@ -89,7 +89,7 @@ public partial class MainWindow
         var fittingActions = new Grid { ColumnSpacing = 8 }; fittingActions.ColumnDefinitions.Add(new()); fittingActions.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         reset.Height = 32;
         fittingActions.Children.Add(skeletonToggle); Grid.SetColumn(reset, 1); fittingActions.Children.Add(reset); editor.Controls.Children.Add(fittingActions);
-        var sections = new SelectorBar();
+        var sections = new SelectorBar { HorizontalAlignment = HorizontalAlignment.Center };
         foreach (var title in new[] { "Global", "Local", "Shape Keys" }) sections.Items.Add(new SelectorBarItem { Text = title });
         sections.SelectedItem = sections.Items[0]; AutomationProperties.SetName(sections, "Fitting section"); editor.Controls.Children.Add(sections);
         var opacity = new Slider { Minimum = 0, Maximum = 100, Value = 35, MinWidth = 70 }; AutomationProperties.SetName(opacity, "Target opacity");
