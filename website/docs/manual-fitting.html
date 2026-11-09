@@ -1,24 +1,98 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f2f2ef" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#131517" media="(prefers-color-scheme: dark)">
   <meta name="description" content="Fit a parametric ear model with global, local, and shape-key controls.">
-  <title>Manual PPM fitting — Pinna2HRTF Documentation</title><link rel="icon" href="../favicon-macos.png?v=glass-ear2" type="image/png" sizes="512x512"><link rel="shortcut icon" href="../favicon-macos.png?v=glass-ear2" type="image/png"><link rel="apple-touch-icon" href="../favicon-macos.png?v=glass-ear2"><link rel="stylesheet" href="styles.css">
+  <title>Fitting the ear model by hand — Pinna2HRTF docs</title>
+  <link rel="icon" href="../favicon-macos.png?v=glass-ear2" type="image/png" sizes="512x512">
+  <link rel="shortcut icon" href="../favicon-macos.png?v=glass-ear2" type="image/png">
+  <link rel="apple-touch-icon" href="../favicon-macos.png?v=glass-ear2">
+  <link rel="stylesheet" href="../styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=3">
 </head>
-<body><a class="skip-link" href="#main">Skip to content</a><div class="docs-frame">
-      <header class="docs-header"><a class="brand" href="../" aria-label="Pinna2HRTF home"><img src="../assets/app-icon.webp?v=glass-ear2" alt=""><strong>Pinna2HRTF</strong></a><nav class="top-nav" aria-label="Main navigation"><a href="../">Home</a><a href="../#downloads">Downloads</a><a href="index.html" aria-current="page">Documentation</a></nav></header>
-  <div class="docs-layout"><aside class="docs-sidebar"><p class="sidebar-label">Documentation</p><nav class="sidebar-links" aria-label="Documentation pages"><a href="index.html">Overview</a><a href="desktop-app.html">Desktop app</a><a href="scan-preparation.html">Scan preparation &amp; ear editing</a><a href="manual-fitting.html" aria-current="page">Manual PPM fitting</a><a href="results.html">Simulation &amp; results</a><a href="cli.html">Python CLI</a><a href="building.html">Build from source</a></nav><nav class="on-this-page" aria-label="On this page"><p class="sidebar-label">On this page</p><a href="#open-a-fit">Open a fit</a><a href="#1-match-the-whole-ear">1. Match the whole ear</a><a href="#2-refine-local-anatomy">2. Refine local anatomy</a><a href="#3-adjust-shape-keys">3. Adjust shape keys</a><a href="#4-inspect-the-fit">4. Inspect the fit</a><a href="#5-save-and-use-it">5. Save and use it</a></nav></aside>
-    <main class="docs-content" id="main"><p class="guide-status">SOURCE GUIDE <span>/</span> Features may differ from the published installer. Check your release before following a workflow.</p><p class="kicker">USER GUIDE / MANUAL PPM FITTING</p><h1>Fit a parametric ear model.</h1>
-<p class="lede">Fit a parametric pinna model (PPM) to your ear mesh, check the fit, and save it for simulation. Mesh2PPM inference does this automatically; manual fitting lets you do it by hand.</p>
-<h2 id="open-a-fit">Open a fit</h2><p>In Project Settings, find <strong>Manual PPM Fit</strong> and choose <strong>Fit…</strong> for the left or right ear. A source mesh must be available for that side. The original mesh is preserved.</p>
-<h2 id="1-match-the-whole-ear">1. Match the whole ear</h2><p>Start in <strong>Global</strong>. Adjust the position, rotation, and scale to align the model with the target mesh. Position is in millimeters and rotation is in degrees. Drag to rotate and scroll to zoom; use the camera controls to inspect different directions.</p>
-<figure><a href="../assets/screenshots/fitting-global.jpg" data-light-href="../assets/screenshots/fitting-global.jpg" data-dark-href="../assets/screenshots/fitting-global-dark.png" aria-label="Open full-size screenshot: Global fitting: position, rotation, and scale with the skeleton overlaid."><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/fitting-global-dark.png"><img src="../assets/screenshots/fitting-global.jpg" alt="Global fitting: position, rotation, and scale with the skeleton overlaid." width="2620" height="1746" loading="lazy" decoding="async"></picture></a><figcaption>Global fitting: position, rotation, and scale with the skeleton overlaid. <a href="../assets/screenshots/fitting-global.jpg" data-light-href="../assets/screenshots/fitting-global.jpg" data-dark-href="../assets/screenshots/fitting-global-dark.png">View full size ↗</a></figcaption></figure>
-<h2 id="2-refine-local-anatomy">2. Refine local anatomy</h2><p>Switch to <strong>Local</strong> and expand a control group to adjust its bone parameters. Enable <strong>Show skeleton</strong> to see the posed bones through the surface. For a right ear, the model is mirrored across Y; control axes follow the template.</p>
-<figure><a href="../assets/screenshots/fitting-local.jpg" data-light-href="../assets/screenshots/fitting-local.jpg" data-dark-href="../assets/screenshots/fitting-local-dark.png" aria-label="Open full-size screenshot: Local fitting: refine individual anatomical control groups."><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/fitting-local-dark.png"><img src="../assets/screenshots/fitting-local.jpg" alt="Local fitting: refine individual anatomical control groups." width="2620" height="1746" loading="lazy" decoding="async"></picture></a><figcaption>Local fitting: refine individual anatomical control groups. <a href="../assets/screenshots/fitting-local.jpg" data-light-href="../assets/screenshots/fitting-local.jpg" data-dark-href="../assets/screenshots/fitting-local-dark.png">View full size ↗</a></figcaption></figure>
-<h2 id="3-adjust-shape-keys">3. Adjust shape keys</h2><p>After global and local fitting, use <strong>Shape Keys</strong> to adjust individual features. Changes update the preview automatically. Undo and Redo let you compare adjustments; <strong>Reset adjustments</strong> resets all model controls.</p>
-<figure><a href="../assets/screenshots/fitting-shape-keys.jpg" data-light-href="../assets/screenshots/fitting-shape-keys.jpg" data-dark-href="../assets/screenshots/fitting-shape-keys-dark.png" aria-label="Open full-size screenshot: Shape keys: adjust individual features after aligning the model."><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/fitting-shape-keys-dark.png"><img src="../assets/screenshots/fitting-shape-keys.jpg" alt="Shape keys: adjust individual features after aligning the model." width="2620" height="1746" loading="lazy" decoding="async"></picture></a><figcaption>Shape keys: adjust individual features after aligning the model. <a href="../assets/screenshots/fitting-shape-keys.jpg" data-light-href="../assets/screenshots/fitting-shape-keys.jpg" data-dark-href="../assets/screenshots/fitting-shape-keys-dark.png">View full size ↗</a></figcaption></figure>
-<h2 id="4-inspect-the-fit">4. Inspect the fit</h2><p>Choose <strong>Overlay</strong>, <strong>Target</strong>, <strong>Error Map</strong>, or <strong>Hidden</strong> from Display. Target opacity helps reveal the model underneath. The error colors run from 0 to 3 mm or more.</p><p>Check <strong>Symmetric RMSE</strong> and expand <strong>Distance Details</strong> for more statistics. These use nearest-vertex distances, so inspect the anatomy visually too.</p>
-<h2 id="5-save-and-use-it">5. Save and use it</h2><p>Choose <strong>Save Manual Fit</strong>, then enable <strong>Use saved manual fits</strong> in Project Settings to use fitted geometry for preprocessing. An ear without a saved fit keeps its current preprocessing source. If the source changes, refit that ear. Project Settings reports when a saved fit is out of date.</p>
-</main></div>
-  <footer class="docs-footer"><small>Individualized HRTFs from pinna meshes</small><nav aria-label="Footer"><a href="index.html">Documentation home</a><a href="../#downloads">Downloads</a><a href="https://github.com/Any2HRTF/Pinna2HRTF">GitHub</a></nav></footer>
-</div><script src="screenshot-theme.js" defer></script></body></html>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header wrap">
+    <a class="brand" href="../" aria-label="Pinna2HRTF home"><img src="../assets/app-icon.webp?v=glass-ear2" alt="" width="32" height="32" decoding="async">Pinna2HRTF</a>
+    <nav class="main-nav" aria-label="Main navigation">
+      <a href="../#downloads">Download</a>
+      <a href="index.html" aria-current="page">Docs</a>
+      <a href="https://github.com/Any2HRTF/Pinna2HRTF">GitHub</a>
+    </nav>
+  </header>
+
+  <div class="docs-layout wrap">
+    <aside class="docs-sidebar">
+      <nav aria-label="Documentation pages">
+        <a href="index.html">Getting started</a>
+        <a href="desktop-app.html">Desktop app</a>
+        <a href="scan-preparation.html">Head scans &amp; ear editing</a>
+        <a href="manual-fitting.html" aria-current="page">Manual PPM fitting</a>
+        <a href="results.html">Simulation &amp; results</a>
+        <a href="cli.html">Python CLI</a>
+        <a href="building.html">Build from source</a>
+      </nav>
+    </aside>
+
+    <main class="docs-content" id="main">
+      <h1>Fitting the ear model by hand</h1>
+      <p class="lede">Fit a parametric pinna model (PPM) to your ear mesh, check the fit, and save it for simulation. Mesh2PPM inference does this automatically; manual fitting lets you do it yourself.</p>
+      <p class="version-note">Written for version 2.0. The current download is v1.1.0, so a few things may look different in your copy.</p>
+
+      <h2 id="open-a-fit">Open a fit</h2>
+      <p>In Project Settings, find <strong>Manual PPM Fit</strong> and choose <strong>Fit…</strong> for the left or right ear. A source mesh must be available for that side. The original mesh is preserved.</p>
+
+      <h2 id="1-match-the-whole-ear">1. Match the whole ear</h2>
+      <p>Start in <strong>Global</strong>. Adjust the position, rotation, and scale to align the model with the target mesh. Position is in millimeters and rotation is in degrees. Drag to rotate and scroll to zoom; use the camera controls to inspect different directions.</p>
+      <figure>
+        <a href="../assets/screenshots/fitting-global.jpg" data-light-href="../assets/screenshots/fitting-global.jpg" data-dark-href="../assets/screenshots/fitting-global-dark.png" aria-label="Open the full-size screenshot"><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/fitting-global-dark.png"><img src="../assets/screenshots/fitting-global.jpg" alt="Global fitting: position, rotation, and scale with the skeleton overlaid." width="2620" height="1746" loading="lazy" decoding="async"></picture></a>
+        <figcaption>Global fitting: position, rotation, and scale with the skeleton overlaid.</figcaption>
+      </figure>
+
+      <h2 id="2-refine-local-anatomy">2. Refine local anatomy</h2>
+      <p>Switch to <strong>Local</strong> and expand a control group to adjust its bone parameters. Enable <strong>Show skeleton</strong> to see the posed bones through the surface. For a right ear, the model is mirrored across Y; control axes follow the template.</p>
+      <figure>
+        <a href="../assets/screenshots/fitting-local.jpg" data-light-href="../assets/screenshots/fitting-local.jpg" data-dark-href="../assets/screenshots/fitting-local-dark.png" aria-label="Open the full-size screenshot"><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/fitting-local-dark.png"><img src="../assets/screenshots/fitting-local.jpg" alt="Local fitting: refine individual anatomical control groups." width="2620" height="1746" loading="lazy" decoding="async"></picture></a>
+        <figcaption>Local fitting: refine individual anatomical control groups.</figcaption>
+      </figure>
+
+      <h2 id="3-adjust-shape-keys">3. Adjust shape keys</h2>
+      <p>After global and local fitting, use <strong>Shape Keys</strong> to adjust individual features. Changes update the preview automatically. Undo and Redo let you compare adjustments; <strong>Reset adjustments</strong> resets all model controls.</p>
+      <figure>
+        <a href="../assets/screenshots/fitting-shape-keys.jpg" data-light-href="../assets/screenshots/fitting-shape-keys.jpg" data-dark-href="../assets/screenshots/fitting-shape-keys-dark.png" aria-label="Open the full-size screenshot"><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/fitting-shape-keys-dark.png"><img src="../assets/screenshots/fitting-shape-keys.jpg" alt="Shape keys: adjust individual features after aligning the model." width="2620" height="1746" loading="lazy" decoding="async"></picture></a>
+        <figcaption>Shape keys: adjust individual features after aligning the model.</figcaption>
+      </figure>
+
+      <h2 id="4-inspect-the-fit">4. Inspect the fit</h2>
+      <p>Choose <strong>Overlay</strong>, <strong>Target</strong>, <strong>Error Map</strong>, or <strong>Hidden</strong> from Display. Target opacity helps reveal the model underneath. The error colors run from 0 to 3 mm or more.</p>
+      <p>Check <strong>Symmetric RMSE</strong> and expand <strong>Distance Details</strong> for more statistics. These use nearest-vertex distances, so inspect the anatomy visually too.</p>
+
+      <h2 id="5-save-and-use-it">5. Save and use it</h2>
+      <p>Choose <strong>Save Manual Fit</strong>, then enable <strong>Use saved manual fits</strong> in Project Settings to use fitted geometry for preprocessing. An ear without a saved fit keeps its current preprocessing source. If the source changes, refit that ear. Project Settings reports when a saved fit is out of date.</p>
+
+      <nav class="pager" aria-label="More documentation"><a class="prev" href="scan-preparation.html"><small>Previous</small>Head scans &amp; ear editing</a><a class="next" href="results.html"><small>Next</small>Simulation &amp; results</a></nav>
+    </main>
+
+    <aside class="docs-toc">
+      <nav aria-label="On this page">
+        <p>On this page</p>
+        <a href="#open-a-fit">Open a fit</a>
+        <a href="#1-match-the-whole-ear">1. Match the whole ear</a>
+        <a href="#2-refine-local-anatomy">2. Refine local anatomy</a>
+        <a href="#3-adjust-shape-keys">3. Adjust shape keys</a>
+        <a href="#4-inspect-the-fit">4. Inspect the fit</a>
+        <a href="#5-save-and-use-it">5. Save and use it</a>
+      </nav>
+    </aside>
+  </div>
+
+  <footer class="site-footer wrap">
+    <p>Pinna2HRTF is open source under the EUPL 1.2.</p>
+    <nav aria-label="Footer"><a href="../">Home</a><a href="../#downloads">Download</a><a href="https://github.com/Any2HRTF/Pinna2HRTF">GitHub</a></nav>
+  </footer>
+  <script src="screenshot-theme.js" defer></script>
+</body>
+</html>

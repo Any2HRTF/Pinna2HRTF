@@ -80,10 +80,10 @@ copyButton?.addEventListener("click", async () => {
 
   try {
     await navigator.clipboard.writeText(target.innerText);
-    copyButton.innerHTML = 'Copied <b aria-hidden="true">✓</b>';
+    copyButton.textContent = "Copied";
     copyStatus.textContent = "Setup commands copied.";
     window.setTimeout(() => {
-      copyButton.innerHTML = 'Copy <b aria-hidden="true">▢</b>';
+      copyButton.textContent = "Copy";
     }, 1800);
   } catch {
     copyStatus.textContent = "Could not copy. Select the commands to copy them manually.";
