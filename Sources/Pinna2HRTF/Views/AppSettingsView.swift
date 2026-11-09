@@ -267,6 +267,9 @@ struct AppSettingsView: View {
             Text(title)
                 .frame(width: 150, alignment: .trailing)
             HStack(spacing: 5) {
+                Image(systemName: ready ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundStyle(ready ? Color.green : Color.red)
+                    .accessibilityHidden(true)
                 Text(ready ? "Available" : "Missing")
                     .foregroundStyle(ready ? Color.secondary : Color.red)
             }
