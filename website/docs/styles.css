@@ -43,6 +43,9 @@ body { font-size: 17px; line-height: 1.7; }
 figcaption { max-width: 40rem; margin-top: 14px; color: var(--muted); font-size: 15px; line-height: 1.5; }
 
 :not(pre) > code { padding: .12em .38em; border-radius: 6px; background: var(--soft); font-size: .86em; overflow-wrap: anywhere; }
+.code-block { position: relative; margin: 1.2em 0 1.6em; }
+.code-block pre { margin: 0; padding-top: 44px; }
+.code-block .copy-button { top: 10px; right: 10px; }
 pre { overflow-x: auto; margin: 1.2em 0 1.6em; padding: 18px 22px; border-radius: 14px; color: var(--term-ink); background: var(--term); font-size: 14px; line-height: 1.7; tab-size: 2; }
 
 .table-wrap { overflow-x: auto; margin: 1.4em 0 1.8em; }
@@ -77,10 +80,11 @@ details[open] summary { margin-bottom: 1em; }
   .docs-sidebar a[aria-current="page"] { color: #171717; background: var(--accent); }
   .lede { font-size: 19px; }
   .docs-content h2 { font-size: 24px; }
-  pre { margin-inline: -4px; padding: 16px; font-size: 13px; }
+  pre { padding: 16px; font-size: 13px; }
+  .code-block { margin-inline: -4px; }
 }
 @media print {
-  .docs-sidebar, .docs-toc, .site-header nav, .site-footer, .pager, .skip-link { display: none; }
+  .docs-sidebar, .docs-toc, .site-header nav, .site-footer, .pager, .skip-link, .copy-button { display: none; }
   .docs-layout { display: block; }
   pre { white-space: pre-wrap; color: #000; background: #f2f2f2; }
 }

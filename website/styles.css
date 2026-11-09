@@ -108,7 +108,7 @@ mark { color: inherit; background: linear-gradient(transparent 58%, var(--accent
 .sticker-mesh { --sticker-rotation: -6deg; right: 34%; bottom: 8px; width: 150px; }
 .sticker-wave { --sticker-rotation: 4deg; right: 15%; bottom: 30px; width: 118px; }
 .sticker-sofa { --sticker-rotation: 5deg; top: 150px; right: -18px; width: 134px; }
-.sticker-cli { --sticker-rotation: -5deg; left: 290px; bottom: 70px; width: 116px; }
+.sticker-cli { --sticker-rotation: -5deg; left: 250px; bottom: -6px; width: 116px; }
 
 /* Front page */
 .hero { padding-block: clamp(36px, 7vw, 76px) 0; }
@@ -148,7 +148,7 @@ mark { color: inherit; background: linear-gradient(transparent 58%, var(--accent
 .cli-section .section-intro { margin-bottom: 18px; }
 .cli-section :not(pre) > code { padding: .1em .35em; border-radius: 5px; background: var(--soft); font-size: .9em; }
 .terminal { position: relative; overflow: hidden; border-radius: 16px; color: var(--term-ink); background: var(--term); box-shadow: var(--shadow); }
-.terminal pre { overflow-x: auto; margin: 0; padding: 24px 24px 8px; font-size: 14px; line-height: 1.9; }
+.terminal pre { overflow-x: auto; margin: 0; padding: 48px 24px 8px; font-size: 14px; line-height: 1.9; }
 .terminal .cmd::before { content: "$ "; color: var(--accent); user-select: none; -webkit-user-select: none; }
 .terminal-note { margin: 0; padding: 0 24px 22px; color: var(--term-muted); font: 14px/1.9 var(--mono); }
 .cli-section .terminal-note code { padding: 0; color: var(--term-ink); background: none; font-size: 1em; overflow-wrap: anywhere; }
@@ -174,7 +174,6 @@ mark { color: inherit; background: linear-gradient(transparent 58%, var(--accent
   .cli-section { grid-template-columns: 1fr; padding-bottom: 72px; }
   .sticker-cli { left: auto; right: 8px; bottom: 30px; width: 92px; }
   .terminal pre, .terminal-note { font-size: 12.5px; padding-inline: 18px; }
-  .terminal pre { padding-top: 48px; }
   .site-footer { margin-top: 48px; }
 }
 @media (prefers-reduced-motion: reduce) {
