@@ -132,7 +132,9 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
 
     private func launchProcess(stage: Stage, project: ProjectRecord, configURL: URL, outputs: GeneratedOutputManifest,
                                environment: EnvironmentConfig) async {
-        configureNotifications()
+        if AppPreferences.enabled(AppPreferences.notifyCompletion) || AppPreferences.enabled(AppPreferences.notifyFailure) {
+            configureNotifications()
+        }
         let process: Process
         do {
             process = try launcher.makeProcess(.pipelineStage(stage, config: configURL), environment: environment, liveEvents: true)
@@ -235,7 +237,9 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
         let elapsed = Self.elapsedDescription(since: startedAt)
         if outcome == .done {
             activity?.liveStatusByProject[project.id] = "Completed · \(stage.title)"
-            sendNotification(title: "\(stage.title) complete", body: "\(project.name): \(stage.title) finished successfully.")
+            if AppPreferences.enabled(AppPreferences.notifyCompletion) {
+                sendNotification(title: "\(stage.title) complete", body: "\(project.name): \(stage.title) finished successfully.")
+            }
             log("\(stage.title) finished in \(elapsed) · outputs verified", for: project.id)
         } else if outcome == .stopped {
             activity?.liveStatusByProject[project.id] = "Stopped · \(stage.title)"
@@ -245,7 +249,9 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
             let cause = validationError ?? "Exit status \(status)."
             let logHint = activity?.technicalLogURLs[project.id].map { "Technical output: \($0.lastPathComponent)." } ?? "Open the technical log for details."
             let detail = "\(cause) \(logHint)"
-            sendNotification(title: "\(stage.title) failed", body: "\(project.name): \(detail)")
+            if AppPreferences.enabled(AppPreferences.notifyFailure) {
+                sendNotification(title: "\(stage.title) failed", body: "\(project.name): \(detail)")
+            }
             log("\(stage.title) failed after \(elapsed): \(detail) Previous results are not a successful rerun.", for: project.id)
         }
         endOutputOperation(project.id)

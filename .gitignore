@@ -22,3 +22,8 @@ AppData/
 !External/bin/
 External/bin/*
 /.vscode
+
+# Xcode user-specific state
+.swiftpm/xcode/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/

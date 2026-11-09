@@ -12,6 +12,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "Pinna2HRTF",
+            exclude: ["App/Info.plist"],
             resources: [
                 .copy("Resources")
             ]

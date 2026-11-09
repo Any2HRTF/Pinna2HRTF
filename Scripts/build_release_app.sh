@@ -79,47 +79,63 @@ if [[ ! -f "$ROOT/uv.lock" ]]; then
   exit 1
 fi
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/pinna2hrtf-uv-cache}"
-MACOS_SDK="${PINNA2HRTF_MACOS_SDK:-macosx26.5}"
-if ! SDK_PATH="$(xcrun --sdk "$MACOS_SDK" --show-sdk-path 2>/dev/null)"; then
-  echo "warning: SDK $MACOS_SDK not found, using the default macOS SDK" >&2
-  SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
-fi
-SDK_VERSION="$(xcrun --sdk "$SDK_PATH" --show-sdk-version)"
-SDK_SWIFT_INTERFACE="$(find "$SDK_PATH/usr/lib/swift/Swift.swiftmodule" -name '*-apple-macos.swiftinterface' -print -quit)"
-SDK_SWIFT_VERSION="$(sed -n 's|// swift-compiler-version: Apple Swift version \([^ ]*\).*|\1|p' "$SDK_SWIFT_INTERFACE")"
-SWIFT_COMPATIBILITY_FLAGS=()
-if [[ -n "$SDK_SWIFT_VERSION" ]]; then
-  SWIFT_COMPATIBILITY_FLAGS=(-Xswiftc -interface-compiler-version -Xswiftc "$SDK_SWIFT_VERSION")
+BUILD_DEVELOPER_DIR="${DEVELOPER_DIR:-$(xcode-select -p)}"
+if [[ ! -x "$BUILD_DEVELOPER_DIR/usr/bin/xcodebuild" && -x /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild ]]; then
+  BUILD_DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 fi
 
+if [[ -x "$BUILD_DEVELOPER_DIR/usr/bin/xcodebuild" && -x "$BUILD_DEVELOPER_DIR/usr/bin/actool" ]]; then
+  XCODE_SCRATCH="${PINNA2HRTF_XCODE_SCRATCH:-/private/tmp/pinna2hrtf-xcode-build-$(id -u)}"
+  DEVELOPER_DIR="$BUILD_DEVELOPER_DIR" xcodebuild -project "$ROOT/Pinna2HRTF.xcodeproj" \
+    -scheme Pinna2HRTF -configuration Release -derivedDataPath "$XCODE_SCRATCH" \
+    CODE_SIGNING_ALLOWED=NO build
+  BUILT_EXECUTABLE="$XCODE_SCRATCH/Build/Products/Release/Pinna2HRTF.app/Contents/MacOS/Pinna2HRTF"
+  SDK_VERSION="$(DEVELOPER_DIR="$BUILD_DEVELOPER_DIR" xcrun --sdk macosx --show-sdk-version)"
+else
+  MACOS_SDK="${PINNA2HRTF_MACOS_SDK:-macosx26.5}"
+  if ! SDK_PATH="$(xcrun --sdk "$MACOS_SDK" --show-sdk-path 2>/dev/null)"; then
+    echo "warning: SDK $MACOS_SDK not found, using the default macOS SDK" >&2
+    SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+  fi
+  SDK_VERSION="$(xcrun --sdk "$SDK_PATH" --show-sdk-version)"
+  SDK_SWIFT_INTERFACE="$(find "$SDK_PATH/usr/lib/swift/Swift.swiftmodule" -name '*-apple-macos.swiftinterface' -print -quit)"
+  SDK_SWIFT_VERSION="$(sed -n 's|// swift-compiler-version: Apple Swift version \([^ ]*\).*|\1|p' "$SDK_SWIFT_INTERFACE")"
+  SWIFT_COMPATIBILITY_FLAGS=()
+  if [[ -n "$SDK_SWIFT_VERSION" ]]; then
+    SWIFT_COMPATIBILITY_FLAGS=(-Xswiftc -interface-compiler-version -Xswiftc "$SDK_SWIFT_VERSION")
+  fi
 
-# Check SwiftUI compiler plugins before spending time packaging the runtime.
-SDK_DIRECT_FLAGS=()
-if [[ -n "$SDK_SWIFT_VERSION" ]]; then
-  SDK_DIRECT_FLAGS=(-interface-compiler-version "$SDK_SWIFT_VERSION")
-fi
-cat > "$STAGE_ROOT/sdk-probe.swift" <<'SWIFTPROBE'
-import SwiftUI
-struct SDKProbe: View {
-    @State private var enabled = false
-    var body: some View { Text(enabled ? "On" : "Off") }
-}
+
+  # Check SwiftUI compiler plugins before spending time packaging the runtime.
+  SDK_DIRECT_FLAGS=()
+  if [[ -n "$SDK_SWIFT_VERSION" ]]; then
+    SDK_DIRECT_FLAGS=(-interface-compiler-version "$SDK_SWIFT_VERSION")
+  fi
+  cat > "$STAGE_ROOT/sdk-probe.swift" <<'SWIFTPROBE'
+  import SwiftUI
+  struct SDKProbe: View {
+      @State private var enabled = false
+      var body: some View { Text(enabled ? "On" : "Off") }
+  }
 SWIFTPROBE
-if ! xcrun swiftc -typecheck -sdk "$SDK_PATH" -module-cache-path /private/tmp/pinna2hrtf-clang-cache "${SDK_DIRECT_FLAGS[@]}" "$STAGE_ROOT/sdk-probe.swift" > "$STAGE_ROOT/sdk-probe.log" 2>&1; then
-  cat "$STAGE_ROOT/sdk-probe.log" >&2
-  echo "The selected SDK/compiler cannot compile SwiftUI. Install the macOS 26.5 SDK or set PINNA2HRTF_MACOS_SDK to a compatible SDK." >&2
-  exit 1
-fi
+  if ! xcrun swiftc -typecheck -sdk "$SDK_PATH" -module-cache-path /private/tmp/pinna2hrtf-clang-cache "${SDK_DIRECT_FLAGS[@]}" "$STAGE_ROOT/sdk-probe.swift" > "$STAGE_ROOT/sdk-probe.log" 2>&1; then
+    cat "$STAGE_ROOT/sdk-probe.log" >&2
+    echo "The selected SDK/compiler cannot compile SwiftUI. Install the macOS 26.5 SDK or set PINNA2HRTF_MACOS_SDK to a compatible SDK." >&2
+    exit 1
+  fi
 
-cd "$ROOT"
-CLANG_MODULE_CACHE_PATH="/private/tmp/pinna2hrtf-clang-cache" \
-SWIFTPM_HOME="/private/tmp/pinna2hrtf-swiftpm-cache" \
-swift build -c release --sdk "$SDK_PATH" --disable-sandbox --scratch-path "$SCRATCH" --product Pinna2HRTF "${SWIFT_COMPATIBILITY_FLAGS[@]}"
+  cd "$ROOT"
+  CLANG_MODULE_CACHE_PATH="/private/tmp/pinna2hrtf-clang-cache" \
+  SWIFTPM_HOME="/private/tmp/pinna2hrtf-swiftpm-cache" \
+  swift build -c release --sdk "$SDK_PATH" --disable-sandbox --scratch-path "$SCRATCH" --product Pinna2HRTF "${SWIFT_COMPATIBILITY_FLAGS[@]}"
+
+  BUILT_EXECUTABLE="$SCRATCH/release/Pinna2HRTF"
+fi
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS" "$RESOURCES"
-cp "$SCRATCH/release/Pinna2HRTF" "$MACOS/Pinna2HRTF"
-# Preserve the selected SDK's compatibility behavior with newer SwiftPM linkers.
+cp "$BUILT_EXECUTABLE" "$MACOS/Pinna2HRTF"
+# Record the minimum macOS version and SDK used for this build.
 xcrun vtool -set-build-version macos 13.0 "$SDK_VERSION" -replace -output "$MACOS/Pinna2HRTF" "$MACOS/Pinna2HRTF"
 cp -R "$ROOT/HRTFCalculation" "$RESOURCES/HRTFCalculation"
 cp "$ROOT/pyproject.toml" "$RESOURCES/pyproject.toml"
@@ -150,6 +166,18 @@ if [[ -d "$EXTERNAL_ROOT/src/Mesh2HRTF/mesh2hrtf" && -f "$EXTERNAL_ROOT/src/Mesh
 fi
 if [[ -f "$ICON" ]]; then
   cp "$ICON" "$RESOURCES/app_icon.icns"
+fi
+# Compile the layered icon when full Xcode is available. Command Line Tools
+# builds retain the bundled .icns fallback.
+ICON_DEVELOPER_DIR="${DEVELOPER_DIR:-$(xcode-select -p)}"
+if [[ ! -x "$ICON_DEVELOPER_DIR/usr/bin/actool" && -x /Applications/Xcode.app/Contents/Developer/usr/bin/actool ]]; then
+  ICON_DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+fi
+if [[ -x "$ICON_DEVELOPER_DIR/usr/bin/actool" ]]; then
+  DEVELOPER_DIR="$ICON_DEVELOPER_DIR" xcrun actool \
+    --compile "$RESOURCES" --output-partial-info-plist "$STAGE_ROOT/icon-info.plist" \
+    --app-icon Pinna2HRTF --platform macosx --minimum-deployment-target 13.0 --target-device mac \
+    "$ROOT/Sources/Pinna2HRTF/Resources/Pinna2HRTF.icon"
 fi
 if [[ -f "$ROOT/icon.png" ]]; then
   cp "$ROOT/icon.png" "$RESOURCES/icon.png"
@@ -244,6 +272,10 @@ cat > "$CONTENTS/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+if [[ -f "$RESOURCES/Assets.car" && -f "$RESOURCES/Pinna2HRTF.icns" ]]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile Pinna2HRTF" "$CONTENTS/Info.plist"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string Pinna2HRTF" "$CONTENTS/Info.plist"
+fi
 chmod +x "$MACOS/Pinna2HRTF"
 ditto --norsrc --noextattr --noqtn "$APP_DIR" "$CLEAN_APP_DIR"
 xattr -cr "$CLEAN_APP_DIR"

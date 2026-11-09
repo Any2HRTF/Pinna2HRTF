@@ -5,6 +5,15 @@ import AppKit
 struct Pinna2HRTFApp: App {
     @NSApplicationDelegateAdaptor(Pinna2HRTFAppDelegate.self) private var appDelegate
     @StateObject private var store = AppStore()
+    @AppStorage(AppPreferences.appearance) private var appearance = "system"
+
+    private var colorScheme: ColorScheme? {
+        switch appearance {
+        case "light": .light
+        case "dark": .dark
+        default: nil
+        }
+    }
 
     init() {
         // Writing to a subprocess that already exited must fail with EPIPE, not kill the app.
@@ -14,6 +23,7 @@ struct Pinna2HRTFApp: App {
     var body: some Scene {
         Window("Pinna2HRTF", id: "main") {
             ContentView(store: store)
+                .preferredColorScheme(colorScheme)
                 .onAppear { appDelegate.store = store }
                 .frame(minWidth: PressureFieldView.minimumViewerWidth + 630, maxWidth: .infinity, minHeight: 650, maxHeight: .infinity)
         }
@@ -42,6 +52,10 @@ struct Pinna2HRTFApp: App {
                     NSWorkspace.shared.open(URL(string: "https://any2hrtf.github.io/Pinna2HRTF/docs/")!)
                 }
             }
+        }
+        Settings {
+            AppSettingsView(store: store)
+                .preferredColorScheme(colorScheme)
         }
     }
 }

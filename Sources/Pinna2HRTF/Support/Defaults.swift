@@ -3,6 +3,11 @@ import Foundation
 enum Defaults {
     static let evaluationGrid = "ARI_Grid"
     static func packageRoot(from filePath: String = #filePath) -> URL {
+        if filePath == #filePath,
+           let path = Bundle.main.object(forInfoDictionaryKey: "Pinna2HRTFSourceRoot") as? String,
+           FileManager.default.fileExists(atPath: URL(fileURLWithPath: path).appendingPathComponent("Package.swift").path) {
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
         let start = URL(fileURLWithPath: filePath).deletingLastPathComponent()
         var current = start
         while current.path != "/" {
@@ -95,7 +100,8 @@ enum Defaults {
     }
 
     static func which(_ name: String) -> String? {
-        let paths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        let userBin = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin").path
+        let paths = [userBin, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
         for path in paths {
             let candidate = URL(fileURLWithPath: path).appendingPathComponent(name).path
             if FileManager.default.isExecutableFile(atPath: candidate) {

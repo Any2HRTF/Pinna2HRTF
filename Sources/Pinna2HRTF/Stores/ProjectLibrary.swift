@@ -154,7 +154,27 @@ final class ProjectLibrary: ObservableObject {
     // MARK: Adding projects
 
     func newProject() -> ProjectRecord {
-        Defaults.newProject(packageRoot: packageURL, index: projects.count + 1)
+        var project = Defaults.newProject(packageRoot: packageURL, index: projects.count + 1)
+        let defaults = UserDefaults.standard
+        if let path = defaults.string(forKey: AppPreferences.projectDirectory), !path.isEmpty {
+            project.saveLocation = URL(fileURLWithPath: path, isDirectory: true)
+                .appendingPathComponent("Project \(projects.count + 1)-\(project.id.uuidString)").path
+        }
+        if let value = defaults.string(forKey: AppPreferences.inputHandling),
+           let handling = InputHandling(rawValue: value) {
+            project.inputHandling = handling
+        }
+        if let grid = defaults.string(forKey: AppPreferences.evaluationGrid), !grid.isEmpty {
+            project.settings.preprocessing.evaluationGrid = grid
+        }
+        let minimum = AppPreferences.int(AppPreferences.minimumFrequency, fallback: 0, range: 0...95999)
+        let maximum = AppPreferences.int(AppPreferences.maximumFrequency, fallback: 24000, range: 1...96000)
+        project.settings.preprocessing.minFrequency = String(min(minimum, maximum - 1))
+        project.settings.preprocessing.maxFrequency = String(maximum)
+        project.settings.preprocessing.frequencyStepCount = String(AppPreferences.int(AppPreferences.frequencySteps, fallback: 129, range: 2...8193))
+        project.settings.numcalc.maxInstances = String(AppPreferences.int(AppPreferences.maxInstances, fallback: 1, range: 1...1024))
+        project.settings.numcalc.maxCPULoad = String(AppPreferences.int(AppPreferences.maxCPULoad, fallback: 90, range: 1...100))
+        return project
     }
 
     /// The listed project stored at `folder` (links resolved), if any.
