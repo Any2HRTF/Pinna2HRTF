@@ -1913,7 +1913,13 @@ public partial class MainWindow : Window
     {
         var project = selectedProject; var previous = box.Text;
         var path = folder ? await PickFolderAsync(previous) : await PickFileAsync(previous);
-        if (path != null && selectedProject == project && box.Text == previous && !shutdownCleanupDone && (project == null || !ProjectBusy(project.Id))) box.Text = path;
+        if (path != null && selectedProject == project && box.Text == previous && !shutdownCleanupDone && (project == null || !ProjectBusy(project.Id)))
+        {
+            box.Text = path;
+            // The compact path field is usually hidden, so a picker selection does not
+            // generate the focus-loss event that normally commits setting edits.
+            await CommitSettingInputAsync(box);
+        }
     }
 
     async Task<string?> PickFileAsync(string? currentPath = null)
