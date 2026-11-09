@@ -102,13 +102,13 @@ mark { color: inherit; background: linear-gradient(transparent 58%, var(--accent
   84% { transform: translateY(-2px) rotate(calc(var(--sticker-rotation) + 1deg)) scale(1.01, .99); }
   100% { transform: translateY(0) rotate(var(--sticker-rotation)) scale(1); }
 }
-.sticker-girl { --sticker-rotation: 6deg; top: 8px; right: 3%; width: clamp(150px, 19vw, 210px); }
-.sticker-headphones { --sticker-rotation: -8deg; top: 30px; right: 2%; width: 104px; }
-.sticker-hrtf { --sticker-rotation: 5deg; top: 44px; right: 150px; width: 96px; }
-.sticker-mesh { --sticker-rotation: -6deg; right: 300px; bottom: 6px; width: 150px; }
-.sticker-wave { --sticker-rotation: 4deg; right: 165px; bottom: 14px; width: 118px; }
-.sticker-sofa { --sticker-rotation: 5deg; right: 16px; bottom: 8px; width: 134px; }
-.sticker-cli { --sticker-rotation: -5deg; left: 4%; bottom: 0; width: 116px; }
+.sticker-girl { --sticker-rotation: 6deg; top: 150px; right: 20%; width: clamp(150px, 19vw, 210px); }
+.sticker-headphones { --sticker-rotation: -8deg; top: 70px; right: 8%; width: 104px; }
+.sticker-hrtf { --sticker-rotation: 5deg; top: 128px; left: 470px; width: 96px; }
+.sticker-mesh { --sticker-rotation: -6deg; right: 34%; bottom: 8px; width: 150px; }
+.sticker-wave { --sticker-rotation: 4deg; right: 15%; bottom: 30px; width: 118px; }
+.sticker-sofa { --sticker-rotation: 5deg; top: 150px; right: -18px; width: 134px; }
+.sticker-cli { --sticker-rotation: -5deg; left: 290px; bottom: 70px; width: 116px; }
 
 /* Front page */
 .hero { padding-block: clamp(36px, 7vw, 76px) 0; }
@@ -134,7 +134,7 @@ mark { color: inherit; background: linear-gradient(transparent 58%, var(--accent
 .step h3 { margin-bottom: 10px; font-size: 24px; font-weight: 720; }
 .step p { margin: 0; color: var(--muted); font-size: 17px; }
 
-.downloads { padding-bottom: 170px; }
+.downloads { padding-bottom: 96px; }
 .download-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 32px; }
 .download-entry { display: flex; flex-direction: column; align-items: flex-start; padding: 28px; border-radius: 20px; background: var(--paper); }
 .download-entry h3 { margin-bottom: 2px; font-size: 24px; font-weight: 720; }
@@ -161,18 +161,18 @@ mark { color: inherit; background: linear-gradient(transparent 58%, var(--accent
   .main-nav { gap: 14px; font-size: 14px; }
   .main-nav .nav-extra { display: none; }
   .sticker-girl { top: auto; right: 2px; bottom: -34px; width: 118px; }
-  .sticker-headphones { top: 44px; right: auto; left: 76px; width: 74px; }
-  .sticker-hrtf { top: 50px; right: auto; left: 0; width: 66px; }
+  .sticker-headphones { top: 176px; right: 0; width: 74px; }
+  .sticker-hrtf { top: 50px; left: 0; width: 66px; }
   .workflow > h2 { padding-top: 64px; }
   .step { grid-template-columns: 1fr; gap: 20px; }
   .step:nth-child(even) .step-text { order: 0; }
   .download-list { grid-template-columns: 1fr; }
-  .downloads { padding-bottom: 130px; }
-  .sticker-mesh { right: 205px; width: 104px; }
-  .sticker-wave { right: 110px; width: 90px; }
-  .sticker-sofa { right: 4px; width: 100px; }
-  .cli-section { grid-template-columns: 1fr; padding-bottom: 110px; }
-  .sticker-cli { left: auto; right: 8px; bottom: 0; width: 92px; }
+  .downloads { padding-bottom: 84px; }
+  .sticker-mesh { right: 55%; bottom: 0; width: 104px; }
+  .sticker-wave { right: 6px; bottom: 6px; width: 90px; }
+  .sticker-sofa { top: 196px; right: -6px; width: 96px; }
+  .cli-section { grid-template-columns: 1fr; padding-bottom: 72px; }
+  .sticker-cli { left: auto; right: 8px; bottom: 30px; width: 92px; }
   .terminal pre, .terminal-note { font-size: 12.5px; padding-inline: 18px; }
   .terminal pre { padding-top: 48px; }
   .site-footer { margin-top: 48px; }
