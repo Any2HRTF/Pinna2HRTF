@@ -13,8 +13,8 @@
   <link rel="icon" href="favicon-macos.png?v=glass-ear2" type="image/png" sizes="512x512">
   <link rel="shortcut icon" href="favicon-macos.png?v=glass-ear2" type="image/png">
   <link rel="apple-touch-icon" href="favicon-macos.png?v=glass-ear2">
-  <link rel="stylesheet" href="styles.css?v=7">
-  <link rel="stylesheet" href="home.css?v=7">
+  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="home.css?v=8">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -41,7 +41,7 @@
         <p class="hero-meta">Free and open source. Desktop app for macOS and Windows, plus a Python CLI.</p>
       </div>
       <figure class="dial" id="dial">
-        <svg viewBox="-270 -270 540 540" role="img" aria-label="A head seen from above with a sound source circling it">
+        <svg viewBox="-270 -270 540 540" role="img" aria-label="A head seen from above with a sound source you can move around it and closer to it">
           <circle class="ring" r="240"/><circle class="ring" r="170"/><circle class="ring" r="100"/>
           <g id="dial-ticks"></g>
           <text y="-205">front</text><text x="-200">left</text><text x="200">right</text><text y="205">back</text>
@@ -55,8 +55,13 @@
           <ellipse class="head" rx="47" ry="52"/>
         </svg>
         <figcaption>
-          <div class="readout"><span>azimuth <b id="dial-az">0°</b></span><div class="ears"><span>L</span><i id="ear-l"></i><span>R</span><i id="ear-r"></i></div></div>
-          <span>Drag the sound source around the head. An HRTF captures how each ear hears it from every direction. The level bars are only a sketch.</span>
+          <div class="readout"><span>azimuth <b id="dial-az">0°</b></span><span>distance <b id="dial-dist">1.00 m</b></span></div>
+          <div class="irs" role="img" aria-label="Sketched impulse responses at the left and right ear">
+            <span>L</span><svg viewBox="0 0 240 60" preserveAspectRatio="none" aria-hidden="true"><path id="ir-l"/></svg>
+            <span>R</span><svg viewBox="0 0 240 60" preserveAspectRatio="none" aria-hidden="true"><path id="ir-r"/></svg>
+            <span></span><div class="ir-axis"><span>0 ms</span><span>impulse response at each ear</span><span>4 ms</span></div>
+          </div>
+          <p>Drag the sound source around the head, or pull it in close. The nearer ear hears it sooner and louder; the far ear gets it late and dulled by the head. This is a rough sketch. Your real HRTF comes from the shape of your own ears.</p>
         </figcaption>
       </figure>
       <button class="draggable-sticker sticker-girl" type="button" aria-label="Move the girl sticker" aria-describedby="sticker-hint"><img src="assets/sticker-scan-it.webp" alt="" width="560" height="840" decoding="async"></button>
@@ -141,7 +146,7 @@
     </div>
     <span class="wordmark" aria-hidden="true">Pinna2HRTF</span>
   </footer>
-  <script src="script.js?v=7"></script>
-  <script src="home.js?v=7"></script>
+  <script src="script.js?v=8"></script>
+  <script src="home.js?v=8"></script>
 </body>
 </html>

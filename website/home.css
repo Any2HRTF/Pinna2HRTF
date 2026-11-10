@@ -25,12 +25,16 @@ h2 { margin-bottom: 0; font-size: clamp(34px, 5.4vw, 64px); font-weight: 800; le
 .dial .pulse:nth-of-type(2) { animation-delay: -.9s; }
 .dial .pulse:nth-of-type(3) { animation-delay: -1.8s; }
 @keyframes pulse { from { transform: scale(1); opacity: .9; } to { transform: scale(13); opacity: 0; } }
-.dial figcaption { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 6px 18px; margin-top: 10px; color: var(--muted); font-size: 14px; line-height: 1.45; }
-.readout { display: grid; gap: 5px; font: 600 13px var(--mono); color: var(--ink); }
-.readout b { font-size: 26px; letter-spacing: -.04em; }
-.ears { display: grid; grid-template-columns: auto 86px; align-items: center; gap: 4px 8px; font-weight: 600; }
-.ears i { display: block; height: 7px; border-radius: 4px; background: var(--soft); overflow: hidden; }
-.ears i::after { content: ""; display: block; width: 100%; height: 100%; border-radius: 4px; background: var(--accent); transform-origin: left; transform: scaleX(var(--level, .5)); }
+.dial figcaption { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px 20px; margin-top: 10px; color: var(--muted); font-size: 14px; line-height: 1.45; cursor: default; }
+.dial figcaption p { grid-column: 1 / -1; margin: 0; }
+.readout { display: grid; gap: 6px; font: 600 13px var(--mono); color: var(--ink); }
+.readout span { display: grid; }
+.readout b { font-size: 24px; letter-spacing: -.04em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.irs { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 2px 8px; font: 600 13px var(--mono); color: var(--ink); }
+.irs svg { height: 60px; border-bottom: 1px solid var(--rule); background: linear-gradient(var(--rule), var(--rule)) 0 50% / 100% 1px no-repeat; }
+.irs path { fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.irs svg:nth-of-type(2) path { stroke: var(--underline); }
+.ir-axis { display: flex; justify-content: space-between; gap: 8px; color: var(--quiet); font-size: 11px; font-weight: 500; }
 
 /* 2. Ticker */
 .ticker { margin-inline: -4vw; padding-block: 15px; overflow: hidden; color: #171717; background: var(--accent); transform: rotate(-1.4deg); }

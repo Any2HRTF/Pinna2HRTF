@@ -10,8 +10,11 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").match
   const ticks = document.getElementById("dial-ticks");
   const source = document.getElementById("dial-source");
   const readout = document.getElementById("dial-az");
-  const left = document.getElementById("ear-l");
-  const right = document.getElementById("ear-r");
+  const range = document.getElementById("dial-dist");
+  const left = document.getElementById("ir-l");
+  const right = document.getElementById("ir-r");
+  const dot = source.querySelectorAll("circle");
+  const ray = source.querySelector(".ray");
 
   for (let deg = 0; deg < 360; deg += 10) {
     const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
@@ -24,17 +27,52 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").match
   }
 
   // `angle` runs clockwise from the front; azimuth is reported counter-clockwise.
+  // `radius` is in dial units and maps to a source distance of 0.2 m to 1 m.
+  const NEAR = 85, FAR = 240, HEAD = 0.0875, SPEED = 343, WINDOW = 4, POINTS = 240;
   let angle = 35;
+  let radius = FAR;
+  let touched = false;
   let held = false;
   let hovering = false;
 
+  // A rough spherical-head impulse response: the sound travels straight to an ear it can
+  // see and creeps around the head to one it cannot, arriving later, weaker and duller.
+  const trace = (path, distance, cosine, echo) => {
+    const visible = Math.acos(HEAD / distance);
+    const incidence = Math.acos(Math.min(Math.max(cosine, -1), 1));
+    let length, shadow = 0;
+    if (incidence <= visible) length = Math.sqrt(distance * distance + HEAD * HEAD - 2 * distance * HEAD * cosine);
+    else {
+      length = Math.sqrt(distance * distance - HEAD * HEAD) + HEAD * (incidence - visible);
+      shadow = (incidence - visible) / (Math.PI - visible);
+    }
+    const arrival = (length / SPEED) * 1000; // ms
+    const gain = Math.min(1, Math.sqrt(0.11 / length)) * (1 - 0.6 * shadow);
+    const pitch = 3.2 - 1.7 * shadow; // kHz
+    const decay = 0.26 + 0.16 * shadow; // ms
+    const ring = (u) => (u < 0 ? 0 : Math.exp(-u / decay) * Math.sin(2 * Math.PI * pitch * u));
+    let d = "";
+    for (let i = 0; i <= POINTS; i++) {
+      const u = (i / POINTS) * WINDOW - arrival;
+      const value = gain * (ring(u) + 0.45 * ring(u - echo));
+      d += `${i ? "L" : "M"}${i} ${(30 - value * 40).toFixed(1)}`;
+    }
+    path.setAttribute("d", d);
+  };
+
   const render = () => {
     source.setAttribute("transform", `rotate(${angle})`);
+    dot.forEach((circle) => circle.setAttribute("cy", -radius));
+    ray.setAttribute("y2", -(radius - 18));
     const azimuth = Math.round((360 - angle) % 360) % 360;
     readout.textContent = `${azimuth}°`;
-    const side = Math.sin((angle * Math.PI) / 180); // +1 is fully right
-    left.style.setProperty("--level", (0.55 - 0.4 * side).toFixed(3));
-    right.style.setProperty("--level", (0.55 + 0.4 * side).toFixed(3));
+    const distance = 0.2 + (0.8 * (radius - NEAR)) / (FAR - NEAR);
+    range.textContent = `${distance.toFixed(2)} m`;
+    const radians = (angle * Math.PI) / 180;
+    const side = Math.sin(radians); // +1 is fully right
+    const echo = 0.14 + 0.06 * (1 + Math.cos(radians)); // the pinna answers differently front and back
+    trace(left, distance, -side, echo);
+    trace(right, distance, side, echo);
   };
 
   const follow = (event) => {
@@ -42,6 +80,8 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").match
     const x = event.clientX - (box.left + box.width / 2);
     const y = event.clientY - (box.top + box.height / 2);
     angle = ((Math.atan2(x, -y) * 180) / Math.PI + 360) % 360;
+    radius = Math.min(Math.max(Math.hypot(x, y) * (540 / box.width), NEAR), FAR);
+    touched = true;
     render();
   };
 
@@ -54,7 +94,12 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").match
 
   let last = performance.now();
   const orbit = (now) => {
-    if (!held && !hovering) { angle = (angle + ((now - last) / 1000) * 14) % 360; render(); }
+    if (!held && !hovering) {
+      angle = (angle + ((now - last) / 1000) * 14) % 360;
+      // Until someone takes over, drift in and out to show that distance matters too.
+      if (!touched) radius = 175 + 65 * Math.cos(now / 2600);
+      render();
+    }
     last = now;
     requestAnimationFrame(orbit);
   };
