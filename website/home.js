@@ -92,17 +92,52 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").match
   svg.addEventListener("pointerenter", () => { hovering = true; });
   svg.addEventListener("pointerleave", () => { hovering = false; });
 
+  // Wavefronts leave the source at a steady speed. When one meets the head it bounces:
+  // the echo spreads back from a mirror image of the source just inside the skull
+  // (the head acts as a convex mirror), so a closer source gives quicker, stronger,
+  // more tightly curved reflections.
+  const rings = source.querySelectorAll(".pulse");
+  const echoes = source.querySelectorAll(".echo");
+  const SKULL = 50, AFTER = 95, SPREAD = (58 * Math.PI) / 180;
+  let phase = 0;
+  const ripple = (seconds) => {
+    const gap = radius - SKULL; // source to the nearest point of the head
+    const travel = gap + AFTER;
+    const image = (gap * SKULL) / (2 * gap + SKULL); // depth of the mirror image
+    const closeness = (FAR - radius) / (FAR - NEAR);
+    phase = (phase + (seconds * 90) / travel) % 1;
+    rings.forEach((ring, index) => {
+      const progress = (phase + index / rings.length) % 1;
+      const reached = 13 + progress * (travel - 13);
+      ring.setAttribute("r", reached.toFixed(1));
+      ring.style.opacity = ((1 - progress) * (0.5 + 0.5 * closeness)).toFixed(3);
+      ring.style.strokeWidth = (2 + 2.5 * closeness).toFixed(2);
+      const echo = echoes[index];
+      const back = reached - gap;
+      if (back <= 0) { echo.style.opacity = 0; return; }
+      const size = image + back;
+      const x = (size * Math.sin(SPREAD)).toFixed(1);
+      const y = (-(SKULL - image) - size * Math.cos(SPREAD)).toFixed(1);
+      echo.setAttribute("d", `M${-x} ${y}A${size.toFixed(1)} ${size.toFixed(1)} 0 0 1 ${x} ${y}`);
+      echo.style.opacity = ((1 - back / AFTER) * (0.35 + 0.65 * closeness)).toFixed(3);
+      echo.style.strokeWidth = (1.8 + 2.2 * closeness).toFixed(2);
+    });
+  };
+
   let last = performance.now();
   const orbit = (now) => {
+    const seconds = Math.min((now - last) / 1000, 0.1);
     if (!held && !hovering) {
-      angle = (angle + ((now - last) / 1000) * 14) % 360;
+      angle = (angle + seconds * 14) % 360;
       // Until someone takes over, drift in and out to show that distance matters too.
       if (!touched) radius = 175 + 65 * Math.cos(now / 2600);
       render();
     }
+    ripple(seconds);
     last = now;
     requestAnimationFrame(orbit);
   };
+  ripple(0);
   render();
   if (!reduceMotion) requestAnimationFrame(orbit);
 })();

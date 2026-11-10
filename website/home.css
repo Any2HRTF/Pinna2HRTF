@@ -21,10 +21,8 @@ h2 { margin-bottom: 0; font-size: clamp(34px, 5.4vw, 64px); font-weight: 800; le
 .dial .head { fill: var(--paper); stroke: var(--ink); stroke-width: 3.5; stroke-linejoin: round; }
 .dial .ray { stroke: var(--underline); stroke-width: 2; stroke-dasharray: 2 9; stroke-linecap: round; }
 .dial .source { fill: var(--accent); stroke: var(--ink); stroke-width: 3.5; }
-.dial .pulse { fill: none; stroke: var(--underline); stroke-width: 2.5; transform-box: fill-box; transform-origin: center; animation: pulse 2.7s linear infinite; }
-.dial .pulse:nth-of-type(2) { animation-delay: -.9s; }
-.dial .pulse:nth-of-type(3) { animation-delay: -1.8s; }
-@keyframes pulse { from { transform: scale(1); opacity: .9; } to { transform: scale(13); opacity: 0; } }
+.dial .pulse { fill: none; stroke: var(--underline); stroke-width: 2.5; }
+.dial .echo { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 1 7; opacity: 0; }
 .dial figcaption { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px 20px; margin-top: 10px; color: var(--muted); font-size: 14px; line-height: 1.45; cursor: default; }
 .dial figcaption p { grid-column: 1 / -1; margin: 0; }
 .readout { display: grid; gap: 6px; font: 600 13px var(--mono); color: var(--ink); }
@@ -149,7 +147,7 @@ h2 { margin-bottom: 0; font-size: clamp(34px, 5.4vw, 64px); font-weight: 800; le
   .sticker-cli { top: auto; bottom: 30px; left: auto; right: 2px; width: 100px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ticker div, .dial .pulse, .cli-section h2::after { animation: none; }
+  .ticker div, .cli-section h2::after { animation: none; }
   .terminal.is-typing .cmd { clip-path: none; animation: none; }
   .showcase picture { transform: none; }
 }
