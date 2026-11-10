@@ -39,9 +39,6 @@ ln -s /Applications "$STAGE/Applications"
 cp "$WORK/background.tiff" "$STAGE/.background/background.tiff"
 APP_ICNS="$STAGE/Pinna2HRTF.app/Contents/Resources/Pinna2HRTF.icns"
 [[ -f "$APP_ICNS" ]] || APP_ICNS="$STAGE/Pinna2HRTF.app/Contents/Resources/app_icon.icns"
-if [[ -f "$APP_ICNS" ]]; then
-  cp "$APP_ICNS" "$STAGE/.VolumeIcon.icns"
-fi
 
 SIZE_MB=$(( $(du -sm "$STAGE" | cut -f1) * 11 / 10 + 64 ))
 RW="$WORK/rw.dmg"
@@ -50,9 +47,6 @@ MOUNT="$(hdiutil attach "$RW" -readwrite -noverify -noautoopen | awk -F'\t' '/\/
 if [[ -z "$MOUNT" || ! -d "$MOUNT" ]]; then
   echo "Could not mount the writable image." >&2
   exit 1
-fi
-if [[ -f "$MOUNT/.VolumeIcon.icns" ]]; then
-  SetFile -a C "$MOUNT" 2>/dev/null || xcrun SetFile -a C "$MOUNT" 2>/dev/null || true
 fi
 
 # Lay out the Finder window. Finder needs the disk by its POSIX path.
@@ -88,6 +82,11 @@ done
 if [[ ! -f "$MOUNT/.DS_Store" ]]; then
   echo "Finder did not save the window layout." >&2
   exit 1
+fi
+# Finder removes a volume icon during layout, so add it afterwards.
+if [[ -f "$APP_ICNS" ]]; then
+  cp "$APP_ICNS" "$MOUNT/.VolumeIcon.icns"
+  SetFile -a C "$MOUNT" 2>/dev/null || xcrun SetFile -a C "$MOUNT" 2>/dev/null || true
 fi
 chmod -Rf go-w "$MOUNT" 2>/dev/null || true
 rm -rf "$MOUNT/.fseventsd" "$MOUNT/.Trashes"
