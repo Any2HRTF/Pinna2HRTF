@@ -115,34 +115,34 @@ h2 { margin-bottom: 0; font-size: clamp(34px, 5.4vw, 64px); font-weight: 800; le
 .cli-link { display: inline-block; margin-top: 36px; font-weight: 600; }
 
 /* Stickers: scattered on purpose, visitors can move them */
-.sticker-girl { --sticker-rotation: 6deg; left: 41%; top: -8px; width: clamp(120px, 13vw, 168px); }
-.sticker-headphones { --sticker-rotation: -8deg; top: 70px; right: 4%; width: 110px; }
-.sticker-hrtf { --sticker-rotation: 6deg; top: 44%; right: -8px; width: 104px; }
-.sticker-wave { --sticker-rotation: -5deg; top: 44%; left: 2%; width: 124px; }
-.sticker-sofa { --sticker-rotation: 7deg; top: 10%; right: 6%; width: 150px; }
-.sticker-mesh { --sticker-rotation: -6deg; left: 30%; bottom: -46px; width: 160px; }
-.sticker-cli { --sticker-rotation: -7deg; top: 40%; left: 6%; width: 124px; }
+.sticker-girl { --sticker-rotation: 8deg; left: 31%; top: 3%; width: clamp(150px, 17vw, 220px); }
+.sticker-headphones { --sticker-rotation: -11deg; top: clamp(60px, 9vw, 120px); left: clamp(170px, 24vw, 320px); width: 132px; }
+.sticker-hrtf { --sticker-rotation: 9deg; top: 47%; right: 9%; width: 122px; }
+.sticker-wave { --sticker-rotation: -9deg; top: 49%; left: 37%; width: 142px; }
+.sticker-sofa { --sticker-rotation: 10deg; bottom: 5%; left: 55%; width: 164px; }
+.sticker-mesh { --sticker-rotation: -8deg; top: 3%; left: 21%; width: 172px; }
+.sticker-cli { --sticker-rotation: -10deg; top: 33%; left: 13%; width: 144px; }
 
 @media (max-width: 860px) {
   .hero { grid-template-columns: 1fr; }
   .dial { width: min(100%, 420px); margin-inline: auto; }
-  .sticker-girl { left: auto; right: 0; top: 150px; width: 104px; }
+  .sticker-girl { left: auto; right: -4px; top: 92px; width: 116px; }
   .flow { grid-template-columns: 1fr; gap: 0; }
   .flow-stage { top: 0; z-index: 2; margin-inline: -18px; padding: 14px 18px 18px; background: linear-gradient(var(--page) 88%, transparent); }
   .flow-steps li { min-height: 62vh; }
-  .sticker-headphones { top: 40px; right: 0; width: 76px; }
-  .sticker-hrtf { top: auto; bottom: 4%; right: 0; width: 76px; }
+  .sticker-headphones { top: 58px; left: auto; right: 4px; width: 88px; }
+  .sticker-hrtf { top: auto; bottom: 9%; right: 4px; width: 88px; }
   .glossary dl > div { grid-template-columns: 1fr; gap: 4px; margin-bottom: 22px; }
   .glossary dl > div:nth-child(2) { margin-left: 8%; }
   .glossary dl > div:nth-child(3) { margin-left: 16%; }
-  .sticker-wave { top: 40%; left: auto; right: 0; width: 90px; }
-  .sticker-sofa { top: 4%; right: 0; width: 100px; }
+  .sticker-wave { top: 43%; left: 52%; width: 98px; }
+  .sticker-sofa { bottom: 13%; left: 58%; width: 108px; }
   .downloads .wrap { grid-template-columns: 1fr; }
-  .sticker-mesh { left: auto; right: 6px; bottom: auto; top: 26px; width: 104px; }
+  .sticker-mesh { left: 46%; top: 8px; width: 116px; }
   .terminal { transform: none; }
   .terminal pre, .terminal-note { font-size: 12.5px; padding-inline: 16px; }
   .terminal-bar span { display: none; }
-  .sticker-cli { top: auto; bottom: -30px; left: auto; right: 6px; width: 92px; }
+  .sticker-cli { top: auto; bottom: 30px; left: auto; right: 2px; width: 100px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .ticker div, .dial .pulse, .cli-section h2::after { animation: none; }

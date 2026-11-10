@@ -86,24 +86,35 @@ mark { color: inherit; background: linear-gradient(transparent 58%, var(--accent
 /* Stickers */
 .content-section { position: relative; scroll-margin-top: 16px; }
 .draggable-sticker {
+  --stuck: drop-shadow(0 0 .6px rgba(23, 23, 23, .55)) drop-shadow(0 1.5px 1px rgba(23, 23, 23, .28));
   position: absolute; z-index: 3; display: block; width: 100px; padding: 0; border: 0;
   background: transparent; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
   transform: rotate(var(--sticker-rotation, 0deg));
-  filter: drop-shadow(0 5px 5px rgba(23, 23, 23, .18));
+  filter: var(--stuck);
   transition: transform 220ms cubic-bezier(.2, .8, .2, 1), filter 220ms ease;
   -webkit-tap-highlight-color: transparent;
 }
 .draggable-sticker img { display: block; width: 100%; height: auto; pointer-events: none; -webkit-user-drag: none; }
-.draggable-sticker:hover { transform: translateY(-5px) rotate(calc(var(--sticker-rotation, 0deg) + 4deg)) scale(1.06); filter: drop-shadow(0 9px 8px rgba(23, 23, 23, .22)); }
-.draggable-sticker.is-dragging { z-index: 10; cursor: grabbing; transform: translateY(-12px) rotate(calc(var(--sticker-rotation, 0deg) + 7deg)) scale(1.12); filter: drop-shadow(0 18px 12px rgba(23, 23, 23, .28)); transition-duration: 140ms; }
-.draggable-sticker.is-released { animation: sticker-release 760ms cubic-bezier(.2, .9, .3, 1) both; }
+/* Glossy vinyl: a soft highlight plus a sheen that sweeps across on hover, both cut to the sticker's shape. */
+.draggable-sticker.has-art::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background:
+    linear-gradient(112deg, transparent 38%, rgba(255, 255, 255, .7) 50%, transparent 62%) 130% 0 / 260% 100% no-repeat,
+    linear-gradient(155deg, rgba(255, 255, 255, .34), transparent 42%);
+  -webkit-mask: var(--art) center / 100% 100% no-repeat; mask: var(--art) center / 100% 100% no-repeat;
+  transition: background-position 700ms ease;
+}
+.draggable-sticker.has-art:hover::after, .draggable-sticker.is-dragging::after { background-position: -30% 0, 0 0; }
+/* Hover peels one edge up; dragging lifts the whole sticker off the page. */
+.draggable-sticker:hover { transform: rotate(calc(var(--sticker-rotation, 0deg) + 3deg)) perspective(500px) rotateX(9deg) rotateY(-7deg) scale(1.04); filter: drop-shadow(0 0 .6px rgba(23, 23, 23, .55)) drop-shadow(3px 7px 5px rgba(23, 23, 23, .26)); }
+.draggable-sticker.is-dragging { z-index: 10; cursor: grabbing; transform: translateY(-12px) rotate(calc(var(--sticker-rotation, 0deg) + 7deg)) scale(1.12); filter: drop-shadow(0 0 .6px rgba(23, 23, 23, .55)) drop-shadow(6px 20px 12px rgba(23, 23, 23, .3)); transition-duration: 140ms; }
+.draggable-sticker.is-released { animation: sticker-release 620ms cubic-bezier(.2, .9, .3, 1) both; }
 @keyframes sticker-release {
-  0% { transform: translateY(-12px) rotate(calc(var(--sticker-rotation) + 7deg)) scale(1.1); }
-  24% { transform: translateY(3px) rotate(calc(var(--sticker-rotation) - 8deg)) scale(.88, 1.12); }
-  44% { transform: translateY(-6px) rotate(calc(var(--sticker-rotation) + 5deg)) scale(1.08, .92); }
-  66% { transform: translateY(1px) rotate(calc(var(--sticker-rotation) - 2deg)) scale(.98, 1.03); }
-  84% { transform: translateY(-2px) rotate(calc(var(--sticker-rotation) + 1deg)) scale(1.01, .99); }
-  100% { transform: translateY(0) rotate(var(--sticker-rotation)) scale(1); }
+  0% { transform: translateY(-12px) rotate(calc(var(--sticker-rotation) + 7deg)) scale(1.12); }
+  30% { transform: rotate(calc(var(--sticker-rotation) - 2deg)) scale(.94); }
+  55% { transform: rotate(calc(var(--sticker-rotation) + 1deg)) scale(1.03); }
+  100% { transform: rotate(var(--sticker-rotation)) scale(1); }
+}
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
