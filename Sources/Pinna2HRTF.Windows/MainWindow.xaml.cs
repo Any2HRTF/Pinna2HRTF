@@ -3557,8 +3557,18 @@ public partial class MainWindow : Window
                 {
                     var text = File.ReadAllText(directLog);
                     if (Regex.IsMatch(text, @"(?m)^End time:\s*\S"))
-                        foreach (Match match in Regex.Matches(text, @"(?m)^Step\s+(\d+),\s+Frequency\s*="))
-                            if (int.TryParse(match.Groups[1].Value, out var completedStep)) steps.Add(completedStep);
+                    {
+                        // -estimate_ram writes the same NC.out with every step header but solves
+                        // nothing; only a solved step reports its own time statistic.
+                        var headers = Regex.Matches(text, @"(?m)^Step\s+(\d+),\s+Frequency\s*=");
+                        for (var index = 0; index < headers.Count; index++)
+                        {
+                            var start = headers[index].Index + headers[index].Length;
+                            var end = index + 1 < headers.Count ? headers[index + 1].Index : text.Length;
+                            if (text.IndexOf("Time Statistic For The Current Step", start, end - start, StringComparison.Ordinal) >= 0
+                                && int.TryParse(headers[index].Groups[1].Value, out var completedStep)) steps.Add(completedStep);
+                        }
+                    }
                 }
                 inspection.DirectRunSteps[source] = steps;
             }

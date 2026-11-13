@@ -444,14 +444,19 @@ enum ArtifactScanner {
         if let cached = inspection.directRunSteps[source] { return cached }
         var steps: Set<Int> = []
         let directLog = source.appendingPathComponent("NC.out", isDirectory: false)
-        if FileManager.default.fileExists(atPath: directLog.path) {
-            let text = (try? String(contentsOf: directLog, encoding: .utf8)) ?? ""
+        if let data = try? Data(contentsOf: directLog) {
+            let text = String(decoding: data, as: UTF8.self)
             let fullRange = NSRange(text.startIndex..<text.endIndex, in: text)
             if directRunEndPattern.firstMatch(in: text, options: [], range: fullRange) != nil {
-                for match in directRunStepPattern.matches(in: text, options: [], range: fullRange) {
-                    guard match.numberOfRanges == 2, match.range(at: 1).location != NSNotFound else { continue }
-                    let stepRange = Range(match.range(at: 1), in: text)
-                    if let stepRange, let step = Int(text[stepRange]) { steps.insert(step) }
+                // `-estimate_ram` writes the same NC.out with every step header but solves
+                // nothing; only a solved step reports its own time statistic.
+                let headers = directRunStepPattern.matches(in: text, options: [], range: fullRange)
+                for (index, header) in headers.enumerated() {
+                    guard let headerRange = Range(header.range, in: text),
+                          let stepRange = Range(header.range(at: 1), in: text),
+                          let step = Int(text[stepRange]) else { continue }
+                    let end = index + 1 < headers.count ? Range(headers[index + 1].range, in: text)?.lowerBound ?? text.endIndex : text.endIndex
+                    if text[headerRange.upperBound..<end].contains("Time Statistic For The Current Step") { steps.insert(step) }
                 }
             }
         }

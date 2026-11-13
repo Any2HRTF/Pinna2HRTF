@@ -379,8 +379,9 @@ def run_numcalc_slurm(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
 
 
 def slurm_worker_text(config: PipelineConfig) -> str:
-    # Mirrors NumCalc.frequency_step_complete: all four outputs are non-empty and
-    # the step log contains NumCalc's end marker.
+    # Per-step part of NumCalc.frequency_step_complete: all four outputs are non-empty
+    # and the step log contains NumCalc's end marker. Steps solved by a direct run
+    # (NC.out only) are not recognized here and are recomputed.
     adaptive_flag = " -adapt_fmmlength" if config.numcalc.adaptive_fmm_length else ""
     return "\n".join([
         "#!/usr/bin/env bash",

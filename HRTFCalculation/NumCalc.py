@@ -21,7 +21,14 @@ def _completed_direct_run_steps(log_path: Path, size: int, mtime_ns: int) -> fro
     text = log_path.read_text(encoding="utf-8", errors="replace")
     if not re.search(r"(?m)^End time:\s*\S", text):
         return frozenset()
-    return frozenset(int(step) for step in re.findall(r"(?m)^Step\s+(\d+),\s+Frequency\s*=", text))
+    # `-estimate_ram` writes the same NC.out with every step header but solves
+    # nothing; only a solved step reports its own time statistic.
+    headers = list(re.finditer(r"(?m)^Step\s+(\d+),\s+Frequency\s*=", text))
+    ends = [header.start() for header in headers[1:]] + [len(text)]
+    return frozenset(
+        int(header.group(1)) for header, end in zip(headers, ends)
+        if "Time Statistic For The Current Step" in text[header.end():end]
+    )
 
 
 def frequency_step_complete(source_dir: Path, step: int) -> bool:
