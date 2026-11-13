@@ -3,7 +3,40 @@ import AppKit
 import UserNotifications
 
 struct AppSettingsView: View {
-    private enum Tab: Hashable { case general, projects, computing, notifications, tools }
+    private enum Pane: Hashable, CaseIterable {
+        case general, projects, computing, notifications, tools
+
+        var title: String {
+            switch self {
+            case .general: "General"
+            case .projects: "New Projects"
+            case .computing: "Computing"
+            case .notifications: "Notifications"
+            case .tools: "Tools"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .general: "gearshape"
+            case .projects: "folder.badge.plus"
+            case .computing: "cpu"
+            case .notifications: "bell.badge"
+            case .tools: "wrench.and.screwdriver"
+            }
+        }
+
+        /// Used only until the pane has been laid out once.
+        var estimatedHeight: CGFloat {
+            switch self {
+            case .general: 80
+            case .projects: 250
+            case .computing: 140
+            case .notifications: 130
+            case .tools: 220
+            }
+        }
+    }
 
     @ObservedObject var store: AppStore
     @AppStorage(AppPreferences.projectDirectory) private var projectDirectory = ""
@@ -25,32 +58,31 @@ struct AppSettingsView: View {
     @AppStorage(AppPreferences.developerPython) private var developerPython = ""
     @AppStorage(AppPreferences.developerExternalDir) private var developerExternalDir = ""
     @State private var invalidGrid = false
-    @State private var selectedTab: Tab = .general
+    @State private var selectedPane: Pane = .general
+    @State private var paneHeights: [Pane: CGFloat] = [:]
 
-    private var windowHeight: CGFloat {
-        let desiredHeight: CGFloat
-        switch selectedTab {
-        case .general: desiredHeight = 190
-        case .projects: desiredHeight = 420
-        case .computing: desiredHeight = 230
-        case .notifications: desiredHeight = 260
-        case .tools: desiredHeight = developerMode ? 720 : 320
-        }
-        return min(desiredHeight, max(190, (NSScreen.main?.visibleFrame.height ?? 820) - 100))
-    }
+    private static let paneWidth: CGFloat = 640
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            general.tabItem { Label("General", systemImage: "gearshape") }.tag(Tab.general)
-            projects.tabItem { Label("New Projects", systemImage: "folder.badge.plus") }.tag(Tab.projects)
-            computing.tabItem { Label("Computing", systemImage: "cpu") }.tag(Tab.computing)
-            notifications.tabItem { Label("Notifications", systemImage: "bell") }.tag(Tab.notifications)
-            tools.tabItem { Label("Tools", systemImage: "wrench.and.screwdriver") }.tag(Tab.tools)
+        TabView(selection: $selectedPane) {
+            ForEach(Pane.allCases, id: \.self) { pane in
+                ScrollView(.vertical) {
+                    paneContent(pane)
+                        .frame(width: Self.paneWidth - 80, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 40)
+                        .padding(.top, 22)
+                        .padding(.bottom, 26)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { paneHeights[pane] = $0 }
+                }
+                .tabItem { Label(pane.title, systemImage: pane.symbol) }
+                .tag(pane)
+            }
         }
-        .padding(20)
-        .frame(width: 620, height: windowHeight)
-        .animation(.easeInOut(duration: 0.18), value: selectedTab)
-        .animation(.easeInOut(duration: 0.18), value: developerMode)
+        .frame(width: Self.paneWidth, height: min(paneHeights[selectedPane] ?? selectedPane.estimatedHeight,
+                                                  max(120, (NSScreen.main?.visibleFrame.height ?? 820) - 120)))
+        .animation(.easeInOut(duration: 0.2), value: selectedPane)
+        .animation(.easeInOut(duration: 0.2), value: developerMode)
         .onChange(of: developerMode) { _ in store.environmentPreferencesDidChange() }
         .onChange(of: developerNumCalc) { _ in store.environmentPreferencesDidChange() }
         .onChange(of: developerMeshGrading) { _ in store.environmentPreferencesDidChange() }
@@ -67,201 +99,210 @@ struct AppSettingsView: View {
         }
     }
 
+    @ViewBuilder private func paneContent(_ pane: Pane) -> some View {
+        switch pane {
+        case .general: general
+        case .projects: projects
+        case .computing: computing
+        case .notifications: notifications
+        case .tools: tools
+        }
+    }
+
     private var general: some View {
         Form {
-            Picker("Appearance", selection: $appearance) {
-                Text("System").tag("system")
+            Picker("Appearance:", selection: $appearance) {
+                Text("Match System").tag("system")
+                Divider()
                 Text("Light").tag("light")
                 Text("Dark").tag("dark")
             }
-            .pickerStyle(.segmented)
         }
-        .formStyle(.grouped)
     }
 
     private var projects: some View {
         Form {
             Section {
-                LabeledContent("Project location") {
-                    HStack {
-                        Text(projectDirectory.isEmpty ? "Application Support" : projectDirectory)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                        Spacer(minLength: 8)
-                        Button("Choose…") { chooseDirectory(selection: $projectDirectory) }
-                            .fixedSize()
-                        if !projectDirectory.isEmpty {
-                            Button("Reset") { projectDirectory = "" }
-                                .fixedSize()
-                        }
-                    }
-                }
-                .accessibilityElement(children: .contain)
-                Picker("Input files", selection: $inputHandling) {
+                locationPicker("Project location:", path: $projectDirectory,
+                               defaultTitle: "Application Support", choose: { chooseDirectory(selection: $projectDirectory) })
+                Picker("Input files:", selection: $inputHandling) {
                     ForEach(InputHandling.allCases) { handling in
                         Text(handling.title).tag(handling.rawValue)
                     }
                 }
-                LabeledContent("Evaluation grid") {
-                    HStack {
-                        Text(evaluationGrid.isEmpty ? "ARI grid (91 directions)" : evaluationGrid)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                        Spacer(minLength: 8)
-                        Button("Choose Grid…") { chooseGrid() }
-                            .fixedSize()
-                        if !evaluationGrid.isEmpty {
-                            Button("Reset") { evaluationGrid = "" }
-                                .fixedSize()
-                        }
+                locationPicker("Evaluation grid:", path: $evaluationGrid,
+                               defaultTitle: "ARI Grid (91 directions)", choose: chooseGrid)
+            }
+            Section {
+                LabeledContent("Frequency range:") {
+                    HStack(spacing: 6) {
+                        numberField("Minimum frequency", value: $minimumFrequency, range: 0...max(0, min(maximumFrequency - 1, 95999)), step: 100)
+                        Text("to")
+                        numberField("Maximum frequency", value: $maximumFrequency, range: max(1, min(minimumFrequency + 1, 96000))...96000, step: 100)
+                        Text("Hz")
                     }
                 }
-            } header: {
-                Text("New project defaults")
-            }
-            Section("Simulation defaults") {
-                numberSetting("Minimum frequency", value: $minimumFrequency, range: 0...max(0, min(maximumFrequency - 1, 95999)), step: 100, unit: "Hz")
-                numberSetting("Maximum frequency", value: $maximumFrequency, range: max(1, min(minimumFrequency + 1, 96000))...96000, step: 100, unit: "Hz")
-                numberSetting("Frequency steps", value: $frequencySteps, range: 2...8193)
+                LabeledContent("Frequency steps:") {
+                    numberField("Frequency steps", value: $frequencySteps, range: 2...8193)
+                }
+                caption("Applies to new projects only.")
             }
         }
-        .formStyle(.grouped)
     }
 
     private var computing: some View {
         Form {
-            Section {
-                numberSetting("Parallel NumCalc instances", value: $maxInstances, range: 1...1024)
-                numberSetting("CPU load limit", value: $maxCPULoad, range: 1...100, unit: "%")
-            } header: {
-                Text("New project defaults")
+            LabeledContent("Parallel NumCalc instances:") {
+                numberField("Parallel NumCalc instances", value: $maxInstances, range: 1...1024)
             }
+            LabeledContent("CPU load limit:") {
+                HStack(spacing: 6) {
+                    numberField("CPU load limit", value: $maxCPULoad, range: 1...100)
+                    Text("%")
+                }
+            }
+            caption("Applies to new projects only.")
         }
-        .formStyle(.grouped)
     }
 
     private var notifications: some View {
         Form {
-            Section {
-                Toggle("Allow notifications", isOn: $notifyAll)
-                Toggle("When a stage completes", isOn: $notifyCompletion)
-                    .disabled(!notifyAll)
-                Toggle("When a stage fails", isOn: $notifyFailure)
-                    .disabled(!notifyAll)
+            Toggle("Allow notifications", isOn: $notifyAll)
+            LabeledContent("Notify me:") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("When a stage completes", isOn: $notifyCompletion)
+                    Toggle("When a stage fails", isOn: $notifyFailure)
+                }
+                .disabled(!notifyAll)
             }
+            .padding(.top, 4)
         }
-        .formStyle(.grouped)
     }
 
     private var tools: some View {
-        Form {
-            Section("Tools") {
-                toolRow("NumCalc", path: store.environment.numcalcExecutable)
-                toolRow("Mesh grading", path: store.environment.meshGradingExecutable)
-                toolRow("Python", path: store.environment.pythonExecutable ?? ProcessLauncher.runtimePythonURL.path)
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
+                toolRow("NumCalc:", path: store.environment.numcalcExecutable)
+                toolRow("Mesh grading:", path: store.environment.meshGradingExecutable)
+                toolRow("Python:", path: store.environment.pythonExecutable ?? ProcessLauncher.runtimePythonURL.path)
                 if !Defaults.isPackagedApp || developerMode {
-                    toolRow("uv (development)", path: store.environment.uvExecutable)
+                    toolRow("uv (development):", path: store.environment.uvExecutable)
                 }
-                directoryRow("Mesh2HRTF", path: URL(fileURLWithPath: store.environment.externalDir).appendingPathComponent("src/Mesh2HRTF/mesh2hrtf").path)
+                toolRow("Mesh2HRTF:", path: URL(fileURLWithPath: store.environment.externalDir).appendingPathComponent("src/Mesh2HRTF/mesh2hrtf").path, directory: true)
             }
-            Section {
+            Divider().padding(.vertical, 2)
+            VStack(alignment: .leading, spacing: 8) {
                 Toggle("Developer mode", isOn: $developerMode)
+                    .padding(.leading, 162)
                 if developerMode {
-                    executableSetting("NumCalc", path: $developerNumCalc, defaultPath: store.library.environment.numcalcExecutable)
-                    executableSetting("Mesh grading", path: $developerMeshGrading, defaultPath: store.library.environment.meshGradingExecutable)
-                    executableSetting("Python", path: $developerPython, defaultPath: ProcessLauncher.runtimePythonURL.path)
-                    executableSetting("uv", path: $developerUV, defaultPath: store.library.environment.uvExecutable)
-                    directorySetting("External dependencies", path: $developerExternalDir, defaultPath: store.library.environment.externalDir)
+                    pathSetting("NumCalc:", path: $developerNumCalc, defaultPath: store.library.environment.numcalcExecutable)
+                    pathSetting("Mesh grading:", path: $developerMeshGrading, defaultPath: store.library.environment.meshGradingExecutable)
+                    pathSetting("Python:", path: $developerPython, defaultPath: ProcessLauncher.runtimePythonURL.path)
+                    pathSetting("uv:", path: $developerUV, defaultPath: store.library.environment.uvExecutable)
+                    pathSetting("External dependencies:", path: $developerExternalDir, defaultPath: store.library.environment.externalDir, directory: true)
                 }
             }
         }
-        .formStyle(.grouped)
     }
 
-    private func numberSetting(_ title: String, value: Binding<Int>, range: ClosedRange<Int>, step: Int = 1, unit: String = "") -> some View {
-        Stepper(value: value, in: range, step: step) {
-            HStack {
-                Text(title)
-                Spacer()
-                TextField(title, value: value, format: .number)
-                    .labelsHidden()
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 80)
-                    .onChange(of: value.wrappedValue) { newValue in
-                        let bounded = min(max(newValue, range.lowerBound), range.upperBound)
-                        if bounded != newValue { value.wrappedValue = bounded }
-                    }
-                if !unit.isEmpty { Text(unit).foregroundStyle(.secondary) }
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Safari-style location pop-up: the default, the chosen folder, and "Other…".
+    private func locationPicker(_ title: String, path: Binding<String>, defaultTitle: String, choose: @escaping () -> Void) -> some View {
+        let selection = Binding<String>(
+            get: { path.wrappedValue.isEmpty ? "default" : "custom" },
+            set: { choice in
+                if choice == "default" { path.wrappedValue = "" }
+                if choice == "other" { DispatchQueue.main.async(execute: choose) }
+            })
+        return Picker(title, selection: selection) {
+            Text(defaultTitle).tag("default")
+            if !path.wrappedValue.isEmpty {
+                Label {
+                    Text(FileManager.default.displayName(atPath: path.wrappedValue))
+                } icon: {
+                    Image(nsImage: Self.menuIcon(forPath: path.wrappedValue))
+                }
+                .labelStyle(.titleAndIcon)
+                .tag("custom")
             }
+            Divider()
+            Text("Other…").tag("other")
+        }
+        .help(path.wrappedValue.isEmpty ? defaultTitle : path.wrappedValue)
+    }
+
+    private static func menuIcon(forPath path: String) -> NSImage {
+        let icon = NSWorkspace.shared.icon(forFile: path)
+        icon.size = NSSize(width: 16, height: 16)
+        return icon
+    }
+
+    private func numberField(_ title: String, value: Binding<Int>, range: ClosedRange<Int>, step: Int = 1) -> some View {
+        HStack(spacing: 4) {
+            TextField(title, value: value, format: .number)
+                .labelsHidden()
+                .multilineTextAlignment(.trailing)
+                .frame(width: 64)
+                .onChange(of: value.wrappedValue) { newValue in
+                    let bounded = min(max(newValue, range.lowerBound), range.upperBound)
+                    if bounded != newValue { value.wrappedValue = bounded }
+                }
+            Stepper(title, value: value, in: range, step: step)
+                .labelsHidden()
         }
     }
 
-    private func toolRow(_ title: String, path: String) -> some View {
-        let ready = FileManager.default.isExecutableFile(atPath: path)
-        return HStack {
-            Label(title, systemImage: ready ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(ready ? .green : .red)
-            Spacer()
-            Text(ready ? "Available" : "Missing")
-                .foregroundStyle(.secondary)
-        }
-        .help(path)
-    }
-
-    private func directoryRow(_ title: String, path: String) -> some View {
+    private func toolRow(_ title: String, path: String, directory: Bool = false) -> some View {
         var isDirectory: ObjCBool = false
-        let ready = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
-        return HStack {
-            Label(title, systemImage: ready ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(ready ? .green : .red)
-            Spacer()
-            Text(ready ? "Available" : "Missing").foregroundStyle(.secondary)
+        let ready = directory
+            ? FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+            : FileManager.default.isExecutableFile(atPath: path)
+        return HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .frame(width: 150, alignment: .trailing)
+            HStack(spacing: 5) {
+                Image(systemName: ready ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundStyle(ready ? Color.green : Color.red)
+                    .accessibilityHidden(true)
+                Text(ready ? "Available" : "Missing")
+                    .foregroundStyle(ready ? Color.secondary : Color.red)
+            }
+            .accessibilityElement(children: .combine)
         }
+        .padding(.vertical, 2)
         .help(path)
     }
 
-    private func executableSetting(_ title: String, path: Binding<String>, defaultPath: String) -> some View {
-        LabeledContent(title) {
-            HStack {
+    private func pathSetting(_ title: String, path: Binding<String>, defaultPath: String, directory: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .frame(width: 150, alignment: .trailing)
+            HStack(spacing: 6) {
                 TextField("", text: path, prompt: Text(defaultPath))
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("\(title) path")
+                    .labelsHidden()
+                    .accessibilityLabel("\(title.replacingOccurrences(of: ":", with: "")) path")
                     .help(defaultPath)
                 Button("Choose…") {
-                    let panel = NSOpenPanel()
-                    panel.canChooseFiles = true
-                    panel.canChooseDirectories = false
-                    panel.allowsMultipleSelection = false
-                    if panel.runModal() == .OK, let url = panel.url {
-                        path.wrappedValue = url.path
+                    if directory {
+                        chooseDirectory(selection: path)
+                    } else {
+                        let panel = NSOpenPanel()
+                        panel.canChooseFiles = true
+                        panel.canChooseDirectories = false
+                        panel.allowsMultipleSelection = false
+                        if panel.runModal() == .OK, let url = panel.url {
+                            path.wrappedValue = url.path
+                        }
                     }
                 }
-                .fixedSize()
-                if !path.wrappedValue.isEmpty {
-                    Button("Reset") { path.wrappedValue = "" }
-                        .fixedSize()
-                }
-            }
-        }
-        .accessibilityElement(children: .contain)
-    }
-
-    private func directorySetting(_ title: String, path: Binding<String>, defaultPath: String) -> some View {
-        LabeledContent(title) {
-            HStack {
-                TextField("", text: path, prompt: Text(defaultPath))
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("\(title) path")
-                    .help(defaultPath)
-                Button("Choose…") { chooseDirectory(selection: path) }
-                    .fixedSize()
-                if !path.wrappedValue.isEmpty {
-                    Button("Reset") { path.wrappedValue = "" }.fixedSize()
-                }
+                Button("Reset") { path.wrappedValue = "" }
+                    .disabled(path.wrappedValue.isEmpty)
             }
         }
         .accessibilityElement(children: .contain)

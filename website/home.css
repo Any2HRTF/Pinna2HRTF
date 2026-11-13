@@ -1,0 +1,153 @@
+/* Front page. Every section has its own layout on purpose. */
+body { overflow-x: clip; }
+h2 { margin-bottom: 0; font-size: clamp(34px, 5.4vw, 64px); font-weight: 800; letter-spacing: -.05em; line-height: 1; }
+
+/* 1. Hero: headline beside a direction dial */
+.hero { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); align-items: center; gap: clamp(24px, 4vw, 56px); padding-block: clamp(28px, 5vw, 64px) clamp(48px, 7vw, 96px); }
+.hero h1 { margin-bottom: 26px; font-size: clamp(46px, 7.6vw, 96px); font-weight: 800; letter-spacing: -.06em; line-height: .94; }
+.hero h1 em { position: relative; z-index: 0; display: inline-block; padding: 0 .12em .04em; color: #171717; white-space: nowrap; }
+.hero h1 em::after { content: ""; position: absolute; z-index: -1; inset: 12% 0 2% 0; border-radius: .14em; background: var(--accent); transform: rotate(-1.2deg); }
+.hero-lede { max-width: 30em; margin-bottom: 30px; color: var(--muted); font-size: clamp(17px, 1.7vw, 20px); line-height: 1.5; }
+.hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 26px; }
+.hero-meta { margin: 20px 0 0; color: var(--quiet); font-size: 14px; }
+
+.dial { position: relative; margin: 0; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
+.dial:active { cursor: grabbing; }
+.dial svg { display: block; width: 100%; height: auto; overflow: visible; }
+.dial .ring { fill: none; stroke: var(--rule); stroke-width: 1.5; }
+.dial .tick { stroke: var(--quiet); stroke-width: 1.5; }
+.dial .tick.major { stroke: var(--ink); stroke-width: 2.5; }
+.dial text { fill: var(--muted); font: 600 13px var(--mono); text-anchor: middle; dominant-baseline: middle; }
+.dial .head { fill: var(--paper); stroke: var(--ink); stroke-width: 3.5; stroke-linejoin: round; }
+.dial .ray { stroke: var(--underline); stroke-width: 2; stroke-dasharray: 2 9; stroke-linecap: round; }
+.dial .source { fill: var(--accent); stroke: var(--ink); stroke-width: 3.5; }
+.dial .pulse { fill: none; stroke: var(--underline); stroke-width: 2.5; }
+.dial .echo { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 1 7; opacity: 0; }
+.dial figcaption { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px 20px; margin-top: 10px; color: var(--muted); font-size: 14px; line-height: 1.45; cursor: default; }
+.dial figcaption p { grid-column: 1 / -1; margin: 0; }
+.readout { display: grid; gap: 6px; font: 600 13px var(--mono); color: var(--ink); }
+.readout span { display: grid; }
+.readout b { font-size: 24px; letter-spacing: -.04em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.irs { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 2px 8px; font: 600 13px var(--mono); color: var(--ink); }
+.irs svg { height: 60px; border-bottom: 1px solid var(--rule); background: linear-gradient(var(--rule), var(--rule)) 0 50% / 100% 1px no-repeat; }
+.irs path { fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.irs svg:nth-of-type(2) path { stroke: var(--underline); }
+.ir-axis { display: flex; justify-content: space-between; gap: 8px; color: var(--quiet); font-size: 11px; font-weight: 500; }
+
+/* 2. Ticker */
+.ticker { margin-inline: -4vw; padding-block: 15px; overflow: hidden; color: #171717; background: var(--accent); transform: rotate(-1.4deg); }
+.ticker div { display: flex; width: max-content; animation: ticker 36s linear infinite; }
+.ticker span { padding-right: .6em; font-size: clamp(20px, 2.6vw, 30px); font-weight: 800; letter-spacing: -.02em; text-transform: uppercase; white-space: nowrap; }
+@keyframes ticker { to { transform: translateX(-50%); } }
+
+/* 3. Showcase: the window tips up as it scrolls in */
+.showcase { padding-top: clamp(72px, 11vw, 150px); perspective: 1600px; }
+.showcase h2 { max-width: 12em; margin-bottom: clamp(28px, 4vw, 48px); }
+.showcase h2 em { color: var(--muted); }
+.showcase picture { display: block; transform-origin: 50% 100%; transform: rotateX(calc((1 - var(--p, 1)) * 26deg)) scale(calc(.86 + var(--p, 1) * .14)); will-change: transform; }
+.showcase img { display: block; width: 100%; border-radius: 0.8% / 1.2%; box-shadow: var(--shadow); }
+
+/* 4. Workflow: pinned screenshot, scrolling steps */
+.workflow { padding-top: clamp(80px, 12vw, 160px); }
+.flow { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 4fr); gap: clamp(28px, 5vw, 72px); margin-top: 24px; }
+.flow-stage { position: sticky; top: 12vh; align-self: start; display: grid; margin: 0; }
+.flow-stage picture { grid-area: 1 / 1; opacity: 0; transform: scale(.96) rotate(-1deg); transition: opacity .45s ease, transform .6s cubic-bezier(.2, .8, .2, 1); }
+.flow-stage picture.is-active { opacity: 1; transform: none; }
+.flow-stage img { display: block; width: 100%; border-radius: 0.8% / 1.2%; box-shadow: var(--shadow); }
+.flow-steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+.flow-steps li { display: flex; flex-direction: column; justify-content: center; min-height: 72vh; counter-increment: step; opacity: .28; transition: opacity .4s ease; }
+.flow-steps li.is-active { opacity: 1; }
+.flow-steps li::before { content: counter(step); margin-bottom: 6px; color: transparent; font-size: clamp(90px, 13vw, 170px); font-weight: 800; letter-spacing: -.06em; line-height: .85; -webkit-text-stroke: 2.5px var(--ink); }
+.flow-steps li.is-active::before { color: var(--accent); }
+.flow-steps h3 { margin-bottom: 10px; font-size: clamp(24px, 2.6vw, 32px); font-weight: 760; letter-spacing: -.04em; }
+.flow-steps p { margin: 0; color: var(--muted); font-size: 17px; }
+
+/* 5. Glossary: three words on a staircase */
+.glossary { padding-top: clamp(64px, 9vw, 120px); }
+.glossary dl { margin: clamp(28px, 4vw, 48px) 0 0; }
+.glossary dl > div { display: grid; grid-template-columns: auto minmax(0, 24em); align-items: center; gap: clamp(16px, 3vw, 44px); width: fit-content; }
+.glossary dl > div:nth-child(2) { margin-left: 14%; }
+.glossary dl > div:nth-child(3) { margin-left: 28%; }
+.glossary dt { color: transparent; font-size: clamp(72px, 15vw, 190px); font-weight: 800; letter-spacing: -.07em; line-height: .95; -webkit-text-stroke: 2.5px var(--ink); transition: color .25s ease; }
+.glossary dl > div:hover dt { color: var(--accent); }
+.glossary dd { margin: 0; font: italic 500 clamp(17px, 1.9vw, 23px)/1.4 var(--serif); }
+.glossary dd b { display: block; margin-bottom: 4px; color: var(--quiet); font: 600 13px/1.3 var(--mono); }
+
+/* 6. Download: one yellow slab */
+.downloads { margin-top: clamp(80px, 11vw, 150px); padding: clamp(36px, 6vw, 80px) 0 clamp(40px, 6vw, 72px); border-radius: clamp(28px, 5vw, 64px); color: #171717; background: var(--accent); }
+.downloads .wrap { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: clamp(24px, 5vw, 72px); }
+.downloads h2 { font-size: clamp(54px, 9vw, 120px); line-height: .88; }
+.downloads h2 em { display: block; font-size: .62em; line-height: 1.1; }
+.downloads-intro { max-width: 22em; margin: 26px 0 0; font-size: 17px; line-height: 1.5; }
+.platforms { margin: 0; padding: 0; list-style: none; border-top: 3px solid #171717; }
+.platforms li { border-bottom: 3px solid #171717; }
+.platform { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 20px; padding: 22px 14px 20px 0; color: #171717; text-decoration: none; transition: padding .25s cubic-bezier(.2, .8, .2, 1), background .2s ease, color .2s ease; }
+.platform strong { font-size: clamp(34px, 5vw, 60px); font-weight: 800; letter-spacing: -.05em; line-height: 1; }
+.platform span { grid-column: 1; font-size: 15px; }
+.platform i { grid-area: 1 / 2 / 3 / 3; font-size: clamp(34px, 5vw, 56px); font-style: normal; font-weight: 300; line-height: 1; transition: transform .25s cubic-bezier(.2, .8, .2, 1); }
+.platform:hover { padding-inline: 20px 20px; color: var(--accent); background: #171717; }
+.platform:hover i { transform: translateY(6px); }
+.download-foot { margin: 18px 0 0; font-size: 13.5px; line-height: 1.5; }
+.download-foot a { color: #171717; text-decoration-color: #171717; text-decoration-thickness: 1.5px; }
+
+/* 7. CLI: a tilted terminal window */
+.cli-section { padding-top: clamp(80px, 11vw, 150px); text-align: center; }
+.cli-section h2 { font-family: var(--mono); font-size: clamp(26px, 4.4vw, 52px); font-weight: 700; letter-spacing: -.06em; }
+.cli-section h2::before { content: "$ "; color: var(--underline); }
+.cli-section h2::after { content: ""; display: inline-block; width: .55em; height: 1em; margin-left: .15em; background: var(--accent); vertical-align: -.12em; animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.cli-intro { max-width: 34em; margin: 18px auto 0; color: var(--muted); font-size: 18px; line-height: 1.5; }
+.cli-intro code { padding: .1em .35em; border-radius: 5px; background: var(--soft); font-size: .88em; }
+.terminal { position: relative; width: min(100%, 760px); margin: 44px auto 0; overflow: hidden; border-radius: 16px; color: var(--term-ink); background: var(--term); box-shadow: var(--shadow); text-align: left; transform: rotate(-1.6deg); transition: transform .4s cubic-bezier(.2, .8, .2, 1); }
+.terminal:hover { transform: none; }
+.terminal-bar { display: flex; align-items: center; gap: 7px; padding: 13px 16px; background: rgba(255, 255, 255, .06); color: var(--term-muted); font: 12px var(--mono); }
+.terminal-bar i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
+.terminal-bar i:nth-child(2) { background: #febc2e; }
+.terminal-bar i:nth-child(3) { margin-right: 10px; background: #28c840; }
+.terminal .copy-button { top: 8px; right: 10px; }
+.terminal pre { overflow-x: auto; margin: 0; padding: 20px 22px 6px; font-size: 14px; line-height: 1.9; }
+.terminal .cmd { display: inline-block; }
+.terminal .cmd::before { content: "$ "; color: var(--accent); user-select: none; -webkit-user-select: none; }
+.terminal.is-typing .cmd { clip-path: inset(0 100% 0 0); animation: type .9s steps(26) forwards; }
+.terminal.is-typing .cmd:nth-child(2) { animation-delay: 1.1s; }
+.terminal.is-typing .cmd:nth-child(3) { animation-delay: 1.8s; }
+@keyframes type { to { clip-path: inset(0 0 0 0); } }
+.terminal-note { margin: 0; padding: 0 22px 20px; color: var(--term-muted); font: 14px/1.9 var(--mono); }
+.terminal-note code { color: var(--term-ink); overflow-wrap: anywhere; }
+.cli-link { display: inline-block; margin-top: 36px; font-weight: 600; }
+
+/* Stickers: scattered on purpose, visitors can move them */
+.sticker-girl { --sticker-rotation: 8deg; left: 31%; top: 3%; width: clamp(150px, 17vw, 220px); }
+.sticker-headphones { --sticker-rotation: -11deg; top: clamp(60px, 9vw, 120px); left: clamp(170px, 24vw, 320px); width: 132px; }
+.sticker-hrtf { --sticker-rotation: 9deg; top: 47%; right: 9%; width: 122px; }
+.sticker-wave { --sticker-rotation: -9deg; top: 49%; left: 37%; width: 142px; }
+.sticker-sofa { --sticker-rotation: 10deg; bottom: 5%; left: 55%; width: 164px; }
+.sticker-mesh { --sticker-rotation: -8deg; top: 3%; left: 21%; width: 172px; }
+.sticker-cli { --sticker-rotation: -10deg; top: 33%; left: 13%; width: 144px; }
+
+@media (max-width: 860px) {
+  .hero { grid-template-columns: 1fr; }
+  .dial { width: min(100%, 420px); margin-inline: auto; }
+  .sticker-girl { left: auto; right: -4px; top: 92px; width: 116px; }
+  .flow { grid-template-columns: 1fr; gap: 0; }
+  .flow-stage { top: 0; z-index: 2; margin-inline: -18px; padding: 14px 18px 18px; background: linear-gradient(var(--page) 88%, transparent); }
+  .flow-steps li { min-height: 62vh; }
+  .sticker-headphones { top: 58px; left: auto; right: 4px; width: 88px; }
+  .sticker-hrtf { top: auto; bottom: 9%; right: 4px; width: 88px; }
+  .glossary dl > div { grid-template-columns: 1fr; gap: 4px; margin-bottom: 22px; }
+  .glossary dl > div:nth-child(2) { margin-left: 8%; }
+  .glossary dl > div:nth-child(3) { margin-left: 16%; }
+  .sticker-wave { top: 43%; left: 52%; width: 98px; }
+  .sticker-sofa { bottom: 13%; left: 58%; width: 108px; }
+  .downloads .wrap { grid-template-columns: 1fr; }
+  .sticker-mesh { left: 46%; top: 8px; width: 116px; }
+  .terminal { transform: none; }
+  .terminal pre, .terminal-note { font-size: 12.5px; padding-inline: 16px; }
+  .terminal-bar span { display: none; }
+  .sticker-cli { top: auto; bottom: 30px; left: auto; right: 2px; width: 100px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ticker div, .cli-section h2::after { animation: none; }
+  .terminal.is-typing .cmd { clip-path: none; animation: none; }
+  .showcase picture { transform: none; }
+}

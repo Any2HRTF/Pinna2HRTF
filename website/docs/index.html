@@ -3,60 +3,100 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Pinna2HRTF documentation for the desktop app, full-head scan preparation, ear editing, and Python CLI.">
+  <meta name="theme-color" content="#f2f2ef" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#131517" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="Pinna2HRTF documentation: a first run, the desktop app, head-scan preparation, ear editing, and the Python CLI.">
   <title>Documentation — Pinna2HRTF</title>
   <link rel="icon" href="../favicon-macos.png?v=glass-ear2" type="image/png" sizes="512x512">
   <link rel="shortcut icon" href="../favicon-macos.png?v=glass-ear2" type="image/png">
   <link rel="apple-touch-icon" href="../favicon-macos.png?v=glass-ear2">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="../styles.css?v=7">
+  <link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
-  <div class="docs-frame">
-    <header class="docs-header">
-      <a class="brand" href="../" aria-label="Pinna2HRTF home"><img src="../assets/app-icon.webp?v=glass-ear2" alt=""><strong>Pinna2HRTF</strong></a>
-      <nav class="top-nav" aria-label="Main navigation"><a href="../">Home</a><a href="../#downloads">Downloads</a><a href="index.html" aria-current="page">Documentation</a></nav>
-    </header>
-    <div class="docs-layout">
-      <aside class="docs-sidebar">
-        <p class="sidebar-label">Documentation</p>
-        <nav class="sidebar-links" aria-label="Documentation pages">
-          <a href="index.html" aria-current="page">Overview</a><a href="desktop-app.html">Desktop app</a><a href="scan-preparation.html">Scan preparation &amp; ear editing</a><a href="manual-fitting.html">Manual PPM fitting</a><a href="results.html">Simulation &amp; results</a><a href="cli.html">Python CLI</a><a href="building.html">Build from source</a>
-        </nav>
-      <nav class="on-this-page" aria-label="On this page"><p class="sidebar-label">On this page</p><a href="#guides">Guides</a><a href="#before-you-start">Before you start</a><a href="#your-first-run">Your first run</a><a href="#downloads-and-support">Downloads and support</a></nav></aside>
-      <main class="docs-content" id="main">
-        <p class="kicker"><span class="dot" aria-hidden="true"></span> USER GUIDE</p>
-        <h1>Calculate your first HRTF.</h1>
-        <p class="lede">Pinna2HRTF prepares one or two ear meshes, builds an acoustic simulation, and exports individualized HRTF and HRIR data in SOFA files.</p>
-        <div class="release-note"><p><strong>Release status</strong></p><p>This guide describes the version 2.0 app and CLI source. The public downloads still point to v1.1.0, so some features described here may not be available in the installer.</p></div>
+  <header class="site-header wrap">
+    <a class="brand" href="../" aria-label="Pinna2HRTF home"><img src="../assets/app-icon.webp?v=glass-ear2" alt="" width="32" height="32" decoding="async">Pinna2HRTF</a>
+    <nav class="main-nav" aria-label="Main navigation">
+      <a href="../#downloads">Download</a>
+      <a href="index.html" aria-current="page">Docs</a>
+      <a href="https://github.com/Any2HRTF/Pinna2HRTF">GitHub</a>
+    </nav>
+  </header>
 
-        <h2 id="guides">Guides</h2>
-        <div class="page-cards">
-          <a class="page-card" href="desktop-app.html"><strong>Desktop app</strong><span>Projects, mesh inputs, pipeline stages, previews, logs, and outputs.</span></a>
-          <a class="page-card" href="scan-preparation.html"><strong>Scan preparation &amp; ear editing</strong><span>Align a head scan, prepare left and right ears, review and save edits.</span></a>
-          <a class="page-card" href="cli.html"><strong>Python CLI</strong><span>Install the environment, prepare native tools, run stages, and configure YAML.</span></a>
-          <a class="page-card" href="building.html"><strong>Build from source</strong><span>Package a local macOS or Windows app for development.</span></a>
-          <a class="page-card" href="manual-fitting.html"><strong>Manual PPM fitting</strong><span>Global alignment, local anatomy, shape keys, and fit inspection.</span></a><a class="page-card" href="results.html"><strong>Simulation &amp; results</strong><span>Microphones, mesh grading, pressure fields, HRTF plots, and SOFA output.</span></a>
-        </div>
+  <div class="docs-layout wrap">
+    <aside class="docs-sidebar">
+      <nav aria-label="Documentation pages">
+        <a href="index.html" aria-current="page">Getting started</a>
+        <a href="desktop-app.html">Desktop app</a>
+        <a href="scan-preparation.html">Head scans &amp; ear editing</a>
+        <a href="manual-fitting.html">Manual PPM fitting</a>
+        <a href="results.html">Simulation &amp; results</a>
+        <a href="cli.html">Python CLI</a>
+        <a href="building.html">Build from source</a>
+      </nav>
+    </aside>
 
-        <h2 id="before-you-start">Before you start</h2>
-        <p>You need one or two ear meshes, a project folder, an evaluation grid (the source directions), and a frequency range. For a full-head scan, first align the scan and review the extracted ears. Left and right always refer to the person being modeled.</p>
-        <h2 id="your-first-run">Your first run</h2>
-        <ol>
-          <li><strong>Create a project.</strong> Choose where to save it and add your ear meshes. If you have a full-head scan, follow <a href="scan-preparation.html">scan preparation</a> first.</li>
-          <li><strong>Inspect the geometry.</strong> Check the selected ears and their orientation in Preview. Mesh2PPM prediction is optional; start with your original meshes unless you intend to use predicted geometry.</li>
-          <li><strong>Prepare the simulation.</strong> Choose the evaluation grid and frequency range in Project Settings, then run Preprocessing. Inspect the resulting geometry and source placement before starting NumCalc.</li>
-          <li><strong>Solve.</strong> Run NumCalc and follow progress in the live log. Use the technical log to investigate errors.</li>
-          <li><strong>Export.</strong> Run SOFA export and postprocessing after the simulation completes. Keep the project configuration with the results so you can identify how they were produced.</li>
-        </ol>
-        <div class="callout"><p><strong>What you get</strong></p><p>HRTFs describe how sound is filtered for each source direction. HRIRs are the corresponding impulse responses. Both are exported as SOFA files, a format for spatial acoustic data.</p></div>
-<figure><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/desktop-workspace-dark.png"><img src="../assets/screenshots/desktop-workspace.jpg" alt="Pinna2HRTF showing a simulation mesh, project settings, and workflow status, with standard macOS window controls" width="2620" height="1746" loading="lazy"></picture><figcaption>The project workspace: ear geometry in the center, input settings and pipeline progress on the right.</figcaption></figure>
-        <h2 id="downloads-and-support">Downloads and support</h2>
-        <p>Get the macOS or Windows app from the <a href="../#downloads">download section</a>. The installers bundle Python, the Mesh2PPM models, and the simulation tools. The <a href="https://github.com/Any2HRTF/Pinna2HRTF/releases">release page</a> has checksums and previous versions.</p>
-        <p>For code, issue reports, and release notes, visit the <a href="https://github.com/Any2HRTF/Pinna2HRTF">Pinna2HRTF GitHub repository</a>.</p>
-      </main>
-    </div>
-    <footer class="docs-footer"><small>Individualized HRTFs from pinna meshes</small><nav aria-label="Footer"><a href="../">Home</a><a href="../#downloads">Downloads</a><a href="https://github.com/Any2HRTF/Pinna2HRTF">GitHub</a></nav></footer>
+    <main class="docs-content" id="main">
+      <h1>Getting started</h1>
+      <p class="lede">Pinna2HRTF prepares one or two ear meshes, runs an acoustic simulation on them, and exports individualized HRTFs and HRIRs as SOFA files. This page walks you through a first run. The guides go deeper.</p>
+
+      <aside class="note">
+      <p><strong>A note on versions.</strong> These pages describe version 2.0 of the app and CLI, as it is in the source. The current download is still v1.1.0, so some of what you read here may not be in your installer yet.</p></aside>
+
+      <h2 id="guides">Guides</h2>
+      <ul class="guide-list">
+        <li><a href="desktop-app.html"><strong>Desktop app</strong><span>Install it, create a project, and run the pipeline from mesh to SOFA.</span></a></li>
+        <li><a href="scan-preparation.html"><strong>Head scans &amp; ear editing</strong><span>Align a full-head scan, cut out the ears, and clean them up.</span></a></li>
+        <li><a href="manual-fitting.html"><strong>Manual PPM fitting</strong><span>Fit the parametric ear model by hand and check how close it is.</span></a></li>
+        <li><a href="results.html"><strong>Simulation &amp; results</strong><span>Microphones, mesh grading, pressure fields, HRTF plots, and SOFA export.</span></a></li>
+        <li><a href="cli.html"><strong>Python CLI</strong><span>Install the environment, run single stages, or configure a full run in YAML.</span></a></li>
+        <li><a href="building.html"><strong>Build from source</strong><span>Package your own macOS or Windows app.</span></a></li>
+      </ul>
+
+      <h2 id="before-you-start">Before you start</h2>
+      <p>You need one or two ear meshes, a project folder, an evaluation grid (the source directions), and a frequency range. For a full-head scan, first align the scan and review the extracted ears. Left and right always refer to the person being modeled.</p>
+
+      <h2 id="your-first-run">Your first run</h2>
+      <ol>
+        <li><strong>Create a project.</strong> Choose where to save it and add your ear meshes. If you have a full-head scan, follow <a href="scan-preparation.html">scan preparation</a> first.</li>
+        <li><strong>Inspect the geometry.</strong> Check the selected ears and their orientation in Preview. Mesh2PPM prediction is optional; start with your original meshes unless you intend to use predicted geometry.</li>
+        <li><strong>Prepare the simulation.</strong> Choose the evaluation grid and frequency range in Project Settings, then run Preprocessing. Inspect the resulting geometry and source placement before starting NumCalc.</li>
+        <li><strong>Solve.</strong> Run NumCalc and follow progress in the live log. Use the technical log to investigate errors.</li>
+        <li><strong>Export.</strong> Run SOFA export and postprocessing after the simulation completes. Keep the project configuration with the results so you can identify how they were produced.</li>
+      </ol>
+      <aside class="note">
+      <p><strong>What you get.</strong> HRTFs describe how sound is filtered for each source direction. HRIRs are the corresponding impulse responses. Both are exported as SOFA files, a format for spatial acoustic data.</p></aside>
+      <figure>
+        <a href="../assets/screenshots/desktop-workspace.jpg" data-light-href="../assets/screenshots/desktop-workspace.jpg" data-dark-href="../assets/screenshots/desktop-workspace-dark.png" aria-label="Open the full-size screenshot"><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/desktop-workspace-dark.png"><img src="../assets/screenshots/desktop-workspace.jpg" alt="Pinna2HRTF showing a simulation mesh, project settings, and workflow status, with standard macOS window controls" width="2620" height="1746" loading="lazy" decoding="async"></picture></a>
+        <figcaption>The project workspace: ear geometry in the center, input settings and pipeline progress on the right.</figcaption>
+      </figure>
+
+      <h2 id="downloads-and-support">Downloads and support</h2>
+      <p>Get the macOS or Windows app from the <a href="../#downloads">download section</a>. The installers bundle Python, the Mesh2PPM models, and the simulation tools. The <a href="https://github.com/Any2HRTF/Pinna2HRTF/releases">release page</a> has checksums and previous versions.</p>
+      <p>For code, issue reports, and release notes, visit the <a href="https://github.com/Any2HRTF/Pinna2HRTF">Pinna2HRTF GitHub repository</a>.</p>
+
+      <nav class="pager" aria-label="More documentation"><a class="next" href="desktop-app.html"><small>Next</small>Desktop app</a></nav>
+    </main>
+
+    <aside class="docs-toc">
+      <nav aria-label="On this page">
+        <p>On this page</p>
+        <a href="#guides">Guides</a>
+        <a href="#before-you-start">Before you start</a>
+        <a href="#your-first-run">Your first run</a>
+        <a href="#downloads-and-support">Downloads and support</a>
+      </nav>
+    </aside>
   </div>
+
+  <footer class="site-footer">
+    <div class="footer-row wrap">
+      <p>Open source under the EUPL 1.2.</p>
+      <nav aria-label="Footer"><a href="../">Home</a><a href="../#downloads">Download</a><a href="https://github.com/Any2HRTF/Pinna2HRTF">GitHub</a></nav>
+    </div>
+    <span class="wordmark" aria-hidden="true">Pinna2HRTF</span>
+  </footer>
+  <script src="screenshot-theme.js" defer></script>
 </body>
 </html>

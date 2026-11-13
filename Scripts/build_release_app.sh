@@ -338,18 +338,14 @@ fi
 codesign --verify --deep --strict --verbose=2 "$CLEAN_APP_DIR"
 if [[ "$MODE" == "distribution" ]]; then
   APP_ARCHIVE="$STAGE_ROOT/Pinna2HRTF.zip"
-  DMG_STAGE="$STAGE_ROOT/dmg"
   DMG_PATH="$DIST_DIR/Pinna2HRTF-$APP_ARTIFACT_VERSION-macOS-arm64.dmg"
   ditto -c -k --sequesterRsrc --keepParent "$CLEAN_APP_DIR" "$APP_ARCHIVE"
   xcrun notarytool submit "$APP_ARCHIVE" --keychain-profile "$NOTARY_PROFILE" --wait
   xcrun stapler staple "$CLEAN_APP_DIR"
   xcrun stapler validate "$CLEAN_APP_DIR"
   spctl --assess --type execute --verbose=2 "$CLEAN_APP_DIR"
-  mkdir -p "$DMG_STAGE" "$DIST_DIR"
-  ditto --norsrc --noextattr --noqtn "$CLEAN_APP_DIR" "$DMG_STAGE/Pinna2HRTF.app"
-  ln -s /Applications "$DMG_STAGE/Applications"
   rm -f "$DMG_PATH" "$DMG_PATH.sha256"
-  hdiutil create -volname "Pinna2HRTF $APP_DISPLAY_VERSION" -srcfolder "$DMG_STAGE" -format UDZO -ov "$DMG_PATH"
+  "$ROOT/Scripts/dmg/make_dmg.sh" "$CLEAN_APP_DIR" "$DMG_PATH" "Pinna2HRTF $APP_DISPLAY_VERSION" "$APP_DISPLAY_VERSION"
   codesign --force --sign "$SIGNING_IDENTITY" --timestamp "$DMG_PATH"
   xcrun notarytool submit "$DMG_PATH" --keychain-profile "$NOTARY_PROFILE" --wait
   xcrun stapler staple "$DMG_PATH"
@@ -367,13 +363,9 @@ else
   ditto --norsrc --noextattr --noqtn "$CLEAN_APP_DIR" "$FINAL_APP_DIR"
   codesign --verify --deep --verbose=2 "$FINAL_APP_DIR"
   if [[ "$MODE" == "installer" ]]; then
-    DMG_STAGE="$STAGE_ROOT/dmg"
     DMG_NAME="Pinna2HRTF-$APP_ARTIFACT_VERSION-macOS-arm64.dmg"
     DMG_PATH="$DIST_DIR/$DMG_NAME"
-    mkdir -p "$DMG_STAGE" "$DIST_DIR"
-    ditto --norsrc --noextattr --noqtn "$CLEAN_APP_DIR" "$DMG_STAGE/Pinna2HRTF.app"
-    ln -s /Applications "$DMG_STAGE/Applications"
-    hdiutil create -volname "Pinna2HRTF $APP_DISPLAY_VERSION" -srcfolder "$DMG_STAGE" -format UDZO -ov "$DMG_PATH"
+    "$ROOT/Scripts/dmg/make_dmg.sh" "$CLEAN_APP_DIR" "$DMG_PATH" "Pinna2HRTF $APP_DISPLAY_VERSION" "$APP_DISPLAY_VERSION"
     codesign --force --sign - "$DMG_PATH"
     hdiutil verify "$DMG_PATH"
     (cd "$DIST_DIR" && shasum -a 256 "$DMG_NAME" > "$DMG_NAME.sha256")

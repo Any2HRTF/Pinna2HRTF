@@ -7,6 +7,15 @@ document.querySelectorAll(".draggable-sticker").forEach((sticker) => {
   const area = sticker.closest(".content-section");
   if (!area) return;
 
+  // Lets CSS cut the gloss to the sticker's outline.
+  const art = sticker.querySelector("img");
+  if (art && window.CSS?.supports?.("mask", "url(a.png) center / 100% 100% no-repeat")) {
+    sticker.style.setProperty("--art", `url("${art.getAttribute("src")}")`);
+    const showGloss = () => sticker.classList.add("has-art");
+    if (art.complete && art.naturalWidth) showGloss();
+    else art.addEventListener("load", showGloss, { once: true });
+  }
+
   let drag = null;
 
   const placeFromCurrentPosition = () => {
@@ -80,10 +89,10 @@ copyButton?.addEventListener("click", async () => {
 
   try {
     await navigator.clipboard.writeText(target.innerText);
-    copyButton.innerHTML = 'Copied <b aria-hidden="true">✓</b>';
+    copyButton.textContent = "Copied";
     copyStatus.textContent = "Setup commands copied.";
     window.setTimeout(() => {
-      copyButton.innerHTML = 'Copy <b aria-hidden="true">▢</b>';
+      copyButton.textContent = "Copy";
     }, 1800);
   } catch {
     copyStatus.textContent = "Could not copy. Select the commands to copy them manually.";

@@ -1,35 +1,103 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f2f2ef" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#131517" media="(prefers-color-scheme: dark)">
   <meta name="description" content="Align an edited head scan, extract pinnae, and review ear meshes in Pinna2HRTF.">
-  <title>Scan preparation and ear editing — Pinna2HRTF Documentation</title><link rel="icon" href="../favicon-macos.png?v=glass-ear2" type="image/png" sizes="512x512"><link rel="shortcut icon" href="../favicon-macos.png?v=glass-ear2" type="image/png"><link rel="apple-touch-icon" href="../favicon-macos.png?v=glass-ear2"><link rel="stylesheet" href="styles.css">
+  <title>Preparing ears from a head scan — Pinna2HRTF docs</title>
+  <link rel="icon" href="../favicon-macos.png?v=glass-ear2" type="image/png" sizes="512x512">
+  <link rel="shortcut icon" href="../favicon-macos.png?v=glass-ear2" type="image/png">
+  <link rel="apple-touch-icon" href="../favicon-macos.png?v=glass-ear2">
+  <link rel="stylesheet" href="../styles.css?v=7">
+  <link rel="stylesheet" href="styles.css?v=7">
 </head>
-<body><a class="skip-link" href="#main">Skip to content</a><div class="docs-frame">
-  <header class="docs-header"><a class="brand" href="../" aria-label="Pinna2HRTF home"><img src="../assets/app-icon.webp?v=glass-ear2" alt=""><strong>Pinna2HRTF</strong></a><nav class="top-nav" aria-label="Main navigation"><a href="../">Home</a><a href="../#downloads">Downloads</a><a href="index.html" aria-current="page">Documentation</a></nav></header>
-  <div class="docs-layout"><aside class="docs-sidebar"><p class="sidebar-label">Documentation</p><nav class="sidebar-links" aria-label="Documentation pages"><a href="index.html">Overview</a><a href="desktop-app.html">Desktop app</a><a href="scan-preparation.html" aria-current="page">Scan preparation &amp; ear editing</a><a href="manual-fitting.html">Manual PPM fitting</a><a href="results.html">Simulation &amp; results</a><a href="cli.html">Python CLI</a><a href="building.html">Build from source</a></nav><nav class="on-this-page" aria-label="On this page"><p class="sidebar-label">On this page</p><a href="#1-align-the-scan">1. Align the scan</a><a href="#2-prepare-and-inspect-the-ears">2. Prepare and inspect the ears</a><a href="#3-review-and-edit">3. Review and edit</a><a href="#automate-scan-preparation">Automate scan preparation</a></nav></aside>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header wrap">
+    <a class="brand" href="../" aria-label="Pinna2HRTF home"><img src="../assets/app-icon.webp?v=glass-ear2" alt="" width="32" height="32" decoding="async">Pinna2HRTF</a>
+    <nav class="main-nav" aria-label="Main navigation">
+      <a href="../#downloads">Download</a>
+      <a href="index.html" aria-current="page">Docs</a>
+      <a href="https://github.com/Any2HRTF/Pinna2HRTF">GitHub</a>
+    </nav>
+  </header>
+
+  <div class="docs-layout wrap">
+    <aside class="docs-sidebar">
+      <nav aria-label="Documentation pages">
+        <a href="index.html">Getting started</a>
+        <a href="desktop-app.html">Desktop app</a>
+        <a href="scan-preparation.html" aria-current="page">Head scans &amp; ear editing</a>
+        <a href="manual-fitting.html">Manual PPM fitting</a>
+        <a href="results.html">Simulation &amp; results</a>
+        <a href="cli.html">Python CLI</a>
+        <a href="building.html">Build from source</a>
+      </nav>
+    </aside>
+
     <main class="docs-content" id="main">
-      <p class="guide-status">SOURCE GUIDE <span>/</span> Features may differ from the published installer. Check your release before following a workflow.</p>
-      <p class="kicker"><span class="dot" aria-hidden="true"></span> FULL-HEAD SCANS</p><h1>Prepare ears from an edited head scan.</h1>
-      <p class="lede">Align an edited full-head scan, extract the ears, and inspect and edit them before simulation.</p>
-      <div class="callout"><p><strong>What you need</strong></p><p>A full-head scan in millimeters that includes both ear surfaces and has already been cleaned up in a scan-editing tool. The app does not detect landmarks or scan orientation, and it does not replace a scan editor.</p></div>
-      <figure><a href="../assets/screenshots/scan-preparation-input.png" data-light-href="../assets/screenshots/scan-preparation-input.png" data-dark-href="../assets/screenshots/scan-preparation-input-dark.png" aria-label="Open full-size screenshot: Full Scan: inspect the input and choose which ears to prepare."><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/scan-preparation-input-dark.png"><img src="../assets/screenshots/scan-preparation-input.png" alt="Full Scan: inspect the input and choose which ears to prepare." width="2620" height="1746" loading="lazy" decoding="async"></picture></a><figcaption>Full Scan: inspect the input and choose which ears to prepare. <a href="../assets/screenshots/scan-preparation-input.png" data-light-href="../assets/screenshots/scan-preparation-input.png" data-dark-href="../assets/screenshots/scan-preparation-input-dark.png">View full size ↗</a></figcaption></figure>
-<h2 id="1-align-the-scan">1. Align the scan</h2><p>Before preparing ears, use <strong>Align scan…</strong> to select these points in order: nose tip, left ear-canal entrance, right ear-canal entrance. “Left” and “right” refer to the person in the scan. Preview the alignment and save a separate aligned copy.</p>
+      <h1>Preparing ears from a head scan</h1>
+      <p class="lede">If you have a full-head scan instead of separate ear meshes, the app can align it, cut out the ears, and let you clean them up before simulation.</p>
+      <p class="version-note">Written for version 2.0. The current download is v1.1.0, so a few things may look different in your copy.</p>
+
+      <aside class="note">
+      <p><strong>What you need.</strong> A full-head scan in millimeters that includes both ear surfaces and has already been cleaned up in a scan-editing tool. The app does not detect landmarks or scan orientation, and it does not replace a scan editor.</p></aside>
+      <figure>
+        <a href="../assets/screenshots/scan-preparation-input.png" data-light-href="../assets/screenshots/scan-preparation-input.png" data-dark-href="../assets/screenshots/scan-preparation-input-dark.png" aria-label="Open the full-size screenshot"><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/scan-preparation-input-dark.png"><img src="../assets/screenshots/scan-preparation-input.png" alt="Full Scan: inspect the input and choose which ears to prepare." width="2620" height="1746" loading="lazy" decoding="async"></picture></a>
+        <figcaption>Full Scan: inspect the input and choose which ears to prepare.</figcaption>
+      </figure>
+
+      <h2 id="1-align-the-scan">1. Align the scan</h2>
+      <p>Before preparing ears, use <strong>Align scan…</strong> to select these points in order: nose tip, left ear-canal entrance, right ear-canal entrance. “Left” and “right” refer to the person in the scan. Preview the alignment and save a separate aligned copy.</p>
       <p>The three landmarks define the horizontal plane. The aligned frame uses X toward the nose, Y toward the person’s left, and Z upward, with the ear midpoint at the origin. This reference is not the Frankfort plane. If your scan is already aligned outside the app, you can skip this step.</p>
-      <figure><a href="../assets/screenshots/scan-alignment.png" data-light-href="../assets/screenshots/scan-alignment.png" data-dark-href="../assets/screenshots/scan-alignment-dark.png" aria-label="Open full-size screenshot: Place the nose tip and both ear-canal entrances in the alignment editor. Rotate the scan to reach each side."><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/scan-alignment-dark.png"><img src="../assets/screenshots/scan-alignment.png" alt="Place the nose tip and both ear-canal entrances in the alignment editor. Rotate the scan to reach each side." width="2620" height="1746" loading="lazy" decoding="async"></picture></a><figcaption>Place the nose tip and both ear-canal entrances in the alignment editor. Rotate the scan to reach each side. <a href="../assets/screenshots/scan-alignment.png" data-light-href="../assets/screenshots/scan-alignment.png" data-dark-href="../assets/screenshots/scan-alignment-dark.png">View full size ↗</a></figcaption></figure><figure><a href="../assets/screenshots/alignment-preview.png" data-light-href="../assets/screenshots/alignment-preview.png" data-dark-href="../assets/screenshots/alignment-preview-dark.png" aria-label="Open full-size screenshot: Preview the aligned coordinate frame before saving a separate aligned scan."><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/alignment-preview-dark.png"><img src="../assets/screenshots/alignment-preview.png" alt="Preview the aligned coordinate frame before saving a separate aligned scan." width="2620" height="1746" loading="lazy" decoding="async"></picture></a><figcaption>Preview the aligned coordinate frame before saving a separate aligned scan. <a href="../assets/screenshots/alignment-preview.png" data-light-href="../assets/screenshots/alignment-preview.png" data-dark-href="../assets/screenshots/alignment-preview-dark.png">View full size ↗</a></figcaption></figure>
-<h2 id="2-prepare-and-inspect-the-ears">2. Prepare and inspect the ears</h2><ol><li>Choose the scan and set its crop rotation. Nose-and-ear alignment in the app sets this to zero. For scans aligned elsewhere, verify orientation; a Z rotation of 90 or 270 degrees may be needed.</li><li>Select left, right, or both ears with the checkboxes beside <strong>Align scan</strong>, then run <strong>Scan Preparation</strong>. Changing the selection does not require a new alignment.</li><li>Inspect each prepared mesh in Preview. The default crop polygon and margins are calibrated for edited, aligned scans; they do not automatically locate the ear. Check the crop placement for every scan.</li></ol>
-      <details><summary>How preparation processes and validates the mesh</summary>      <p>Preparation crops the pinna region, cleans the mesh, performs 0.75 mm isotropic remeshing (six iterations, capped at 150,000 faces), reconstructs it with Screened Poisson (depth 7, one worker), restores the attachment boundary, and closes residual holes. A prepared ear is validated for one connected surface, consistent winding, finite coordinates, positive volume, and exactly one simple open attachment boundary.</p>
+      <figure>
+        <a href="../assets/screenshots/scan-alignment.png" data-light-href="../assets/screenshots/scan-alignment.png" data-dark-href="../assets/screenshots/scan-alignment-dark.png" aria-label="Open the full-size screenshot"><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/scan-alignment-dark.png"><img src="../assets/screenshots/scan-alignment.png" alt="Place the nose tip and both ear-canal entrances in the alignment editor. Rotate the scan to reach each side." width="2620" height="1746" loading="lazy" decoding="async"></picture></a>
+        <figcaption>Place the nose tip and both ear-canal entrances in the alignment editor. Rotate the scan to reach each side.</figcaption>
+      </figure>
+      <figure>
+        <a href="../assets/screenshots/alignment-preview.png" data-light-href="../assets/screenshots/alignment-preview.png" data-dark-href="../assets/screenshots/alignment-preview-dark.png" aria-label="Open the full-size screenshot"><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/alignment-preview-dark.png"><img src="../assets/screenshots/alignment-preview.png" alt="Preview the aligned coordinate frame before saving a separate aligned scan." width="2620" height="1746" loading="lazy" decoding="async"></picture></a>
+        <figcaption>Preview the aligned coordinate frame before saving a separate aligned scan.</figcaption>
+      </figure>
+
+      <h2 id="2-prepare-and-inspect-the-ears">2. Prepare and inspect the ears</h2>
+      <ol>
+        <li>Choose the scan and set its crop rotation. Nose-and-ear alignment in the app sets this to zero. For scans aligned elsewhere, verify orientation; a Z rotation of 90 or 270 degrees may be needed.</li>
+        <li>Select left, right, or both ears with the checkboxes beside <strong>Align scan</strong>, then run <strong>Scan Preparation</strong>. Changing the selection does not require a new alignment.</li>
+        <li>Inspect each prepared mesh in Preview. The default crop polygon and margins are calibrated for edited, aligned scans; they do not automatically locate the ear. Check the crop placement for every scan.</li>
+      </ol>
+      <details><summary>How preparation processes and validates the mesh</summary>
+      <p>Preparation crops the pinna region, cleans the mesh, performs 0.75 mm isotropic remeshing (six iterations, capped at 150,000 faces), reconstructs it with Screened Poisson (depth 7, one worker), restores the attachment boundary, and closes residual holes. A prepared ear is validated for one connected surface, consistent winding, finite coordinates, positive volume, and exactly one simple open attachment boundary.</p>
       <p>The prepared ears are exported in the crop frame: left toward +Y and right toward −Y. Original scans are preserved. The project retains the validated ear STL files and a provenance report in <code>Prepared/</code>; intermediate geometry is temporary.</p>
-</details>
-      <figure><a href="../assets/screenshots/prepared-ear.png" data-light-href="../assets/screenshots/prepared-ear.png" data-dark-href="../assets/screenshots/prepared-ear-dark.png" aria-label="Open full-size screenshot: Inspect the left ear and its attachment region before opening the ear editor."><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/prepared-ear-dark.png"><img src="../assets/screenshots/prepared-ear.png" alt="Inspect the left ear and its attachment region before opening the ear editor." width="2620" height="1746" loading="lazy" decoding="async"></picture></a><figcaption>Inspect the left ear and its attachment region before opening the ear editor. <a href="../assets/screenshots/prepared-ear.png" data-light-href="../assets/screenshots/prepared-ear.png" data-dark-href="../assets/screenshots/prepared-ear-dark.png">View full size ↗</a></figcaption></figure>
-<h2 id="3-review-and-edit">3. Review and edit</h2><p>Open <strong>Edit Left Ear…</strong> or <strong>Edit Right Ear…</strong> from the prepared mesh preview. The editor offers two tools:</p>
-      <h3>Select faces</h3><p>Draw a closed lasso or click individual faces. The selection turns red; inspect it from another angle before choosing <strong>Delete Selected Faces</strong>. By default only visible surfaces are selected. Enable <strong>Select through mesh</strong> to include hidden faces, or <strong>Add to current selection</strong> to build a selection in several passes. Use Invert Selection or Clear Selection to revise it.</p>
-<figure><a href="../assets/screenshots/ear-face-selection.png" data-light-href="../assets/screenshots/ear-face-selection.png" data-dark-href="../assets/screenshots/ear-face-selection-dark.png" aria-label="Open full-size screenshot: Select Faces: draw around faces or click them to select a region for deletion."><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/ear-face-selection-dark.png"><img src="../assets/screenshots/ear-face-selection.png" alt="Select Faces: draw around faces or click them to select a region for deletion." width="2620" height="1746" loading="lazy" decoding="async"></picture></a><figcaption>Select Faces: draw around faces or click them to select a region for deletion. <a href="../assets/screenshots/ear-face-selection.png" data-light-href="../assets/screenshots/ear-face-selection.png" data-dark-href="../assets/screenshots/ear-face-selection-dark.png">View full size ↗</a></figcaption></figure>
-      <h3>Preview a cutting plane</h3><p>Choose <strong>Cutting Plane</strong>, then an X, Y, or Z preset, or enter an arbitrary normal. Adjust the offset and kept side. The cyan rectangle shows the plane; red marks the part to remove. The preview automatically fits the cross-section. You can also set the width and height of the preview rectangle.</p><p>Position the plane to preserve the pinna and the intended attachment boundary. Choose <strong>Apply cut</strong> to inspect the result; use Undo if it removes anatomy you need.</p>
-<figure><a href="../assets/screenshots/ear-cutting-plane.png" data-light-href="../assets/screenshots/ear-cutting-plane.png" data-dark-href="../assets/screenshots/ear-cutting-plane-dark.png" aria-label="Open full-size screenshot: Cutting Plane: inspect the red removal region and adjust the plane before applying a cut."><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/ear-cutting-plane-dark.png"><img src="../assets/screenshots/ear-cutting-plane.png" alt="Cutting Plane: inspect the red removal region and adjust the plane before applying a cut." width="2620" height="1746" loading="lazy" decoding="async"></picture></a><figcaption>Cutting Plane: inspect the red removal region and adjust the plane before applying a cut. <a href="../assets/screenshots/ear-cutting-plane.png" data-light-href="../assets/screenshots/ear-cutting-plane.png" data-dark-href="../assets/screenshots/ear-cutting-plane-dark.png">View full size ↗</a></figcaption></figure>
+      </details>
+      <figure>
+        <a href="../assets/screenshots/prepared-ear.png" data-light-href="../assets/screenshots/prepared-ear.png" data-dark-href="../assets/screenshots/prepared-ear-dark.png" aria-label="Open the full-size screenshot"><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/prepared-ear-dark.png"><img src="../assets/screenshots/prepared-ear.png" alt="Inspect the left ear and its attachment region before opening the ear editor." width="2620" height="1746" loading="lazy" decoding="async"></picture></a>
+        <figcaption>Inspect the left ear and its attachment region before opening the ear editor.</figcaption>
+      </figure>
+
+      <h2 id="3-review-and-edit">3. Review and edit</h2>
+      <p>Open <strong>Edit Left Ear…</strong> or <strong>Edit Right Ear…</strong> from the prepared mesh preview. The editor offers two tools:</p>
+
+      <h3>Select faces</h3>
+      <p>Draw a closed lasso or click individual faces. The selection turns red; inspect it from another angle before choosing <strong>Delete Selected Faces</strong>. By default only visible surfaces are selected. Enable <strong>Select through mesh</strong> to include hidden faces, or <strong>Add to current selection</strong> to build a selection in several passes. Use Invert Selection or Clear Selection to revise it.</p>
+      <figure>
+        <a href="../assets/screenshots/ear-face-selection.png" data-light-href="../assets/screenshots/ear-face-selection.png" data-dark-href="../assets/screenshots/ear-face-selection-dark.png" aria-label="Open the full-size screenshot"><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/ear-face-selection-dark.png"><img src="../assets/screenshots/ear-face-selection.png" alt="Select Faces: draw around faces or click them to select a region for deletion." width="2620" height="1746" loading="lazy" decoding="async"></picture></a>
+        <figcaption>Select Faces: draw around faces or click them to select a region for deletion.</figcaption>
+      </figure>
+
+      <h3>Preview a cutting plane</h3>
+      <p>Choose <strong>Cutting Plane</strong>, then an X, Y, or Z preset, or enter an arbitrary normal. Adjust the offset and kept side. The cyan rectangle shows the plane; red marks the part to remove. The preview automatically fits the cross-section. You can also set the width and height of the preview rectangle.</p>
+      <p>Position the plane to preserve the pinna and the intended attachment boundary. Choose <strong>Apply cut</strong> to inspect the result; use Undo if it removes anatomy you need.</p>
+      <figure>
+        <a href="../assets/screenshots/ear-cutting-plane.png" data-light-href="../assets/screenshots/ear-cutting-plane.png" data-dark-href="../assets/screenshots/ear-cutting-plane-dark.png" aria-label="Open the full-size screenshot"><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/screenshots/ear-cutting-plane-dark.png"><img src="../assets/screenshots/ear-cutting-plane.png" alt="Cutting Plane: inspect the red removal region and adjust the plane before applying a cut." width="2620" height="1746" loading="lazy" decoding="async"></picture></a>
+        <figcaption>Cutting Plane: inspect the red removal region and adjust the plane before applying a cut.</figcaption>
+      </figure>
       <p>Use <strong>Mesh Cleanup → Keep Largest Component</strong> to remove disconnected fragments from the working copy. <strong>Save Ear</strong> validates and saves the result. The editor requires a connected, manifold surface with consistent winding, one simple attachment boundary, and at most one canal opening. Cuts stay open; preprocessing later closes the canal and estimates the source landmark.</p>
       <p>Saved edits and their provenance are stored in <code>MeshEdits/</code>; the original scan and automatically prepared meshes remain unchanged. <strong>Require ear review before continuing</strong> is an optional pause and is off by default. <a href="desktop-app.html#reset-outputs">Reset Outputs</a> keeps saved edits, alignments, and PPM fits.</p>
-      <h2 id="automate-scan-preparation">Automate scan preparation</h2><p>For command-line runs, set the scan path, rotation, and prepared sides in the YAML file. Use <code>null</code> for an unused <code>paths.left_ear</code> or <code>paths.right_ear</code>; the prepared ears are used as inputs automatically.</p>
+
+      <h2 id="automate-scan-preparation">Automate scan preparation</h2>
+      <p>For command-line runs, set the scan path, rotation, and prepared sides in the YAML file. Use <code>null</code> for an unused <code>paths.left_ear</code> or <code>paths.right_ear</code>; the prepared ears are used as inputs automatically.</p>
       <pre><code>scan_preparation:
   enabled: true
   scan_path: /path/to/edited-head.stl
@@ -40,9 +108,33 @@
   require_manual_review: false
   reviewed_left: null
   reviewed_right: null</code></pre>
+
       <pre><code>uv run Pinna2HRTF scan-preparation --config pinna2hrtf.yaml
 uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage all</code></pre>
       <p>The app and CLI reuse a valid preparation when its source and settings are unchanged. Changed scans or preparation settings require a new preparation. Saved ear edits are tied to the prepared mesh, so changing an edit invalidates later inference and simulation results. See the <a href="cli.html">CLI guide</a> for installation and the full pipeline configuration.</p>
-    </main></div>
-  <footer class="docs-footer"><small>Individualized HRTFs from pinna meshes</small><nav aria-label="Footer"><a href="index.html">Documentation home</a><a href="../#downloads">Downloads</a><a href="https://github.com/Any2HRTF/Pinna2HRTF">GitHub</a></nav></footer>
-</div><script src="screenshot-theme.js" defer></script></body></html>
+
+      <nav class="pager" aria-label="More documentation"><a class="prev" href="desktop-app.html"><small>Previous</small>Desktop app</a><a class="next" href="manual-fitting.html"><small>Next</small>Manual PPM fitting</a></nav>
+    </main>
+
+    <aside class="docs-toc">
+      <nav aria-label="On this page">
+        <p>On this page</p>
+        <a href="#1-align-the-scan">1. Align the scan</a>
+        <a href="#2-prepare-and-inspect-the-ears">2. Prepare and inspect the ears</a>
+        <a href="#3-review-and-edit">3. Review and edit</a>
+        <a href="#automate-scan-preparation">Automate scan preparation</a>
+      </nav>
+    </aside>
+  </div>
+
+  <footer class="site-footer">
+    <div class="footer-row wrap">
+      <p>Open source under the EUPL 1.2.</p>
+      <nav aria-label="Footer"><a href="../">Home</a><a href="../#downloads">Download</a><a href="https://github.com/Any2HRTF/Pinna2HRTF">GitHub</a></nav>
+    </div>
+    <span class="wordmark" aria-hidden="true">Pinna2HRTF</span>
+  </footer>
+  <script src="screenshot-theme.js" defer></script>
+  <script src="copy.js" defer></script>
+</body>
+</html>
