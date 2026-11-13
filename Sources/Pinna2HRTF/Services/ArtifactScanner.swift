@@ -7,6 +7,7 @@ enum ArtifactScanner {
         private var documents: [URL: [String: Any]?] = [:]
         private var metadata: [URL: [FileAttributeKey: Any]?] = [:]
         fileprivate var completedSteps: [URL: Bool] = [:]
+        fileprivate var directRunSteps: [URL: Set<Int>] = [:]
         let isCancelled: () -> Bool
 
         init(isCancelled: @escaping () -> Bool = { false }) { self.isCancelled = isCancelled }
@@ -434,14 +435,42 @@ enum ArtifactScanner {
         return (1...total).allSatisfy { frequencyStepComplete(source: source, step: $0, inspection: inspection) }
     }
 
+    private static let directRunEndPattern = try! NSRegularExpression(pattern: "^End time:\\s*\\S", options: [.anchorsMatchLines])
+    private static let directRunStepPattern = try! NSRegularExpression(pattern: "^Step\\s+(\\d+),\\s+Frequency\\s*=", options: [.anchorsMatchLines])
+
+    /// Steps completed by a direct, all-frequency NumCalc run (single shared `NC.out`).
+    static func directCompletedSteps(source: URL, inspection: Inspection = Inspection()) -> Set<Int> {
+        guard !inspection.isCancelled() else { return [] }
+        if let cached = inspection.directRunSteps[source] { return cached }
+        var steps: Set<Int> = []
+        let directLog = source.appendingPathComponent("NC.out", isDirectory: false)
+        if FileManager.default.fileExists(atPath: directLog.path) {
+            let text = (try? String(contentsOf: directLog, encoding: .utf8)) ?? ""
+            let fullRange = NSRange(text.startIndex..<text.endIndex, in: text)
+            if directRunEndPattern.firstMatch(in: text, options: [], range: fullRange) != nil {
+                for match in directRunStepPattern.matches(in: text, options: [], range: fullRange) {
+                    guard match.numberOfRanges == 2, match.range(at: 1).location != NSNotFound else { continue }
+                    let stepRange = Range(match.range(at: 1), in: text)
+                    if let stepRange, let step = Int(text[stepRange]) { steps.insert(step) }
+                }
+            }
+        }
+        inspection.directRunSteps[source] = steps
+        return steps
+    }
+
     static func frequencyStepComplete(source: URL, step: Int, inspection: Inspection = Inspection()) -> Bool {
         guard !inspection.isCancelled() else { return false }
         let log = source.appendingPathComponent("NC\(step)-\(step)_log.txt", isDirectory: false)
         if let complete = inspection.completedSteps[log] { return complete }
         let output = source.appendingPathComponent("be.out/be.\(step)", isDirectory: true)
         let required = ["pBoundary", "pEvalGrid", "vBoundary", "vEvalGrid"]
-        let complete = required.allSatisfy { fileHasData(output.appendingPathComponent($0, isDirectory: false), inspection: inspection) }
-            && ((try? String(contentsOf: log, encoding: .utf8))?.contains("---------- NumCalc ended:") == true)
+        guard required.allSatisfy({ fileHasData(output.appendingPathComponent($0, isDirectory: false), inspection: inspection) }) else {
+            inspection.completedSteps[log] = false
+            return false
+        }
+        let complete = ((try? String(contentsOf: log, encoding: .utf8))?.contains("---------- NumCalc ended:") == true)
+            || directCompletedSteps(source: source, inspection: inspection).contains(step)
         inspection.completedSteps[log] = complete
         return complete
     }
