@@ -3287,6 +3287,7 @@ public partial class MainWindow : Window
         public bool Background { get; init; }
         public readonly Dictionary<(Guid, Stage), bool> Stages = [];
         public readonly Dictionary<(string, int), bool> Steps = [];
+        public readonly Dictionary<string, HashSet<int>> DirectRunSteps = new(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<string, JsonElement> documents = new(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<string, string> digests = new(StringComparer.OrdinalIgnoreCase);
 
@@ -3535,17 +3536,34 @@ public partial class MainWindow : Window
         inspection ??= new ArtifactInspection();
         var key = (source, step);
         if (!inspection.Steps.TryGetValue(key, out var complete))
-            inspection.Steps[key] = complete = InspectFrequencyStep(source, step);
+            inspection.Steps[key] = complete = InspectFrequencyStep(source, step, inspection);
         return complete;
     }
 
-    bool InspectFrequencyStep(string source, int step)
+    bool InspectFrequencyStep(string source, int step, ArtifactInspection inspection)
     {
         var output = Path.Combine(source, "be.out", $"be.{step}");
         var required = new[] { "pBoundary", "pEvalGrid", "vBoundary", "vEvalGrid" };
-        if (!Directory.Exists(output) || required.Any(name => !File.Exists(Path.Combine(output, name)) && !Directory.Exists(Path.Combine(output, name)))) return false;
         var log = Path.Combine(source, $"NC{step}-{step}_log.txt");
-        try { return File.Exists(log) && File.ReadAllText(log).Contains("---------- NumCalc ended:", StringComparison.Ordinal); }
+        try
+        {
+            if (!Directory.Exists(output) || required.Any(name => !File.Exists(Path.Combine(output, name)) || new FileInfo(Path.Combine(output, name)).Length == 0)) return false;
+            if (File.Exists(log) && File.ReadAllText(log).Contains("---------- NumCalc ended:", StringComparison.Ordinal)) return true;
+            if (!inspection.DirectRunSteps.TryGetValue(source, out var steps))
+            {
+                steps = [];
+                var directLog = Path.Combine(source, "NC.out");
+                if (File.Exists(directLog))
+                {
+                    var text = File.ReadAllText(directLog);
+                    if (Regex.IsMatch(text, @"(?m)^End time:\s*\S"))
+                        foreach (Match match in Regex.Matches(text, @"(?m)^Step\s+(\d+),\s+Frequency\s*="))
+                            if (int.TryParse(match.Groups[1].Value, out var completedStep)) steps.Add(completedStep);
+                }
+                inspection.DirectRunSteps[source] = steps;
+            }
+            return steps.Contains(step);
+        }
         catch { return false; }
     }
     bool ContainsMesh(string folder) => Directory.Exists(folder) && Directory.GetFiles(folder).Any(IsMesh);

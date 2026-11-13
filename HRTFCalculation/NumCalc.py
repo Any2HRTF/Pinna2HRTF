@@ -1,16 +1,27 @@
 from __future__ import annotations
 
 import os
+import re
 import signal
 import subprocess
 import tempfile
 import time
 from collections import deque
+from functools import lru_cache
 from pathlib import Path
 
 import mesh2hrtf as m2h
 import psutil
 from .LiveEvents import emit_live_event
+
+
+@lru_cache(maxsize=16)
+def _completed_direct_run_steps(log_path: Path, size: int, mtime_ns: int) -> frozenset[int]:
+    """Read the single NC.out written by a direct, all-frequency NumCalc run."""
+    text = log_path.read_text(encoding="utf-8", errors="replace")
+    if not re.search(r"(?m)^End time:\s*\S", text):
+        return frozenset()
+    return frozenset(int(step) for step in re.findall(r"(?m)^Step\s+(\d+),\s+Frequency\s*=", text))
 
 
 def frequency_step_complete(source_dir: Path, step: int) -> bool:
@@ -19,9 +30,13 @@ def frequency_step_complete(source_dir: Path, step: int) -> bool:
     if not output_dir.is_dir() or not all((output_dir / name).is_file() and (output_dir / name).stat().st_size > 0 for name in required_outputs):
         return False
     log_path = source_dir / f"NC{step}-{step}_log.txt"
-    if not log_path.is_file():
+    if log_path.is_file() and "---------- NumCalc ended:" in log_path.read_text(encoding="utf-8", errors="replace"):
+        return True
+    direct_log = source_dir / "NC.out"
+    if not direct_log.is_file():
         return False
-    return "---------- NumCalc ended:" in log_path.read_text(encoding="utf-8", errors="replace")
+    info = direct_log.stat()
+    return step in _completed_direct_run_steps(direct_log, info.st_size, info.st_mtime_ns)
 
 
 def resolve_numcalc_executable(numcalc_path: Path) -> Path:
