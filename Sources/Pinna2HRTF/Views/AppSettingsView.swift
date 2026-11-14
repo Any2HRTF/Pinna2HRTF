@@ -137,10 +137,6 @@ struct SettingsPaneView: View {
             }
         } header: {
             Text("Project Files")
-        } footer: {
-            footer(inputHandling == InputHandling.reference.rawValue
-                   ? "New projects refer to the original input files instead of copying them."
-                   : "New projects keep their own copy of each input file.")
         }
         Section {
             locationPicker("Evaluation grid", path: $evaluationGrid,
@@ -159,7 +155,7 @@ struct SettingsPaneView: View {
         } header: {
             Text("Simulation Defaults")
         } footer: {
-            footer("Changes apply to projects you create from now on. Existing projects keep their settings.")
+            footer("Applies to new projects only.")
         }
     }
 
@@ -172,7 +168,7 @@ struct SettingsPaneView: View {
                 numberField("CPU load limit", value: $maxCPULoad, range: 1...100, unit: "%")
             }
         } footer: {
-            footer("NumCalc waits to start more instances while the CPU load is above the limit. Changes apply to new projects.")
+            footer("Applies to new projects only.")
         }
     }
 
@@ -201,10 +197,7 @@ struct SettingsPaneView: View {
             Text("Components")
         }
         Section {
-            Toggle(isOn: $developerMode) {
-                Text("Developer mode")
-                Text("Use your own builds of the external tools.")
-            }
+            Toggle("Developer mode", isOn: $developerMode)
             if developerMode {
                 pathSetting("NumCalc", path: $developerNumCalc, defaultPath: store.library.environment.numcalcExecutable)
                 pathSetting("Mesh grading", path: $developerMeshGrading, defaultPath: store.library.environment.meshGradingExecutable)
@@ -213,8 +206,6 @@ struct SettingsPaneView: View {
                 pathSetting("External dependencies", path: $developerExternalDir,
                             defaultPath: store.library.environment.externalDir, directory: true)
             }
-        } footer: {
-            if developerMode { footer("Leave a path empty to use the bundled tool.") }
         }
     }
 
@@ -308,11 +299,8 @@ struct SettingsPaneView: View {
             }
         } label: {
             Text(title)
-            Text((path as NSString).abbreviatingWithTildeInPath)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .help(path)
         }
+        .help(path)
     }
 
     private func pathSetting(_ title: String, path: Binding<String>, defaultPath: String, directory: Bool = false) -> some View {
