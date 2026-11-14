@@ -154,8 +154,6 @@ struct SettingsPaneView: View {
             }
         } header: {
             Text("Simulation Defaults")
-        } footer: {
-            footer("Applies to new projects only.")
         }
     }
 
@@ -167,8 +165,6 @@ struct SettingsPaneView: View {
             LabeledContent("CPU load limit") {
                 numberField("CPU load limit", value: $maxCPULoad, range: 1...100, unit: "%")
             }
-        } footer: {
-            footer("Applies to new projects only.")
         }
     }
 
@@ -210,14 +206,6 @@ struct SettingsPaneView: View {
     }
 
     // MARK: Controls
-
-    private func footer(_ text: String) -> some View {
-        Text(text)
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
 
     /// Safari-style location pop-up: the default, the chosen folder, and "Other…".
     private func locationPicker(_ title: String, path: Binding<String>, defaultTitle: String, choose: @escaping () -> Void) -> some View {
