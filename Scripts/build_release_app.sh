@@ -41,10 +41,10 @@ CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 ICON="$ROOT/Sources/Pinna2HRTF/Resources/app_icon.icns"
-EXTERNAL_ROOT="$ROOT/External"
+EXTERNAL_ROOT="${PINNA2HRTF_EXTERNAL_ROOT:-$ROOT/External}"
 SIGNING_IDENTITY="-"
 NOTARY_PROFILE="${PINNA2HRTF_NOTARY_PROFILE:-Pinna2HRTF-notary}"
-if [[ ! -d "$EXTERNAL_ROOT" ]]; then
+if [[ -z "${PINNA2HRTF_EXTERNAL_ROOT:-}" && ! -d "$EXTERNAL_ROOT" && -d "$REPO_ROOT/External" ]]; then
   EXTERNAL_ROOT="$REPO_ROOT/External"
 fi
 if [[ -z "$APP_VERSION" || -z "$APP_BUILD_NUMBER" ]]; then
@@ -79,6 +79,32 @@ if [[ ! -f "$ROOT/uv.lock" ]]; then
   exit 1
 fi
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/pinna2hrtf-uv-cache}"
+# A release must contain the native solver, grader and Blender exporter even
+# in a fresh checkout/worktree. Never silently package an incomplete pipeline.
+bash "$ROOT/Scripts/prepare_external_tools.sh" "$EXTERNAL_ROOT"
+EXTERNAL_ROOT="$(cd "$EXTERNAL_ROOT" && pwd)"
+REQUIRED_EXTERNAL_FILES=(
+  bin/NumCalc bin/NumCalc.source-commit
+  bin/hrtf_mesh_grading bin/hrtf_mesh_grading.source-commit bin/libpmp.1.2.1.dylib
+  src/Mesh2HRTF/VERSION src/Mesh2HRTF/LICENSE.txt
+  src/Mesh2HRTF/mesh2hrtf/Mesh2Input/mesh2input.py
+  src/Mesh2HRTF/mesh2hrtf/Mesh2Input/EvaluationGrids/Data/Default/Nodes.txt
+  src/Mesh2HRTF/mesh2hrtf/Mesh2Input/EvaluationGrids/Data/Default/Elements.txt
+  src/Mesh2HRTF/mesh2hrtf/Mesh2Input/Materials/Data/SoundSoft.csv
+  src/hrtf_mesh_grading/LICENSE src/hrtf_mesh_grading/pmp-library/LICENSE.txt
+)
+for required in "${REQUIRED_EXTERNAL_FILES[@]}"; do
+  if [[ ! -s "$EXTERNAL_ROOT/$required" ]]; then
+    echo "Required release dependency is missing: $EXTERNAL_ROOT/$required" >&2
+    exit 1
+  fi
+done
+for executable in NumCalc hrtf_mesh_grading; do
+  if [[ ! -x "$EXTERNAL_ROOT/bin/$executable" ]]; then
+    echo "Required release tool is not executable: $EXTERNAL_ROOT/bin/$executable" >&2
+    exit 1
+  fi
+done
 BUILD_DEVELOPER_DIR="${DEVELOPER_DIR:-$(xcode-select -p)}"
 if [[ ! -x "$BUILD_DEVELOPER_DIR/usr/bin/xcodebuild" && -x /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild ]]; then
   BUILD_DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
@@ -144,7 +170,7 @@ cp "$ROOT/uv.lock" "$RESOURCES/uv.lock"
 cp -R "$ROOT/website" "$RESOURCES/Website"
 if [[ -d "$EXTERNAL_ROOT/bin" ]]; then
   mkdir -p "$RESOURCES/External/bin"
-  for bundled_file in NumCalc NumCalc.source-commit hrtf_mesh_grading libpmp.1.2.1.dylib libpmp.dylib; do
+  for bundled_file in NumCalc NumCalc.source-commit hrtf_mesh_grading hrtf_mesh_grading.source-commit libpmp.1.2.1.dylib libpmp.dylib; do
     if [[ -e "$EXTERNAL_ROOT/bin/$bundled_file" ]]; then
       cp -P "$EXTERNAL_ROOT/bin/$bundled_file" "$RESOURCES/External/bin/$bundled_file"
     fi
@@ -164,6 +190,10 @@ if [[ -d "$EXTERNAL_ROOT/src/Mesh2HRTF/mesh2hrtf" && -f "$EXTERNAL_ROOT/src/Mesh
   cp "$EXTERNAL_ROOT/src/Mesh2HRTF/VERSION" "$RESOURCES/External/src/Mesh2HRTF/VERSION"
   find "$RESOURCES/External/src/Mesh2HRTF" -type f -name '*.o' -delete
 fi
+mkdir -p "$RESOURCES/ThirdPartyLicenses"
+cp "$EXTERNAL_ROOT/src/Mesh2HRTF/LICENSE.txt" "$RESOURCES/ThirdPartyLicenses/Mesh2HRTF.txt"
+cp "$EXTERNAL_ROOT/src/hrtf_mesh_grading/LICENSE" "$RESOURCES/ThirdPartyLicenses/hrtf_mesh_grading.txt"
+cp "$EXTERNAL_ROOT/src/hrtf_mesh_grading/pmp-library/LICENSE.txt" "$RESOURCES/ThirdPartyLicenses/pmp-library.txt"
 if [[ -f "$ICON" ]]; then
   cp "$ICON" "$RESOURCES/app_icon.icns"
 fi
@@ -216,6 +246,7 @@ for line in lines:
 path.write_text("\n".join(next_lines) + "\n")
 PY
 find "$RESOURCES/.venv/bin" -mindepth 1 -maxdepth 1 ! -name python ! -name python3 ! -name python3.11 -exec rm -rf {} +
+PYTHONDONTWRITEBYTECODE=1 "$RESOURCES/.venv/bin/python" "$ROOT/Scripts/trim_macos_runtime.py" "$RESOURCES"
 find "$RESOURCES" -type d -name __pycache__ -prune -exec rm -rf {} +
 # Blender can initialize Python with its own cache settings. Precompile its
 # bundled startup/add-on scripts so first launch cannot add sealed resources.

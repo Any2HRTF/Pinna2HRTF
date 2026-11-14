@@ -13,7 +13,7 @@ GRADING_COMMIT="0bebaaeaf2785ab823dff65523712ceba042e8c0"
 mkdir -p "$BIN" "$SRC"
 
 NUMCALC_NEEDS_BUILD=true
-if [[ -x "$BIN/NumCalc" ]] && [[ -f "$BIN/NumCalc.source-commit" ]] && grep -q -- "$MESH2HRTF_COMMIT" "$BIN/NumCalc.source-commit" && "$BIN/NumCalc" -h 2>/dev/null | grep -q -- "-adapt_fmmlength"; then
+if [[ -x "$BIN/NumCalc" && -s "$SRC/Mesh2HRTF/VERSION" && -s "$SRC/Mesh2HRTF/mesh2hrtf/Mesh2Input/mesh2input.py" ]] && [[ -f "$BIN/NumCalc.source-commit" ]] && grep -q -- "$MESH2HRTF_COMMIT" "$BIN/NumCalc.source-commit" && "$BIN/NumCalc" -h 2>/dev/null | grep -q -- "-adapt_fmmlength"; then
   NUMCALC_NEEDS_BUILD=false
 fi
 
@@ -41,7 +41,7 @@ if [[ "$NUMCALC_NEEDS_BUILD" == true ]]; then
 fi
 
 GRADING_NEEDS_BUILD=true
-if [[ -x "$BIN/hrtf_mesh_grading" ]] && [[ -f "$BIN/hrtf_mesh_grading.source-commit" ]] && grep -q -- "$GRADING_COMMIT $PMP_COMMIT" "$BIN/hrtf_mesh_grading.source-commit"; then
+if [[ -x "$BIN/hrtf_mesh_grading" && -f "$BIN/libpmp.1.2.1.dylib" && -f "$SRC/hrtf_mesh_grading/LICENSE" && -f "$SRC/hrtf_mesh_grading/pmp-library/LICENSE.txt" ]] && [[ -f "$BIN/hrtf_mesh_grading.source-commit" ]] && grep -q -- "$GRADING_COMMIT $PMP_COMMIT" "$BIN/hrtf_mesh_grading.source-commit"; then
   GRADING_NEEDS_BUILD=false
 fi
 
