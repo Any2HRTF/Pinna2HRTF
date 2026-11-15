@@ -30,13 +30,6 @@ struct AppSettingsView: View {
     static let paneWidth: CGFloat = 540
 
     @ObservedObject var store: AppStore
-    @AppStorage(AppPreferences.developerMode) private var developerMode = false
-    @AppStorage(AppPreferences.developerNumCalc) private var developerNumCalc = ""
-    @AppStorage(AppPreferences.developerMeshGrading) private var developerMeshGrading = ""
-    @AppStorage(AppPreferences.developerUV) private var developerUV = ""
-    @AppStorage(AppPreferences.developerPython) private var developerPython = ""
-    @AppStorage(AppPreferences.developerExternalDir) private var developerExternalDir = ""
-    @AppStorage(AppPreferences.notifyAll) private var notifyAll = true
     @State private var selectedPane: Pane = .general
     @State private var paneHeights: [Pane: CGFloat] = [:]
 
@@ -55,15 +48,6 @@ struct AppSettingsView: View {
         }
         .frame(width: Self.paneWidth,
                height: min(paneHeights[selectedPane] ?? 200, max(160, (NSScreen.main?.visibleFrame.height ?? 820) - 120)))
-        .onChange(of: developerMode) { _ in store.environmentPreferencesDidChange() }
-        .onChange(of: developerNumCalc) { _ in store.environmentPreferencesDidChange() }
-        .onChange(of: developerMeshGrading) { _ in store.environmentPreferencesDidChange() }
-        .onChange(of: developerUV) { _ in store.environmentPreferencesDidChange() }
-        .onChange(of: developerPython) { _ in store.environmentPreferencesDidChange() }
-        .onChange(of: developerExternalDir) { _ in store.environmentPreferencesDidChange() }
-        .onChange(of: notifyAll) { enabled in
-            if !enabled { UNUserNotificationCenter.current().removeAllPendingNotificationRequests() }
-        }
     }
 }
 
@@ -106,6 +90,15 @@ struct SettingsPaneView: View {
         .fixedSize(horizontal: false, vertical: true)
         .frame(width: AppSettingsView.paneWidth)
         .animation(.default, value: developerMode)
+        .onChange(of: developerMode) { _ in store.environmentPreferencesDidChange() }
+        .onChange(of: developerNumCalc) { _ in store.environmentPreferencesDidChange() }
+        .onChange(of: developerMeshGrading) { _ in store.environmentPreferencesDidChange() }
+        .onChange(of: developerUV) { _ in store.environmentPreferencesDidChange() }
+        .onChange(of: developerPython) { _ in store.environmentPreferencesDidChange() }
+        .onChange(of: developerExternalDir) { _ in store.environmentPreferencesDidChange() }
+        .onChange(of: notifyAll) { enabled in
+            if !enabled { UNUserNotificationCenter.current().removeAllPendingNotificationRequests() }
+        }
         .alert("Invalid evaluation grid", isPresented: $invalidGrid) {
             Button("OK", role: .cancel) {}
         } message: {
