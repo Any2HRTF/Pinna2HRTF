@@ -142,7 +142,7 @@ if [[ -x "$BUILD_DEVELOPER_DIR/usr/bin/xcodebuild" && -x "$BUILD_DEVELOPER_DIR/u
   fi
   DEVELOPER_DIR="$BUILD_DEVELOPER_DIR" xcodebuild -project "$ROOT/Pinna2HRTF.xcodeproj" \
     -scheme Pinna2HRTF -configuration Release -derivedDataPath "$XCODE_SCRATCH" \
-    CODE_SIGNING_ALLOWED=NO "${ICON_BUILD_FLAGS[@]}" build
+    CODE_SIGNING_ALLOWED=NO ${ICON_BUILD_FLAGS[@]+"${ICON_BUILD_FLAGS[@]}"} build
   BUILT_EXECUTABLE="$XCODE_SCRATCH/Build/Products/Release/Pinna2HRTF.app/Contents/MacOS/Pinna2HRTF"
   SDK_VERSION="$(DEVELOPER_DIR="$BUILD_DEVELOPER_DIR" xcrun --sdk macosx --show-sdk-version)"
 else

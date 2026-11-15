@@ -12,13 +12,15 @@ enum StageReceipt {
             return PreprocessingSignature.fileFingerprint(path)
         }
         if stage == .inference {
-            value["settings"] = try? JSONEncoder.pretty.encode(project.settings.inference).base64EncodedString()
+            var settings = project.settings.inference
+            settings.modelCheckpoint = PreprocessingSignature.sourceCheckpointPath(settings.modelCheckpoint)
+            value["settings"] = try? JSONEncoder.pretty.encode(settings).base64EncodedString()
             for side in EarSide.allCases {
                 value[side.rawValue] = stamp(project.pipelineEar(for: side))
                 value["prediction_" + side.rawValue] = stamp(ArtifactScanner.preprocessingMesh(for: project, side: side)?.path ?? "")
             }
             value["model"] = stamp(project.settings.inference.modelConfig)
-            value["checkpoint"] = stamp(project.settings.inference.modelCheckpoint)
+            value["checkpoint"] = PreprocessingSignature.checkpointFingerprint(project.settings.inference.modelCheckpoint)
         } else {
             value["settings"] = try? JSONEncoder.pretty.encode(project.settings.postprocessing ?? PostprocessingSettings()).base64EncodedString()
             value["preprocessing"] = ArtifactScanner.preprocessingSignature(for: project)

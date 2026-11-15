@@ -19,6 +19,15 @@ enum AppPreferences {
     static let developerUV = "preferences.developerUV"
     static let developerPython = "preferences.developerPython"
     static let developerExternalDir = "preferences.developerExternalDir"
+    static let developerModelConfig = "preferences.developerModelConfig"
+    static let developerModelCheckpoint = "preferences.developerModelCheckpoint"
+
+    /// Custom inference model offered in the project's model menu while developer mode is on.
+    static var developerModel: (config: String, checkpoint: String)? {
+        guard let config = developerOverride(developerModelConfig),
+              let checkpoint = developerOverride(developerModelCheckpoint) else { return nil }
+        return (config, checkpoint)
+    }
 
     static func int(_ key: String, fallback: Int, range: ClosedRange<Int>) -> Int {
         let defaults = UserDefaults.standard

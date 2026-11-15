@@ -73,6 +73,8 @@ struct SettingsPaneView: View {
     @AppStorage(AppPreferences.developerUV) private var developerUV = ""
     @AppStorage(AppPreferences.developerPython) private var developerPython = ""
     @AppStorage(AppPreferences.developerExternalDir) private var developerExternalDir = ""
+    @AppStorage(AppPreferences.developerModelConfig) private var developerModelConfig = ""
+    @AppStorage(AppPreferences.developerModelCheckpoint) private var developerModelCheckpoint = ""
     @State private var invalidGrid = false
 
     var body: some View {
@@ -96,6 +98,8 @@ struct SettingsPaneView: View {
         .onChange(of: developerUV) { _ in store.environmentPreferencesDidChange() }
         .onChange(of: developerPython) { _ in store.environmentPreferencesDidChange() }
         .onChange(of: developerExternalDir) { _ in store.environmentPreferencesDidChange() }
+        .onChange(of: developerModelConfig) { _ in store.environmentPreferencesDidChange() }
+        .onChange(of: developerModelCheckpoint) { _ in store.environmentPreferencesDidChange() }
         .onChange(of: notifyAll) { enabled in
             if !enabled { UNUserNotificationCenter.current().removeAllPendingNotificationRequests() }
         }
@@ -194,6 +198,11 @@ struct SettingsPaneView: View {
                 pathSetting("uv", path: $developerUV, defaultPath: store.library.environment.uvExecutable)
                 pathSetting("External dependencies", path: $developerExternalDir,
                             defaultPath: store.library.environment.externalDir, directory: true)
+                // Both paths together add a "Custom" entry to each project's model menu. PyTorch
+                // checkpoints run only with a Python above that has PyTorch; it is not bundled.
+                pathSetting("Model configuration", path: $developerModelConfig, defaultPath: "Bundled models (.yaml)")
+                pathSetting("Model checkpoint", path: $developerModelCheckpoint,
+                            defaultPath: "Bundled models (.pth needs a Python with PyTorch)")
             }
         }
     }

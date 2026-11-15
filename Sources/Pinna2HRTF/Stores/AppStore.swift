@@ -202,7 +202,11 @@ final class AppStore: ObservableObject {
 
     var modelOptions: [String] {
         let available = Set(resourceOptions(extensions: ["yaml", "yml"]).map(Self.modelName))
-        return ["1 Views", "3 Views", "9 Views", "25 Views"].filter { available.contains($0) }
+        var options = ["1 Views", "3 Views", "9 Views", "25 Views"].filter { available.contains($0) }
+        if AppPreferences.developerModel != nil || selectedModelName(for: selectedProject) == Self.customModelName {
+            options.append(Self.customModelName)
+        }
+        return options
     }
 
     // MARK: Project edits
@@ -279,12 +283,21 @@ final class AppStore: ObservableObject {
     }
 
     func selectedModelName(for project: ProjectRecord?) -> String {
-        Self.modelName(project?.settings.inference.modelConfig ?? "")
+        let config = project?.settings.inference.modelConfig ?? ""
+        if !config.isEmpty, !config.contains("HRTFCalculation/Inference/resources/") { return Self.customModelName }
+        return Self.modelName(config)
     }
 
+    static let customModelName = "Custom"
+
     func setSelectedModelName(_ name: String) {
-        let config = inferenceResourceURL.appendingPathComponent("Local \(name).yaml").path
-        let checkpoint = Defaults.modelCheckpointURL(resources: inferenceResourceURL, stem: "Local \(name)").path
+        var config = inferenceResourceURL.appendingPathComponent("Local \(name).yaml").path
+        var checkpoint = Defaults.modelCheckpointURL(resources: inferenceResourceURL, stem: "Local \(name)").path
+        if name == Self.customModelName {
+            // Without the developer paths there is nothing to switch to; keep the project's model.
+            guard let custom = AppPreferences.developerModel else { return }
+            (config, checkpoint) = custom
+        }
         updateSelectedProject {
             $0.settings.inference.modelConfig = config
             $0.settings.inference.modelCheckpoint = checkpoint

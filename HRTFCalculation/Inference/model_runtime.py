@@ -30,6 +30,7 @@ class CoreMLModel:
         manifest = json.loads(path.read_text())
         channels = configuration["number_of_camera_views"] * (2 if configuration["depth"] else 1)
         self.shape = (1, channels, configuration["img_size"], configuration["img_size"])
+        self.output_size = output_size
         if (manifest.get("format") != "pinna2hrtf-coreml-v1"
                 or tuple(manifest.get("input_shape", [])) != self.shape
                 or manifest.get("output_size") != output_size
@@ -65,7 +66,7 @@ class CoreMLModel:
         if result.returncode:
             raise RuntimeError(result.stderr.strip() or "The native Core ML helper failed")
         output = np.asarray(json.loads(result.stdout), dtype=np.float32)
-        if output.shape != (188,) or not np.isfinite(output).all():
+        if output.shape != (self.output_size,) or not np.isfinite(output).all():
             raise ValueError("Core ML returned an invalid prediction")
         return output[None]
 
@@ -75,8 +76,9 @@ class PyTorchModel:
         try:
             import torch
         except ImportError as error:
-            raise RuntimeError("This Mac release requires a converted .coreml.json model. "
-                               "Original PyTorch checkpoints can be used from a source/CLI environment.") from error
+            raise RuntimeError("PyTorch is not bundled with the Mac release. To use a PyTorch checkpoint, "
+                               "enable Developer mode in Settings > Tools and choose a Python environment "
+                               "that has PyTorch installed, or select a bundled model.") from error
         try:
             from .src.swin_transformer_v2 import SwinTransformerV2
         except ImportError:

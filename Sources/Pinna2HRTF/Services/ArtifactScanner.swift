@@ -507,7 +507,7 @@ enum PreprocessingSignature {
         }
         if project.settings.inference.usePredictionsForPreprocessing && !project.settings.manualPPMFitting.useForPreprocessing {
             inputs["model_config"] = fingerprint(project.settings.inference.modelConfig, inspection: inspection)
-            inputs["model_checkpoint"] = fingerprint(project.settings.inference.modelCheckpoint, inspection: inspection)
+            inputs["model_checkpoint"] = checkpointFingerprint(project.settings.inference.modelCheckpoint, inspection: inspection)
         }
         if project.scanPreparation.enabled { inputs["scan"] = fingerprint(project.scanPreparation.scanPath, inspection: inspection) }
         let grid = gridPath(project.settings.preprocessing.evaluationGrid)
@@ -593,7 +593,7 @@ enum PreprocessingSignature {
             }
         } else if project.settings.inference.usePredictionsForPreprocessing {
             guard resourceMatches(inference.modelConfig, project.settings.inference.modelConfig, relocations: relocations, inspection: inspection),
-                  resourceMatches(inference.modelCheckpoint, project.settings.inference.modelCheckpoint, relocations: relocations, inspection: inspection) else { return false }
+                  resourceMatches(inference.modelCheckpoint, sourceCheckpointPath(project.settings.inference.modelCheckpoint), relocations: relocations, inspection: inspection) else { return false }
         }
         if project.scanPreparation.enabled &&
             !resourceMatches(previous.scanPreparation.scanPath, project.scanPreparation.scanPath, relocations: relocations, inspection: inspection) { return false }
@@ -681,6 +681,22 @@ enum PreprocessingSignature {
     }
 
     static func fileFingerprint(_ path: String) -> String { fingerprint(path, inspection: .init()) }
+
+    /// A Core ML manifest records toolchain versions and changes with every rebuild. The model's
+    /// identity is the checkpoint it was converted from, which also keeps PyTorch-era receipts valid.
+    static func checkpointFingerprint(_ path: String, inspection: ArtifactScanner.Inspection = .init()) -> String {
+        if path.hasSuffix(".coreml.json"),
+           let digest = inspection.document(URL(fileURLWithPath: path))?["source_checkpoint_sha256"] as? String,
+           digest.count == 64, digest.allSatisfy(\.isHexDigit) {
+            return "sha256:" + digest.lowercased()
+        }
+        return fingerprint(path, inspection: inspection)
+    }
+
+    /// The PyTorch checkpoint path a Core ML manifest stands in for.
+    static func sourceCheckpointPath(_ path: String) -> String {
+        path.hasSuffix(".coreml.json") ? String(path.dropLast(".coreml.json".count)) + ".pth" : path
+    }
     private static func fingerprint(_ path: String, inspection: ArtifactScanner.Inspection) -> String {
         if path.isEmpty { return "" }
         let url = URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath()

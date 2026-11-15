@@ -135,6 +135,10 @@ struct ProjectStatusSnapshot {
         case .inference:
             if !project.settings.inference.usePredictionsForPreprocessing { return "Use Mesh2PPM is turned off." }
             if !FileManager.default.fileExists(atPath: project.settings.inference.modelConfig) || !FileManager.default.fileExists(atPath: project.settings.inference.modelCheckpoint) { return "The selected model or checkpoint is missing." }
+            if Defaults.isPackagedApp, project.settings.inference.modelCheckpoint.lowercased().hasSuffix(".pth"),
+               AppPreferences.developerOverride(AppPreferences.developerPython) == nil {
+                return "PyTorch checkpoints need a Python with PyTorch. Choose one in Settings > Tools > Developer mode, or select a bundled model."
+            }
         case .preprocessing:
             if project.settings.inference.usePredictionsForPreprocessing && (!isComplete(.inference) || [.failed, .stopped].contains(project.stageOutcomes?[Stage.inference.rawValue] ?? .ready)) { return "Run Ear preparation & modelling first." }
             if project.settings.manualPPMFitting.useForPreprocessing {
