@@ -3776,6 +3776,10 @@ public partial class MainWindow : Window
             changed = true;
         }
         var checkpointName = Path.GetFileNameWithoutExtension(project.Settings.Inference.ModelCheckpoint);
+        // Mac release manifests describe the same bundled checkpoints.
+        // Resolve their names back to PyTorch when importing a Mac project.
+        if (checkpointName.EndsWith(".coreml", StringComparison.OrdinalIgnoreCase))
+            checkpointName = checkpointName[..^".coreml".Length];
         if (string.IsNullOrWhiteSpace(checkpointName)) checkpointName = modelName;
         var checkpoint = Path.Combine(resources, checkpointName + ".pth");
         if (File.Exists(checkpoint) && !File.Exists(project.Settings.Inference.ModelCheckpoint))

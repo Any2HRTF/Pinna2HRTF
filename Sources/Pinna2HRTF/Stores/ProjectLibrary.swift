@@ -419,7 +419,7 @@ final class ProjectLibrary: ObservableObject {
             if Defaults.isPackagedApp {
                 let resources = packageURL.appendingPathComponent("HRTFCalculation/Inference/resources", isDirectory: true)
                 let bundledConfig = resources.appendingPathComponent(URL(fileURLWithPath: updated.settings.inference.modelConfig).lastPathComponent)
-                let bundledCheckpoint = resources.appendingPathComponent(URL(fileURLWithPath: updated.settings.inference.modelCheckpoint).lastPathComponent)
+                let bundledCheckpoint = Defaults.bundledModelCheckpoint(updated.settings.inference.modelCheckpoint, resources: resources)
                 if updated.settings.inference.modelConfig.contains("HRTFCalculation/Inference/resources/"), FileManager.default.fileExists(atPath: bundledConfig.path) {
                     updated.settings.inference.modelConfig = bundledConfig.path
                 }

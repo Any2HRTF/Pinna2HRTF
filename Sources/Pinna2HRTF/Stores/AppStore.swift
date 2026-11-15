@@ -284,7 +284,7 @@ final class AppStore: ObservableObject {
 
     func setSelectedModelName(_ name: String) {
         let config = inferenceResourceURL.appendingPathComponent("Local \(name).yaml").path
-        let checkpoint = inferenceResourceURL.appendingPathComponent("Local \(name).pth").path
+        let checkpoint = Defaults.modelCheckpointURL(resources: inferenceResourceURL, stem: "Local \(name)").path
         updateSelectedProject {
             $0.settings.inference.modelConfig = config
             $0.settings.inference.modelCheckpoint = checkpoint

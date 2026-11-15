@@ -48,7 +48,7 @@
 cd Pinna2HRTF</code></pre>
 
       <h2 id="macos">macOS</h2>
-      <p>On Apple Silicon, install Git, <code>uv</code>, Xcode Command Line Tools, and the Swift toolchain, then run:</p>
+      <p>On Apple Silicon, install Git, <code>uv</code>, and full Xcode (including <code>coremlcompiler</code>). Open Xcode once to finish setup, then run:</p>
       <pre><code>bash Scripts/build_and_run.sh</code></pre>
       <p>This prepares external tools, builds <code>build/release/Pinna2HRTF.app</code>, and opens it. To build without launching:</p>
       <pre><code>bash Scripts/prepare_external_tools.sh
@@ -56,6 +56,10 @@ bash Scripts/build_release_app.sh</code></pre>
       <p>Local builds are ad-hoc signed. To create a DMG installer, run:</p>
       <pre><code>bash Scripts/build_release_app.sh --installer</code></pre>
       <p>The DMG and its SHA-256 checksum are written to <code>dist/</code>. The DMG is also ad-hoc signed and not notarized, so macOS may block the first launch; choose <strong>Open Anyway</strong> in System Settings → Privacy &amp; Security. The build defaults to SDK 26.5; set <code>PINNA2HRTF_MACOS_SDK</code> to choose another installed SDK.</p>
+
+      <p>The Mac release converts all four bundled PyTorch checkpoints into compiled float32 Core ML models and runs them on the CPU through a native helper. Conversion tools are used only during the build; PyTorch and its unused dependencies are removed from the packaged app. Windows and source/CLI environments keep the PyTorch implementation. Conversion results are cached under <code>build/coreml/</code> and checked against the checkpoint, configuration, converter, and SDK versions.</p>
+      <p>Model conversion checks verify network predictions. Small numerical differences can change the graded solver mesh, so these checks do not establish acoustic equivalence for every input.</p>
+      <p>If Apple's Icon Studio exporter is unavailable, <code>PINNA2HRTF_ICON_ASSETS</code> can point to previously compiled <code>Assets.car</code> and <code>Pinna2HRTF.icns</code> files with a <code>provenance.json</code> containing the matching <code>source_sha256</code>. The build verifies this SHA-256 digest over the icon source's sorted relative file paths and file hashes before reusing the assets.</p>
 
       <h3>Signed and notarized distribution</h3>
       <p>Install a Developer ID Application certificate and save notarization credentials in Keychain under <code>Pinna2HRTF-notary</code>, then run:</p>

@@ -41,6 +41,25 @@ CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 ICON="$ROOT/Sources/Pinna2HRTF/Resources/app_icon.icns"
+ICON_ASSETS="${PINNA2HRTF_ICON_ASSETS:-}"
+if [[ -n "$ICON_ASSETS" ]]; then
+  # A previously compiled icon may be reused only for the exact same source.
+  # This also supports hosts where Apple's Icon Studio exporter cannot run.
+  /usr/bin/python3 - "$ROOT/Sources/Pinna2HRTF/Resources/Pinna2HRTF.icon" "$ICON_ASSETS" <<'PYICONCACHE'
+import hashlib, json, sys
+from pathlib import Path
+source, cache = map(Path, sys.argv[1:])
+digest = hashlib.sha256()
+for path in sorted(source.rglob("*")):
+    if path.is_file():
+        digest.update(str(path.relative_to(source)).encode() + b"\0" + hashlib.sha256(path.read_bytes()).digest())
+if json.loads((cache / "provenance.json").read_text())["source_sha256"] != digest.hexdigest():
+    raise SystemExit("The compiled icon cache does not match the current icon source")
+for name in ("Assets.car", "Pinna2HRTF.icns"):
+    if not (cache / name).is_file():
+        raise SystemExit(f"Missing compiled icon asset: {name}")
+PYICONCACHE
+fi
 EXTERNAL_ROOT="${PINNA2HRTF_EXTERNAL_ROOT:-$ROOT/External}"
 SIGNING_IDENTITY="-"
 NOTARY_PROFILE="${PINNA2HRTF_NOTARY_PROFILE:-Pinna2HRTF-notary}"
@@ -109,12 +128,21 @@ BUILD_DEVELOPER_DIR="${DEVELOPER_DIR:-$(xcode-select -p)}"
 if [[ ! -x "$BUILD_DEVELOPER_DIR/usr/bin/xcodebuild" && -x /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild ]]; then
   BUILD_DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 fi
+export DEVELOPER_DIR="$BUILD_DEVELOPER_DIR"
+if ! xcrun --find coremlcompiler >/dev/null 2>&1; then
+  echo "Full Xcode with coremlcompiler is required to build the native Core ML release." >&2
+  exit 1
+fi
 
 if [[ -x "$BUILD_DEVELOPER_DIR/usr/bin/xcodebuild" && -x "$BUILD_DEVELOPER_DIR/usr/bin/actool" ]]; then
   XCODE_SCRATCH="${PINNA2HRTF_XCODE_SCRATCH:-/private/tmp/pinna2hrtf-xcode-build-$(id -u)}"
+  ICON_BUILD_FLAGS=()
+  if [[ -n "$ICON_ASSETS" ]]; then
+    ICON_BUILD_FLAGS=(EXCLUDED_SOURCE_FILE_NAMES=Pinna2HRTF.icon ASSETCATALOG_COMPILER_APPICON_NAME=)
+  fi
   DEVELOPER_DIR="$BUILD_DEVELOPER_DIR" xcodebuild -project "$ROOT/Pinna2HRTF.xcodeproj" \
     -scheme Pinna2HRTF -configuration Release -derivedDataPath "$XCODE_SCRATCH" \
-    CODE_SIGNING_ALLOWED=NO build
+    CODE_SIGNING_ALLOWED=NO "${ICON_BUILD_FLAGS[@]}" build
   BUILT_EXECUTABLE="$XCODE_SCRATCH/Build/Products/Release/Pinna2HRTF.app/Contents/MacOS/Pinna2HRTF"
   SDK_VERSION="$(DEVELOPER_DIR="$BUILD_DEVELOPER_DIR" xcrun --sdk macosx --show-sdk-version)"
 else
@@ -203,7 +231,10 @@ ICON_DEVELOPER_DIR="${DEVELOPER_DIR:-$(xcode-select -p)}"
 if [[ ! -x "$ICON_DEVELOPER_DIR/usr/bin/actool" && -x /Applications/Xcode.app/Contents/Developer/usr/bin/actool ]]; then
   ICON_DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 fi
-if [[ -x "$ICON_DEVELOPER_DIR/usr/bin/actool" ]]; then
+if [[ -n "$ICON_ASSETS" ]]; then
+  cp "$ICON_ASSETS/Assets.car" "$RESOURCES/Assets.car"
+  cp "$ICON_ASSETS/Pinna2HRTF.icns" "$RESOURCES/Pinna2HRTF.icns"
+elif [[ -x "$ICON_DEVELOPER_DIR/usr/bin/actool" ]]; then
   DEVELOPER_DIR="$ICON_DEVELOPER_DIR" xcrun actool \
     --compile "$RESOURCES" --output-partial-info-plist "$STAGE_ROOT/icon-info.plist" \
     --app-icon Pinna2HRTF --platform macosx --minimum-deployment-target 13.0 --target-device mac \
@@ -246,7 +277,38 @@ for line in lines:
 path.write_text("\n".join(next_lines) + "\n")
 PY
 find "$RESOURCES/.venv/bin" -mindepth 1 -maxdepth 1 ! -name python ! -name python3 ! -name python3.11 -exec rm -rf {} +
+# Export with build-only tools; none of these conversion packages or PyTorch
+# are kept in the Mac application. Source/Windows installs keep uv.lock intact.
+COREML_TOOLS="$STAGE_ROOT/coreml-tools"
+"$UV_BIN" pip install --python "$RESOURCES/.venv/bin/python" --target "$COREML_TOOLS" \
+  'coremltools==9.0' 'numpy==1.26.4'
+PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONPATH="$COREML_TOOLS:$ROOT" \
+  "$RESOURCES/.venv/bin/python" "$ROOT/Scripts/convert_coreml_models.py" \
+  --resources "$RESOURCES" --cache "${PINNA2HRTF_COREML_CACHE:-$ROOT/build/coreml}"
+mkdir -p "$RESOURCES/External/bin"
+xcrun swiftc -O -target arm64-apple-macosx13.0 "$ROOT/Scripts/coreml/PPMPredict.swift" \
+  -o "$RESOURCES/External/bin/ppm_predict"
 PYTHONDONTWRITEBYTECODE=1 "$RESOURCES/.venv/bin/python" "$ROOT/Scripts/trim_macos_runtime.py" "$RESOURCES"
+PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1 PYTHONPATH="$RESOURCES" \
+  "$RESOURCES/.venv/bin/python" - "$RESOURCES" <<'PYCOREMLRUNTIME'
+import importlib.util
+import sys
+from pathlib import Path
+from HRTFCalculation.Inference.model_runtime import CoreMLModel
+import yaml
+import numpy as np
+
+for name in ("torch", "timm", "torchvision", "onnxruntime", "coremltools"):
+    if importlib.util.find_spec(name) is not None:
+        raise SystemExit(f"Unexpected inference/conversion dependency in Mac release: {name}")
+models = Path(sys.argv[1]) / "HRTFCalculation/Inference/resources"
+for views in (1, 3, 9, 25):
+    config = yaml.safe_load((models / f"Local {views} Views.yaml").read_text())["model"]
+    model = CoreMLModel(models / f"Local {views} Views.coreml.json", config, 188)
+    channels = views * (2 if config["depth"] else 1)
+    model.predict(np.zeros((channels, 256, 256), dtype=np.float32))
+print("Verified four native Core ML models without PyTorch or conversion dependencies")
+PYCOREMLRUNTIME
 find "$RESOURCES" -type d -name __pycache__ -prune -exec rm -rf {} +
 # Blender can initialize Python with its own cache settings. Precompile its
 # bundled startup/add-on scripts so first launch cannot add sealed resources.

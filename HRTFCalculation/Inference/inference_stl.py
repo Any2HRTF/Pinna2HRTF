@@ -1,7 +1,6 @@
 import tempfile
 import argparse
 import os
-import torch
 import numpy as np
 from scipy.spatial import cKDTree
 from PIL import Image
@@ -18,11 +17,11 @@ from bezierppm.render_helpers import render
 from HRTFCalculation.LiveEvents import emit_live_event
 
 try:
-    from .src.swin_transformer_v2 import SwinTransformerV2
-    from .src.math_helpers import get_quaternion_from_rotation_matrix, compute_rotation_matrix_from_ortho6d
+    from .model_runtime import CoreMLModel, PyTorchModel, load_model
+    from .src.numpy_math_helpers import decode as decode_numpy_prediction
 except ImportError:
-    from src.swin_transformer_v2 import SwinTransformerV2
-    from src.math_helpers import get_quaternion_from_rotation_matrix, compute_rotation_matrix_from_ortho6d
+    from model_runtime import CoreMLModel, PyTorchModel, load_model
+    from src.numpy_math_helpers import decode as decode_numpy_prediction
 
 __DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 MESH_SUFFIXES = (".stl", ".ply")
@@ -255,6 +254,17 @@ def model_output_size():
 
 
 def get_model_prediction(model, data):
+    if isinstance(model, CoreMLModel):
+        return decode_numpy_prediction(model.predict(data), Path(__DIR_PATH) / "resources/PPM Parameters.csv")
+    # Preserve the original PyTorch calculation order on Windows and in CLI
+    # environments. Mac Core ML inference never imports these dependencies.
+    import torch
+    try:
+        from .src.math_helpers import get_quaternion_from_rotation_matrix, compute_rotation_matrix_from_ortho6d
+    except ImportError:
+        from src.math_helpers import get_quaternion_from_rotation_matrix, compute_rotation_matrix_from_ortho6d
+    if isinstance(model, PyTorchModel):
+        model = model.model
     location_parameters, rotation_parameters, scale_parameters, shape_parameters = ppm_parameter_groups()
 
     with torch.no_grad():
@@ -295,18 +305,7 @@ def main(args):
     assert num_classes == 188, f"PPM Parameters.csv yields {num_classes} model outputs, expected 188."
     if CONFIGURATION['model']['number_of_camera_views'] not in VIEW_INDICES:
         raise ValueError(f"Unsupported number_of_camera_views {CONFIGURATION['model']['number_of_camera_views']!r}; expected one of {sorted(VIEW_INDICES)}.")
-    model = SwinTransformerV2(
-                    img_size=CONFIGURATION['model']['img_size'],
-                    in_chans=2*CONFIGURATION['model']['number_of_camera_views'] if CONFIGURATION['model']['depth'] else CONFIGURATION['model']['number_of_camera_views'],
-                    num_classes=num_classes,
-                    window_size=CONFIGURATION['model']['window_size'],
-                    depths=CONFIGURATION['model']['depths'],
-                    num_heads=CONFIGURATION['model']['num_heads'],
-                    weights = torch.ones(4)
-                )
-
-    model.load_state_dict(torch.load(args.model_checkpoint, map_location=torch.device('cpu'), weights_only=True)["model_state_dict"])
-    model.eval()
+    model = load_model(args.model_checkpoint, CONFIGURATION['model'], num_classes)
 
     prediciton_df = []
 

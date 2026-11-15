@@ -115,9 +115,23 @@ enum Defaults {
         ProjectSettings(
             inference: InferenceSettings(
                 modelConfig: packageRoot.appendingPathComponent("HRTFCalculation/Inference/resources/Local 3 Views.yaml").path,
-                modelCheckpoint: packageRoot.appendingPathComponent("HRTFCalculation/Inference/resources/Local 3 Views.pth").path
+                modelCheckpoint: modelCheckpointURL(resources: packageRoot.appendingPathComponent("HRTFCalculation/Inference/resources"), stem: "Local 3 Views").path
             )
         )
+    }
+
+    static func modelCheckpointURL(resources: URL, stem: String) -> URL {
+        let native = resources.appendingPathComponent(stem + ".coreml.json")
+        if FileManager.default.fileExists(atPath: native.path) { return native }
+        return resources.appendingPathComponent(stem + ".pth")
+    }
+
+    static func bundledModelCheckpoint(_ path: String, resources: URL) -> URL {
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        let stem = name.hasSuffix(".coreml.json")
+            ? String(name.dropLast(".coreml.json".count))
+            : URL(fileURLWithPath: name).deletingPathExtension().lastPathComponent
+        return modelCheckpointURL(resources: resources, stem: stem)
     }
 
     static func newProject(packageRoot: URL, index: Int) -> ProjectRecord {

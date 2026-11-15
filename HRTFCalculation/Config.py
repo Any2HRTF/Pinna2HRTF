@@ -38,7 +38,12 @@ def worktree_root() -> Path:
 
 
 def default_resource(name: str) -> Path:
-    return Path(__file__).resolve().parent / "Inference" / "resources" / name
+    path = Path(__file__).resolve().parent / "Inference" / "resources" / name
+    if sys.platform == "darwin" and path.suffix == ".pth":
+        native = path.with_suffix(".coreml.json")
+        if native.is_file():
+            return native
+    return path
 
 
 def executable_name(name: str) -> str:

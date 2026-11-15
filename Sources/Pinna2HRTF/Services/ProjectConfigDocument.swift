@@ -166,6 +166,13 @@ enum ProjectConfigDocument {
             guard let value = text(inference, key) else { return fallback }
             let local = packageRoot.appendingPathComponent("HRTFCalculation/Inference/resources").appendingPathComponent(URL(fileURLWithPath: value).lastPathComponent)
             let path = relocated(value)
+            if key == "model_checkpoint" {
+                let bundled = Defaults.bundledModelCheckpoint(value, resources: packageRoot.appendingPathComponent("HRTFCalculation/Inference/resources"))
+                if FileManager.default.fileExists(atPath: bundled.path),
+                   !FileManager.default.fileExists(atPath: path) || value.contains("HRTFCalculation/Inference/resources/") {
+                    return bundled.path
+                }
+            }
             if FileManager.default.fileExists(atPath: path) { return path }
             return FileManager.default.fileExists(atPath: local.path) ? local.path : path
         }
