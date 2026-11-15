@@ -10,12 +10,31 @@ import tempfile
 import numpy as np
 
 
+ARCHITECTURE_KEYS = ("window_size", "depths", "num_heads")
+
+
+def _converted_from(native, checkpoint):
+    """Whether a Core ML manifest was converted from exactly this checkpoint."""
+    try:
+        expected = json.loads(native.read_text()).get("source_checkpoint_sha256")
+    except (OSError, ValueError, AttributeError):
+        return False
+    digest = hashlib.sha256()
+    with checkpoint.open("rb") as file:
+        for block in iter(lambda: file.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest() == expected
+
+
 def checkpoint_path(path):
-    """Resolve bundled model selections saved by the other desktop platform."""
+    """Resolve model selections saved by the other desktop platform."""
     path = Path(path)
     if sys.platform == "darwin" and path.suffix == ".pth":
         native = path.with_suffix(".coreml.json")
-        if native.is_file():
+        # The Mac release ships no .pth, so a missing checkpoint resolves to its
+        # conversion. A checkpoint that is present wins unless the conversion was
+        # made from exactly that file; a retrained model must never run stale weights.
+        if native.is_file() and (not path.is_file() or _converted_from(native, path)):
             return native
     elif sys.platform != "darwin" and path.name.endswith(".coreml.json"):
         pytorch = path.with_name(path.name.removesuffix(".coreml.json") + ".pth")
@@ -31,7 +50,8 @@ class CoreMLModel:
         channels = configuration["number_of_camera_views"] * (2 if configuration["depth"] else 1)
         self.shape = (1, channels, configuration["img_size"], configuration["img_size"])
         self.output_size = output_size
-        if (manifest.get("format") != "pinna2hrtf-coreml-v1"
+        if (manifest.get("format") != "pinna2hrtf-coreml-v2"
+                or manifest.get("architecture") != {key: configuration.get(key) for key in ARCHITECTURE_KEYS}
                 or tuple(manifest.get("input_shape", [])) != self.shape
                 or manifest.get("output_size") != output_size
                 or manifest.get("precision") != "float32"

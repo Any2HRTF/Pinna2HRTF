@@ -79,7 +79,10 @@ def convert(resources, cache):
         files = {str(path.relative_to(destination)): sha(path) for path in sorted(destination.rglob("*")) if path.is_file()}
         if not files:
             raise RuntimeError(f"Compiled model is empty: {destination}")
-        manifest = {"format": "pinna2hrtf-coreml-v1", "model": destination.name, "input_shape": list(shape),
+        # The compiled network fixes these; the runtime rejects a configuration that disagrees.
+        architecture = {key: configuration[key] for key in ("window_size", "depths", "num_heads")}
+        manifest = {"format": "pinna2hrtf-coreml-v2", "model": destination.name, "input_shape": list(shape),
+                    "architecture": architecture,
                     "output_size": 188, "source_checkpoint": checkpoint.name, **provenance,
                     "compiled_files": files, "conversion_validation": json.loads(validation_path.read_text())}
         (models / (name + ".coreml.json")).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
