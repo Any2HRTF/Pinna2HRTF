@@ -282,6 +282,7 @@ struct ProjectInspectorView: View {
         Binding(get: { store.selectedProject?.scanPreparation[keyPath: keyPath] ?? "" }, set: { value in
             store.updateSelectedProject { project in
                 var scan = project.scanPreparation
+                guard scan[keyPath: keyPath] != value else { return }
                 scan[keyPath: keyPath] = value
                 if keyPath == \.scanPath {
                     scan.originalScanPath = nil

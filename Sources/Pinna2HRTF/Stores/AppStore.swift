@@ -459,7 +459,20 @@ final class AppStore: ObservableObject {
 
     func beginScanAlignment() {
         guard let project = selectedProject, !selectedProjectIsRunning else { return }
-        let source = project.scanPreparation.originalScanPath ?? project.scanPreparation.scanPath
+        let destination = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("MeshEdits/AlignedScan.ply")
+        var source = project.scanPreparation.originalScanPath ?? project.scanPreparation.scanPath
+        if !source.isEmpty, Self.samePath(source, destination.path) {
+            // The aligned scan cannot be its own source. Recover the original from the alignment report.
+            let report = destination.deletingPathExtension().appendingPathExtension("json")
+            guard let data = try? Data(contentsOf: report),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let original = object["source_path"] as? String,
+                  !Self.samePath(original, destination.path),
+                  FileManager.default.fileExists(atPath: original) else {
+                meshEditorError = "The original scan for this alignment is missing. Choose the full-head scan again."; return
+            }
+            source = original
+        }
         guard !source.isEmpty, FileManager.default.fileExists(atPath: source) else {
             meshEditorError = "Choose a full-head scan first."; return
         }
@@ -468,9 +481,14 @@ final class AppStore: ObservableObject {
         }
         let url = URL(fileURLWithPath: source)
         meshEditorRequest = MeshEditorRequest(projectID: project.id, source: url, originalSource: url,
-            destination: URL(fileURLWithPath: project.saveLocation).appendingPathComponent("MeshEdits/AlignedScan.ply"),
+            destination: destination,
             side: nil, preparedGeneration: nil, preparedReport: nil,
             prepareLeft: project.scanPreparation.prepareLeft, prepareRight: project.scanPreparation.prepareRight)
+    }
+
+    private static func samePath(_ lhs: String, _ rhs: String) -> Bool {
+        URL(fileURLWithPath: lhs).standardizedFileURL.resolvingSymlinksInPath().path
+            == URL(fileURLWithPath: rhs).standardizedFileURL.resolvingSymlinksInPath().path
     }
 
     func beginEarEditing(_ side: EarSide) {
