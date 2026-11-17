@@ -28,7 +28,7 @@ struct MeshEditorView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(model.request.title).font(.headline)
-                    Text("\(model.request.source.lastPathComponent) · Original mesh is preserved").font(.caption).foregroundStyle(.secondary)
+                    Text(model.request.source.lastPathComponent).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if model.busy { ProgressView().controlSize(.small) }
@@ -58,15 +58,13 @@ struct MeshEditorView: View {
                         if model.tool == .selection { selectionControls }
                         if model.tool == .plane { planeControls }
                         EditorInspectorSection("Cleanup", systemImage: "sparkles") {
-                            Text("Remove disconnected fragments and keep only the largest connected piece of the mesh.")
-                                .font(.caption).foregroundStyle(.secondary)
                             Button { Task { await model.edit("largest") } } label: {
                                 Label("Keep Largest Component", systemImage: "square.3.layers.3d.down.right")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.bordered)
                             .tint(.blue)
-                            .help("Remove disconnected fragments. You can undo this.")
+                            .help("Remove loose fragments.")
                         }
                     }
                     EditorInspectorSection("History", systemImage: "clock.arrow.circlepath") {
@@ -98,7 +96,7 @@ struct MeshEditorView: View {
             .disabled(model.busy)
         } footer: {
             HStack {
-                Text(model.request.isAlignment ? "Preview a rigid alignment before saving." : "Cuts stay open. Saving checks the attachment boundary and ear-canal opening.")
+                Text(model.request.isAlignment ? "Preview the alignment, then save." : "The original mesh is kept.")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Cancel") { closeEditor() }.keyboardShortcut(.cancelAction).disabled(model.busy)
@@ -120,10 +118,6 @@ struct MeshEditorView: View {
     var alignmentControls: some View {
         EditorInspectorSection("Nose and Ear Landmarks", systemImage: "mappin.and.ellipse") {
             Toggle("Show coordinate system", isOn: $model.showCoordinateSystem)
-            Text(model.hasAlignment ? "Aligned coordinates (mm): X forward · Y left · Z up. Origin: midpoint between the ear canals." : "Showing the scan’s current axes and origin. Preview Alignment sets X forward, Y left, Z up, with the ear midpoint at the origin.")
-                .font(.caption).foregroundStyle(.secondary)
-            Text(model.landmarks.count == 3 ? "All points placed. Preview the alignment or select a point to replace it." : "\(model.landmarks.count + 1) of 3 — Select \(["the nose tip", "the left ear-canal entrance", "the right ear-canal entrance"][min(model.landmarkSlot, 2)]).")
-                .font(.caption).foregroundStyle(.secondary)
             ForEach(Array(["Nose tip", "Left ear-canal entrance", "Right ear-canal entrance"].enumerated()), id: \.offset) { index, name in
                 Button {
                     model.landmarkSlot = min(index, model.landmarks.count)
@@ -140,13 +134,8 @@ struct MeshEditorView: View {
                 .buttonStyle(.bordered)
                 .disabled(index > model.landmarks.count)
             }
-            DisclosureGroup("Alignment Details") {
-                Text("Select the nose tip, left ear-canal entrance, then right ear-canal entrance. The ear midpoint becomes the origin: X forward, Y left, Z up. Left and right are the listener’s.")
+            Text("Origin: midpoint between the ear canals. X forward, Y left, Z up.")
                 .font(.caption).foregroundStyle(.secondary)
-            }
-            if model.landmarks.count != 3 {
-                Text("Place all three landmarks to preview.").font(.caption).foregroundStyle(.secondary)
-            }
             Button {
                 let points = model.landmarks.map { [Double($0.x), Double($0.y), Double($0.z)] }
                 Task { await model.edit("align", arguments: ["points": points]) }
@@ -161,10 +150,10 @@ struct MeshEditorView: View {
 
     var selectionControls: some View {
         EditorInspectorSection("Select Faces", systemImage: "lasso") {
-            Text("Draw around faces to select them, or click a face to toggle it. Selected faces are red.")
+            Text("Drag to select, click to toggle a face.")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Select through mesh", isOn: $model.throughSelection)
-                .help("Include hidden and back-facing faces. Turn off to select only visible front faces.")
+                .help("Also select hidden and back-facing faces.")
             Toggle("Add to current selection", isOn: $model.addToSelection)
             HStack {
                 Text("\(model.selectedFaces.count) faces selected").font(.caption.monospacedDigit())
@@ -193,7 +182,7 @@ struct MeshEditorView: View {
 
     var planeControls: some View {
         EditorInspectorSection("Cutting Plane", systemImage: "scissors") {
-            Text("Position the plane, then apply the cut. Red marks the side to remove; the cut extends through the mesh and stays open.")
+            Text("The red side is removed.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Text("Align normal to")
@@ -225,7 +214,7 @@ struct MeshEditorView: View {
             Slider(value: $model.planeOffset, in: -model.span/2...model.span/2)
                 .accessibilityLabel("Cutting plane offset")
             Toggle("Fit plane preview to mesh", isOn: $model.fitPlanePreview)
-                .help("Fit the preview to the mesh, or turn off to set its width and height. The cut still extends through the mesh.")
+                .help("Turn off to set the preview size by hand.")
             if !model.fitPlanePreview {
                 VStack(spacing: 6) {
                     HStack {
@@ -240,7 +229,7 @@ struct MeshEditorView: View {
                     }
                 }.textFieldStyle(.roundedBorder)
                 if !model.validPlanePreviewSize {
-                    Text("Enter positive dimensions. Showing the fitted preview until both values are valid.")
+                    Text("Enter values above zero.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
