@@ -42,34 +42,56 @@ struct MeshEditorView: View {
                 }
         } inspector: {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 18) {
                     if model.request.isAlignment {
                         alignmentControls
-
                     } else {
-                        Picker("Tool", selection: $model.tool) {
-                            ForEach(model.tools) { tool in Text(tool.rawValue).tag(tool) }
+                        EditorInspectorSection("Tool", systemImage: "wrench.and.screwdriver") {
+                            Picker("Tool", selection: $model.tool) {
+                                ForEach(model.tools) { tool in Text(tool.rawValue).tag(tool) }
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .onChange(of: model.tool) { _ in model.refreshOverlays() }
                         }
-                        .pickerStyle(.segmented)
-                        .onChange(of: model.tool) { _ in model.refreshOverlays() }
-                    }
-                    if !model.request.isAlignment && model.tool == .landmarks { alignmentControls }
-                    if model.tool == .selection { selectionControls }
-                    if model.tool == .plane { planeControls }
-                    Divider()
-                    HStack {
-                        Button("Undo") { Task { await model.moveHistory(-1) } }.disabled(!model.canUndo)
-                        Button("Redo") { Task { await model.moveHistory(1) } }.disabled(!model.canRedo)
-                    }
-                    if !model.request.isAlignment {
-                        Menu("Mesh Cleanup") {
-                        Button("Keep largest component") { Task { await model.edit("largest") } }
+                        if model.tool == .landmarks { alignmentControls }
+                        if model.tool == .selection { selectionControls }
+                        if model.tool == .plane { planeControls }
+                        EditorInspectorSection("Cleanup", systemImage: "sparkles") {
+                            Text("Remove disconnected fragments and keep only the largest connected piece of the mesh.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Button { Task { await model.edit("largest") } } label: {
+                                Label("Keep Largest Component", systemImage: "square.3.layers.3d.down.right")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.blue)
                             .help("Remove disconnected fragments. You can undo this.")
                         }
                     }
-                    Text(model.message).font(.caption).foregroundStyle(.secondary)
-                    if let error = model.error {
-                        Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                    EditorInspectorSection("History", systemImage: "clock.arrow.circlepath") {
+                        HStack {
+                            Button { Task { await model.moveHistory(-1) } } label: {
+                                Label("Undo", systemImage: "arrow.uturn.backward").frame(maxWidth: .infinity)
+                            }
+                            .disabled(!model.canUndo)
+                            Button { Task { await model.moveHistory(1) } } label: {
+                                Label("Redo", systemImage: "arrow.uturn.forward").frame(maxWidth: .infinity)
+                            }
+                            .disabled(!model.canRedo)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    if !model.message.isEmpty || model.error != nil {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if !model.message.isEmpty {
+                                Text(model.message).font(.caption).foregroundStyle(.secondary)
+                            }
+                            if let error = model.error {
+                                Label(error, systemImage: "exclamationmark.triangle.fill")
+                                    .font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                            }
+                        }
                     }
                 }.padding(16)
             }
@@ -80,12 +102,13 @@ struct MeshEditorView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Cancel") { closeEditor() }.keyboardShortcut(.cancelAction).disabled(model.busy)
-                Button(model.request.isAlignment ? "Save aligned scan" : "Save ear") {
+                Button(model.request.isAlignment ? "Save Aligned Scan" : "Save Ear") {
                     Task {
                         if await model.save() { saved(model.request); dismiss() }
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(.green)
                 .disabled(!model.canSave)
                 .keyboardShortcut(.defaultAction)
             }
@@ -95,8 +118,7 @@ struct MeshEditorView: View {
     }
 
     var alignmentControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Nose and ear landmarks").font(.subheadline.weight(.semibold))
+        EditorInspectorSection("Nose and Ear Landmarks", systemImage: "mappin.and.ellipse") {
             Toggle("Show coordinate system", isOn: $model.showCoordinateSystem)
             Text(model.hasAlignment ? "Aligned coordinates (mm): X forward · Y left · Z up. Origin: midpoint between the ear canals." : "Showing the scan’s current axes and origin. Preview Alignment sets X forward, Y left, Z up, with the ear midpoint at the origin.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -119,45 +141,63 @@ struct MeshEditorView: View {
                 .disabled(index > model.landmarks.count)
             }
             DisclosureGroup("Alignment Details") {
-            Text("Select the nose tip, left ear-canal entrance, then right ear-canal entrance. The ear midpoint becomes the origin: X forward, Y left, Z up. Left and right are the listener’s.")
+                Text("Select the nose tip, left ear-canal entrance, then right ear-canal entrance. The ear midpoint becomes the origin: X forward, Y left, Z up. Left and right are the listener’s.")
                 .font(.caption).foregroundStyle(.secondary)
             }
             if model.landmarks.count != 3 {
                 Text("Place all three landmarks to preview.").font(.caption).foregroundStyle(.secondary)
             }
-            Button("Preview alignment") {
+            Button {
                 let points = model.landmarks.map { [Double($0.x), Double($0.y), Double($0.z)] }
                 Task { await model.edit("align", arguments: ["points": points]) }
+            } label: {
+                Label("Preview Alignment", systemImage: "move.3d").frame(maxWidth: .infinity)
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
             .disabled(model.landmarks.count != 3)
         }
     }
 
     var selectionControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        EditorInspectorSection("Select Faces", systemImage: "lasso") {
             Text("Draw around faces to select them, or click a face to toggle it. Selected faces are red.")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Select through mesh", isOn: $model.throughSelection)
                 .help("Include hidden and back-facing faces. Turn off to select only visible front faces.")
             Toggle("Add to current selection", isOn: $model.addToSelection)
-            Text("\(model.selectedFaces.count) faces selected").font(.caption.monospacedDigit())
-            Button("Delete selected faces") {
-                Task { await model.edit("delete", arguments: ["faces": model.selectedFaces.sorted()]) }
-            }.disabled(model.selectedFaces.isEmpty)
             HStack {
-            Button("Invert selection") { model.invertSelection() }
-                .disabled(model.faces.isEmpty)
-            Button("Clear selection") { model.selectedFaces.removeAll(); model.refreshOverlays() }
-                .disabled(model.selectedFaces.isEmpty)
+                Text("\(model.selectedFaces.count) faces selected").font(.caption.monospacedDigit())
+                    .foregroundStyle(model.selectedFaces.isEmpty ? Color.secondary : Color.red)
+                Spacer()
+                Button("Invert") { model.invertSelection() }
+                    .disabled(model.faces.isEmpty)
+                    .help("Invert selection")
+                Button("Clear") { model.selectedFaces.removeAll(); model.refreshOverlays() }
+                    .disabled(model.selectedFaces.isEmpty)
+                    .help("Clear selection")
             }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            Button(role: .destructive) {
+                Task { await model.edit("delete", arguments: ["faces": model.selectedFaces.sorted()]) }
+            } label: {
+                Label("Delete Selected Faces", systemImage: "trash").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+            .controlSize(.large)
+            .disabled(model.selectedFaces.isEmpty)
         }
     }
 
     var planeControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        EditorInspectorSection("Cutting Plane", systemImage: "scissors") {
             Text("Position the plane, then apply the cut. Red marks the side to remove; the cut extends through the mesh and stays open.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
+                Text("Align normal to")
+                Spacer()
                 ForEach(["X", "Y", "Z"], id: \.self) { axis in
                     Button(axis) {
                         model.planeX = axis == "X" ? "1" : "0"
@@ -167,6 +207,8 @@ struct MeshEditorView: View {
                     }
                     .accessibilityLabel("Set cutting plane normal to \(axis)")
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
             HStack {
                 Text("Normal")
@@ -203,11 +245,17 @@ struct MeshEditorView: View {
                 }
             }
             Toggle("Flip kept side", isOn: $model.flipPlane)
-            Button("Apply cut") {
+            Button {
                 guard let normal = model.normal else { return }
                 let origin = model.planeOrigin
                 Task { await model.edit("cut", arguments: ["normal": [normal.x, normal.y, normal.z], "origin": [origin.x, origin.y, origin.z]]) }
-            }.disabled(model.normal == nil || !model.planeOffset.isFinite)
+            } label: {
+                Label("Apply Cut", systemImage: "scissors").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.orange)
+            .controlSize(.large)
+            .disabled(model.normal == nil || !model.planeOffset.isFinite)
         }
         .onChange(of: model.planeX) { _ in model.refreshOverlays() }
         .onChange(of: model.planeY) { _ in model.refreshOverlays() }
@@ -217,6 +265,32 @@ struct MeshEditorView: View {
         .onChange(of: model.fitPlanePreview) { _ in model.updatePlanePreviewSizing() }
         .onChange(of: model.planePreviewWidth) { _ in model.refreshOverlays() }
         .onChange(of: model.planePreviewHeight) { _ in model.refreshOverlays() }
+    }
+}
+
+/// A titled group in the editor inspector, so related controls and their action read as one unit.
+private struct EditorInspectorSection<Content: View>: View {
+    let title: String
+    let systemImage: String
+    let content: Content
+
+    init(_ title: String, systemImage: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.systemImage = systemImage
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 10) { content }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
+        }
     }
 }
 
