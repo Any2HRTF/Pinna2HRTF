@@ -7,11 +7,20 @@ struct Pinna2HRTFApp: App {
     @StateObject private var store = AppStore()
     @AppStorage(AppPreferences.appearance) private var appearance = "system"
 
-    private var colorScheme: ColorScheme? {
-        switch appearance {
-        case "light": .light
-        case "dark": .dark
+    /// Applied at the AppKit level: `preferredColorScheme(nil)` does not fully revert a forced
+    /// scheme (leaving stale materials and layers), and it never reaches the AppKit editor windows.
+    private static func applyAppearance(_ value: String) {
+        let name: NSAppearance.Name? = switch value {
+        case "light": .aqua
+        case "dark": .darkAqua
         default: nil
+        }
+        NSApp.appearance = name.flatMap(NSAppearance.init(named:))
+        for window in NSApp.windows {
+            window.appearance = nil
+            window.invalidateShadow()
+            window.contentView?.needsDisplay = true
+            window.contentView?.needsLayout = true
         }
     }
 
@@ -23,8 +32,11 @@ struct Pinna2HRTFApp: App {
     var body: some Scene {
         Window("Pinna2HRTF", id: "main") {
             ContentView(store: store)
-                .preferredColorScheme(colorScheme)
-                .onAppear { appDelegate.store = store }
+                .onAppear {
+                    appDelegate.store = store
+                    Self.applyAppearance(appearance)
+                }
+                .onChange(of: appearance) { Self.applyAppearance($0) }
                 .frame(minWidth: PressureFieldView.minimumViewerWidth + 630, maxWidth: .infinity, minHeight: 650, maxHeight: .infinity)
         }
         .defaultSize(width: 1320, height: 900)
@@ -55,7 +67,6 @@ struct Pinna2HRTFApp: App {
         }
         Settings {
             AppSettingsView(store: store)
-                .preferredColorScheme(colorScheme)
         }
     }
 }
