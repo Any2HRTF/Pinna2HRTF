@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct PipelineCommandContext {
@@ -69,13 +70,13 @@ struct PipelineCommands: Commands {
             Divider()
 
             Button("Remove Project") {
-                commands?.removeProject()
+                if !forwardDeleteToTextField() { commands?.removeProject() }
             }
             .keyboardShortcut(commands?.folderSelected == true ? nil : KeyboardShortcut(.delete, modifiers: [.command]))
             .disabled(commands?.folderSelected != false || commands?.canRemoveProject != true)
 
             Button("Remove Folder") {
-                commands?.removeFolder()
+                if !forwardDeleteToTextField() { commands?.removeFolder() }
             }
             .keyboardShortcut(commands?.folderSelected == true ? KeyboardShortcut(.delete, modifiers: [.command]) : nil)
             .disabled(commands?.folderSelected != true)
@@ -181,4 +182,11 @@ extension FocusedValues {
 
 private struct PipelineCommandContextKey: FocusedValueKey {
     typealias Value = PipelineCommandContext
+}
+
+@MainActor
+private func forwardDeleteToTextField() -> Bool {
+    guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView, editor.isEditable else { return false }
+    editor.deleteToBeginningOfLine(nil)
+    return true
 }
