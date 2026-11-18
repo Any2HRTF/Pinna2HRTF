@@ -154,7 +154,9 @@ private struct RunToolbarButton: View {
         Button {
             store.performWorkflowAction()
         } label: {
-            Label(running ? "Stop" : "Run Next Step", systemImage: running ? "stop.fill" : "play.fill")
+            let aligning = store.activeWorkflowAlignment != nil
+            Label(running ? "Stop" : (aligning ? "Save Alignment" : "Run Next Step"),
+                  systemImage: running ? "stop.fill" : (aligning ? "checkmark" : "play.fill"))
         }
         .help(running ? "Stop" : store.workflowNextAction.title)
         .disabled(!running && !canRun)

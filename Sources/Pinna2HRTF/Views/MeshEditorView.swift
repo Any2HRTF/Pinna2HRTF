@@ -14,14 +14,22 @@ struct MeshEditorView: View {
             subtitle: request.source.lastPathComponent,
             autosaveName: "MeshEditorWindow",
             document: MeshEditorModel(request: request, saved: store.finishMeshEditing),
-            content: { model, actions in MeshEditorView(model: model, actions: actions) },
+            content: { model, actions in
+                MeshEditorView(model: model, actions: actions)
+                    .onChange(of: model.canSave) { value in
+                        if request.isAlignment, store.meshEditorRequest?.id == request.id { store.alignmentCanSave = value }
+                    }
+            },
             closed: { [weak store] in
-                if store?.meshEditorRequest?.id == request.id { store?.meshEditorRequest = nil }
+                if store?.meshEditorRequest?.id == request.id {
+                    store?.meshEditorRequest = nil
+                    if request.isAlignment { store?.alignmentCanSave = false }
+                }
             })
     }
 
     var body: some View {
-        EditorWindowLayout(saveTitle: model.request.isAlignment ? "Save Aligned Scan" : "Save Ear",
+        EditorWindowLayout(saveTitle: model.request.isAlignment ? "Save Alignment" : "Save Ear",
                            canSave: model.canSave, isSaving: model.isSaving, actions: actions) {
             EditorSceneView(model: model, darkMode: colorScheme == .dark)
                 .overlay(alignment: .bottomTrailing) { NavigationHelpButton().padding(12) }
@@ -75,8 +83,8 @@ struct MeshEditorView: View {
     private var alignmentSection: some View {
         Section("Landmarks") {
             ForEach(Array(["Nose tip", "Left ear-canal entrance", "Right ear-canal entrance"].enumerated()), id: \.offset) { index, name in
-                let placed = index < model.landmarks.count
-                let current = model.landmarkSlot == index
+                let placed = model.hasAlignment || index < model.landmarks.count
+                let current = !model.hasAlignment && model.landmarkSlot == index
                 Button {
                     model.landmarkSlot = min(index, model.landmarks.count)
                 } label: {
@@ -91,15 +99,12 @@ struct MeshEditorView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(index > model.landmarks.count)
+                .disabled(index > model.landmarks.count || model.hasAlignment)
             }
             Toggle("Show axes", isOn: $model.showCoordinateSystem)
                 .help("Origin at the midpoint between the ear canals; X forward, Y left, Z up")
-            Button("Preview Alignment") {
-                let points = model.landmarks.map { [Double($0.x), Double($0.y), Double($0.z)] }
-                Task { await model.edit("align", actionName: "Alignment", arguments: ["points": points]) }
-            }
-            .disabled(model.landmarks.count != 3)
+            Button("Restart Picks") { Task { await model.restartLandmarks() } }
+                .disabled(model.landmarks.isEmpty && !model.hasAlignment)
         }
     }
 

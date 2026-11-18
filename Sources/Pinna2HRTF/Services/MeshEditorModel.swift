@@ -305,10 +305,28 @@ final class MeshEditorModel: EditorDocument {
     var pointOfView: SCNNode? { cameraNode }
 
     func pickLandmark(_ point: SCNVector3) {
-        guard !busy, tool == .landmarks else { return }
+        guard !busy, !hasAlignment, !versions.isEmpty, tool == .landmarks else { return }
         if landmarkSlot < landmarks.count { landmarks[landmarkSlot] = point }
         else { landmarks.append(point) }
         landmarkSlot = min(landmarks.count, 2)
+        refreshMarkers()
+        if landmarks.count == 3 {
+            let points = landmarks.map { [Double($0.x), Double($0.y), Double($0.z)] }
+            Task {
+                guard !hasAlignment else { return }
+                await edit("align", actionName: "Alignment", arguments: ["points": points])
+            }
+        }
+    }
+
+    func restartLandmarks() async {
+        guard !busy, !versions.isEmpty else { return }
+        if currentVersion > 0 { await showVersion(0) }
+        guard currentVersion == 0 else { return }
+        landmarks.removeAll()
+        landmarkSlot = 0
+        error = nil
+        undoManager.removeAllActions()
         refreshMarkers()
     }
     private func refreshMarkers() {

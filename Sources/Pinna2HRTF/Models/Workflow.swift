@@ -4,7 +4,7 @@ import AppKit
 enum WorkflowStep: Int, CaseIterable, Identifiable {
     case inputs, prepare, simulation, calculate, results
     var id: Int { rawValue }
-    var title: String { ["Project", "Ear preparation & modelling", "Simulation setup", "Calculation", "SOFA export"][rawValue] }
+    var title: String { ["Project Setup", "Ear preparation & modelling", "Simulation setup", "Calculation", "SOFA export"][rawValue] }
     var stage: Stage? {
         switch self {
         case .inputs: nil
@@ -96,7 +96,15 @@ extension AppStore {
         return nil
     }
 
+    var activeWorkflowAlignment: MeshEditorRequest? {
+        guard let request = meshEditorRequest, request.isAlignment, request.projectID == selectedProjectID else { return nil }
+        return request
+    }
+
     var workflowNextAction: WorkflowAction {
+        if activeWorkflowAlignment != nil {
+            return .init(title: "Save Alignment", step: .prepare, enabled: alignmentCanSave)
+        }
         if let issue = workflowInputIssue { return .init(title: issue, step: .inputs) }
         if isPlacingMicrophone { return .init(title: "Finish Microphone Placement", step: .simulation) }
         if isCheckingProjectFiles { return .init(title: "Checking project files…", step: workflowStep, enabled: false) }
@@ -126,6 +134,10 @@ extension AppStore {
         workflowStep = action.step
         workflowRevealRequest = UUID()
         guard action.enabled else { return }
+        if let request = activeWorkflowAlignment {
+            EditorWindowController.saveEditor(requestID: request.id)
+            return
+        }
         if action.step == .results && action.stage == nil, let project = selectedProject {
             NSWorkspace.shared.open(ArtifactScanner.postprocessingDirectory(for: project))
         } else if let side = action.fit { beginManualPPMFitting(side) }

@@ -16,6 +16,7 @@ final class AppStore: ObservableObject {
     @Published var workflowStep: WorkflowStep = .inputs
     @Published var workflowRevealRequest = UUID()
     @Published var meshEditorRequest: MeshEditorRequest?
+    @Published var alignmentCanSave = false
     @Published var meshEditorError: String?
     @Published var missingOriginalScan: String?
     @Published var ppmFittingRequest: PPMFittingRequest?

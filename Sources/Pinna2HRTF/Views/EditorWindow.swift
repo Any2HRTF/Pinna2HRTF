@@ -107,6 +107,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window?.isDocumentEdited = editorDocument.hasUnsavedChanges
     }
 
+    static func saveEditor(requestID: UUID) {
+        openControllers.first(where: { $0.requestID == requestID })?.saveAndClose()
+    }
+
     private func saveAndClose() {
         guard editorDocument.canSaveDocument else { NSSound.beep(); return }
         Task {

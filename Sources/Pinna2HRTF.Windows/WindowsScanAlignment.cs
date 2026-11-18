@@ -20,6 +20,7 @@ public partial class MainWindow
     string? alignmentSessionSource;
     int alignmentGeneration;
     bool alignmentSaving;
+    bool alignmentPreviewing;
     bool alignmentDiscardPromptOpen;
     readonly HashSet<string> activeAlignmentWorkspaces = [];
     readonly CheckBox coordinateToggle = new() { Content = "Show coordinate system", IsChecked = true };
@@ -68,7 +69,9 @@ public partial class MainWindow
     {
         if (pendingAlignment != null)
             scanAlignmentStatus.Text = "Inspect alignment: X forward, Y left, Z up. Save or cancel.";
-        applyScanAlignmentButton.IsEnabled = scanAlignmentLandmarks.Count == 3;
+        applyScanAlignmentButton.IsEnabled = pendingAlignment != null && !alignmentSaving && !alignmentPreviewing
+            && alignmentWorkspace != null && SamePath(currentMesh?.Path, Path.Combine(alignmentWorkspace, "aligned.ply"));
+        RefreshWorkflow();
     }
 
     void ClearAlignmentPreview()
@@ -77,7 +80,7 @@ public partial class MainWindow
         pendingAlignment = null; alignmentProjectId = null;
         if (alignmentWorkspace != null && !activeAlignmentWorkspaces.Contains(alignmentWorkspace)) { try { Directory.Delete(alignmentWorkspace, true); } catch (IOException) { } }
         alignmentWorkspace = null; alignmentSource = null; alignmentSourceHash = null;
-        applyScanAlignmentButton.Content = "Preview alignment";
+        applyScanAlignmentButton.IsEnabled = false;
         foreach(var axis in alignmentAxes) meshViewport.Items.Remove(axis); alignmentAxes.Clear();
     }
 
@@ -95,10 +98,24 @@ public partial class MainWindow
         }
     }
 
-    async Task PreviewOrSaveAlignmentAsync()
+    void RestartAlignmentPicks()
+    {
+        if (!scanAlignmentMode || alignmentSaving || alignmentSessionSource is not string source) return;
+        var preview = alignmentWorkspace == null ? null : Path.Combine(alignmentWorkspace, "aligned.ply");
+        ResetScanAlignmentPicks();
+        alignmentLoadingRing.IsActive = false;
+        alignmentLoadingRing.Visibility = Visibility.Collapsed;
+        SelectAlignmentArtifact(new Artifact("Full-head scan alignment", source));
+        if (artifacts.FirstOrDefault(item => SamePath(item.Path, preview)) is { } discarded) artifacts.Remove(discarded);
+        UpdateAlignmentAxes();
+        RefreshWorkflow();
+    }
+
+    async Task PreviewOrSaveAlignmentAsync(bool previewOnly = false)
     {
         var project=selectedProject;
         if(!scanAlignmentMode||project==null||alignmentSessionProject!=project.Id||alignmentDiscardPromptOpen||runs.ContainsKey(project.Id)||outputOperations.Contains(project.Id))return;
+        if (alignmentPreviewing || alignmentSaving || (previewOnly ? pendingAlignment != null : pendingAlignment == null)) return;
         using var reservation = projectOperations.TryReserve(project.Id);
         if (reservation == null) return;
         var session = alignmentGeneration;
@@ -109,6 +126,8 @@ public partial class MainWindow
         if (workspace != null) activeAlignmentWorkspaces.Add(workspace);
         applyScanAlignmentButton.IsEnabled=false;
         alignmentSaving = pendingAlignment != null;
+        alignmentPreviewing = previewOnly;
+        RefreshWorkflow();
         try
         {
             if(pendingAlignment is { } aligned)
@@ -145,13 +164,14 @@ public partial class MainWindow
             alignmentSourceHash=result.GetProperty("source_sha256").GetString();
             pendingAlignment=result;
             SelectAlignmentArtifact(new Artifact("Alignment preview — unsaved",preview));
-            applyScanAlignmentButton.Content="Save alignment";scanAlignmentStatus.Text="Inspect alignment: X forward, Y left, Z up. Save or cancel.";
+            scanAlignmentStatus.Text = "Inspect alignment: X forward, Y left, Z up. Save or cancel.";
         }
         catch(Exception error){AppendLog("Scan alignment: " + error.Message, project.Id); if(selectedProject==project && session==alignmentGeneration)scanAlignmentStatus.Text=error.Message;}
         finally
         {
             if (session == alignmentGeneration) { alignmentLoadingRing.IsActive = false; alignmentLoadingRing.Visibility = Visibility.Collapsed; }
             alignmentSaving = false;
+            alignmentPreviewing = false;
             if (workspace != null)
             {
                 activeAlignmentWorkspaces.Remove(workspace);

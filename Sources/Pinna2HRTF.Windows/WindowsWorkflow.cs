@@ -9,7 +9,7 @@ namespace Pinna2HRTF.Windows;
 
 public partial class MainWindow
 {
-    static readonly string[] WorkflowTitles = ["Project", "Ear preparation & modelling", "Simulation setup", "Calculation", "SOFA export"];
+    static readonly string[] WorkflowTitles = ["Project Setup", "Ear preparation & modelling", "Simulation setup", "Calculation", "SOFA export"];
     readonly StackPanel[] workflowPages = Enumerable.Range(0, 5).Select(_ => new StackPanel { Spacing = 10 }).ToArray();
     readonly ListBox workflowNavigation = new() { SelectionMode = SelectionMode.Single };
     readonly TextBlock[] workflowStates = Enumerable.Range(0, 5).Select(_ => new TextBlock { FontSize = 11, TextWrapping = TextWrapping.Wrap }).ToArray();
@@ -357,7 +357,7 @@ public partial class MainWindow
         if (selectedProject is not { } p) return new("Create or select a project", 0, Enabled: false);
         if (runs.ContainsKey(p.Id) || queuedStages.ContainsKey(p.Id)) return new("Stop", workflowStep);
         if (placementSide != null) return new("Finish microphone placement", 2);
-        if (scanAlignmentMode) return new("Finish scan alignment", 1);
+        if (scanAlignmentMode) return new("Save alignment", 1, Enabled: applyScanAlignmentButton.IsEnabled);
         if (WorkflowInputIssue(p) is string input) return new(input, p.Settings.ScanPreparation.Enabled && !WorkflowSides(p).Any() && File.Exists(p.Settings.ScanPreparation.ScanPath) && !string.IsNullOrWhiteSpace(p.SaveLocation) ? 1 : 0);
         if (p.Settings.ScanPreparation.Enabled && !StageIsComplete(Stage.ScanPreparation, p, inspection)) return new("Run " + WorkflowStageTitle(Stage.ScanPreparation), 1, Stage.ScanPreparation);
         if (WorkflowSides(p).Any(side => p.Settings.ScanPreparation.EarEdit(side) != null && !EarReviewIsCurrent(p, side, inspection))) return new("Review outdated ear edit", 1);
@@ -376,6 +376,7 @@ public partial class MainWindow
         var action = NextWorkflowAction(); SelectWorkflowStep(action.Step);
         if (!macInspectorVisible) ToggleMacInspector();
         if (!action.Enabled) return;
+        if (scanAlignmentMode) { _ = ApplyScanAlignmentAsync(); return; }
         if (action.Step == 0 && selectedProject is { } project) {
             if (string.IsNullOrWhiteSpace(project.SaveLocation)) BrowseSaveLocationClicked(this, new RoutedEventArgs());
             else if (project.Settings.ScanPreparation.Enabled && !File.Exists(project.Settings.ScanPreparation.ScanPath)) BrowseScanClicked(this, new RoutedEventArgs());
@@ -455,7 +456,7 @@ public partial class MainWindow
             var next = NextWorkflowAction(inspection);
             var reason = next.Stage != null && p != null ? StageUnavailableReason(next.Stage, p, inspection) : null;
             var stoppable = p != null && (runs.ContainsKey(p.Id) || queuedStages.ContainsKey(p.Id));
-            runAllButton.Content = reason == null ? next.Title : "Review " + WorkflowTitles[next.Step].ToLowerInvariant(); runAllButton.IsEnabled = next.Enabled && (!busy || stoppable);
+            runAllButton.Content = reason == null ? next.Title : "Review " + WorkflowTitles[next.Step].ToLowerInvariant(); runAllButton.IsEnabled = next.Enabled && (!busy || stoppable || scanAlignmentMode);
             var retry = p != null && next.Stage != null && FailedStages(p.Id).Contains(next.Stage);
             if (retry && reason == null) runAllButton.Content = "Retry " + WorkflowStageTitle(next.Stage!);
             workflowCompact.Content = runAllButton.Content;

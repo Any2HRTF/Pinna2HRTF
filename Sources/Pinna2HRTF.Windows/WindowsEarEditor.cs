@@ -176,7 +176,8 @@ public partial class MainWindow
         selectionPanel.Children.Add(throughToggle);
         var selectionStatus = new TextBlock { Text = "0 faces selected", FontFamily = new FontFamily("Consolas"), FontSize = 12 };
         selectionPanel.Children.Add(selectionStatus);
-        var deleteButton = new Button { Content = "Remove selected faces", IsEnabled = false, HorizontalAlignment = HorizontalAlignment.Stretch };
+        const double editActionHeight = 32;
+        var deleteButton = new Button { Content = "Remove selected faces", IsEnabled = false, HorizontalAlignment = HorizontalAlignment.Stretch, Height = editActionHeight };
         var clearButton = new Button { Content = "Clear", IsEnabled = false, HorizontalAlignment = HorizontalAlignment.Stretch };
         var invertButton = new Button { Content = "Invert", HorizontalAlignment = HorizontalAlignment.Stretch };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(clearButton, "Clear selection");
@@ -227,7 +228,7 @@ public partial class MainWindow
         var undoButton = NavigationHelp.Command("Undo"); undoButton.IsEnabled = false;
         var redoButton = NavigationHelp.Command("Redo"); redoButton.IsEnabled = false;
         historyRow.Children.Add(undoButton); historyRow.Children.Add(redoButton);
-        var largestButton = new Button { Content = "Keep Largest Component", HorizontalAlignment = HorizontalAlignment.Stretch, MinHeight = deleteButton.MinHeight, Padding = deleteButton.Padding };
+        var largestButton = new Button { Content = "Keep Largest Component", HorizontalAlignment = HorizontalAlignment.Stretch, Height = editActionHeight };
         panel.Children.Add(WorkflowGroupHeading("Mesh cleanup"));
         panel.Children.Add(largestButton);
         var message = new TextBlock { Text = "Loading mesh…", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = mutedTextBrush };

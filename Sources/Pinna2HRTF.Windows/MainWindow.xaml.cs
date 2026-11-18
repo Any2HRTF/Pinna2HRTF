@@ -209,7 +209,7 @@ public partial class MainWindow : Window
     readonly CheckBox prepareLeftEarBox = new() { IsChecked = true };
     readonly CheckBox prepareRightEarBox = new() { IsChecked = true };
     readonly Button alignScanButton = new() { Content = "Align head scan…" };
-    readonly Button applyScanAlignmentButton = new() { Content = "Apply Alignment", IsEnabled = false };
+    readonly Button applyScanAlignmentButton = new() { Content = "Save alignment", IsEnabled = false };
     readonly CheckBox adaptiveFmmLengthBox = new();
     readonly CheckBox normalizeHrtfsBox = new();
     readonly CheckBox resampleHrirsBox = new();
@@ -771,10 +771,7 @@ public partial class MainWindow : Window
         var cancelAlignment = new Button { Content = "Cancel" };
         cancelAlignment.Click += async (_, _) => await ConfirmCancelAlignmentAsync();
         var restartAlignment = new Button { Content = "Restart picks" };
-        restartAlignment.Click += async (_, _) =>
-        {
-            if (await ConfirmCancelAlignmentAsync()) await BeginScanAlignmentAsync();
-        };
+        restartAlignment.Click += (_, _) => RestartAlignmentPicks();
         var alignmentMessage = new Grid { ColumnSpacing = 8 };
         alignmentMessage.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         alignmentMessage.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1716,6 +1713,7 @@ public partial class MainWindow : Window
         scanAlignmentBorder.Visibility = Visibility.Visible;
         SelectAlignmentArtifact(new Artifact("Full-head scan alignment", source));
         if (currentMesh != null && SamePath(currentMesh.Path, source)) UpdateAlignmentAxes();
+        RefreshWorkflow();
     }
 
     void EndScanAlignment()
@@ -2127,7 +2125,7 @@ public partial class MainWindow : Window
         refreshingArtifacts = true;
         try { artifactPicker.SelectedItem = listed; }
         finally { refreshingArtifacts = false; }
-        if (currentMesh != null && SamePath(currentMesh.Path, listed.Path)) return;
+        if (currentMesh != null && SamePath(currentMesh.Path, listed.Path) && SamePath(selectedArtifactPath, listed.Path)) return;
         OpenArtifact(listed);
     }
 
@@ -2228,7 +2226,15 @@ public partial class MainWindow : Window
             viewerPlaceholder.Visibility = Visibility.Visible;
             AppendLog("Cannot open mesh: " + error, selectedProject?.Id);
         }
-        finally { if (generation == meshLoadGeneration) { alignmentLoadingRing.IsActive = false; alignmentLoadingRing.Visibility = Visibility.Collapsed; } }
+        finally
+        {
+            if (generation == meshLoadGeneration)
+            {
+                alignmentLoadingRing.IsActive = false;
+                alignmentLoadingRing.Visibility = Visibility.Collapsed;
+                if (scanAlignmentMode) UpdateAlignmentSaveEnabled();
+            }
+        }
     }
 
     string SafeReadText(string path)
@@ -2340,7 +2346,7 @@ public partial class MainWindow : Window
             else
                 AppendLog("Could not hit the active mesh at the selected position. Try clicking directly on the mesh surface.", selectedProject?.Id);
         }
-        else if (primaryClick && scanAlignmentMode && !alignmentLoadingRing.IsActive && mode == MeshPointerMode.Rotate && wasClick && currentMesh != null && meshVisual != null)
+        else if (primaryClick && scanAlignmentMode && !alignmentPreviewing && !alignmentLoadingRing.IsActive && mode == MeshPointerMode.Rotate && wasClick && currentMesh != null && meshVisual != null)
         {
             var hit = meshViewport.FindHits(point.Position).FirstOrDefault(x => ReferenceEquals(x.ModelHit, meshVisual));
             if (hit != null && scanAlignmentLandmarks.Count < 3)
@@ -2361,7 +2367,7 @@ public partial class MainWindow : Window
                 scanAlignmentStatus.Text = scanAlignmentLandmarks.Count == 3
                     ? "Three landmarks picked. Apply the alignment or cancel."
                     : $"Picked {scanAlignmentLandmarks.Count}/3. Next: {names[scanAlignmentLandmarks.Count]}";
-                UpdateAlignmentSaveEnabled();
+                if (scanAlignmentLandmarks.Count == 3) _ = PreviewOrSaveAlignmentAsync(previewOnly: true);
             }
             else if (hit == null)
                 AppendLog("Click directly on the scan surface to place each landmark.", selectedProject?.Id);
