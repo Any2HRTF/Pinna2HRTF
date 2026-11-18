@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .FileIdentity import sha256
-from .RunConfig import MANIFEST_RELATIVE, _DOTNET_EPOCH_TICKS, _output_manifest_lock, _read_output_manifest
+from .RunConfig import MANIFEST_RELATIVE, SLURM_RECORD, _DOTNET_EPOCH_TICKS, _output_manifest_lock, _read_output_manifest, release_finished_slurm_jobs, slurm_busy_message
 
 
 EDITOR_FOLDERS = {"meshedits", "manual ppm"}
@@ -152,7 +152,7 @@ class Outputs:
 
     @contextmanager
     def locked(self):
-        for relative in (".pinna2hrtf", MANIFEST_RELATIVE.as_posix(), ".pinna2hrtf/outputs.lock"):
+        for relative in (".pinna2hrtf", MANIFEST_RELATIVE.as_posix(), ".pinna2hrtf/outputs.lock", SLURM_RECORD.as_posix(), ".pinna2hrtf/slurm"):
             if self.safe(relative) is None:
                 raise ValueError("Linked project metadata")
         with _output_manifest_lock(self.root) as held:
@@ -185,12 +185,14 @@ class Outputs:
         return files, directories
 
     def reconcile(self):
+        self.slurm_jobs = release_finished_slurm_jobs(self.root)
         files, directories = self.scan()
         owned = self.doc["Files"]
         known = self.doc["Directories"]
         pending = self.doc.get("Pending")
         if pending:
             stage = stage_name(pending["Stage"])
+            awaiting_slurm = stage == "Numcalc" and bool(self.slurm_jobs)
             for relative, now in files.items():
                 before = pending["Before"].get(relative)
                 if before and (all(before[k] == now[k] for k in now) or any(owned.get(relative, {}).get(k) != before[k] for k in now)):
@@ -198,8 +200,16 @@ class Outputs:
                 producer = classify(self.normalized(relative))
                 if stage in ("Scan-Preparation", "Inference", "Postprocessing") and producer != stage:
                     continue
-                owned[relative] = fingerprint(self.root / relative, producer)
-            self.doc["Pending"] = None
+                current = owned.get(relative)
+                if current and current["Stage"] == producer and all(current[k] == now[k] for k in now):
+                    continue
+                try:
+                    owned[relative] = fingerprint(self.root / relative, producer)
+                except OSError:
+                    if not awaiting_slurm:
+                        raise
+            if not awaiting_slurm:
+                self.doc["Pending"] = None
         for mapping in (owned, known):
             for relative in list(mapping):
                 path = self.safe(relative)
@@ -218,6 +228,8 @@ class Outputs:
 
     def begin(self, stage):
         files, directories = self.reconcile()
+        if self.slurm_jobs and stage != "Numcalc":
+            raise RuntimeError(slurm_busy_message(self.slurm_jobs))
         for path in self.inputs:
             if path.is_relative_to(self.root):
                 name = self.normalized(path.relative_to(self.root).as_posix())
@@ -225,7 +237,8 @@ class Outputs:
                     continue
                 if classify(name) == stage or classify(name, DIRECTORIES) == stage or (stage == "Preprocessing" and name.startswith("Projects/")):
                     raise ValueError(f"Stage would overwrite an input: {path}")
-        self.doc["Pending"] = {"Token": uuid.uuid4().hex, "Stage": stage, "Before": {k: dict(v, Stage=stage, Sha256="") for k, v in files.items()}, "Directories": sorted(directories)}
+        if not self.doc.get("Pending"):
+            self.doc["Pending"] = {"Token": uuid.uuid4().hex, "Stage": stage, "Before": {k: dict(v, Stage=stage, Sha256="") for k, v in files.items()}, "Directories": sorted(directories)}
         write_json(self.root / MANIFEST_RELATIVE, self.doc)
 
     def reset(self, boundary):
@@ -342,10 +355,14 @@ def execute(command):
             store.reconcile()
         write_json(store.root / MANIFEST_RELATIVE, store.doc)
         if action == "reset":
-            result = store.reset(stage_name(command["stage"]) if command.get("stage") else None)
+            boundary = stage_name(command["stage"]) if command.get("stage") else None
+            if store.slurm_jobs and boundary != "Postprocessing":
+                raise RuntimeError(slurm_busy_message(store.slurm_jobs))
+            result = store.reset(boundary)
             write_json(store.root / MANIFEST_RELATIVE, store.doc)
             return result
-        return {"stages": sorted({entry["Stage"] for entry in store.doc["Files"].values()})}
+        return {"stages": sorted({entry["Stage"] for entry in store.doc["Files"].values()}),
+                "slurmJobs": [{"side": job["Side"], "jobId": job["JobId"], "state": job["State"], "submitted": job.get("SubmittedUtc")} for job in store.slurm_jobs]}
 
 
 def serve():

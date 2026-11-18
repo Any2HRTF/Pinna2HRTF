@@ -1,5 +1,6 @@
 import argparse
-from ..FileIdentity import sha256
+import glob
+from ..FileIdentity import cached_sha256, sha256
 import hashlib
 import json
 import os
@@ -88,6 +89,33 @@ def _write_export_record(project):
     temporary = project / (EXPORT_RECORD + ".tmp")
     temporary.write_text(json.dumps(record, indent=1), encoding="utf-8")
     os.replace(temporary, project / EXPORT_RECORD)
+
+
+_PREPROCESSING_OUTPUT = re.compile(r"^(parameters\.json|NumCalc/source_\d+/NC\.inp|ObjectMeshes/.+|EvaluationGrids/.+)$")
+_REQUIRED_PREPROCESSING_OUTPUTS = (
+    ("parameters.json", re.compile(r"^parameters\.json$")),
+    ("solver input", re.compile(r"^NumCalc/source_\d+/NC\.inp$")),
+    ("object mesh", re.compile(r"^ObjectMeshes/")),
+    ("evaluation grid", re.compile(r"^EvaluationGrids/")),
+)
+
+
+def preprocessing_outputs(project):
+    project = Path(project)
+    files, _ = _project_files(project)
+    names = sorted(name for name in files if _PREPROCESSING_OUTPUT.match(name))
+    missing = [label for label, pattern in _REQUIRED_PREPROCESSING_OUTPUTS if not any(pattern.match(name) for name in names)]
+    if missing:
+        raise FileNotFoundError(f"The Mesh2HRTF project {project} is missing its {', '.join(missing)}. Run preprocessing again.")
+    return {name: cached_sha256(project / name) for name in names}
+
+
+def recorded_preprocessing_outputs(project):
+    try:
+        files = json.loads((Path(project) / EXPORT_RECORD).read_text(encoding="utf-8"))["files"]
+        return {name: digest for name, digest in files.items() if _PREPROCESSING_OUTPUT.match(name)}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
 
 
 def snapshot_generated_outputs(project):
@@ -216,7 +244,7 @@ def plan_export_backups(destinations, protected_paths, logger=print):
     """
     replace = []
     for destination in destinations.values():
-        for old in sorted(destination.parent.glob(f".{destination.name}.pinna2hrtf-backup-*")):
+        for old in sorted(destination.parent.glob(f".{glob.escape(destination.name)}.pinna2hrtf-backup-*")):
             logger(f"Note: an export backup from an earlier version is kept at {old}. Remove it yourself when it is no longer needed.")
         if not destination.exists():
             continue

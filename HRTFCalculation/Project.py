@@ -17,9 +17,9 @@ import uuid
 
 import yaml
 
-from .Config import PipelineConfig, load_config
-from .Compatibility import read_settings
-from .MicrophonePlacement import SIDES, ignore_stale_placements, placement_key, record_placements, statuses
+from .Config import PipelineConfig, config_from_text, load_config
+from .Compatibility import decode_settings, read_settings
+from .MicrophonePlacement import ignore_stale_placements, placements_path, read_placements, statuses, updated_placements
 
 
 class SettingsRevisionConflict(Exception):
@@ -102,15 +102,18 @@ def _duplicate_locked(command: dict, source: Path | None) -> dict:
                 raise ValueError("Linked project files cannot be duplicated automatically.")
     staging = parent / (".pinna-copy-" + uuid.uuid4().hex)
     try:
-        ignored = {".pinna2hrtf/outputs.lock"}
+        uncopied = {"outputs.lock", "settings.lock", "slurm-jobs.json", "slurm"}
+        def copied(relative):
+            parts = relative.split("/")
+            return not (len(parts) > 1 and parts[0] == ".pinna2hrtf" and parts[1] in uncopied)
         def snapshot():
             return {path.relative_to(source).as_posix(): (path.stat().st_size, path.stat().st_mtime_ns)
-                    for path in source.rglob("*") if path.is_file() and path.relative_to(source).as_posix() not in ignored}
+                    for path in source.rglob("*") if path.is_file() and copied(path.relative_to(source).as_posix())}
         before = snapshot() if source else {}
         if not source:
             staging.mkdir()
         else:
-            shutil.copytree(source, staging, ignore=lambda folder, names: {"outputs.lock"} if Path(folder) == source / ".pinna2hrtf" else set())
+            shutil.copytree(source, staging, ignore=lambda folder, names: uncopied & set(names) if Path(folder) == source / ".pinna2hrtf" else set())
         if source and snapshot() != before:
             raise RuntimeError("The source changed during duplication; no copy was registered.")
         for relative in before:
@@ -163,11 +166,11 @@ def _duplicate_locked(command: dict, source: Path | None) -> dict:
                              Sha256=sha256(copied))
             data["Pending"] = None
             manifest.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        revision = settings_revision(staging / "Project Settings.yaml")
         if "mac_record" in command:
             record = relocate(command["mac_record"], roots, destination)
-            record.update(id=str(uuid.uuid4()), name=name, saveLocation=str(destination))
+            record.update(id=str(uuid.uuid4()), name=name, saveLocation=str(destination), settingsRevision=revision)
             record.pop("stageOutcomes", None)
-            record.pop("settingsRevision", None)
             if record.get("preservedConfigJSON"):
                 record["preservedConfigJSON"] = json.dumps(relocate(json.loads(record["preservedConfigJSON"]), roots, destination))
             publish_copy(staging, destination)
@@ -176,8 +179,7 @@ def _duplicate_locked(command: dict, source: Path | None) -> dict:
             publish_copy(staging, destination)
             return {"path": str(destination)}
         project = relocate(command["project"], roots, destination)
-        project.update(Id=str(uuid.uuid4()), Name=name, SaveLocation=str(destination))
-        project.pop("SettingsRevision", None)
+        project.update(Id=str(uuid.uuid4()), Name=name, SaveLocation=str(destination), SettingsRevision=revision)
         project["Settings"]["Preprocessing"]["SourcePositionInputLeft"] = None
         project["Settings"]["Preprocessing"]["SourcePositionInputRight"] = None
         preserved = project.get("PreservedConfigJSON")
@@ -238,10 +240,20 @@ def settings_revision(path: Path | None) -> str | None:
 
 
 @contextlib.contextmanager
-def settings_lock(path: Path):
+def settings_lock(path: Path, create: bool = True):
     metadata = path.parent / ".pinna2hrtf"
-    metadata.mkdir(parents=True, exist_ok=True)
-    with (metadata / "settings.lock").open("a+b") as handle:
+    if create:
+        metadata.mkdir(parents=True, exist_ok=True)
+    try:
+        handle = (metadata / "settings.lock").open("a+b")
+    except OSError:
+        if create:
+            raise
+        handle = None
+    if handle is None:
+        yield
+        return
+    with handle:
         if os.name == "nt":
             import msvcrt
             handle.seek(0)
@@ -260,12 +272,85 @@ def settings_lock(path: Path):
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def settings_mapping(raw: bytes) -> dict:
+    _, text, _ = decode_settings(raw)
+    mapping = yaml.safe_load(text)
+    return mapping if isinstance(mapping, dict) else {}
+
+
 def saved_settings(path: Path | None) -> dict | None:
     if path is None or not path.is_file():
         return None
-    _, text, _ = read_settings(path)
-    mapping = yaml.safe_load(text)
-    return mapping if isinstance(mapping, dict) else {}
+    return settings_mapping(path.read_bytes())
+
+
+def loaded_settings(path: Path) -> tuple[bytes, PipelineConfig, list[str], dict]:
+    with settings_lock(path, create=False):
+        raw = path.read_bytes()
+        with warnings.catch_warnings(record=True) as notices:
+            warnings.simplefilter("always")
+            config = config_from_text(decode_settings(raw)[1], path.parent)
+        placements = read_placements(config.paths.output_dir)
+    return raw, config, [str(notice.message) for notice in notices], placements
+
+
+def settings_document(command: dict, saved: dict | None) -> tuple[PipelineConfig, dict, str, bool]:
+    edited = command["config"]
+    merging = "preserved" in command or "revision" in command or command.get("merge") is True
+    current = merge_settings(edited, command.get("preserved"), saved) if merging else edited
+    config = PipelineConfig.model_validate(current)
+    mapping = config.model_dump(mode="json")
+    serialized = yaml.safe_dump(current if command.get("preserve_fields") else mapping, sort_keys=False)
+    return config, mapping, serialized, merging
+
+
+def save_settings(command: dict, path: Path) -> dict:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with settings_lock(path):
+        try:
+            previous = path.read_bytes()
+        except FileNotFoundError:
+            previous = None
+        if "revision" in command:
+            expected = command["revision"]
+            if previous is None and expected is not None:
+                raise SettingsRevisionConflict(f"{path.name} was removed after it was loaded. Reload the project settings, then try again.")
+            if previous is not None and expected is None:
+                raise SettingsRevisionConflict(f"{path.name} was created by another save. Reload the project settings, then try again.")
+            if previous is not None and hashlib.sha256(previous).hexdigest() != expected:
+                raise SettingsRevisionConflict(f"{path.name} changed after it was loaded. Reload the project settings, then try again.")
+        config, _, serialized, merging = settings_document(command, settings_mapping(previous) if previous is not None else None)
+        placements_file, placements = None, None
+        if merging:
+            resolved = config.resolved(path.resolve().parent)
+            placements_file = placements_path(resolved.paths.output_dir)
+            placements = updated_placements(resolved, command["config"].get("preprocessing") or {}, read_placements(resolved.paths.output_dir))
+        publish_settings(path, serialized, previous is not None, placements_file, placements)
+        return {"path": str(path), "revision": settings_revision(path)}
+
+
+def publish_settings(path: Path, serialized: str, existed: bool, placements_file: Path | None, placements: dict | None) -> None:
+    from .Outputs import replace_text, write_json
+    if placements is None:
+        replace_text(path, serialized)
+        return
+    backup = path.with_name(f".{path.name}.{uuid.uuid4().hex}.bak") if existed else None
+    if backup is not None:
+        shutil.copy2(path, backup)
+    try:
+        replace_text(path, serialized)
+        try:
+            placements_file.parent.mkdir(parents=True, exist_ok=True)
+            write_json(placements_file, placements)
+        except BaseException:
+            if backup is not None:
+                os.replace(backup, path)
+            else:
+                path.unlink(missing_ok=True)
+            raise
+    finally:
+        if backup is not None:
+            backup.unlink(missing_ok=True)
 
 
 def merge_settings(edited: dict, preserved: dict | None, saved: dict | None) -> dict:
@@ -357,28 +442,32 @@ def execute(command: dict) -> dict:
         validate_prepared(load_config(command["path"]))
         return {"valid": True}
     if action == "read":
-        raw, text, _ = read_settings(command["path"])
-        mapping = yaml.safe_load(text)
-        if not isinstance(mapping, dict):
-            raise ValueError("Project settings must contain a mapping")
-        if command.get("with_revision"):
+        path = Path(command["path"])
+        if not command.get("with_revision"):
+            _, text, _ = read_settings(path)
+            mapping = yaml.safe_load(text)
+            if not isinstance(mapping, dict):
+                raise ValueError("Project settings must contain a mapping")
+            return mapping
+        with settings_lock(path, create=False):
+            raw = path.read_bytes()
+            mapping = yaml.safe_load(decode_settings(raw)[1])
+            if not isinstance(mapping, dict):
+                raise ValueError("Project settings must contain a mapping")
             try:
-                placements = statuses(PipelineConfig.model_validate(mapping).resolved(Path(command["path"]).resolve().parent))
+                config = PipelineConfig.model_validate(mapping).resolved(path.resolve().parent)
+                placements = read_placements(config.paths.output_dir)
             except ValueError:
-                placements = {}
-            return {"config": mapping, "revision": hashlib.sha256(raw).hexdigest(), "microphone_placements": placements}
-        return mapping
+                config = None
+        return {"config": mapping, "revision": hashlib.sha256(raw).hexdigest(),
+                "microphone_placements": statuses(config, placements) if config is not None else {}}
     if action == "load":
-        with warnings.catch_warnings(record=True) as notices:
-            warnings.simplefilter("always")
-            config = load_config(command["path"])
-        revision = settings_revision(Path(command["path"]))
-        notices = [str(notice.message) for notice in notices]
-        ignore_stale_placements(config, notices.append)
+        path = Path(command["path"]).expanduser().resolve()
+        raw, config, notices, placements = loaded_settings(path)
+        ignore_stale_placements(config, notices.append, placements)
         mapping = config.model_dump(mode="json")
         if command.get("folder"):
-            _, text, _ = read_settings(command["path"])
-            original = yaml.safe_load(text) or {}
+            original = settings_mapping(raw)
             old_root = original.get("paths", {}).get("output_dir", "")
             new_root = str(Path(command["folder"]).resolve())
             def portable(value):
@@ -396,29 +485,13 @@ def execute(command: dict) -> dict:
                 return value
             mapping = portable(mapping)
             mapping["paths"]["output_dir"] = new_root
-        return {"config": mapping, "warnings": notices, "revision": revision}
-    if action in {"validate", "save"}:
+        return {"config": mapping, "warnings": notices, "revision": hashlib.sha256(raw).hexdigest()}
+    if action == "save":
+        return save_settings(command, Path(command["path"]))
+    if action == "validate":
         path = Path(command["path"]) if command.get("path") else None
-        if action == "save":
-            path.parent.mkdir(parents=True, exist_ok=True)
-        with settings_lock(path) if action == "save" else contextlib.nullcontext():
-            expected = command.get("revision")
-            if action == "save" and expected is not None and settings_revision(path) != expected:
-                raise SettingsRevisionConflict(f"{path.name} changed after it was loaded. Reload the project settings, then try again.")
-            edited = command["config"]
-            merging = "preserved" in command or "revision" in command
-            current = merge_settings(edited, command.get("preserved"), saved_settings(path)) if merging else edited
-            config = PipelineConfig.model_validate(current)
-            mapping = config.model_dump(mode="json")
-            serialized = yaml.safe_dump(current if command.get("preserve_fields") else mapping, sort_keys=False)
-            if action == "validate":
-                return {"config": mapping, "yaml": serialized}
-            if merging:
-                placed = edited.get("preprocessing") or {}
-                record_placements(config.resolved(path.resolve().parent), {side for side in SIDES if placed.get(placement_key(side)) is not None})
-            from .Outputs import replace_text
-            replace_text(path, serialized)
-            return {"path": str(path), "revision": settings_revision(path)}
+        _, mapping, serialized, _ = settings_document(command, saved_settings(path))
+        return {"config": mapping, "yaml": serialized}
     if action == "duplicate":
         return duplicate(command)
     if action == "validate_outputs":

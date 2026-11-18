@@ -14,7 +14,7 @@ def placement_key(side: str) -> str:
 
 def read_placements(output_dir: Path) -> dict:
     try:
-        document = json.loads((Path(output_dir) / PLACEMENTS_RELATIVE).read_text(encoding="utf-8"))
+        document = json.loads(placements_path(output_dir).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     if not isinstance(document, dict) or document.get("format") != PLACEMENTS_FORMAT:
@@ -31,9 +31,9 @@ def matching_record(placements: dict, side: str, position) -> dict | None:
 
 def status(placements: dict, side: str, position, mesh: Path | None) -> str:
     record = matching_record(placements, side, position)
-    if record is None:
+    if record is None or not record.get("mesh_sha256"):
         return "unrecorded"
-    if record.get("mesh_sha256") and mesh is not None and Path(mesh).is_file() and cached_sha256(mesh) == record["mesh_sha256"]:
+    if mesh is not None and Path(mesh).is_file() and cached_sha256(mesh) == record["mesh_sha256"]:
         return "current"
     return "stale"
 
@@ -50,39 +50,37 @@ def preprocessing_meshes(config) -> dict:
         return {}
 
 
-def statuses(config) -> dict:
-    placements = read_placements(config.paths.output_dir)
+def statuses(config, placements: dict) -> dict:
     positions = {side: getattr(config.preprocessing, placement_key(side)) for side in SIDES}
     meshes = preprocessing_meshes(config) if placements else {}
     return {side: status(placements, side, position, meshes.get(side)) for side, position in positions.items() if position is not None}
 
 
-def record_placements(config, confirmed_sides) -> None:
-    previous = read_placements(config.paths.output_dir)
-    meshes = preprocessing_meshes(config) if confirmed_sides else {}
+def placements_path(output_dir: Path) -> Path:
+    return Path(output_dir) / PLACEMENTS_RELATIVE
+
+
+def updated_placements(config, edited_preprocessing: dict, previous: dict) -> dict | None:
+    confirmed = {side for side in SIDES if edited_preprocessing.get(placement_key(side)) is not None}
+    meshes = preprocessing_meshes(config) if confirmed else {}
     document = {"format": PLACEMENTS_FORMAT}
     for side in SIDES:
-        position = getattr(config.preprocessing, placement_key(side))
-        if position is None:
-            continue
-        position_mm = [float(value) for value in position]
-        record = matching_record(previous, side, position)
-        if side not in confirmed_sides:
-            document[side] = {"position_mm": position_mm, "mesh_sha256": None}
-        elif record is not None and record.get("mesh_sha256"):
-            document[side] = record
-        elif meshes.get(side) is not None and Path(meshes[side]).is_file():
-            document[side] = {"position_mm": position_mm, "mesh_sha256": cached_sha256(meshes[side])}
-    path = Path(config.paths.output_dir) / PLACEMENTS_RELATIVE
-    if document == {"format": PLACEMENTS_FORMAT, **previous} or (len(document) == 1 and not path.exists()):
-        return
-    from .Outputs import write_json
-    path.parent.mkdir(parents=True, exist_ok=True)
-    write_json(path, document)
+        if placement_key(side) not in edited_preprocessing:
+            if side in previous:
+                document[side] = previous[side]
+        elif side in confirmed and meshes.get(side) is not None and Path(meshes[side]).is_file():
+            position = getattr(config.preprocessing, placement_key(side))
+            document[side] = {"position_mm": [float(value) for value in position], "mesh_sha256": cached_sha256(meshes[side])}
+    if document == {"format": PLACEMENTS_FORMAT, **previous}:
+        return None
+    if len(document) == 1 and not placements_path(config.paths.output_dir).exists():
+        return None
+    return document
 
 
-def ignore_stale_placements(config, logger) -> None:
-    placements = read_placements(config.paths.output_dir)
+def ignore_stale_placements(config, logger, placements: dict | None = None) -> None:
+    if placements is None:
+        placements = read_placements(config.paths.output_dir)
     if not placements:
         return
     meshes = preprocessing_meshes(config)

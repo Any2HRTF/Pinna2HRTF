@@ -314,8 +314,12 @@ def resolve_path(path: Path, base: Path) -> Path:
 def load_config(path: str | Path) -> PipelineConfig:
     config_path = Path(path).expanduser().resolve()
     _, text, _ = read_settings(config_path)
+    return config_from_text(text, config_path.parent)
+
+
+def config_from_text(text: str, config_dir: Path) -> PipelineConfig:
     data = yaml.safe_load(text) or {}
-    config = PipelineConfig.model_validate(import_legacy_distance(data)).resolved(config_path.parent)
+    config = PipelineConfig.model_validate(import_legacy_distance(data)).resolved(config_dir)
     preprocessing = data.get("preprocessing")
     if isinstance(preprocessing, dict) and "head_radius" in preprocessing and "ear_distance" not in preprocessing:
         warnings.warn(LEGACY_DISTANCE_IMPORTED, UserWarning)

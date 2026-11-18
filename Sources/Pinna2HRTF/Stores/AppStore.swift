@@ -457,7 +457,13 @@ final class AppStore: ObservableObject {
         Task { @MainActor in
             do {
                 let reloaded = try await Task.detached(priority: .userInitiated) {
-                    let settings = try ProjectConfigDocument.read(folder.appendingPathComponent("Project Settings.yaml"))
+                    let settingsURL = folder.appendingPathComponent("Project Settings.yaml")
+                    guard FileManager.default.fileExists(atPath: settingsURL.path) else {
+                        var reloaded = project
+                        reloaded.settingsRevision = nil
+                        return reloaded
+                    }
+                    let settings = try ProjectConfigDocument.read(settingsURL)
                     var reloaded = try ProjectConfigDocument.restore(settings, into: project, folder: folder, packageRoot: root)
                     reloaded.settingsRevision = settings.revision
                     return reloaded

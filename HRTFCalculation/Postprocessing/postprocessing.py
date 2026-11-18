@@ -1,4 +1,3 @@
-import glob
 from pathlib import Path
 
 import mesh2hrtf as m2h
@@ -28,8 +27,8 @@ def resample_hrir_files(output_dir, sampling_rate=48000):
 
 def normalize_sofa_files(output_dir, level_offset_db):
     gain = 10 ** (level_offset_db / 20)
-    for sofa_path in glob.glob(f"{output_dir}/*.sofa"):
-        sofa = sf.read_sofa(sofa_path)
+    for sofa_path in sorted(Path(output_dir).glob("*.sofa")):
+        sofa = sf.read_sofa(str(sofa_path))
         if hasattr(sofa, "Data_IR"):
             sofa.Data_IR = np.asarray(sofa.Data_IR) * gain
         if hasattr(sofa, "Data_Real"):
@@ -37,7 +36,7 @@ def normalize_sofa_files(output_dir, level_offset_db):
         if hasattr(sofa, "Data_Imag"):
             sofa.Data_Imag = np.asarray(sofa.Data_Imag) * gain
         sofa.GLOBAL_Comment = f"{getattr(sofa, 'GLOBAL_Comment', '')} Broadband level offset of {level_offset_db:g} dB applied during Pinna2HRTF postprocessing.".strip()
-        sf.write_sofa(sofa_path, sofa)
+        sf.write_sofa(str(sofa_path), sofa)
 
 
 def cli():

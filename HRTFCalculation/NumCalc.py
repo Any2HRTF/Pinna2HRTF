@@ -115,7 +115,8 @@ def run_local_numcalc(project_path: Path | list[Path], numcalc_path: Path, max_r
             projects = [project_path] if (project_path / "parameters.json").exists() else [path for path in project_path.iterdir() if (path / "parameters.json").exists()]
         if not projects:
             raise FileNotFoundError(f"No Mesh2HRTF projects found at {project_path}")
-        from .Preprocessing import _project_files, _sha256, _is_solver_output, EXPORT_RECORD
+        from .FileIdentity import sha256
+        from .Preprocessing import _project_files, _is_solver_output, EXPORT_RECORD
         import json
         ownership = {}
         for project in projects:
@@ -227,7 +228,7 @@ def run_local_numcalc(project_path: Path | list[Path], numcalc_path: Path, max_r
             files, _ = _project_files(project)
             for name in files:
                 if name not in existing and _is_solver_output(name, grids):
-                    recorded[name] = _sha256(project / name)
+                    recorded[name] = sha256(project / name)
             temporary = project / (EXPORT_RECORD + ".tmp")
             temporary.write_text(json.dumps(record, indent=1), encoding="utf-8")
             os.replace(temporary, project / EXPORT_RECORD)

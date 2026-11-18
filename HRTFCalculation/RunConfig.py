@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from typing import Callable, Iterable
@@ -120,6 +120,10 @@ def run_from_config(config: PipelineConfig, stages: Iterable[str] | None = None,
     if "numcalc" in selected or (run_all and config.numcalc.enabled):
         with stage_outputs(config, "numcalc", dry_run):
             run_numcalc(config, dry_run, logger)
+        if config.numcalc.mode == "slurm" and not dry_run:
+            if "postprocessing" in selected or (run_all and config.postprocessing.enabled):
+                logger("Postprocessing waits for the Slurm jobs. Run it after they finish.")
+            return
     if "postprocessing" in selected or (run_all and config.postprocessing.enabled):
         with stage_outputs(config, "postprocessing", dry_run):
             run_postprocessing(config, dry_run, logger)
@@ -251,6 +255,9 @@ def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
         return
     from .Preprocessing import run_preprocessing_pipeline
     left_path, right_path = preprocessing_input_paths(config, logger)
+    if config.inference.use_predictions_for_preprocessing and not config.manual_ppm.enabled:
+        from .StageReceipt import require_current_inference
+        require_current_inference(config, [side for side, path in (("left", left_path), ("right", right_path)) if path is not None])
     signature = preprocessing_input_signature(config)
     run_preprocessing_pipeline(
         left_path=left_path,
@@ -264,8 +271,8 @@ def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
     )
     if signature != preprocessing_input_signature(config):
         raise ValueError("Preprocessing inputs changed while the mesh was being built. Rerun preprocessing.")
-    from .Outputs import write_json
-    write_json(config.paths.output_dir / PREPROCESSING_INPUT_RECEIPT, signature)
+    from .StageReceipt import record_preprocessing
+    record_preprocessing(config, signature)
     if config.scan_preparation.enabled:
         from .ScanPreparation import record_stage
         record_stage(config, "preprocessing", [path / "NumCalc/source_1/NC.inp" for path in project_dirs(config)])
@@ -338,6 +345,8 @@ def run_numcalc(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
 def run_numcalc_local(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
     emit_live_event("Checking completed frequency steps")
     logger(f"Running local NumCalc with {config.paths.numcalc_executable}")
+    if not dry_run:
+        require_no_slurm_jobs(config.paths.output_dir)
     projects_root = config.paths.output_dir / "Projects"
     projects = project_dirs(config)
     for project_dir in projects:
@@ -361,31 +370,191 @@ def run_numcalc_local(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
     )
 
 
+SLURM_RECORD = Path(".pinna2hrtf") / "slurm-jobs.json"
+SLURM_WORKERS = Path(".pinna2hrtf") / "slurm"
+SLURM_ACTIVE_STATES = {"PENDING", "RUNNING", "REQUEUED", "REQUEUE_FED", "REQUEUE_HOLD", "RESIZING", "SUSPENDED",
+                       "CONFIGURING", "COMPLETING", "SIGNALING", "STAGE_OUT", "STOPPED"}
+SLURM_CANCEL_HINT = "cancel them with Pinna2HRTF numcalc --config <settings> --cancel"
+
+
 def run_numcalc_slurm(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
-    worker = config.paths.output_dir / "run_numcalc_array.sh"
-    if not dry_run:
-        worker.write_text(slurm_worker_text(config), encoding="utf-8")
-        worker.chmod(0o755)
+    from .Outputs import write_json
+    root = config.paths.output_dir
+    jobs = slurm_jobs(root) if dry_run else release_finished_slurm_jobs(root)
+    unknown = [job for job in jobs if job["State"] == "unknown"]
+    if unknown:
+        raise RuntimeError(f"Cannot query Slurm for {describe_slurm_jobs(unknown)}. Run this command where squeue or sacct is available, or {SLURM_CANCEL_HINT}.")
+    active = {job["Side"]: job for job in jobs}
+    missing = []
     for project_dir in project_dirs(config):
-        parameters = project_dir / "parameters.json"
-        with parameters.open("r", encoding="utf-8") as file:
+        if project_dir.name in active:
+            logger(f"{project_dir.name}: Slurm job {active[project_dir.name]['JobId']} is still active and is not submitted again")
+        else:
+            missing.append(project_dir)
+    if not missing:
+        raise RuntimeError(slurm_busy_message(jobs))
+    recorded = [slurm_record_entry(job) for job in jobs]
+    submitted = []
+    for project_dir in missing:
+        side = project_dir.name
+        with (project_dir / "parameters.json").open("r", encoding="utf-8") as file:
             steps = json.load(file)["numFrequencies"]
+        worker_relative = SLURM_WORKERS / f"numcalc-{side.lower()}-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.sh"
+        worker = root / worker_relative
         command = [
             "sbatch",
             "--parsable",
-            f"--job-name={project_dir.parent.parent.name}_{project_dir.name}_NumCalc",
+            f"--job-name={project_dir.parent.parent.name}_{side}_NumCalc",
             f"--partition={config.numcalc.partition}",
             f"--qos={config.numcalc.qos}",
             f"--time={config.numcalc.time_limit}",
             f"--mem={config.numcalc.memory}",
             f"--array=1-{steps}%{config.numcalc.array_concurrency}",
-            f"--output={config.paths.output_dir}/slurm-%x-%A_%a.out",
-            "--wrap",
-            f"bash {shlex.quote(str(worker))} {shlex.quote(str(project_dir))}",
+            f"--output={root}/slurm-%x-%A_%a.out",
+            str(worker),
+            str(project_dir),
         ]
         logger(shlex.join(command))
-        if not dry_run:
-            subprocess.run(command, check=True)
+        if dry_run:
+            continue
+        worker.parent.mkdir(parents=True, exist_ok=True)
+        with open(worker, "x", encoding="utf-8", newline="\n") as stream:
+            stream.write(slurm_worker_text(config))
+        worker.chmod(0o555)
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(slurm_submission_failure(side, "sbatch did not reply within 5 minutes and may have queued the job. Check squeue before submitting again", submitted)) from None
+        except OSError as error:
+            worker.unlink(missing_ok=True)
+            raise RuntimeError(slurm_submission_failure(side, f"sbatch is unavailable ({error.strerror or error})", submitted)) from None
+        if result.returncode != 0:
+            worker.unlink(missing_ok=True)
+            raise RuntimeError(slurm_submission_failure(side, f"sbatch failed: {result.stderr.strip() or result.returncode}", submitted))
+        reply = result.stdout.strip().splitlines()
+        job_id, _, cluster = (reply[-1] if reply else "").strip().partition(";")
+        if not job_id.isdigit():
+            raise RuntimeError(slurm_submission_failure(side, f"sbatch returned no job ID ({result.stdout.strip()!r}) and may have queued the job. Check squeue before submitting again", submitted))
+        entry = {"Side": side, "JobId": job_id, "Cluster": cluster or None, "Project": project_dir.relative_to(root).as_posix(),
+                 "Steps": steps, "SubmittedUtc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                 "Worker": worker_relative.as_posix(), "WorkerSha256": sha256(worker).upper()}
+        try:
+            write_json(root / SLURM_RECORD, {"Version": 1, "Jobs": [*recorded, entry]})
+        except BaseException:
+            slurm_command(entry, "scancel", job_id)
+            raise
+        recorded.append(entry)
+        submitted.append(entry)
+        logger(f"{side}: submitted Slurm job {job_id} for {steps} frequency steps")
+
+
+def slurm_submission_failure(side: str, reason: str, submitted: list[dict]) -> str:
+    message = f"The {side} ear was not submitted: {reason}."
+    if submitted:
+        message += f" {describe_slurm_jobs(submitted)} stays queued and recorded. Run the command again to submit only the missing ear, or {SLURM_CANCEL_HINT}."
+    return message
+
+
+def describe_slurm_jobs(jobs: Iterable[dict]) -> str:
+    return ", ".join(f"{job['Side']} job {job['JobId']}" for job in jobs)
+
+
+def slurm_record_entry(job: dict) -> dict:
+    return {key: value for key, value in job.items() if key != "State"}
+
+
+def slurm_command(job: dict, *command: str) -> subprocess.CompletedProcess | None:
+    cluster = ["--clusters", job["Cluster"]] if job.get("Cluster") else []
+    try:
+        return subprocess.run([*command, *cluster], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def slurm_job_state(job: dict) -> str:
+    queue = slurm_command(job, "squeue", "--noheader", "--jobs", job["JobId"], "--format", "%i")
+    if queue is not None:
+        if queue.returncode == 0:
+            listed = any(line.strip().split("_")[0] == job["JobId"] for line in queue.stdout.splitlines())
+            return "active" if listed else "finished"
+        if "invalid job id" in queue.stderr.lower():
+            return "finished"
+    accounting = slurm_command(job, "sacct", "--noheader", "--allocations", "--parsable2", "--jobs", job["JobId"], "--format", "State")
+    if accounting is not None and accounting.returncode == 0:
+        states = {line.split()[0].upper() for line in accounting.stdout.splitlines() if line.strip()}
+        if states:
+            return "active" if states & SLURM_ACTIVE_STATES else "finished"
+    return "finished" if job.get("Cancelled") else "unknown"
+
+
+def slurm_jobs(root: Path) -> list[dict]:
+    path = root / SLURM_RECORD
+    if not path.is_file():
+        return []
+    record = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(record, dict) or record.get("Version") != 1 or not isinstance(record.get("Jobs"), list) \
+            or not all(isinstance(job, dict) and job.get("Side") in ("Left", "Right") and str(job.get("JobId", "")).isdigit() for job in record["Jobs"]):
+        raise ValueError(f"Unsupported Slurm job record: {path}")
+    return [dict(job, State=slurm_job_state(job)) for job in record["Jobs"]]
+
+
+def release_finished_slurm_jobs(root: Path) -> list[dict]:
+    from .Outputs import write_json
+    jobs = slurm_jobs(root)
+    remaining = [job for job in jobs if job["State"] != "finished"]
+    if len(remaining) != len(jobs):
+        write_json(root / SLURM_RECORD, {"Version": 1, "Jobs": [slurm_record_entry(job) for job in remaining]})
+        for job in jobs:
+            if job["State"] == "finished":
+                remove_slurm_worker(root, job)
+    return remaining
+
+
+def remove_slurm_worker(root: Path, job: dict) -> None:
+    relative = PurePosixPath(str(job.get("Worker", "")))
+    if relative.parent != PurePosixPath(SLURM_WORKERS.as_posix()) or not relative.name.endswith(".sh"):
+        return
+    worker = root / relative
+    if worker.is_symlink() or not worker.is_file() or sha256(worker).upper() != str(job.get("WorkerSha256", "")).upper():
+        return
+    worker.unlink()
+
+
+def cancel_numcalc_slurm(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
+    from .Outputs import write_json
+    root = config.paths.output_dir
+    if dry_run:
+        for job in slurm_jobs(root):
+            logger(f"{job['Side']}: Slurm job {job['JobId']} is {job['State']}")
+        return
+    with _output_manifest_lock(root) as held:
+        if not held:
+            raise RuntimeError("Project outputs are busy")
+        jobs = release_finished_slurm_jobs(root)
+        if not jobs:
+            logger("No active Slurm jobs for this project")
+            return
+        failures = []
+        for job in jobs:
+            result = slurm_command(job, "scancel", job["JobId"])
+            if result is not None and (result.returncode == 0 or "invalid job id" in result.stderr.lower()):
+                job["Cancelled"] = True
+                logger(f"{job['Side']}: cancelled Slurm job {job['JobId']}")
+            else:
+                failures.append(job)
+        write_json(root / SLURM_RECORD, {"Version": 1, "Jobs": [slurm_record_entry(job) for job in jobs]})
+    if failures:
+        raise RuntimeError(f"Could not cancel {describe_slurm_jobs(failures)}. Check scancel and squeue on the cluster.")
+
+
+def slurm_busy_message(jobs: Iterable[dict]) -> str:
+    return f"NumCalc is running on Slurm ({describe_slurm_jobs(jobs)}). Wait for the jobs to finish, or {SLURM_CANCEL_HINT}."
+
+
+def require_no_slurm_jobs(root: Path) -> None:
+    jobs = [job for job in slurm_jobs(root) if job["State"] != "finished"]
+    if jobs:
+        raise RuntimeError(slurm_busy_message(jobs))
 
 
 def slurm_worker_text(config: PipelineConfig) -> str:
@@ -699,6 +868,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--numcalc-mode", choices=["local", "slurm"], help="Run NumCalc in this mode for this run only; the saved setting is unchanged.")
     parser.add_argument("--write-template", type=str, help="Write a default config template and exit.")
+    parser.add_argument("--cancel", action="store_true", help="Cancel this project's recorded Slurm NumCalc jobs instead of running a stage.")
     return parser.parse_args()
 
 
@@ -765,6 +935,11 @@ def cli() -> None:
         raise SystemExit("--config is required unless --write-template is used")
     from .MicrophonePlacement import ignore_stale_placements
     config = load_config(args.config)
+    if args.cancel:
+        if args.stage != ["numcalc"]:
+            raise SystemExit("--cancel applies only to the numcalc stage")
+        cancel_numcalc_slurm(config.resolved(), args.dry_run, log_default)
+        return
     if args.numcalc_mode:
         config.numcalc.mode = args.numcalc_mode
     if not args.stage or {"all", "preprocessing"} & set(args.stage):

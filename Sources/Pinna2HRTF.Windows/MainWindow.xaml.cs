@@ -1780,7 +1780,7 @@ public partial class MainWindow : Window
                 using var fresh = FileFingerprints.Fresh();
                 InvalidateManualPositions(project);
                 var receipt = Path.Combine(project.SaveLocation, ".pinna2hrtf-preprocessing-inputs-v1.json");
-                if (PreprocessingFilesPresent(project) && !File.Exists(receipt))
+                if (PreprocessingFilesPresent(project) && !File.Exists(receipt) && StageReceiptIsCurrent("preprocessing", project))
                     StageReceiptAsync("record-stage", "preprocessing", project).GetAwaiter().GetResult();
             });
         }
@@ -1803,7 +1803,7 @@ public partial class MainWindow : Window
     async Task TryReadProjectSettingsAsync(ProjectRecord project)
     {
         var path = Path.Combine(project.SaveLocation, "Project Settings.yaml");
-        if (!File.Exists(path)) return;
+        if (!File.Exists(path)) { project.SettingsRevision = null; return; }
         var result = await RequestPythonAsync("project", new { action = "load", path, folder = project.SaveLocation });
         if (result.TryGetProperty("warnings", out var notices))
             foreach (var notice in notices.EnumerateArray()) AppendLog(notice.GetString(), project.Id);
@@ -2992,8 +2992,11 @@ public partial class MainWindow : Window
         var document = ProjectDocument.Build(prepared, environment);
         var preprocessing = document["preprocessing"]!.AsObject();
         foreach (var side in new[] { "left", "right" })
-            if (preprocessing["source_position_input_" + side] is null) preprocessing.Remove("source_position_input_" + side);
-        var saved = await RequestPythonAsync("project", new { action = "save", path = config, config = document, preserved, revision = project.SettingsRevision });
+            if (preprocessing["source_position_input_" + side] is null || !ValidManualPosition(project, side)) preprocessing.Remove("source_position_input_" + side);
+        var request = new System.Text.Json.Nodes.JsonObject { ["action"] = "save", ["path"] = config, ["config"] = document, ["preserved"] = preserved, ["merge"] = true };
+        if (project.SettingsRevision != null) request["revision"] = project.SettingsRevision;
+        else if (!File.Exists(config)) request["revision"] = null;
+        var saved = await RequestPythonAsync("project", request);
         project.SettingsRevision = saved.GetProperty("revision").GetString();
         Persist();
         return config;

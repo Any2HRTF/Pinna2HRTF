@@ -30,8 +30,12 @@ enum PipelineConfigWriter {
         }
         let configURL = output.appendingPathComponent("Project Settings.yaml")
         let generated = mapping(project: prepared, environment: environment, manualPositions: manualPositions)
-        var request: [String: Any] = ["config": generated, "path": configURL.path, "preserve_fields": true,
-                                      "revision": project.settingsRevision.map { $0 as Any } ?? NSNull()]
+        var request: [String: Any] = ["config": generated, "path": configURL.path, "preserve_fields": true, "merge": true]
+        if let revision = project.settingsRevision {
+            request["revision"] = revision
+        } else if !FileManager.default.fileExists(atPath: configURL.path) {
+            request["revision"] = NSNull()
+        }
         if let preserved = project.preservedConfigJSON {
             request["preserved"] = try JSONSerialization.jsonObject(with: Data(preserved.utf8))
         }

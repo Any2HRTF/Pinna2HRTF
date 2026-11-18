@@ -28,7 +28,10 @@ def import_legacy_distance(data):
 
 
 def read_settings(path):
-    raw = Path(path).read_bytes()
+    return decode_settings(Path(path).read_bytes())
+
+
+def decode_settings(raw):
     if raw.startswith(codecs.BOM_UTF8):
         encoding = "utf-8-sig"
     elif raw.startswith(codecs.BOM_UTF16_LE):

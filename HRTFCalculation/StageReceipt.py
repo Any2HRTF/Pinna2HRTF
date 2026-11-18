@@ -33,44 +33,102 @@ MESSAGES = {
 CHECK_ERRORS = (ValueError, OSError, KeyError, TypeError, AttributeError, IndexError)
 
 
-def signature(config, stage):
-    root = config.paths.output_dir
-    ears = dict(zip(("left", "right"), input_paths(config)))
-    if stage == "inference":
-        settings = config.inference.model_dump(mode="json")
-        model = Path(settings.pop("model_config_file"))
-        from .Inference.model_runtime import checkpoint_path
-        checkpoint = checkpoint_path(settings.pop("model_checkpoint"))
-        weights = sha256(checkpoint)
-        if checkpoint.name.endswith(".coreml.json"):
-            weights = json.loads(checkpoint.read_text())["source_checkpoint_sha256"]
-        result = {"settings": settings, "weights": weights, "model": sha256(model), "ears": {}}
-        for side, ear in ears.items():
-            if ear is not None:
-                prediction = predicted_stl(root / settings[f"prediction_{side}_folder"], ear.stem)
-                if prediction is None:
-                    raise ValueError(f"Missing {side} prediction")
-                result["ears"][side] = [sha256(ear), sha256(prediction)]
+class StageNotCurrent(ValueError):
+    pass
+
+
+def digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, allow_nan=False).encode()).hexdigest()
+
+
+def receipt_path(config, stage):
+    return config.paths.output_dir / f".pinna2hrtf-{stage}-receipt.json"
+
+
+def inference_signatures(config):
+    settings = config.inference.model_dump(mode="json")
+    model = sha256(Path(settings.pop("model_config_file")))
+    from .Inference.model_runtime import checkpoint_path
+    checkpoint = checkpoint_path(settings.pop("model_checkpoint"))
+    weights = sha256(checkpoint)
+    if checkpoint.name.endswith(".coreml.json"):
+        weights = json.loads(checkpoint.read_text())["source_checkpoint_sha256"]
+    ears = {}
+    for side, ear in zip(("left", "right"), input_paths(config)):
+        if ear is not None:
+            prediction = predicted_stl(config.paths.output_dir / settings[f"prediction_{side}_folder"], ear.stem)
+            if prediction is None:
+                raise ValueError(f"Missing {side} prediction")
+            ears[side] = [sha256(ear), sha256(prediction)]
+    overall = digest({"settings": settings, "weights": weights, "model": model, "ears": ears})
+    sides = {}
+    for side, identity in ears.items():
+        other = "right" if side == "left" else "left"
+        side_settings = {name: value for name, value in settings.items()
+                         if name not in ("enabled", "use_predictions_for_preprocessing") and not name.endswith(f"_{other}_folder")}
+        sides[side] = digest({"settings": side_settings, "weights": weights, "model": model, "ear": identity})
+    return overall, sides
+
+
+def require_current_inference(config, sides):
+    receipt = json_object(read_text(receipt_path(config, "inference")))
+    if receipt is None or receipt.get("version") != 2:
+        raise StageNotCurrent(f"The {' and '.join(sides)} Mesh2PPM prediction has no inference record from this version of Pinna2HRTF. Run inference again before preprocessing.")
+    overall, current = inference_signatures(config)
+    recorded = receipt.get("ears")
+    if isinstance(recorded, dict):
+        stale = [side for side in sides if recorded.get(side) != current.get(side)]
     else:
-        settings = config.postprocessing.model_dump(mode="json")
-        destination = Path(settings.pop("output_sofa_dir"))
-        exports = sorted(destination.glob("*.sofa"))
-        if not exports:
-            raise ValueError("Missing SOFA exports")
-        if settings.get("spatial_upsampling"):
-            exports.extend(sorted((destination / "Upsampled").glob("HRIR_*/*.sofa")))
-            exports.extend(sorted((destination / "Upsampled").glob("HRIR_*/upsampling.json")))
-        for option in ("matlab_executable", "amt_path", "enabled", "overwrite"):
-            settings.pop(option, None)
-        result = {"settings": settings, "preprocessing": preprocessing_input_signature(config),
-                  "exports": {p.relative_to(destination).as_posix(): sha256(p) for p in exports}, "ears": {}}
-        for side, ear in ears.items():
-            if ear is not None:
-                files = sorted((root / "Projects" / side.title() / "Output2HRTF").glob("*.sofa"))
-                if not files:
-                    raise ValueError(f"Missing {side} SOFA results")
-                result["ears"][side] = {p.name: sha256(p) for p in files}
-    return hashlib.sha256(json.dumps(result, sort_keys=True, allow_nan=False).encode()).hexdigest()
+        stale = [] if receipt.get("sha256") == overall else list(sides)
+    if stale:
+        raise StageNotCurrent(f"The {' and '.join(stale)} Mesh2PPM prediction does not match the current ear mesh, model or inference settings. Run inference again before preprocessing.")
+
+
+def signature(config, stage):
+    if stage == "inference":
+        return inference_signatures(config)[0]
+    root = config.paths.output_dir
+    settings = config.postprocessing.model_dump(mode="json")
+    destination = Path(settings.pop("output_sofa_dir"))
+    exports = sorted(destination.glob("*.sofa"))
+    if not exports:
+        raise ValueError("Missing SOFA exports")
+    if settings.get("spatial_upsampling"):
+        exports.extend(sorted((destination / "Upsampled").glob("HRIR_*/*.sofa")))
+        exports.extend(sorted((destination / "Upsampled").glob("HRIR_*/upsampling.json")))
+    for option in ("matlab_executable", "amt_path", "enabled", "overwrite"):
+        settings.pop(option, None)
+    result = {"settings": settings, "preprocessing": preprocessing_input_signature(config),
+              "exports": {p.relative_to(destination).as_posix(): sha256(p) for p in exports}, "ears": {}}
+    for side, ear in zip(("left", "right"), input_paths(config)):
+        if ear is not None:
+            files = sorted((root / "Projects" / side.title() / "Output2HRTF").glob("*.sofa"))
+            if not files:
+                raise ValueError(f"Missing {side} SOFA results")
+            result["ears"][side] = {p.name: sha256(p) for p in files}
+    return digest(result)
+
+
+def preprocessing_outputs_match(config, recorded=None):
+    from .Preprocessing import preprocessing_outputs, recorded_preprocessing_outputs
+    for side, ear in zip(("left", "right"), input_paths(config)):
+        if ear is None:
+            continue
+        project = config.paths.output_dir / "Projects" / side.title()
+        current = preprocessing_outputs(project)
+        expected = recorded.get(side) if isinstance(recorded, dict) else recorded_preprocessing_outputs(project)
+        if expected is not None and expected != current:
+            return False
+    return True
+
+
+def record_preprocessing(config, inputs=None):
+    from .Preprocessing import preprocessing_outputs
+    inputs = inputs or preprocessing_input_signature(config)
+    outputs = {side: preprocessing_outputs(config.paths.output_dir / "Projects" / side.title()) for side in inputs["ears"]}
+    path = config.paths.output_dir / PREPROCESSING_INPUT_RECEIPT
+    write_json(path, {**inputs, "outputs": outputs})
+    return path
 
 
 def verdict(reason, legacy=False):
@@ -80,6 +138,8 @@ def verdict(reason, legacy=False):
 def checked(check, legacy):
     try:
         matches = check()
+    except StageNotCurrent:
+        return verdict("inputs-changed", legacy)
     except CHECK_ERRORS:
         return verdict("inputs-unavailable", legacy)
     return verdict(("legacy-current" if legacy else "current") if matches else "inputs-changed", legacy)
@@ -104,7 +164,7 @@ def json_object(text):
 
 def receipt_status(config, stage, app, record, command_config):
     root = config.paths.output_dir
-    text = read_text(root / f".pinna2hrtf-{stage}-receipt.json")
+    text = read_text(receipt_path(config, stage))
     receipt = json_object(text) if text else None
     if receipt is not None:
         if receipt.get("version") != 2:
@@ -118,7 +178,7 @@ def receipt_status(config, stage, app, record, command_config):
     if text is None:
         return verdict("missing-receipt")
     if app == "windows":
-        recorded = read_windows_text(root / f".pinna2hrtf-{stage}-receipt.json")
+        recorded = read_windows_text(receipt_path(config, stage))
         return checked(lambda: recorded == windows_postprocessing_stamp(record, command_config), True)
     if app == "mac":
         if not text:
@@ -129,20 +189,21 @@ def receipt_status(config, stage, app, record, command_config):
 
 def preprocessing_status(config, app, record, command_config):
     root = config.paths.output_dir
-    if (root / PREPROCESSING_INPUT_RECEIPT).exists():
-        def shared():
+    shared = root / PREPROCESSING_INPUT_RECEIPT
+    if shared.exists():
+        def shared_matches():
             validate_preprocessing_inputs(config, lambda _: None)
-            return True
-        return checked(shared, False)
+            return preprocessing_outputs_match(config, json.loads(shared.read_text(encoding="utf-8")).get("outputs"))
+        return checked(shared_matches, False)
     legacy = root / LEGACY_PREPROCESSING_RECEIPT
     if app == "windows":
         receipt = root / WINDOWS_PREPROCESSING_RECEIPT
         if receipt.exists():
-            return checked(lambda: windows_preprocessing_receipt_matches(receipt, record, command_config), True)
+            return checked(lambda: windows_preprocessing_receipt_matches(receipt, record, command_config) and preprocessing_outputs_match(config), True)
         recorded = read_windows_text(legacy)
         if recorded is None:
             return verdict("missing-receipt")
-        return checked(lambda: recorded == windows_legacy_preprocessing_stamp(record, command_config), True)
+        return checked(lambda: recorded == windows_legacy_preprocessing_stamp(record, command_config) and preprocessing_outputs_match(config), True)
     receipt = root / MAC_PREPROCESSING_RECEIPT
     if not receipt.exists():
         receipt = legacy
@@ -153,7 +214,7 @@ def preprocessing_status(config, app, record, command_config):
     saved = read_text(receipt)
     if not saved:
         return verdict("receipt-unreadable", True)
-    return checked(lambda: mac_preprocessing_matches(saved, record, config), True)
+    return checked(lambda: mac_preprocessing_matches(saved, record, config) and preprocessing_outputs_match(config), True)
 
 
 def spatial_upsampling_current(config):
@@ -234,11 +295,16 @@ def execute(command):
         return stage_status(command)
     config = PipelineConfig.model_validate(command["config"]).resolved()
     if stage == "preprocessing":
-        path = config.paths.output_dir / PREPROCESSING_INPUT_RECEIPT
-        write_json(path, preprocessing_input_signature(config))
-        return {"path": str(path)}
-    receipt = {"version": 2, "sha256": signature(config, stage)}
-    write_json(config.paths.output_dir / f".pinna2hrtf-{stage}-receipt.json", receipt)
+        status = stage_status(command)
+        if not status["current"]:
+            raise StageNotCurrent(f"Preprocessing outputs can't be recorded ({status['reason']}): {status['message']} Run preprocessing again.")
+        return {"path": str(record_preprocessing(config))}
+    if stage == "inference":
+        overall, sides = inference_signatures(config)
+        receipt = {"version": 2, "sha256": overall, "ears": sides}
+    else:
+        receipt = {"version": 2, "sha256": signature(config, stage)}
+    write_json(receipt_path(config, stage), receipt)
     return receipt
 
 
