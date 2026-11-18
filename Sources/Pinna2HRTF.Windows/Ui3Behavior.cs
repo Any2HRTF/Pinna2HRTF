@@ -63,9 +63,6 @@ internal static class NavigationBindings
         : right ? shift ? NavigationAction.Pan : NavigationAction.Orbit : NavigationAction.None;
 }
 
-// Reconcile flattened folder lists without removing/reinserting their anchors.
-// Projects crossing a folder boundary are removed first, then inserted below
-// their destination. Status updates and collapse/expand leave folder rows alive.
 internal static class StableRows
 {
     public static void Reconcile(IList<object> current, IReadOnlyList<object> desired, Func<object, bool> anchor)

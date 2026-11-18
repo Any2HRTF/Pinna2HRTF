@@ -6,7 +6,6 @@ struct PipelineLogEvent: Decodable, Sendable {
     var key: String?
 }
 
-/// Saves the complete child-process stream and extracts only explicit progress events.
 final class PipelineLogCapture: @unchecked Sendable {
     static let eventPrefix = "@@PINNA2HRTF_EVENT@@"
 
@@ -80,17 +79,13 @@ final class PipelineLogCapture: @unchecked Sendable {
     }
 }
 
-// Both pipeline runs and environment setup must drain their final bytes before completing.
-// A grandchild (for example a detached NumCalc) can inherit the pipe and keep it
-// open after the direct child exits, so the final drain is non-blocking and bounded.
 extension Process {
     func run(capturing capture: PipelineLogCapture?, drainTimeout: TimeInterval = 2,
              onExit: @escaping @Sendable (Process) -> Void) throws {
         let pipe = Pipe()
         let reader = pipe.fileHandleForReading
-        // Guards reads against the final drain and the close that follows it.
         let readLock = NSLock()
-        let state = LockedValue(false) // true once the handle is being drained or closed
+        let state = LockedValue(false)
         standardOutput = pipe
         standardError = pipe
         reader.readabilityHandler = { handle in
@@ -99,7 +94,6 @@ extension Process {
             guard !state.value else { return }
             let data = handle.availableData
             if data.isEmpty {
-                // EOF: nobody holds the write end any more.
                 handle.readabilityHandler = nil
                 return
             }

@@ -57,8 +57,6 @@ def convert(resources, cache):
             native.save(str(package))
             rng = np.random.default_rng(514)
             differences = []
-            # Conversion checks are build integrity checks, not a replacement
-            # for validating the full acoustics on representative ear scans.
             for values in (np.zeros(shape, np.float32), np.ones(shape, np.float32), rng.random(shape, dtype=np.float32)):
                 with torch.inference_mode():
                     expected = model(torch.from_numpy(values)).numpy()
@@ -79,7 +77,6 @@ def convert(resources, cache):
         files = {str(path.relative_to(destination)): sha(path) for path in sorted(destination.rglob("*")) if path.is_file()}
         if not files:
             raise RuntimeError(f"Compiled model is empty: {destination}")
-        # The compiled network fixes these; the runtime rejects a configuration that disagrees.
         network = {key: configuration[key] for key in ("window_size", "depths", "num_heads")}
         manifest = {"format": "pinna2hrtf-coreml-v2", "model": destination.name, "input_shape": list(shape),
                     "architecture": network,

@@ -11,9 +11,6 @@ using System.Numerics;
 
 namespace Pinna2HRTF.Windows;
 
-// Precision Touchpad input is captured by Composition only over this viewport.
-// Mouse wheel messages remain with Helix; no wheel-size/device heuristics and
-// no global input-mode switching are used.
 internal sealed class SharedNavigation : IInteractionTrackerOwner, IDisposable
 {
     readonly Viewport3DX viewport;
@@ -32,7 +29,6 @@ internal sealed class SharedNavigation : IInteractionTrackerOwner, IDisposable
         viewport.CameraRotationMode = CameraRotationMode.Turntable;
         viewport.ModelUpDirection = Vector3.UnitZ;
         viewport.IsInertiaEnabled = false;
-        // Help is available through a deliberate Controls flyout, not a hover popup over the mesh.
         viewport.Loaded += Loaded;
         viewport.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(MousePressed), true);
         if (viewport.IsLoaded) Initialize();
@@ -64,7 +60,6 @@ internal sealed class SharedNavigation : IInteractionTrackerOwner, IDisposable
         }
         catch (Exception error) when (error is System.Runtime.InteropServices.COMException or NotSupportedException)
         {
-            // Older systems/drivers keep ordinary mouse-compatible navigation.
             source?.Dispose(); tracker?.Dispose(); source = null; tracker = null;
             Diagnose("mouse-compatible fallback", error.Message);
         }

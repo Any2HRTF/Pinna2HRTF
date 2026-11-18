@@ -1,8 +1,6 @@
 import Foundation
 import AppKit
 
-/// The project list: projects, folders, selection, environment settings and their persistence,
-/// plus import, duplication and the safety rules for removing a project.
 @MainActor
 final class ProjectLibrary: ObservableObject {
     @Published var folders: [ProjectFolder]
@@ -54,13 +52,10 @@ final class ProjectLibrary: ObservableObject {
     var selectedProject: ProjectRecord? { projects.first { $0.id == selectedProjectID } }
     var selectedProjectIndex: Int? { projects.firstIndex { $0.id == selectedProjectID } }
 
-    // MARK: Persistence
-
     var registry: ProjectRegistry {
         ProjectRegistry(projects: projects, selectedProjectID: selectedProjectID, environment: environment, folders: folders)
     }
 
-    /// Coalesces bursts of edits (typing in a settings field) into one background write.
     func persist() {
         persistWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
@@ -83,7 +78,6 @@ final class ProjectLibrary: ObservableObject {
         }
     }
 
-    /// Writes pending changes synchronously (quit).
     func flushPersistence() {
         persistWork?.cancel()
         persistWork = nil
@@ -96,8 +90,6 @@ final class ProjectLibrary: ObservableObject {
         if registryStore.recover(using: registry) { persistenceMessage = nil }
         else { persistenceMessage = registryStore.lastError }
     }
-
-    // MARK: Folders
 
     @discardableResult
     func createFolder(named name: String) -> UUID {
@@ -151,8 +143,6 @@ final class ProjectLibrary: ObservableObject {
         projectRevealToken = UUID()
     }
 
-    // MARK: Adding projects
-
     func newProject() -> ProjectRecord {
         var project = Defaults.newProject(packageRoot: packageURL, index: projects.count + 1)
         let defaults = UserDefaults.standard
@@ -177,13 +167,11 @@ final class ProjectLibrary: ObservableObject {
         return project
     }
 
-    /// The listed project stored at `folder` (links resolved), if any.
     func existingProject(at folder: URL) -> ProjectRecord? {
         let target = Self.realPath(folder.path)
         return projects.first { !$0.saveLocation.isEmpty && Self.realPath($0.saveLocation) == target }
     }
 
-    /// Appends and selects `project`.
     func add(_ project: ProjectRecord) {
         projects.append(project)
         selectedProjectID = project.id
@@ -216,7 +204,6 @@ final class ProjectLibrary: ObservableObject {
         return duplicate
     }
 
-    /// Reads an existing project folder off the main thread. Never changes files in it.
     nonisolated static func importedRecord(from folder: URL, index: Int, packageRoot root: URL) throws -> (project: ProjectRecord, note: String?) {
         var project = Defaults.newProject(packageRoot: root, index: index)
         project.name = folder.lastPathComponent
@@ -227,12 +214,12 @@ final class ProjectLibrary: ObservableObject {
         let configURL = ["Project Settings.yaml", ".pinna2hrtf_native_run.yaml", "pipeline.yaml"]
             .map { folder.appendingPathComponent($0) }.first { FileManager.default.fileExists(atPath: $0.path) }
         if let configURL {
-            // ProjectConfigDocument restores legacy geometry fields.
-            let document = try ProjectConfigDocument.parse(String(contentsOf: configURL, encoding: .utf8))
+            let data = try ProjectConfigDocument.request("read", ["path": configURL.path])
+            guard let document = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw ProjectValidation.Failure(message: "Project settings must contain a mapping.")
+            }
             project = try ProjectConfigDocument.restore(document, into: project, folder: folder, packageRoot: root)
         }
-        // The user's folder is left as it is. On case-sensitive volumes a legacy
-        // lowercase folder is not found under its current name, so say so.
         var note: String?
         let entries = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
         if entries.contains("intermediates"), !FileManager.default.fileExists(atPath: folder.appendingPathComponent("Intermediates").path) {
@@ -262,18 +249,11 @@ final class ProjectLibrary: ObservableObject {
         return ""
     }
 
-    // MARK: Removing projects
-
     enum RemovalPlan {
-        /// Remove only the list entry; `reason` explains why the folder stays (nil when there is no folder).
         case listOnly(reason: String?)
         case trash(URL)
     }
 
-    /// Decides whether removing `project` may move its folder to Trash.
-    /// A folder is trashed only when the app created it (or it carries the app's
-    /// project marker), it is not a protected location, and it neither contains
-    /// nor lies inside another listed project. Links are resolved first.
     func removalPlan(for project: ProjectRecord) -> RemovalPlan {
         let location = project.saveLocation.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !location.isEmpty else { return .listOnly(reason: nil) }
@@ -308,9 +288,7 @@ final class ProjectLibrary: ObservableObject {
         protected += ["", "Desktop", "Documents", "Downloads", "Library", "Movies", "Music", "Pictures", "Public", "Applications", "Library/Mobile Documents"]
             .map { Self.realPath(home.appendingPathComponent($0).path) }
         protected += [rootURL, packageURL, Defaults.appDataURL, Defaults.appDataURL.appendingPathComponent("Projects")].map { Self.realPath($0.path) }
-        // Never trash a folder that is, or contains, a protected location.
         if protected.contains(where: { Self.path(folder, contains: $0) }) { return true }
-        // Volume roots (for example /Volumes/Data).
         let url = URL(fileURLWithPath: folder, isDirectory: true)
         if let volume = try? url.resourceValues(forKeys: [.volumeURLKey]).volume,
            Self.realPath(volume.path) == folder { return true }
@@ -322,7 +300,6 @@ final class ProjectLibrary: ObservableObject {
             && realPath(Defaults.appDataURL.appendingPathComponent("Projects").path) != folder
     }
 
-    /// Files the app writes into every project it has run or tracked.
     nonisolated static func hasProjectMarker(_ folder: String) -> Bool {
         let root = URL(fileURLWithPath: folder, isDirectory: true)
         var isDirectory: ObjCBool = false
@@ -342,8 +319,6 @@ final class ProjectLibrary: ObservableObject {
         persist()
     }
 
-    // MARK: Paths
-
     nonisolated static func realPath(_ path: String) -> String {
         let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
         guard let resolved = realpath(standardized, nil) else {
@@ -353,23 +328,17 @@ final class ProjectLibrary: ObservableObject {
         return String(cString: resolved)
     }
 
-    /// Component-aware containment: `/a/b` contains `/a/b` and `/a/b/c`, not `/a/bc`.
     nonisolated static func path(_ parent: String, contains child: String) -> Bool {
         if parent == "/" { return child.hasPrefix("/") }
         return child == parent || child.hasPrefix(parent + "/")
     }
 
-    // MARK: Migration
-
     nonisolated static func migrateProjectDirectory(for project: ProjectRecord) {
         let projectFolder = URL(fileURLWithPath: project.saveLocation, isDirectory: true)
         let entries = try? FileManager.default.contentsOfDirectory(at: projectFolder, includingPropertiesForKeys: nil)
-        let legacyIntermediates = entries?.first(where: { $0.lastPathComponent == "intermediates" })
-        let currentIntermediates = entries?.first(where: { $0.lastPathComponent == "Intermediates" })
-        if let legacyIntermediates, currentIntermediates == nil {
-            let migrationPath = projectFolder.appendingPathComponent(".pinna2hrtf-intermediates-migration")
-            try? FileManager.default.moveItem(at: legacyIntermediates, to: migrationPath)
-            try? FileManager.default.moveItem(at: migrationPath, to: projectFolder.appendingPathComponent("Intermediates"))
+        if entries?.contains(where: { $0.lastPathComponent == "intermediates" }) == true,
+           entries?.contains(where: { $0.lastPathComponent == "Intermediates" }) == false {
+            _ = try? ProjectConfigDocument.request("prepare-folder", ["path": projectFolder.path, "migrate": true])
         }
     }
 
@@ -432,8 +401,6 @@ final class ProjectLibrary: ObservableObject {
         return next
     }
 
-    /// Replaces a leading path prefix only on a component boundary
-    /// (`…/External` matches `…/External/bin`, never `…/ExternalData`).
     nonisolated static func migratedPath(_ path: String, replacements: [(String, String)]) -> String {
         for (old, new) in replacements where !old.isEmpty {
             if path == old { return new }

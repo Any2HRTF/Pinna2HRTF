@@ -30,7 +30,6 @@ if [[ "$NUMCALC_NEEDS_BUILD" == true ]]; then
     git -C "$MESH2HRTF_SRC" fetch --depth 1 origin "$MESH2HRTF_COMMIT"
   fi
   git -C "$MESH2HRTF_SRC" checkout --detach "$MESH2HRTF_COMMIT"
-  # Always rebuild: an untracked binary from an older commit survives the checkout.
   rm -f "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/bin/NumCalc"
   mkdir -p "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/bin"
   make -C "$MESH2HRTF_SRC/mesh2hrtf/NumCalc/src" clean || true
@@ -89,7 +88,6 @@ fi
 if [[ "$(uname -s)" == "Darwin" && -x "$BIN/hrtf_mesh_grading" && -f "$BIN/libpmp.1.2.1.dylib" ]]; then
   if otool -L "$BIN/hrtf_mesh_grading" | grep -q "@rpath/libpmp.1.2.1.dylib"; then
     install_name_tool -change "@rpath/libpmp.1.2.1.dylib" "@loader_path/libpmp.1.2.1.dylib" "$BIN/hrtf_mesh_grading"
-    # install_name_tool invalidates the ad-hoc linker signature; arm64 kills unsigned binaries.
     codesign --force --sign - "$BIN/hrtf_mesh_grading"
   fi
 fi

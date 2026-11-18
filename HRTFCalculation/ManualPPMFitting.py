@@ -20,8 +20,6 @@ from trimesh.transformations import reflection_matrix
 _blender_scene_ready = False
 _reference_tree: cKDTree | None = None
 
-# Weight bounds from Perfler et al. (2025), Table 1. Only the two Crus
-# helicis dent keys are restricted to nonnegative weights.
 _SHAPE_KEY_RANGES = {
     "Antitragus-Crease": (-1.0, 1.0),
     "Cavum conchae-Depth": (-1.0, 1.0),
@@ -171,8 +169,6 @@ def _apply_controls(parameters: dict[str, float], control_values: dict[str, floa
             euler = Quaternion((current["W"], current["X"], current["Y"], current["Z"])).to_euler("ZYX")
             degrees = {"X": math.degrees(euler.x), "Y": math.degrees(euler.y), "Z": math.degrees(euler.z)}
             degrees.update(axes)
-            # Recompose with Blender's own Euler implementation so the untouched axes
-            # remain stable when editing one component of a ZYX rotation.
             rotation = Euler(tuple(math.radians(degrees[axis]) for axis in "XYZ"), "ZYX").to_quaternion()
             model.set_parameter(name=bone, type="Rotation", point=point,
                                 value=tuple(float(component) for component in rotation), axis="WXYZ")
@@ -207,8 +203,6 @@ def _apply_controls(parameters: dict[str, float], control_values: dict[str, floa
 def _export(model: BezierPPM, path: str, mirror_y: bool) -> None:
     global _blender_scene_ready
     if _blender_scene_ready:
-        # BezierPPM normally reopens its bundled .blend for every export. Keep
-        # that scene warm during interactive fitting and just update its rig.
         model._BezierPPM__load_blender_file = lambda _filepath: None
     model.export_stl(file=path)
     _blender_scene_ready = True
@@ -284,8 +278,6 @@ def _write_preview_mesh(parameters: dict[str, float], path: str, mirror_y: bool 
         stream.write(struct.pack("<II", len(vertices), len(triangles)))
         stream.write(vertices.tobytes())
         stream.write(triangles.tobytes())
-        # Keep the per-vertex PPM -> target distances beside the preview geometry
-        # so the app can color the surface without another distance pass.
         stream.write(np.asarray(distances, dtype="<f4").tobytes())
     temporary.replace(destination)
     return metrics
@@ -359,7 +351,6 @@ def execute(command: dict) -> dict:
                     mesh_object.scale.y = -original_scale_y
                 model.export_blend(file=blend_output)
             finally:
-                # The warm scene is reused by later previews and exports.
                 mesh_object.scale.y = original_scale_y
         return {"parameters": parameters, "controls": _controls_from_parameters(parameters),
                 "template_blend": template_blend or ""}

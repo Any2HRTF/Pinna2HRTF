@@ -83,10 +83,9 @@ def get_camera_position(camera_jitter=False, cam_radius=0.18):
     phi_theta = np.array(np.meshgrid(phi, theta)).T.reshape(-1,2)
     theta_m = np.concatenate((radius[:,np.newaxis],phi_theta), axis=1)
 
-    # convert spherical to Cartesian coordinates
     x, y, z = theta_m[:,0] * np.cos(theta_m[:,2]) * np.cos(theta_m[:,1]), \
         theta_m[:,0] * np.cos(theta_m[:,2]) * np.sin(theta_m[:,1]), \
-        theta_m[:,0] * np.sin(theta_m[:,2])#
+        theta_m[:,0] * np.sin(theta_m[:,2])
 
     loc_cam = np.array([x, y, z])
     loc_cam_ref = np.array([0., 0., 0.])
@@ -176,7 +175,6 @@ def _get_model_input(path_to_mesh, views_list, depth, mirror, initial_transforms
 
     new = original_cloud.apply_transform(matrix_scale)
 
-    # open ear canal
     vert_ind = np.argwhere((new.vertices[:, 1] <= 0))
     mask = np.ones(len(new.vertices), dtype=bool)
     mask[vert_ind] = False
@@ -196,7 +194,6 @@ def _get_model_input(path_to_mesh, views_list, depth, mirror, initial_transforms
     for i in range(camera_positions.shape[1]):
 
         if i in views_list:
-            # bpy.context.scene.cycles.device = "GPU"
             render(
                 dirpath=tempdir,
                 filename="img",
@@ -204,7 +201,6 @@ def _get_model_input(path_to_mesh, views_list, depth, mirror, initial_transforms
                 camera_location_reference=camera_position_reference,
                 light_shape='SQUARE',
                 light_power=350000,
-                # light_power=200000,
                 light_location=[-0.01*1000, 0.15*1000, 0.1*1000],
                 depth=depth
             )
@@ -256,8 +252,6 @@ def model_output_size():
 def get_model_prediction(model, data):
     if isinstance(model, CoreMLModel):
         return decode_numpy_prediction(model.predict(data), Path(__DIR_PATH) / "resources/PPM Parameters.csv")
-    # Preserve the original PyTorch calculation order on Windows and in CLI
-    # environments. Mac Core ML inference never imports these dependencies.
     import torch
     try:
         from .src.math_helpers import get_quaternion_from_rotation_matrix, compute_rotation_matrix_from_ortho6d
@@ -300,8 +294,6 @@ def main(args):
         CONFIGURATION = yaml.safe_load(file)
 
     num_classes = model_output_size()
-    # The shipped checkpoints were trained with 188 outputs; a different count
-    # means PPM Parameters.csv no longer matches the network head.
     assert num_classes == 188, f"PPM Parameters.csv yields {num_classes} model outputs, expected 188."
     if CONFIGURATION['model']['number_of_camera_views'] not in VIEW_INDICES:
         raise ValueError(f"Unsupported number_of_camera_views {CONFIGURATION['model']['number_of_camera_views']!r}; expected one of {sorted(VIEW_INDICES)}.")
@@ -348,7 +340,6 @@ def main(args):
         if selected_file is not None:
             mesh_files = [name for name in mesh_files if name == selected_file]
         else:
-            # Scan preparation writes the same ear as .stl and .ply; process each stem once, preferring .stl.
             stl_stems = {Path(name).stem for name in mesh_files if Path(name).suffix.lower() == ".stl"}
             mesh_files = [name for name in mesh_files if Path(name).suffix.lower() == ".stl" or Path(name).stem not in stl_stems]
         for stl_file in mesh_files:
@@ -427,7 +418,6 @@ def main(args):
             
             regions = prediction.get_region_indices()
 
-            # calculate region specific errors
             points = prediction.points
             inverse_trasformation_matrix = np.linalg.inv(transform_matrix)
             transformed_point_cloud =  (inverse_trasformation_matrix[:3,:3] @ points.T + inverse_trasformation_matrix[:3,3:]).T

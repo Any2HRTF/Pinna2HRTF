@@ -1,8 +1,6 @@
-/* Front page. Every section has its own layout on purpose. */
 body { overflow-x: clip; }
 h2 { margin-bottom: 0; font-size: clamp(34px, 5.4vw, 64px); font-weight: 800; letter-spacing: -.05em; line-height: 1; }
 
-/* 1. Hero: headline beside a direction dial */
 .hero { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); align-items: center; gap: clamp(24px, 4vw, 56px); padding-block: clamp(28px, 5vw, 64px) clamp(48px, 7vw, 96px); }
 .hero h1 { margin-bottom: 26px; font-size: clamp(46px, 7.6vw, 96px); font-weight: 800; letter-spacing: -.06em; line-height: .94; }
 .hero h1 em { position: relative; z-index: 0; display: inline-block; padding: 0 .12em .04em; color: #171717; white-space: nowrap; }
@@ -34,20 +32,17 @@ h2 { margin-bottom: 0; font-size: clamp(34px, 5.4vw, 64px); font-weight: 800; le
 .irs svg:nth-of-type(2) path { stroke: var(--underline); }
 .ir-axis { display: flex; justify-content: space-between; gap: 8px; color: var(--quiet); font-size: 11px; font-weight: 500; }
 
-/* 2. Ticker */
 .ticker { margin-inline: -4vw; padding-block: 15px; overflow: hidden; color: #171717; background: var(--accent); transform: rotate(-1.4deg); }
 .ticker div { display: flex; width: max-content; animation: ticker 36s linear infinite; }
 .ticker span { padding-right: .6em; font-size: clamp(20px, 2.6vw, 30px); font-weight: 800; letter-spacing: -.02em; text-transform: uppercase; white-space: nowrap; }
 @keyframes ticker { to { transform: translateX(-50%); } }
 
-/* 3. Showcase: the window tips up as it scrolls in */
 .showcase { padding-top: clamp(72px, 11vw, 150px); perspective: 1600px; }
 .showcase h2 { max-width: 12em; margin-bottom: clamp(28px, 4vw, 48px); }
 .showcase h2 em { color: var(--muted); }
 .showcase picture { display: block; transform-origin: 50% 100%; transform: rotateX(calc((1 - var(--p, 1)) * 26deg)) scale(calc(.86 + var(--p, 1) * .14)); will-change: transform; }
 .showcase img { display: block; width: 100%; border-radius: 0.8% / 1.2%; box-shadow: var(--shadow); }
 
-/* 4. Workflow: pinned screenshot, scrolling steps */
 .workflow { padding-top: clamp(80px, 12vw, 160px); }
 .flow { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 4fr); gap: clamp(28px, 5vw, 72px); margin-top: 24px; }
 .flow-stage { position: sticky; top: 12vh; align-self: start; display: grid; margin: 0; }
@@ -62,7 +57,6 @@ h2 { margin-bottom: 0; font-size: clamp(34px, 5.4vw, 64px); font-weight: 800; le
 .flow-steps h3 { margin-bottom: 10px; font-size: clamp(24px, 2.6vw, 32px); font-weight: 760; letter-spacing: -.04em; }
 .flow-steps p { margin: 0; color: var(--muted); font-size: 17px; }
 
-/* 5. Glossary: three words on a staircase */
 .glossary { padding-top: clamp(64px, 9vw, 120px); }
 .glossary dl { margin: clamp(28px, 4vw, 48px) 0 0; }
 .glossary dl > div { display: grid; grid-template-columns: auto minmax(0, 24em); align-items: center; gap: clamp(16px, 3vw, 44px); width: fit-content; }
@@ -73,7 +67,6 @@ h2 { margin-bottom: 0; font-size: clamp(34px, 5.4vw, 64px); font-weight: 800; le
 .glossary dd { margin: 0; font: italic 500 clamp(17px, 1.9vw, 23px)/1.4 var(--serif); }
 .glossary dd b { display: block; margin-bottom: 4px; color: var(--quiet); font: 600 13px/1.3 var(--mono); }
 
-/* 6. Download: one yellow slab */
 .downloads { margin-top: clamp(80px, 11vw, 150px); padding: clamp(36px, 6vw, 80px) 0 clamp(40px, 6vw, 72px); border-radius: clamp(28px, 5vw, 64px); color: #171717; background: var(--accent); }
 .downloads .wrap { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: clamp(24px, 5vw, 72px); }
 .downloads h2 { font-size: clamp(54px, 9vw, 120px); line-height: .88; }
@@ -90,7 +83,6 @@ h2 { margin-bottom: 0; font-size: clamp(34px, 5.4vw, 64px); font-weight: 800; le
 .download-foot { margin: 18px 0 0; font-size: 13.5px; line-height: 1.5; }
 .download-foot a { color: #171717; text-decoration-color: #171717; text-decoration-thickness: 1.5px; }
 
-/* 7. CLI: a tilted terminal window */
 .cli-section { padding-top: clamp(80px, 11vw, 150px); text-align: center; }
 .cli-section h2 { font-family: var(--mono); font-size: clamp(26px, 4.4vw, 52px); font-weight: 700; letter-spacing: -.06em; }
 .cli-section h2::before { content: "$ "; color: var(--underline); }
@@ -116,7 +108,6 @@ h2 { margin-bottom: 0; font-size: clamp(34px, 5.4vw, 64px); font-weight: 800; le
 .terminal-note code { color: var(--term-ink); overflow-wrap: anywhere; }
 .cli-link { display: inline-block; margin-top: 36px; font-weight: 600; }
 
-/* Stickers: scattered on purpose, visitors can move them */
 .sticker-girl { --sticker-rotation: 8deg; left: 31%; top: 3%; width: clamp(150px, 17vw, 220px); }
 .sticker-headphones { --sticker-rotation: -11deg; top: clamp(60px, 9vw, 120px); left: clamp(170px, 24vw, 320px); width: 132px; }
 .sticker-hrtf { --sticker-rotation: 9deg; top: 47%; right: 9%; width: 122px; }

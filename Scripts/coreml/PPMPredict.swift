@@ -2,8 +2,6 @@ import Foundation
 import CoreML
 import Darwin
 
-// A separate helper keeps Python's Blender runtime independent of Core ML's
-// native dependencies. Models are compiled during release packaging.
 struct PredictionFailure: LocalizedError {
     let message: String
     var errorDescription: String? { message }
@@ -14,8 +12,6 @@ do {
         throw PredictionFailure(message: "Usage: ppm_predict <compiled.mlmodelc> <float32-input-file>")
     }
     let configuration = MLModelConfiguration()
-    // Retain float32 CPU behavior across machines; GPU/ANE is a separate
-    // numerical change and is deliberately not selected implicitly.
     configuration.computeUnits = .cpuOnly
     let model = try MLModel(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]), configuration: configuration)
     guard let constraint = model.modelDescription.inputDescriptionsByName["images"]?.multiArrayConstraint else {

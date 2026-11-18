@@ -73,7 +73,7 @@ public partial class MainWindow
             try
             {
                 var step = catalog[steps.SelectedIndex].GetProperty("id").GetInt32();
-                var result = await RequestPythonAsync("HRTFCalculation.PressureField", new { action = "frame", source = artifact.Path, step, surface }, lifetime.Token);
+                var result = await RequestPythonAsync("pressure", new { action = "frame", source = artifact.Path, step, surface }, lifetime.Token);
                 if (lifetime.IsCancellationRequested || revision != requested) return;
                 frame = result; Recolor(); editor.Status.Text = "Pressure loaded.";
             }
@@ -96,7 +96,7 @@ public partial class MainWindow
             var requested = ++revision; editor.Status.Text = "Finding calculated frequencies…";
             try
             {
-                var result = await RequestPythonAsync("HRTFCalculation.PressureField", new { action = "inspect", source = artifact.Path }, lifetime.Token);
+                var result = await RequestPythonAsync("pressure", new { action = "inspect", source = artifact.Path }, lifetime.Token);
                 if (lifetime.IsCancellationRequested || requested != revision) return;
                 var old = steps.SelectedIndex >= 0 && steps.SelectedIndex < catalog.Count ? catalog[steps.SelectedIndex].GetProperty("id").GetInt32() : -1;
                 catalog = result.GetProperty("steps").EnumerateArray().Select(x => x.Clone()).ToList();
@@ -115,7 +115,6 @@ public partial class MainWindow
         locked.Click += (_,_) => { colorRange = null; if (frame != null) Recolor(); };
         reset.Click += (_,_) => editor.ResetCamera(artifact.Side == "right"); refresh.Click += async (_,_) => await Inspect();
         editor.Window.Activate(); await Inspect();
-        // Keep cancellation alive for the whole window, not merely initialization.
         var closed = new TaskCompletionSource(); editor.Window.Closed += (_,_) => closed.TrySetResult();
         if (!lifetime.IsCancellationRequested) await closed.Task;
     }

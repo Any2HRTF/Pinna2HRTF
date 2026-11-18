@@ -58,8 +58,6 @@ internal sealed class NativeEditor
         Window.Content = root;
         var chrome = new WindowChrome(Window, root, header, drag, minimumWidth: 900, minimumHeight: 640);
         var navigation = new SharedNavigation(Viewport);
-        // Each native editor is a separate XAML root. Give it its own themed
-        // surfaces and keep it in step with the main window, including popups.
         void Appearance()
         {
             var dark = root.ActualTheme == ElementTheme.Dark;

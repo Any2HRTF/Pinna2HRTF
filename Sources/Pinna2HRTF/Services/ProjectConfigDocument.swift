@@ -1,11 +1,9 @@
 import Foundation
 
-// Use the same safe YAML parser as the bundled pipeline; never interpret a config as code.
 enum ProjectConfigDocument {
     static var pythonURL: URL? {
         let bundled = Defaults.pipelineRoot.appendingPathComponent(".venv/bin/python")
         if Defaults.isPackagedApp { return FileManager.default.isExecutableFile(atPath: bundled.path) ? bundled : nil }
-        // Development builds use the source tree's uv environment.
         let source = Defaults.packageRoot().appendingPathComponent(".venv/bin/python")
         for candidate in [bundled, source] where FileManager.default.isExecutableFile(atPath: candidate.path) {
             return candidate
@@ -16,9 +14,7 @@ enum ProjectConfigDocument {
         return installed
     }
 
-    /// Runs a short Python helper. Registered with the process launcher so it is
-    /// stopped on quit, and stopped if it takes longer than `timeout`.
-    static func runPython(_ script: String, input: Data, arguments: [String] = [], timeout: TimeInterval = 60, operation: String = "Python operation") throws -> Data {
+    static func run(_ arguments: [String], input: Data, timeout: TimeInterval = 60, operation: String = "Python operation") throws -> Data {
         guard let pythonURL else { throw ProjectValidation.Failure(message: "The bundled Python runtime is unavailable.") }
         let fm = FileManager.default
         let temporary = fm.temporaryDirectory.appendingPathComponent("pinna-config-\(UUID().uuidString)")
@@ -36,7 +32,7 @@ enum ProjectConfigDocument {
         defer { try? inputHandle.close(); try? outputHandle.close(); try? errorHandle.close() }
         let process = Process()
         process.executableURL = pythonURL
-        process.arguments = ["-B", "-c", script] + arguments
+        process.arguments = ["-B"] + arguments
         process.currentDirectoryURL = Defaults.pipelineRoot
         process.standardInput = inputHandle
         process.standardOutput = outputHandle
@@ -55,52 +51,9 @@ enum ProjectConfigDocument {
         return try Data(contentsOf: outputURL)
     }
 
-    static func parse(_ yaml: String) throws -> [String: Any] {
-        let data = try runPython("""
-        import sys, json, yaml
-        value = yaml.safe_load(sys.stdin.read())
-        if not isinstance(value, dict):
-            raise ValueError('Project settings must contain a YAML mapping.')
-        print(json.dumps(value, allow_nan=False))
-        """, input: Data(yaml.utf8))
-        guard let mapping = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw ProjectValidation.Failure(message: "Project settings must contain a mapping.")
-        }
-        return mapping
-    }
-
-    static func encode(_ mapping: [String: Any]) throws -> String {
-        let output = try runPython("""
-        import sys, json, yaml
-        print(yaml.safe_dump(json.load(sys.stdin), sort_keys=False), end='')
-        """, input: JSONSerialization.data(withJSONObject: mapping, options: [.sortedKeys]))
-        guard let yaml = String(data: output, encoding: .utf8) else { throw ProjectValidation.Failure(message: "Could not encode project settings.") }
-        return yaml
-    }
-
-    static func merged(generated current: [String: Any], preservedJSON: String) throws -> [String: Any] {
-        guard var saved = try JSONSerialization.jsonObject(with: Data(preservedJSON.utf8)) as? [String: Any] else {
-            throw ProjectValidation.Failure(message: "The imported settings snapshot is unreadable.")
-        }
-        let editable: [String: [String]] = [
-            "scan_preparation": ["enabled", "scan_path", "original_scan_path", "rotation_degrees", "prepare_left", "prepare_right", "target_edge_mm", "left_margin_mm", "right_margin_mm", "side_min_mm", "side_max_mm", "require_manual_review", "reviewed_left", "reviewed_right"],
-            "paths": ["edited_left_ear", "edited_right_ear", "left_ear", "right_ear", "output_dir", "external_deps_dir", "numcalc_executable", "mesh_grading_executable", "evaluation_grid"],
-            "inference": ["enabled", "model_config_file", "model_checkpoint", "target_left_folder", "target_right_folder", "prediction_left_folder", "prediction_right_folder", "use_predictions_for_preprocessing"],
-            "ui": ["ear_model_method"],
-            "manual_ppm": ["enabled", "left_mesh", "right_mesh", "left_parameters", "right_parameters", "left_blend", "right_blend", "left_source", "right_source", "left_source_identity", "right_source_identity", "template_blend"],
-            "preprocessing": ["title", "ear_distance", "head_radius", "min_frequency", "max_frequency", "frequency_step_count", "source_assignment_face_count", "source_position_input_left", "source_position_input_right", "mesh_min_edge_length", "mesh_max_edge_length", "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite", "skip_mesh_grading"],
-            "numcalc": ["mode", "max_instances", "max_cpu_load", "adaptive_fmm_length"],
-            "postprocessing": ["overwrite", "output_sofa_dir", "normalize", "level_offset_db", "resample_hrirs", "sampling_rate", "spatial_upsampling", "spatial_subdivisions", "spatial_normalize", "matlab_executable", "amt_path"]
-        ]
-        for (section, keys) in editable {
-            var values = saved[section] as? [String: Any] ?? current[section] as? [String: Any] ?? [:]
-            let generatedValues = current[section] as? [String: Any] ?? [:]
-            for key in keys {
-                if let value = generatedValues[key] { values[key] = value } else { values.removeValue(forKey: key) }
-            }
-            saved[section] = values
-        }
-        return saved
+    static func request(_ action: String, _ payload: [String: Any], timeout: TimeInterval = 60) throws -> Data {
+        try run(["-m", "HRTFCalculation", "project", action], input: JSONSerialization.data(withJSONObject: payload),
+                timeout: timeout, operation: action)
     }
 
     static func restore(_ config: [String: Any], into original: ProjectRecord, folder: URL, packageRoot: URL) throws -> ProjectRecord {
@@ -156,7 +109,6 @@ enum ProjectConfigDocument {
                 if side == .left { project.leftEar = "" } else { project.rightEar = "" }
             } else if let value = text(paths, key) {
                 let path = relocated(value)
-                // If copied input data exists, prefer the portable in-project copy over a missing original path.
                 if FileManager.default.fileExists(atPath: path) || (side == .left ? project.leftEar : project.rightEar).isEmpty {
                     if side == .left { project.leftEar = path } else { project.rightEar = path }
                 }

@@ -1,17 +1,6 @@
 import Foundation
 import Darwin
 
-/// Stops a process together with every descendant, including jobs that left the
-/// parent's session (NumCalc is started through `setsid`) and children spawned
-/// while the stop is in progress.
-///
-/// Procedure, repeated until nothing tracked is left:
-/// 1. SIGSTOP the tree top-down and re-snapshot until no new member appears, so
-///    nobody can fork or exit-and-reparent while we look.
-/// 2. SIGTERM every member, then SIGCONT so the signal can be handled.
-/// 3. Wait for a grace period, then SIGKILL survivors.
-/// Every signal is sent only to a PID whose start time still matches the one
-/// recorded when it was first seen, which guards against PID reuse.
 enum ProcessTreeTerminator {
     struct Identity: Hashable {
         let pid: pid_t
@@ -28,7 +17,6 @@ enum ProcessTreeTerminator {
     static func terminate(_ process: Process, grace: TimeInterval = 2) {
         guard process.isRunning else { return }
         terminate(rootPID: process.processIdentifier, grace: grace)
-        // Foundation reaps the root; make sure a stray root never outlives us.
         if process.isRunning { _ = Darwin.kill(process.processIdentifier, SIGKILL) }
     }
 
@@ -41,7 +29,6 @@ enum ProcessTreeTerminator {
         var sessions = Set<pid_t>()
 
         for _ in 0..<6 {
-            // 1. Freeze until the membership is stable.
             var members: [Entry] = []
             for _ in 0..<25 {
                 let snapshot = Self.snapshot()
@@ -59,11 +46,9 @@ enum ProcessTreeTerminator {
             }
             guard !members.isEmpty else { return }
 
-            // 2. Ask everyone to stop, then let them run their handlers.
             for entry in members { _ = Darwin.kill(entry.identity.pid, SIGTERM) }
             for entry in members { _ = Darwin.kill(entry.identity.pid, SIGCONT) }
 
-            // 3. Grace period, then force.
             let deadline = Date().addingTimeInterval(grace)
             var survivors = alive(members.map(\.identity))
             while !survivors.isEmpty && Date() < deadline {
@@ -78,8 +63,6 @@ enum ProcessTreeTerminator {
         }
     }
 
-    /// Descendants of `root` (top-down), plus orphans that kept the session or
-    /// process group of a member seen earlier, plus their descendants.
     private static func collect(root: pid_t, snapshot: [pid_t: Entry], tracked: [pid_t: Identity],
                                 groups: Set<pid_t>, sessions: Set<pid_t>) -> [Entry] {
         var children: [pid_t: [pid_t]] = [:]
@@ -88,7 +71,6 @@ enum ProcessTreeTerminator {
         func acceptable(_ entry: Entry) -> Bool {
             let pid = entry.identity.pid
             guard pid > 1, pid != me else { return false }
-            // A PID seen before must still be the same process.
             if let known = tracked[pid], known != entry.identity { return false }
             return true
         }
@@ -115,7 +97,6 @@ enum ProcessTreeTerminator {
         return identities.filter { snapshot[$0.pid]?.identity == $0 }
     }
 
-    /// Live (non-zombie) processes keyed by PID.
     private static func snapshot() -> [pid_t: Entry] {
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
         for _ in 0..<4 {

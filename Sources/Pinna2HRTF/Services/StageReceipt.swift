@@ -5,7 +5,7 @@ enum StageReceipt {
     static func url(_ stage: Stage, _ project: ProjectRecord) -> URL {
         URL(fileURLWithPath: project.saveLocation).appendingPathComponent(".pinna2hrtf-\(stage.rawValue)-receipt.json")
     }
-    static func signature(_ stage: Stage, _ project: ProjectRecord) -> String {
+    private static func legacySignature(_ stage: Stage, _ project: ProjectRecord) -> String {
         var value: [String: Any] = [:]
         func stamp(_ path: String) -> String {
             guard !path.isEmpty else { return "" }
@@ -36,11 +36,19 @@ enum StageReceipt {
         let data = (try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])) ?? Data()
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
-    static func record(_ stage: Stage, _ project: ProjectRecord) throws {
-        try signature(stage, project).write(to: url(stage, project), atomically: true, encoding: .utf8)
+    private static func request(_ action: String, _ stage: Stage, _ project: ProjectRecord) throws -> Data {
+        let config = PipelineConfigWriter.mapping(project: project, environment: Defaults.environment(root: Defaults.runtimeRoot))
+        return try ProjectConfigDocument.request(action, ["config": config, "stage": stage.rawValue], timeout: 600)
     }
+
     static func current(_ stage: Stage, _ project: ProjectRecord) -> Bool {
-        guard let saved = try? String(contentsOf: url(stage, project), encoding: .utf8) else { return false }
-        return saved == signature(stage, project)
+        let data = try? Data(contentsOf: url(stage, project))
+        if stage == .preprocessing || data.flatMap({ try? JSONSerialization.jsonObject(with: $0) }) is [String: Any] {
+            struct Reply: Decodable { let current: Bool }
+            guard let response = try? request("stage-status", stage, project) else { return false }
+            return (try? JSONDecoder().decode(Reply.self, from: response).current) == true
+        }
+        guard let data else { return false }
+        return String(data: data, encoding: .utf8) == legacySignature(stage, project)
     }
 }

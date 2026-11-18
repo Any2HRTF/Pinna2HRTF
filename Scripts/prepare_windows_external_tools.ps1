@@ -47,7 +47,6 @@ function Invoke-Git([string[]]$Arguments) {
 function Find-Msys2 {
     $candidates = @($Msys2Root, "C:\msys64") | Select-Object -Unique
     foreach ($candidate in $candidates) {
-        # A fresh MSYS2 installation has bash before the UCRT64 packages are installed.
         if (Test-Path (Join-Path $candidate "usr\bin\bash.exe")) {
             return [IO.Path]::GetFullPath($candidate)
         }

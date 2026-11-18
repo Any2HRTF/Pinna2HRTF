@@ -1,4 +1,5 @@
 import argparse
+from ..FileIdentity import sha256
 import hashlib
 import json
 import os
@@ -33,10 +34,6 @@ def _is_generated_project(path, protected_paths):
 
 
 EXPORT_RECORD = ".pinna2hrtf-export.json"
-# Exact names of files NumCalc, Pinna2HRTF's NumCalc runner and Mesh2HRTF's
-# Output2HRTF add to a project after export (see NC_Main.cpp, NumCalc.py,
-# output2hrtf.py, write_output_report.py, inspect_sofa_files.py, export_vtk.py).
-# Any other unrecorded file means the backup is kept.
 _NUMCALC_OUTPUT = re.compile(
     r"^NumCalc/source_\d+/("
     r"be\.out/be\.\d+/(pBoundary|pBoundaryVTK\.vtk|pEvalGrid|vBoundary|vEvalGrid)"
@@ -83,18 +80,10 @@ def _project_files(root):
     return files, other
 
 
-def _sha256(path):
-    digest = hashlib.sha256()
-    with open(path, "rb") as file:
-        for block in iter(lambda: file.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def _write_export_record(project):
     """Record every file of a freshly generated project so a later backup can be checked for changes."""
     files, _ = _project_files(project)
-    record = {"version": 1, "files": {name: _sha256(project / name) for name in sorted(files) if name != EXPORT_RECORD}}
+    record = {"version": 1, "files": {name: sha256(project / name) for name in sorted(files) if name != EXPORT_RECORD}}
     temporary = project / (EXPORT_RECORD + ".tmp")
     temporary.write_text(json.dumps(record, indent=1), encoding="utf-8")
     os.replace(temporary, project / EXPORT_RECORD)
@@ -112,7 +101,7 @@ def snapshot_generated_outputs(project):
     except (OSError, ValueError, KeyError, TypeError):
         return None
     files, _ = _project_files(project)
-    unchanged = {name for name in files if name.startswith("Output2HRTF/") and name in recorded and _sha256(project / name) == recorded[name]}
+    unchanged = {name for name in files if name.startswith("Output2HRTF/") and name in recorded and sha256(project / name) == recorded[name]}
     return record, set(files), unchanged
 
 
@@ -131,7 +120,7 @@ def claim_generated_outputs(project, snapshot):
     files, _ = _project_files(project)
     for name in files:
         if _is_solver_output(name, grids) and (name not in existing or name in unchanged):
-            recorded[name] = _sha256(project / name)
+            recorded[name] = sha256(project / name)
     temporary = project / (EXPORT_RECORD + ".tmp")
     temporary.write_text(json.dumps(record, indent=1), encoding="utf-8")
     os.replace(temporary, project / EXPORT_RECORD)
@@ -200,7 +189,7 @@ def inspect_previous_backup(backup, protected_paths=()):
     for name, digest in recorded.items():
         if name not in present:
             return False, f"a generated file was removed ({name})"
-        if _sha256(backup / name) != digest:
+        if sha256(backup / name) != digest:
             return False, f"a generated file was changed ({name})"
     unknown = sorted(present - set(recorded))
     if unknown:
@@ -286,8 +275,6 @@ def _publish_export_projects(staged, destinations, protected_paths, logger=print
         raise
     for side, retiring in retired.items():
         destination = destinations[side]
-        # Check again: the folder may have changed or been replaced while the
-        # projects were built. Only the exact folder the user confirmed is deleted.
         approved = approved_backups.get(str(previous_backup_path(destination)))
         if approved is None:
             deletable, reason = False, "it was not among the backups you confirmed for deletion"
@@ -321,7 +308,6 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
     right_path = Path(right_path) if right_path else None
     if left_path is None and right_path is None:
         raise ValueError("At least one ear mesh is required")
-    # Inspect and validate before cleaning any previous output.
     left_ear = trimesh.load(left_path, force="mesh") if left_path is not None else None
     right_ear = trimesh.load(right_path, force="mesh") if right_path is not None else None
     ears = {"left": left_ear, "right": right_ear}
@@ -344,10 +330,6 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             migration_path.rename(intermediates)
         elif legacy_intermediates is not None and current_intermediates is not legacy_intermediates:
             legacy_intermediates.rename(_kept_backup_path(legacy_intermediates))
-        # One previous export per ear. The desktop/config route cannot prompt, so
-        # an older backup is approved for deletion only when it holds unchanged
-        # generated files; it is checked again before deletion. Anything else is
-        # kept as <project>.previous-<date>.
         protected = [path.resolve() for path in (left_path, right_path) if path is not None]
         to_replace = plan_export_backups({"left": left_project, "right": right_project}, protected, logger)
         approved_backups = {str(path): fingerprint for path, _, fingerprint in to_replace}
@@ -357,7 +339,6 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
         right_project = Path(f"{export_prefix}-Right")
         legacy_projects = []
         intermediates = Path(f"{export_prefix}-Intermediates")
-        # Fail before any work if an existing export target is not ours to replace.
         protected = [path.resolve() for path in (left_path, right_path) if path is not None]
         for project in (left_project, right_project):
             if project.exists() and not _is_generated_project(project, protected):
@@ -372,8 +353,6 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             if not confirm_replace_previous(question):
                 raise RuntimeError("Cancelled: the older export backups were left unchanged.")
         approved_backups = {str(path): fingerprint for path, _, fingerprint in to_replace}
-    # Preserve legacy and previous intermediate files; these folders can hold
-    # inputs, inference results and files changed outside the app.
     protected = [path.resolve() for path in (left_path, right_path) if path is not None]
     def is_input(path):
         resolved = path.resolve()
@@ -385,22 +364,18 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
         if is_input(path):
             raise FileExistsError(f"Refusing to replace an input: {path}")
         previous = Path(f"{path}.previous")
-        # A .previous that is or holds a selected input is never moved or replaced.
         if keep_one and not path.is_symlink() and path.is_file() and not ((previous.exists() or previous.is_symlink()) and is_input(previous)):
-            # Generated intermediate file: keep one previous copy. The older copy
-            # is replaced only if it still matches the fingerprint recorded when
-            # it was made; an edited, unrecorded or unusual one is kept dated.
             target = previous
             record = _read_previous_record(path.parent)
             if target.exists() or target.is_symlink():
                 expected = record.get(target.name)
                 unchanged = (expected is not None and not target.is_symlink() and target.is_file()
-                             and _sha256(target) == expected)
+                             and sha256(target) == expected)
                 if not unchanged:
                     kept = _kept_backup_path(path)
                     target.rename(kept)
                     logger(f"Kept an older or edited copy at {kept}")
-            digest = _sha256(path)
+            digest = sha256(path)
             path.replace(target)
             record[target.name] = digest
             _write_previous_record(path.parent, record)
@@ -437,8 +412,6 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             if path is not None:
                 side_dir.mkdir(parents=True, exist_ok=True)
             elif side_dir.exists():
-                # Preserve inference results and unfamiliar files. An unused side
-                # directory is removed only when no such content remains.
                 try:
                     side_dir.rmdir()
                 except OSError:
@@ -464,8 +437,6 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
                 ear.export(side_dirs[side] / "input_ear.stl")
         closed = {side: side_dirs[side] / "closed_ear.stl" for side, ear in ears.items() if ear is not None}
         landmark_paths = {side: side_dirs[side] / "source_landmark.json" for side, ear in ears.items() if ear is not None}
-        # The dummy head is shared by both sides. Keeping it at the work root
-        # avoids creating an artificial Left folder for a right-only project.
         dummy_head = work_dir / "dummy_head.stl"
         cut = {side: side_dirs[side] / "cut_head.stl" for side, ear in ears.items() if ear is not None}
         stitched = {side: side_dirs[side] / "stitched_head.stl" for side, ear in ears.items() if ear is not None}
@@ -536,10 +507,6 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             grading_env = os.environ.copy()
             grading_env["DYLD_LIBRARY_PATH"] = os.pathsep.join(filter(None, [str(Path(mesh_grading_executable).parent), grading_env.get("DYLD_LIBRARY_PATH")]))
             subprocess.run([str(mesh_grading_executable), '-x', str(settings.mesh_min_edge_length), '-y', str(settings.mesh_max_edge_length), '-e', str(settings.mesh_max_error), '-v', '-g', str(gamma_l), '-h', str(gamma_r), '-s', side, '-i', str(stitched[side]), '-o', str(graded[side])], check=True, env=grading_env)
-        # Both app/config and standalone exports publish only after every side
-        # has been generated. Existing projects are retained, including unknown
-        # or externally modified files. Older backups are deleted only when
-        # approved above and still unchanged at publication.
         export_destinations = {"left": left_project, "right": right_project}
         left_project.parent.mkdir(parents=True, exist_ok=True)
         export_staging = Path(tempfile.mkdtemp(prefix=f".{left_project.name}-staging-", dir=left_project.parent))
@@ -620,7 +587,6 @@ def preprocess():
         frequency_step_count=args.frequency_step_count,
         source_assignment_face_count=args.source_face_count,
     )
-    # Version compatibility only; remove in a future release.
     if args.head_radius is not None:
         print("Warning: --head-radius is deprecated; use --ear-distance. Removed in a future release.")
     run_preprocessing_pipeline(

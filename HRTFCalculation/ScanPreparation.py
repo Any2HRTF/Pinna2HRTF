@@ -22,9 +22,6 @@ POISSON = dict(depth=7, fulldepth=5, scale=1.1, samplespernode=3.0,
 
 
 def _meshlab():
-    # The Windows wheels share native DLL names. Loading MeshLab first makes
-    # the later bpy import fail with ERROR_PROC_NOT_FOUND. Receipt inspection
-    # needs neither library; actual meshing establishes the compatible order.
     if sys.platform == "win32":
         import bpy
     import pymeshlab
@@ -137,8 +134,6 @@ def close_non_attachment_boundaries(mesh):
     if not len(components):
         raise ValueError("Hole closing produced no connected surface")
     result = max(components, key=lambda item: len(item.faces))
-    # MeshLab deliberately skips some degenerate three- and four-edge loops.
-    # Trimesh's narrow fill handles only those residual micro-holes.
     result.fill_holes()
     result = cap_non_attachment_boundaries(result)
     result.fix_normals()
@@ -352,8 +347,6 @@ def restore_attachment_boundary(poisson, planes, rotation_degrees, output, targe
     for candidate_offset in (0.0, 0.2, 0.5, 1.0, 1.5):
         keep = np.ones(len(faces), dtype=bool)
         for normal, origin in planes:
-            # Retain whole Poisson triangles. Cutting triangles independently
-            # duplicates intersection vertices and creates hairline cracks.
             unit_normal = normal / np.linalg.norm(normal)
             shifted_origin = origin + candidate_offset * unit_normal
             keep &= np.all(
@@ -417,7 +410,6 @@ def preparation_signature(settings, cached=True):
     return {"settings": settings.model_dump(mode="json", exclude={"require_manual_review", "reviewed_left", "reviewed_right", "original_scan_path"}), "source_sha256": digest}
 
 
-# Prepared-ear digests whose serialized topology already passed in this process.
 _validated_prepared_ears = set()
 
 
@@ -465,7 +457,6 @@ def prepare_scan(config, logger=print):
         raise ValueError("Select at least one ear to prepare.")
     source = Path(settings.scan_path)
     output = config.paths.output_dir / "Prepared"
-    # Never overwrite an input even if a project has been pointed at generated output.
     if source.resolve() == output.resolve() or output.resolve() in source.resolve().parents:
         raise ValueError("The source scan must be outside the generated Prepared folder.")
     signature = preparation_signature(settings, cached=False)
@@ -496,7 +487,6 @@ def prepare_scan(config, logger=print):
                                     "metrics": mesh_metrics(ready)}
         if signature != preparation_signature(settings, cached=False):
             raise ValueError("The source scan changed during preparation; outputs were not published.")
-        # No prepared meshes are published until all selected ears pass validation.
         output.mkdir(parents=True, exist_ok=True)
         for side in report["ears"]:
             shutil.copy2(work / f"{side.title()}.stl", output / f"{side.title()}.stl")

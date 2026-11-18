@@ -4,14 +4,12 @@ import ModelIO
 import SceneKit.ModelIO
 import AppKit
 
-/// The 3D/image viewer: loaded scene, per-project camera memory and microphone placement.
 @MainActor
 final class ViewerModel: ObservableObject {
     @Published var selectedPressure: URL?
     @Published var selectedMesh: URL?
     @Published var selectedImage: NSImage?
     @Published var selectedScene = SCNScene()
-    // Camera persistence is internal state; publishing each redraw invalidates the viewer layout.
     var selectedCameraState: ViewerCameraState?
     @Published var microphonePlacementSide: EarSide?
     @Published var pendingMicrophonePosition: ManualMicrophonePosition?
@@ -42,8 +40,6 @@ final class ViewerModel: ObservableObject {
     private var selectedProjectID: UUID? { store?.selectedProjectID }
     private var selectedProject: ProjectRecord? { store?.selectedProject }
     private func log(_ text: String, for projectID: UUID? = nil) { store?.appendLog(text, for: projectID) }
-
-    // MARK: Viewer
 
     func forget(_ projectID: UUID) {
         viewerStateByProject[projectID] = nil
@@ -140,7 +136,6 @@ final class ViewerModel: ObservableObject {
         rememberSelectedArtifact(url)
     }
 
-    /// Builds the scene off the main thread.
     private nonisolated static func loadScene(url: URL, darkMode: Bool, savedCamera: ViewerCameraState?,
                                               microphonePreview: MicrophonePreview?) -> LoadedScene? {
         let microphone = microphonePreview?.microphonePosition(for: url)
@@ -262,8 +257,6 @@ final class ViewerModel: ObservableObject {
         return states
     }
 
-    // MARK: Microphone placement
-
     func beginMicrophonePlacement(_ side: EarSide) {
         guard let store, let project = selectedProject, !store.selectedProjectIsRunning else { return }
         microphonePlacementSession = UUID()
@@ -379,7 +372,7 @@ final class ViewerModel: ObservableObject {
         try? FileManager.default.createDirectory(at: landmarkURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         let process: Process
         do {
-            process = try ProcessLauncher.shared.makeProcess(.python(["-m", "HRTFCalculation.Preprocessing.src.ear_canal_closer", "--ear_path", meshURL.path, "--landmark_path", landmarkURL.path, "--side", side.rawValue, "--estimate-only"]), environment: environment)
+            process = try ProcessLauncher.shared.makeProcess(.python(["-m", "HRTFCalculation", "ear-canal", "--ear_path", meshURL.path, "--landmark_path", landmarkURL.path, "--side", side.rawValue, "--estimate-only"]), environment: environment)
         } catch {
             completion(nil)
             return

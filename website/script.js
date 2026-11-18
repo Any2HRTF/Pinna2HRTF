@@ -7,7 +7,6 @@ document.querySelectorAll(".draggable-sticker").forEach((sticker) => {
   const area = sticker.closest(".content-section");
   if (!area) return;
 
-  // Lets CSS cut the gloss to the sticker's outline.
   const art = sticker.querySelector("img");
   if (art && window.CSS?.supports?.("mask", "url(a.png) center / 100% 100% no-repeat")) {
     sticker.style.setProperty("--art", `url("${art.getAttribute("src")}")`);

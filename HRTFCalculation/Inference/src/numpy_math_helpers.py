@@ -27,7 +27,6 @@ def rotation_matrix(poses):
 
 
 def quaternion(matrix):
-    # Match math_helpers.py: Shepperd's largest-component pivot, then w >= 0.
     r00, r11, r22 = matrix[..., 0, 0], matrix[..., 1, 1], matrix[..., 2, 2]
     trace = r00 + r11 + r22
     pivot = np.argmax(np.stack((trace, r00, r11, r22), axis=-1), axis=-1)

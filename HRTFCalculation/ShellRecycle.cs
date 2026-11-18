@@ -1,8 +1,9 @@
 using System.Runtime.InteropServices;
-namespace Pinna2HRTF.Windows;
+using System;
+using System.IO;
+using System.ComponentModel;
+using Microsoft.Win32.SafeHandles;
 
-// FOFX_RECYCLEONDELETE requests recycling, and the sink vetoes any operation
-// lacking recycle semantics. Completion requires an actual Recycle Bin item.
 public static class ShellRecycle
 {
     [ComImport, Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -36,50 +37,62 @@ public static class ShellRecycle
         [PreserveSig] int UpdateProgress(uint total, uint done); [PreserveSig] int ResetTimer(); [PreserveSig] int PauseTimer(); [PreserveSig] int ResumeTimer();
     }
     [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
-    sealed class Sink(Func<bool> revalidate) : ISink
+    sealed class Sink : ISink
     {
+        readonly Func<bool> revalidate;
+        public Sink(Func<bool> revalidate) { this.revalidate = revalidate; }
         const int Abort = unchecked((int)0x80004004);
         public bool Recycled; public int Failure;
-        public int StartOperations() => 0;
+        public int StartOperations() { return 0; }
         public int FinishOperations(int result) { if (result < 0) Failure = result; return 0; }
         public int PreDeleteItem(uint flags, IntPtr item) { try { return (flags & 0x80) != 0 && revalidate() ? 0 : Abort; } catch { return Abort; } }
         public int PostDeleteItem(uint flags, IntPtr item, int result, IntPtr recycled)
         { if (result < 0 || recycled == IntPtr.Zero) Failure = result < 0 ? result : Abort; else Recycled = true; return Failure < 0 ? Failure : 0; }
-        public int PreRenameItem(uint f, IntPtr i, string n) => Abort;
-        public int PostRenameItem(uint f, IntPtr i, string n, int r, IntPtr c) => Abort;
-        public int PreMoveItem(uint f, IntPtr i, IntPtr d, string n) => Abort;
-        public int PostMoveItem(uint f, IntPtr i, IntPtr d, string n, int r, IntPtr c) => Abort;
-        public int PreCopyItem(uint f, IntPtr i, IntPtr d, string n) => Abort;
-        public int PostCopyItem(uint f, IntPtr i, IntPtr d, string n, int r, IntPtr c) => Abort;
-        public int PreNewItem(uint f, IntPtr d, string n) => Abort;
-        public int PostNewItem(uint f, IntPtr d, string n, string t, uint a, int r, IntPtr c) => Abort;
-        public int UpdateProgress(uint t, uint d) => 0; public int ResetTimer() => 0; public int PauseTimer() => 0; public int ResumeTimer() => 0;
+        public int PreRenameItem(uint f, IntPtr i, string n) { return Abort; }
+        public int PostRenameItem(uint f, IntPtr i, string n, int r, IntPtr c) { return Abort; }
+        public int PreMoveItem(uint f, IntPtr i, IntPtr d, string n) { return Abort; }
+        public int PostMoveItem(uint f, IntPtr i, IntPtr d, string n, int r, IntPtr c) { return Abort; }
+        public int PreCopyItem(uint f, IntPtr i, IntPtr d, string n) { return Abort; }
+        public int PostCopyItem(uint f, IntPtr i, IntPtr d, string n, int r, IntPtr c) { return Abort; }
+        public int PreNewItem(uint f, IntPtr d, string n) { return Abort; }
+        public int PostNewItem(uint f, IntPtr d, string n, string t, uint a, int r, IntPtr c) { return Abort; }
+        public int UpdateProgress(uint t, uint d) { return 0; } public int ResetTimer() { return 0; } public int PauseTimer() { return 0; } public int ResumeTimer() { return 0; }
     }
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
     static extern void SHCreateItemFromParsingName(string path, IntPtr context, ref Guid iid, out IntPtr item);
-    public static Task RecycleAsync(string path, Func<bool> revalidate, IntPtr owner)
+    [StructLayout(LayoutKind.Sequential)]
+    struct FileInfo { public uint Attributes, CreatedLow, CreatedHigh, AccessLow, AccessHigh, WriteLow, WriteHigh, Volume, SizeHigh, SizeLow, Links, IndexHigh, IndexLow; }
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetFileInformationByHandle(SafeFileHandle file, out FileInfo info);
+
+    public static void Recycle(string path, string expected)
     {
-        var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread = new Thread(() =>
-        {
-            object? com = null; IntPtr item = IntPtr.Zero;
-            try
-            {
-                if (!revalidate()) throw new IOException("The folder changed after confirmation. Nothing was recycled.");
-                com = Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("3AD05575-8857-4850-9277-11B85BDB8E09"))!)!;
-                var operation = (IOperation)com;
-                operation.SetOwnerWindow(owner);
-                operation.SetOperationFlags(0x00080000 | 0x20000000 | 0x00100000 | 0x0400 | 0x0010 | 0x0004);
-                var iid = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
-                SHCreateItemFromParsingName(path, IntPtr.Zero, ref iid, out item);
-                var sink = new Sink(revalidate); operation.DeleteItem(item, sink); operation.PerformOperations();
-                operation.GetAnyOperationsAborted(out var aborted);
-                if (aborted || sink.Failure < 0 || !sink.Recycled) throw new IOException("Windows did not confirm recycling. The project remains in the list.");
-                completed.SetResult();
+        Func<bool> matches = delegate {
+            using (var file = CreateFile(path, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero)) {
+                FileInfo info;
+                if (file.IsInvalid || !GetFileInformationByHandle(file, out info)) return false;
+                return string.Format("{0:X8}:{1:X8}{2:X8}", info.Volume, info.IndexHigh, info.IndexLow) == expected;
             }
-            catch (Exception error) { completed.SetException(error); }
-            finally { if (item != IntPtr.Zero) Marshal.Release(item); if (com != null) Marshal.FinalReleaseComObject(com); }
-        }) { IsBackground = true, Name = "Pinna2HRTF recycle" };
-        thread.SetApartmentState(ApartmentState.STA); thread.Start(); return completed.Task;
+        };
+        if (!matches()) throw new IOException("Project folder identity changed");
+        object com = Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("3AD05575-8857-4850-9277-11B85BDB8E09")));
+        IntPtr item = IntPtr.Zero;
+        try {
+            var operation = (IOperation)com;
+            operation.SetOperationFlags(0x00080000 | 0x20000000 | 0x00100000 | 0x0400 | 0x0010 | 0x0004);
+            var iid = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
+            SHCreateItemFromParsingName(path, IntPtr.Zero, ref iid, out item);
+            var sink = new Sink(matches);
+            operation.DeleteItem(item, sink);
+            operation.PerformOperations();
+            bool aborted;
+            operation.GetAnyOperationsAborted(out aborted);
+            if (aborted || sink.Failure < 0 || !sink.Recycled) throw new IOException("Windows did not confirm recycling");
+        } finally {
+            if (item != IntPtr.Zero) Marshal.Release(item);
+            Marshal.FinalReleaseComObject(com);
+        }
     }
 }

@@ -13,18 +13,33 @@ STEPS = {
 }
 
 
+MACHINE_COMMANDS = ("project", "mesh", "pressure", "fit-worker", "outputs", "output-worker")
+
+
 def cli() -> None:
     arguments = sys.argv[1:]
     if not arguments or arguments[0] in {"-h", "--help"}:
-        print("usage: Pinna2HRTF {scan-preparation|inference|preprocessing|numcalc|sofa|postprocessing|run-config} [options]")
+        print("usage: Pinna2HRTF {" + "|".join((*STEPS, *MACHINE_COMMANDS, "geometry", "ear-canal")) + "} [options]")
         return
     step = arguments[0]
+    if step in MACHINE_COMMANDS or step in {"geometry", "ear-canal"}:
+        sys.argv = [f"Pinna2HRTF {step}", *arguments[1:]]
+        if step == "ear-canal":
+            from .Preprocessing.src.ear_canal_closer import main
+            main()
+        elif step == "geometry":
+            from .Geometry import main
+            main()
+        else:
+            from .Commands import machine_command
+            machine_command(step)
+        return
     if step not in STEPS:
         raise SystemExit(f"Unknown Pinna2HRTF step: {step}")
     step_arguments = arguments[1:]
     config_index = next((index for index, argument in enumerate(step_arguments)
                          if argument == "--config" or argument.startswith("--config=")), None)
-    if step in {"scan-preparation", "inference", "preprocessing", "numcalc", "sofa", "postprocessing"} and config_index is not None:
+    if step != "run-config" and config_index is not None:
         if step_arguments[config_index] == "--config":
             if config_index + 1 >= len(step_arguments):
                 raise SystemExit("--config requires a path")

@@ -51,8 +51,8 @@ public partial class MainWindow
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(editorLifetime.Token);
         try
         {
-        var info = GeometryProcess("-B", "-u", "-c", "import contextlib,sys\nwith contextlib.redirect_stdout(sys.stderr):\n from HRTFCalculation.ManualPPMFitting import serve\nserve()");
-        using var worker = new PPMPythonWorker(info, project.Id);
+        var info = GeometryProcess("-B", "-u", "-m", "HRTFCalculation", "fit-worker");
+        using var worker = new CLIWorker(info, project.Id);
         var closed = new TaskCompletionSource();
         editor.Window.Closed += (_,_) => { lifetime.Cancel(); worker.Dispose(); editorWindows.Remove(editor.Window); closed.TrySetResult(); };
         editor.Controls.Margin = new Thickness(16); editor.Controls.Spacing = 12;
@@ -139,8 +139,6 @@ public partial class MainWindow
         var oldFit = project.Settings.ManualPPM.For(side);
         var desktopTemplate = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "PPM.blend");
         var template = File.Exists(project.Settings.ManualPPM.TemplateBlend) ? project.Settings.ManualPPM.TemplateBlend! : File.Exists(desktopTemplate) ? desktopTemplate : "";
-        // Stale fits may be opened for explicit review/re-save, never selected
-        // silently for preprocessing. The current target is validated on save.
         var savedParameters = oldFit != null && SamePath(oldFit.Source, source) && File.Exists(oldFit.Parameters) ? oldFit.Parameters : null;
         void HistoryState()
         {
@@ -182,8 +180,6 @@ public partial class MainWindow
             if (skeleton != null) editor.Viewport.Items.Remove(skeleton);
             if (result.TryGetProperty("skeleton",out var bones))
             {
-                // Match the Mac rig: curved cyan B-Bones, yellow controls and
-                // joint markers, visible through the mesh like Blender In Front.
                 var bendy = new MeshBuilder(); var controlsMesh = new MeshBuilder();
                 foreach (var bone in bones.EnumerateArray())
                 {
@@ -246,8 +242,6 @@ public partial class MainWindow
                     NumberBoxEditing.Attach(number, (UIElement)editor.Window.Content, editor.NavigationButton,
                         () => values[id], value =>
                     {
-                        // Merely focusing a value formatted to two decimals must
-                        // not replace a saved parameter with its rounded display.
                         var displayed = formatter.ParseDouble(formatter.FormatDouble(values[id])) ?? values[id];
                         if (!syncing && !busy && catalog.ShouldCommitNumber(id, value, displayed)) slider.Value = value;
                     }, text => formatter.ParseDouble(text), value => formatter.FormatDouble(value));
@@ -395,10 +389,4 @@ public partial class MainWindow
         for(var i=0;i<vertices;i++){var d=reader.ReadSingle();var c=FieldColors.Distance(d);mesh.Colors.Add(new(c.X,c.Y,c.Z,c.W));}NativeEditor.Normals(mesh);return mesh;
     }
 
-    static void CommitFitFiles(Dictionary<string,byte[]> files)
-    {
-        var originals=files.Keys.ToDictionary(path=>path,path=>File.Exists(path)?File.ReadAllBytes(path):null);
-        try{foreach(var pair in files){var temporary=pair.Key+"."+Guid.NewGuid()+".tmp";try{File.WriteAllBytes(temporary,pair.Value);File.Move(temporary,pair.Key,true);}finally{if(File.Exists(temporary))File.Delete(temporary);}}}
-        catch{foreach(var pair in originals){if(pair.Value==null){if(File.Exists(pair.Key))File.Delete(pair.Key);}else File.WriteAllBytes(pair.Key,pair.Value);}throw;}
-    }
 }

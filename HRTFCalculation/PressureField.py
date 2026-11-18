@@ -68,7 +68,6 @@ def _geometry(source):
 
 def _pressure(path):
     records = _records(path)
-    # NumCalc: version, number of groups, then group ID/count and complex rows.
     if len(records) < 3:
         raise ValueError(f"Incomplete pressure file: {path.name}")
     values = {}
@@ -92,7 +91,6 @@ def _pressure(path):
 
 
 def _frequencies(source):
-    # Use the solver's frequency curve, not a reconstructed linspace.
     text = source.read_text()
     match = re.search(r"^\s*##?\s*Load Frequency Curve[^\n]*\n", text, re.M | re.I)
     if not match:

@@ -39,7 +39,6 @@ def cut_eararea(head, ear, ear_cut_clearance_scale=1.3, side='auto', mode='ellip
     if mode not in ('ellipse', 'exact'):
         raise Exception(f"Unknown mode {mode!r}. Use 'ellipse' or 'exact'.")
 
-    # Resolve side once, then dispatch.
     if side == 'auto':
         if ear.vertices[0, 1] > 0:
             side = 'left'
@@ -56,34 +55,26 @@ def cut_eararea(head, ear, ear_cut_clearance_scale=1.3, side='auto', mode='ellip
 def _ellipse_cut(head, ear, ear_cut_clearance_scale, side):
     """Original behaviour: remove faces inside an axis-aligned elliptical cylinder."""
     a = ( np.abs(np.max(ear.vertices[:,2]) - np.min(ear.vertices[:,2])) / 2 ) * ear_cut_clearance_scale
-    # NOTE: the x semi-axis applies the clearance scale twice (scale**2) while
-    # z applies it once. This asymmetry is the original behaviour and the
-    # meshes/HRTFs produced so far depend on it, so it is intentionally kept.
     b = ( np.abs(np.max(ear.vertices[:,0]) - np.min(ear.vertices[:,0])) / 2 ) * ear_cut_clearance_scale*ear_cut_clearance_scale
 
-    # compute center of the ear
     offset = ( (np.max(ear.vertices[:,0])+np.min(ear.vertices[:,0]))/2, (np.max(ear.vertices[:,2])+np.min(ear.vertices[:,2]))/2)
 
-    # check if cylinder covers the whole ear
     ear_mask = elliptical_cylinder_mask(ear, a, b, offset, side=side)
     if not ear_mask.all():
        import warnings
        warnings.warn('Not all of the ear was removed. Try again with a bigger ear_cut_clearance_scale.')
 
-    # compute the vertex mask
     vert_mask = elliptical_cylinder_mask(head, a, b, offset, side=side)
 
 
-    # select the faces to remove
     n = len(head.vertices)
     vert_ind = np.argwhere(vert_mask)
     mask = np.ones(n, dtype=bool)
     mask[vert_ind] = False
     face_mask = mask[head.faces].any(axis=1)
 
-    # remove faces and update verticess
     head.update_faces(face_mask)
-    head.remove_unreferenced_vertices()  # automatically removes all vertices not used by faces
+    head.remove_unreferenced_vertices()
 
     return head
 
@@ -139,28 +130,23 @@ def _exact_cut(head, ear, side, contains_radius=0.5):
     return head
 
 
-# Create elliptical cylindermask
 def elliptical_cylinder_mask(mesh, a, b, offset, side='left'):
-    # Ellipse condition in the xz-plane (since the cylinder is along the y-axis)
     x_cond = ((mesh.vertices[:, 0] - offset[0])/ b) ** 2
     z_cond = ((mesh.vertices[:, 2] - offset[1])/ a) ** 2
     ellipse_condition = x_cond + z_cond <= 1
 
-    # Left or Right ear cut
-    if side == 'left':  # if ear is on left side
+    if side == 'left':
         y_condition = (mesh.vertices[:, 1] >= 0)
-    elif side == 'right':  # right side
+    elif side == 'right':
         y_condition = (mesh.vertices[:, 1] <= 0)
     else:
         raise Exception('Inconclusive side parameter. Please use \'left\' or \'right\'.')
 
-    # Both conditions must be satisfied for a vertex to be inside the cylinder
     mask = ellipse_condition & y_condition
     return mask
 
 
 if __name__ == "__main__":
-    # Argument parsing
     parser = argparse.ArgumentParser()
     parser.add_argument('--head_path', type=str, required=True, help='Path to the head mesh')
     parser.add_argument('--ear_path', type=str, required=True, help='Path to the ear mesh')
@@ -176,7 +162,6 @@ if __name__ == "__main__":
     export_path = args.export_path
     ear_cut_clearance_scale = args.spazi if args.spazi is not None else args.ear_cut_clearance_scale
 
-    # File loadup and function call
     head = trimesh.load(head_path, force="mesh")
     ear = trimesh.load(ear_path, force="mesh")
 
@@ -185,9 +170,4 @@ if __name__ == "__main__":
     else:
         head = cut_eararea(head, ear, ear_cut_clearance_scale=ear_cut_clearance_scale)
 
-    # Export
     head.export(export_path)
-
-
-# For debugging only
-#head.show(viewer='gl')

@@ -1,13 +1,16 @@
 """Inference backends. Mac releases use a native Core ML helper."""
 
-import hashlib
 import json
+import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 
 import numpy as np
+
+from ..FileIdentity import sha256
 
 
 ARCHITECTURE_KEYS = ("window_size", "depths", "num_heads")
@@ -19,11 +22,7 @@ def _converted_from(native, checkpoint):
         expected = json.loads(native.read_text()).get("source_checkpoint_sha256")
     except (OSError, ValueError, AttributeError):
         return False
-    digest = hashlib.sha256()
-    with checkpoint.open("rb") as file:
-        for block in iter(lambda: file.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest() == expected
+    return sha256(checkpoint) == expected
 
 
 def checkpoint_path(path):
@@ -31,9 +30,6 @@ def checkpoint_path(path):
     path = Path(path)
     if sys.platform == "darwin" and path.suffix == ".pth":
         native = path.with_suffix(".coreml.json")
-        # The Mac release ships no .pth, so a missing checkpoint resolves to its
-        # conversion. A checkpoint that is present wins unless the conversion was
-        # made from exactly that file; a retrained model must never run stale weights.
         if native.is_file() and (not path.is_file() or _converted_from(native, path)):
             return native
     elif sys.platform != "darwin" and path.name.endswith(".coreml.json"):
@@ -68,11 +64,14 @@ class CoreMLModel:
             item = self.model / relative
             if Path(relative).is_absolute() or ".." in Path(relative).parts or item.is_symlink():
                 raise ValueError("Invalid compiled Core ML resource path")
-            if not item.is_file() or hashlib.sha256(item.read_bytes()).hexdigest() != expected:
+            if not item.is_file() or sha256(item) != expected:
                 raise ValueError(f"The compiled Core ML resource is missing or changed: {item}")
         self.helper = Path(__file__).resolve().parents[2] / "External/bin/ppm_predict"
-        if not self.helper.is_file():
-            raise FileNotFoundError("The native Core ML helper is missing. Rebuild or reinstall the Mac app.")
+        if not os.access(self.helper, os.X_OK) or not self.helper.is_file():
+            installed = shutil.which("ppm_predict")
+            if installed is None:
+                raise FileNotFoundError("Install ppm_predict on PATH to use Core ML inference.")
+            self.helper = Path(installed)
 
     def predict(self, data):
         values = np.ascontiguousarray(data, dtype="<f4")[None]
@@ -123,5 +122,4 @@ def load_model(path, configuration, output_size):
         if sys.platform != "darwin":
             raise ValueError("This platform needs the original PyTorch checkpoint for this model")
         return CoreMLModel(path, configuration, output_size)
-    # Windows and source/CLI environments retain their existing PyTorch path.
     return PyTorchModel(path, configuration, output_size)

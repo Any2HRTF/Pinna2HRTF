@@ -38,8 +38,6 @@ internal sealed record PathIdentity(string Path, string Id)
         {
             tail.Push(System.IO.Path.GetFileName(parent));
             var next = System.IO.Path.GetDirectoryName(parent);
-            // An offline drive has no resolvable ancestor. Keep its absolute
-            // spelling for overlap checks; the selected project validates availability.
             if (next == null) return full;
             parent = next;
         }

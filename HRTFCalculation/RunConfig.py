@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import shlex
@@ -16,6 +15,7 @@ from types import SimpleNamespace
 from typing import Callable, Iterable
 
 from .Config import BUNDLED_EVALUATION_GRID_PATH, DEFAULT_EVALUATION_GRID, PipelineConfig, load_config, save_config, template_config
+from .FileIdentity import sha256
 from .LiveEvents import emit_live_event
 
 
@@ -87,6 +87,8 @@ def project_dirs(config: PipelineConfig) -> list[Path]:
 
 
 def run_from_config(config: PipelineConfig, stages: Iterable[str] | None = None, dry_run: bool = False, logger: Logger = log_default) -> None:
+    from .Outputs import stage_outputs
+    from .StageReceipt import execute as stage_receipt
     selected = list(stages or ["all"])
     config = config.resolved()
     run_all = "all" in selected
@@ -96,23 +98,33 @@ def run_from_config(config: PipelineConfig, stages: Iterable[str] | None = None,
         raise ValueError("Set paths.left_ear and/or paths.right_ear, or enable scan_preparation.")
     prepared = False
     if "scan-preparation" in selected:
-        prepared = run_scan_preparation(config, dry_run, logger, force=True)
+        with stage_outputs(config, "scan-preparation", dry_run):
+            prepared = run_scan_preparation(config, dry_run, logger, force=True)
     elif run_all and config.scan_preparation.enabled:
-        prepared = run_scan_preparation(config, dry_run, logger)
+        with stage_outputs(config, "scan-preparation", dry_run):
+            prepared = run_scan_preparation(config, dry_run, logger)
     if prepared:
         forget_ear_reviews(config, logger)
     if "inference" in selected or (run_all and config.inference.enabled):
-        run_inference(config, dry_run, logger)
-    if "preprocessing" in selected and config.scan_preparation.enabled and "scan-preparation" not in selected:
-        prepared = run_scan_preparation(config, dry_run, logger) or prepared
-        if prepared:
-            forget_ear_reviews(config, logger)
+        with stage_outputs(config, "inference", dry_run):
+            run_inference(config, dry_run, logger)
+            if not dry_run:
+                stage_receipt({"action": "record-stage", "stage": "inference", "config": config.model_dump()})
     if "preprocessing" in selected or (run_all and config.preprocessing.enabled):
-        run_preprocessing(config, dry_run, logger)
+        with stage_outputs(config, "preprocessing", dry_run):
+            if "preprocessing" in selected and config.scan_preparation.enabled and "scan-preparation" not in selected:
+                prepared = run_scan_preparation(config, dry_run, logger) or prepared
+                if prepared:
+                    forget_ear_reviews(config, logger)
+            run_preprocessing(config, dry_run, logger)
     if "numcalc" in selected or (run_all and config.numcalc.enabled):
-        run_numcalc(config, dry_run, logger)
+        with stage_outputs(config, "numcalc", dry_run):
+            run_numcalc(config, dry_run, logger)
     if "postprocessing" in selected or (run_all and config.postprocessing.enabled):
-        run_postprocessing(config, dry_run, logger)
+        with stage_outputs(config, "postprocessing", dry_run):
+            run_postprocessing(config, dry_run, logger)
+            if not dry_run:
+                stage_receipt({"action": "record-stage", "stage": "postprocessing", "config": config.model_dump()})
 
 
 def run_inference(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
@@ -252,10 +264,8 @@ def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
     )
     if signature != preprocessing_input_signature(config):
         raise ValueError("Preprocessing inputs changed while the mesh was being built. Rerun preprocessing.")
-    receipt = config.paths.output_dir / PREPROCESSING_INPUT_RECEIPT
-    temporary = receipt.with_suffix(".tmp")
-    temporary.write_text(json.dumps(signature, sort_keys=True), encoding="utf-8")
-    os.replace(temporary, receipt)
+    from .Outputs import write_json
+    write_json(config.paths.output_dir / PREPROCESSING_INPUT_RECEIPT, signature)
     if config.scan_preparation.enabled:
         from .ScanPreparation import record_stage
         record_stage(config, "preprocessing", [path / "NumCalc/source_1/NC.inp" for path in project_dirs(config)])
@@ -379,9 +389,6 @@ def run_numcalc_slurm(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
 
 
 def slurm_worker_text(config: PipelineConfig) -> str:
-    # Per-step part of NumCalc.frequency_step_complete: all four outputs are non-empty
-    # and the step log contains NumCalc's end marker. Steps solved by a direct run
-    # (NC.out only) are not recognized here and are recomputed.
     adaptive_flag = " -adapt_fmmlength" if config.numcalc.adaptive_fmm_length else ""
     return "\n".join([
         "#!/usr/bin/env bash",
@@ -413,8 +420,6 @@ def collect_sofa_files(projects: list[Path], output_dir: Path) -> None:
     if not projects:
         raise ValueError("No projects were provided for SOFA export")
     if len(projects) == 2:
-        # The pinned Mesh2HRTF merger accepts literal file paths internally.
-        # Pair by filename here to bypass its glob-based directory discovery.
         from mesh2hrtf.Output2HRTF.merge_sofa_files import _merge_sofa_files
         ears = [{source.name: source for source in (project / "Output2HRTF").glob("*.sofa")} for project in projects]
         if not ears[0] or set(ears[0]) != set(ears[1]):
@@ -435,8 +440,6 @@ def collect_sofa_files(projects: list[Path], output_dir: Path) -> None:
 
 
 def inspect_sofa_files(output_dir: Path) -> None:
-    # These plots are exported to files, including from the portable CLI where
-    # no Tcl/Tk desktop runtime is required.
     import matplotlib
     matplotlib.use("Agg", force=True)
     import mesh2hrtf as m2h
@@ -461,7 +464,8 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
     destination = output_dir.resolve()
     protected = [root / name for name in ("Input", "Projects", "Intermediates", "Prepared", "Manual PPM", "MeshEdits", "Logs", ".pinna2hrtf")]
     protected += [p.resolve() for p in (config.paths.left_ear, config.paths.right_ear, config.scan_preparation.scan_path) if p is not None]
-    if root not in destination.parents or any(p == destination or p in destination.parents or destination in p.parents for p in protected):
+    protected += [Path(p).resolve() for p in json.loads(os.environ.get("PINNA2HRTF_PROTECTED_INPUTS", "[]")) if p]
+    if destination == destination.parent or destination == root or destination in root.parents or any(p == destination or p in destination.parents or destination in p.parents for p in protected):
         raise ValueError("Choose a separate SOFA output subfolder without inputs or project work.")
     destination.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".pinna-export-", dir=destination.parent))
@@ -470,14 +474,13 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
         _export_postprocessing(config, staging, logger)
         with _output_manifest_lock(root) as can_record:
             published_files = _publish_export(staging, destination, config.postprocessing.overwrite, root)
-            if can_record:
+            if can_record and destination.is_relative_to(root):
                 _record_published_outputs(root, published_files, logger)
             else:
-                logger("Generated-output manifest is held by the desktop app; it records the published files.")
+                logger("The active stage records the published files at completion.")
         published = True
     finally:
         backups = staging / ".backups"
-        # A failed server rollback must keep the recovery copies for the user.
         if published or not backups.exists() or not any(p.is_file() for p in backups.rglob("*")):
             shutil.rmtree(staging, ignore_errors=True)
         else:
@@ -506,19 +509,10 @@ def _read_output_manifest(project_root: Path) -> dict:
 
 
 def _manifest_key(mapping: dict, relative: str) -> str | None:
-    # The Windows app compares manifest paths case-insensitively.
     if relative in mapping:
         return relative
     folded = relative.casefold()
     return next((key for key in mapping if key.casefold() == folded), None)
-
-
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 @contextmanager
@@ -569,13 +563,12 @@ def _record_published_outputs(project_root: Path, files: list[Path], logger: Log
     document = _read_output_manifest(project_root)
     for path in files:
         relative = path.relative_to(project_root).as_posix()
-        # Whole-second mtimes give identical .NET ticks in Python, Swift and C#.
         info = path.stat()
         os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns - info.st_mtime_ns % 1_000_000_000))
         info = path.stat()
         entry = {"Stage": "Postprocessing", "Size": info.st_size,
                  "ModifiedUtcTicks": info.st_mtime_ns // 100 + _DOTNET_EPOCH_TICKS,
-                 "Sha256": _file_sha256(path).upper()}
+                 "Sha256": sha256(path).upper()}
         document["Files"][_manifest_key(document["Files"], relative) or relative] = entry
         parent = PurePosixPath(relative).parent
         while str(parent) != ".":
@@ -597,13 +590,20 @@ def _publish_export(staging, destination, overwrite, project_root=None) -> list[
     backups = staging / ".backups"
     backups.mkdir()
     installed = []
-    # Read once: only files whose current hash matches a manifest entry may be replaced.
-    owned_files = _read_output_manifest(project_root)["Files"] if project_root is not None else {}
+    from .Outputs import classify, write_json
+    external = project_root is not None and not destination.is_relative_to(project_root)
+    ledger = project_root / ".pinna2hrtf/external-sofa-outputs.json" if external else None
+    if ledger and ledger.resolve() != ledger:
+        raise ValueError("Linked SOFA ownership file")
+    external_files = json.loads(ledger.read_text(encoding="utf-8-sig")) if ledger and ledger.exists() else {}
+    owned_files = _read_output_manifest(project_root)["Files"] if project_root and not external else {}
     try:
         for source in list(staging.rglob("*")):
             if not source.is_file() or backups in source.parents:
                 continue
             relative = source.relative_to(staging)
+            if external and classify("HRTF/" + relative.as_posix()) != "Postprocessing":
+                continue
             target = destination / relative
             if target.is_symlink() or any(p.is_symlink() for p in target.parents):
                 raise ValueError("Linked export paths are not supported.")
@@ -612,15 +612,24 @@ def _publish_export(staging, destination, overwrite, project_root=None) -> list[
             if target.exists():
                 if not overwrite:
                     raise FileExistsError(target)
-                if project_root is not None:
+                if external:
+                    if sha256(target).upper() != external_files.get(str(target), "").upper():
+                        raise ValueError(f"Keeping modified or untracked output: {target}")
+                elif project_root is not None:
                     key = _manifest_key(owned_files, target.relative_to(project_root).as_posix())
                     owned = owned_files.get(key) if key is not None else None
-                    if not isinstance(owned, dict) or _file_sha256(target).lower() != str(owned.get("Sha256", "")).lower():
+                    if not isinstance(owned, dict) or sha256(target).lower() != str(owned.get("Sha256", "")).lower():
                         raise ValueError(f"Keeping modified or untracked output: {target}. Move it away, then export again.")
                 backup.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(target, backup)
             installed.append((target, backup))
             source.replace(target)
+            if external:
+                external_files[str(target)] = sha256(target)
+        if ledger:
+            if not any(target.suffix.lower() == ".sofa" for target, _ in installed):
+                raise ValueError("Postprocessing produced no SOFA files")
+            write_json(ledger, external_files)
     except BaseException:
         for target, backup in reversed(installed):
             if backup.exists():
@@ -734,7 +743,6 @@ def sofa_cli() -> None:
     args = parse_sofa_args()
     import mesh2hrtf as m2h
     output_dir = Path(args.output_dir)
-    # Export never deletes anything in a user-selected directory.
     output_dir.mkdir(parents=True, exist_ok=True)
     projects = [Path(project) for project in (args.left_project, args.right_project) if project]
     if not projects:

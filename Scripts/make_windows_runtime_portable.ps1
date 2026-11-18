@@ -5,9 +5,6 @@ $runtime = Get-ChildItem -LiteralPath (Join-Path $package 'Python') -Directory |
 if (-not $runtime) { throw 'The bundled Python 3.11 runtime is missing.' }
 $scripts = Join-Path $package '.venv\Scripts'
 New-Item -ItemType Directory -Force $scripts | Out-Null
-# CPython's Windows venv launcher embeds a base interpreter path. Use the real
-# interpreter and relative _pth files instead, so relocation does not depend on
-# the current directory, a system Python, or the original build folder.
 foreach ($name in @('python.exe', 'pythonw.exe')) {
     if (Test-Path -LiteralPath (Join-Path $runtime.FullName $name)) { Copy-Item -LiteralPath (Join-Path $runtime.FullName $name) -Destination (Join-Path $scripts $name) -Force }
 }

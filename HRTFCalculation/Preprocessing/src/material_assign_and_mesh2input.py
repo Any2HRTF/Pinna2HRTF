@@ -14,7 +14,6 @@ import bmesh # type: ignore
 import numpy as np
 
 
-# Check for the mesh2input add-on which is needed for export
 def check_addon():
     import addon_utils # type: ignore
 

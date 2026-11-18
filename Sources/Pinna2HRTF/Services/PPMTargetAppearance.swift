@@ -1,8 +1,6 @@
 import AppKit
 import SceneKit
 
-// Apply explicit alpha to every geometry, including nested ModelIO nodes.
-// The fitted PPM keeps its opaque distance colors underneath.
 enum PPMTargetAppearance {
     static func apply(to root: SCNNode, opacity: Double, visible: Bool) {
         let opacity = min(1, max(0, opacity))
@@ -18,8 +16,6 @@ enum PPMTargetAppearance {
             material.transparencyMode = .singleLayer
             material.blendMode = .alpha
             material.readsFromDepthBuffer = true
-            // The single-layer pass needs depth writes to discard rear surfaces;
-            // renderingOrder draws it after the opaque PPM has already rendered.
             material.writesToDepthBuffer = true
             geometry.materials = [material]
             node.renderingOrder = opacity < 1 ? 10 : 0

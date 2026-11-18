@@ -33,7 +33,6 @@ if (-not $dotnetPath) {
     throw "dotnet is not on PATH and .dotnet\dotnet.exe was not found."
 }
 
-# Check the native payload before replacing a previously working package.
 $requiredNative = @("libpmp.dll", "libpmp_vis.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll")
 if (-not $AllowMissingExternalTools) { $requiredNative += @("NumCalc.exe", "hrtf_mesh_grading.exe") }
 $missingNative = $requiredNative | Where-Object { -not (Test-Path (Join-Path $externalSourceRoot "bin\$_")) }
@@ -54,8 +53,6 @@ if ($LASTEXITCODE -ne 0) {
 
 New-Item -ItemType Directory -Path $dist | Out-Null
 Copy-Item (Join-Path $publish "*") $dist -Recurse -Force
-# WinUI's XAML compiler emits the page resources next to the publish folder,
-# so copy them explicitly for unpackaged/self-contained deployments.
 foreach ($xamlResource in @("App.xbf", "MainWindow.xbf")) {
     $sourceXamlResource = Join-Path $buildOutput $xamlResource
     if (Test-Path $sourceXamlResource) {
@@ -67,6 +64,14 @@ if (Test-Path $appPri) {
     Copy-Item $appPri (Join-Path $dist "Pinna2HRTF.pri") -Force
 }
 Copy-Item (Join-Path $root "HRTFCalculation") (Join-Path $dist "HRTFCalculation") -Recurse -Force
+@'
+@echo off
+setlocal
+set "PINNA2HRTF_ROOT=%~dp0"
+set "PYTHONPATH=%~dp0"
+"%~dp0.venv\Scripts\python.exe" -B -P -m HRTFCalculation %*
+exit /b %errorlevel%
+'@ | Set-Content -LiteralPath (Join-Path $dist "Pinna2HRTF-CLI.cmd") -Encoding ascii
 Copy-Item (Join-Path $root "pyproject.toml") (Join-Path $dist "pyproject.toml") -Force
 Copy-Item (Join-Path $root "ProjectSettingHelp.json") (Join-Path $dist "ProjectSettingHelp.json") -Force
 if (Test-Path (Join-Path $windowsProject "Resources\app_icon.ico")) {
@@ -82,8 +87,6 @@ New-Item -ItemType Directory -Path $distBin -Force | Out-Null
 $sourceExternal = $externalSourceRoot
 $sourceBin = Join-Path $sourceExternal "bin"
 if (Test-Path $sourceBin) {
-    # Mesh grading and NumCalc are native builds. Copy their complete sibling
-    # runtime (DLLs and helper tools) so the portable app also works offline.
     Get-ChildItem $sourceBin -File -Force | Where-Object { $_.Name -ne "uv.exe" } | ForEach-Object {
         Copy-Item $_.FullName (Join-Path $distBin $_.Name) -Force
     }

@@ -24,9 +24,6 @@ public partial class App : Application
 
     public App()
     {
-        // FileInfo timestamps can lazily initialize TimeZoneInfo under a lock.
-        // Do this before XAML loading/background inspection: an STA lock wait
-        // inside Loaded pumps native callbacks into the half-built window.
         _ = TimeZoneInfo.Local;
         var requestedCulture = Environment.GetEnvironmentVariable("PINNA2HRTF_CULTURE");
         if (!string.IsNullOrWhiteSpace(requestedCulture))
@@ -35,8 +32,6 @@ public partial class App : Application
             System.Globalization.CultureInfo.DefaultThreadCurrentCulture = culture;
             System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = culture;
         }
-        // Keep a named marker alive for the whole process lifetime. Inno Setup
-        // uses the same mutex to detect a running app before install/uninstall.
         bool createdNew;
         var instanceName = InstanceMutexName;
         var reviewProfile = Environment.GetEnvironmentVariable("PINNA2HRTF_APP_DATA");
@@ -44,14 +39,11 @@ public partial class App : Application
         instanceMutex = new Mutex(initiallyOwned: true, name: instanceName, createdNew: out createdNew);
         if (!createdNew)
         {
-            // Do not create a second visible app instance.
             try { instanceMutex.Dispose(); } catch { }
             instanceMutex = null;
             Environment.Exit(0);
             return;
         }
-        // Render at the monitor's native DPI instead of allowing Windows to
-        // bitmap-scale the complete unpackaged process at 125%/150%/200%.
         _ = SetProcessDpiAwarenessContext(PerMonitorV2);
         UnhandledException += (_, error) =>
         {

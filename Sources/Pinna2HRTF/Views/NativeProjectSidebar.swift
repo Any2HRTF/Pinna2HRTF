@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 
-// Use the native outline view's single drag session for both grouping and ordering.
 struct NativeProjectSidebar: NSViewRepresentable {
     @ObservedObject var store: AppStore
     @Binding var selectedFolderID: UUID?
@@ -213,7 +212,6 @@ struct NativeProjectSidebar: NSViewRepresentable {
                 var beforeID: UUID?
                 if index >= 0 && index < siblings.count, case let .project(destination) = siblings[index].kind { beforeID = destination }
                 parent.store.moveProject(id, toFolder: folderID, before: beforeID)
-                // A drop at the end of a group should append within that group.
                 if beforeID == nil, let sourceIndex = parent.store.projects.firstIndex(where: { $0.id == id }) {
                     let moved = parent.store.projects.remove(at: sourceIndex)
                     let last = parent.store.projects.lastIndex(where: { $0.folderID == folderID })
@@ -284,7 +282,6 @@ struct NativeProjectSidebar: NSViewRepresentable {
     }
 }
 
-// Resolve the clicked row before constructing the menu.
 private final class ProjectOutlineView: NSOutlineView {
     var contextMenuForRow: ((Int) -> NSMenu?)?
 
@@ -302,7 +299,6 @@ private final class ProjectOutlineView: NSOutlineView {
     }
 }
 
-// Row content is display-only; let the outline view handle mouse selection and dragging.
 private final class SidebarRowHostingView: NSHostingView<AnyView> {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

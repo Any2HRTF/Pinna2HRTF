@@ -28,7 +28,6 @@ final class MeshWorkspaceSplitView: NSSplitView, NSSplitViewDelegate {
         isVertical = true
         dividerStyle = .thin
         delegate = self
-        // Pane minimums belong to the split view, not its hosted content's current size.
         viewerHost.sizingOptions = []
         inspectorHost.sizingOptions = []
         applyingSize = true
@@ -48,8 +47,6 @@ final class MeshWorkspaceSplitView: NSSplitView, NSSplitViewDelegate {
             inspectorHost.isHidden = false
             addArrangedSubview(inspectorHost)
         } else {
-            // A hidden zero-width pane can leave NSSplitView's old divider painted
-            // over the expanded Metal viewer. Remove the pane from the split entirely.
             removeArrangedSubview(inspectorHost)
             inspectorHost.removeFromSuperview()
             inspectorHost.isHidden = true

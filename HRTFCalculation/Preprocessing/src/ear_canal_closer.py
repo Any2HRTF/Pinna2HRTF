@@ -115,7 +115,6 @@ def _interpolated_caps(loops, n_neighbors=5):
         if len(loop) < 3:
             continue
 
-        # Push the cap slightly inward (toward the head) rather than outward.
         if np.mean(loop[:, 1]) > 0:
             flat_y = float(np.min(loop[:, 1]))
         else:
@@ -187,7 +186,7 @@ def ear_canal_closer(ear, mode="legacy"):
     return ear
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--ear_path', type=str, required=True, help='Path to the ear mesh')
     parser.add_argument('--export_path', type=str, required=False, default=None, help='Path to save the closed up ear to')
@@ -212,3 +211,7 @@ if __name__ == "__main__":
     export_path = args.export_path
     ear = ear_canal_closer(ear, mode=args.mode)
     ear.export(export_path)
+
+
+if __name__ == "__main__":
+    main()

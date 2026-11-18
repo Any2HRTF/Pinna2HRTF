@@ -38,7 +38,6 @@ internal static class HeadGeometry
     static JsonNode? Get(JsonObject node, string key) => node[Key(node, key)];
     public static string MigrateRegistry(string json, out bool changed)
     {
-        // Version compatibility only; remove in a future release.
         var root = JsonNode.Parse(json)?.AsObject() ?? throw new InvalidDataException("Invalid project registry.");
         changed = root.Remove(Key(root, "appVersion"));
         if (Get(root, "numericFormat")?.GetValue<string>() != "invariant-1")
@@ -64,7 +63,6 @@ internal static class HeadGeometry
             if (entry is not JsonObject project || Get(project, "settings") is not JsonObject settings || Get(settings, "preprocessing") is not JsonObject p) continue;
             if (!p.ContainsKey(Key(p, "earDistance")))
             {
-                // The previous unreleased review build stored per-side targets.
                 var sides = new[] { Get(p, "earDistanceLeft"), Get(p, "earDistanceRight") }.Where(x => x != null).Select(x => Parse(x!.GetValue<string>())).ToArray();
                 if (sides.Length > 0) p[Key(p, "earDistance")] = Number(sides.Average());
                 else
@@ -74,7 +72,6 @@ internal static class HeadGeometry
                     if (enabled && !string.IsNullOrWhiteSpace(old)) p[Key(p, "earDistance")] = old;
                 }
             }
-            // Legacy headRadius field: version compatibility only; remove in a future release.
             foreach (var key in new[] { "headRadius", "useCustomHeadRadius", "earDistanceLeft", "earDistanceRight", "linkGeometry" })
                 changed |= p.Remove(Key(p, key));
         }

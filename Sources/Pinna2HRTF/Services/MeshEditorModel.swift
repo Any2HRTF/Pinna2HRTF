@@ -70,7 +70,6 @@ final class MeshEditorModel: ObservableObject {
         return simd_normalize(vector) * (flipPlane ? -1 : 1)
     }
     var planeOrigin: SIMD3<Float> {
-        // Flip changes the kept side, not the location of the cutting plane.
         let direction = (normal ?? SIMD3<Float>(0,1,0)) * (flipPlane ? -1 : 1)
         return center + direction * Float(planeOffset)
     }
@@ -102,11 +101,7 @@ final class MeshEditorModel: ObservableObject {
     static func send(_ command: [String: Any]) async throws -> [String: Any] {
         let data = try JSONSerialization.data(withJSONObject: command)
         let response = try await Task.detached(priority: .userInitiated) {
-            try ProjectConfigDocument.runPython("""
-            import sys, json
-            from HRTFCalculation.MeshEditing import execute
-            print(json.dumps(execute(json.load(sys.stdin)), allow_nan=False))
-            """, input: data, timeout: 600, operation: "Mesh editing")
+            try ProjectConfigDocument.run(["-m", "HRTFCalculation", "mesh"], input: data, timeout: 600, operation: "Mesh editing")
         }.value
         guard let result = try JSONSerialization.jsonObject(with: response) as? [String: Any] else {
             throw ProjectValidation.Failure(message: "The mesh editor returned unreadable data.")
@@ -145,7 +140,6 @@ final class MeshEditorModel: ObservableObject {
             command["output"] = next.path
             command["frame"] = workspace.appendingPathComponent("frame").path
             let result = try await Self.send(command)
-            // Read the new buffers before changing undo history.
             try install(result)
             versions = Array(versions.prefix(currentVersion + 1)) + [next]
             var operation = arguments
@@ -323,8 +317,6 @@ final class MeshEditorModel: ObservableObject {
         let path = CGMutablePath(); path.addLines(between: points); path.closeSubpath()
         let rectangle = path.boundingBox
         var chosen = Set<Int>()
-        // Only projected centroids enclosed by the lasso are candidates. The
-        // default front-surface mode also checks the closest hit for occlusion.
         for face in 0..<(faces.count / 3) {
             let p = (vertex(Int(faces[face*3])) + vertex(Int(faces[face*3+1])) + vertex(Int(faces[face*3+2]))) / 3
             let projected = view.projectPoint(SCNVector3(p))

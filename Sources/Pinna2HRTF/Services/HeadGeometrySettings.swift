@@ -38,7 +38,6 @@ enum HeadGeometrySettings {
         if let text = settings.earDistance, try number(text) <= 0 { throw error("Ear distance must be positive.") }
     }
     static func migrateRegistry(_ object: Any) throws -> Any {
-        // Version compatibility only; remove in a future release.
         guard var root = object as? [String: Any], var projects = root["projects"] as? [[String: Any]] else { throw error("Invalid project registry.") }
         for index in projects.indices {
             guard var settings = projects[index]["settings"] as? [String: Any], var p = settings["preprocessing"] as? [String: Any] else { continue }
@@ -46,7 +45,6 @@ enum HeadGeometrySettings {
                 let sides = try ["earDistanceLeft", "earDistanceRight"].compactMap { p[$0] as? String }.map(number)
                 if !sides.isEmpty { p["earDistance"] = String(sides.reduce(0, +) / Double(sides.count)) }
                 else {
-                    // Legacy headRadius field: version compatibility only; remove in a future release.
                     let old = p["headRadius"] as? String
                     if p["useCustomHeadRadius"] as? Bool ?? (old != nil), let old { p["earDistance"] = old }
                 }

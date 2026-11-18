@@ -409,7 +409,6 @@ public partial class MainWindow
                 var saved = p != null && p.Settings.ScanPreparation.EarEdit(row.Side) != null;
                 row.Original.Visibility = saved ? Visibility.Visible : Visibility.Collapsed;
                 row.Status.Text = saved ? EarReviewIsCurrent(p!, row.Side, inspection) ? "Saved edit in use" : "Saved edit outdated" : ready ? "Ready - editing optional" : "Prepare or choose an ear first";
-                // Editing an outdated reviewed mesh must reopen its original source.
                 row.Edit.IsEnabled = !busy && p != null && (!scan || StageIsComplete(Stage.ScanPreparation, p, inspection));
             }
             foreach (var row in workflowFitRows) {

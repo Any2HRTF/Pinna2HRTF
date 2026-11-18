@@ -366,7 +366,6 @@ public partial class MainWindow
 
         void AddRemovedHalfspacePreview(Vector3 origin, Vector3 planeNormal, Vector3 u, Vector3 v, double halfU, double halfV)
         {
-            // A narrow red strip on the discarded side gives a clear directional cue without obscuring the ear.
             var center = origin + planeNormal * (float)Math.Max(mesh!.MaximumDimension * 0.2, 1);
             var half = (float)Math.Max(Math.Min(halfU, halfV) * 0.22, 1);
             var positions = new Vector3Collection { center - u * half - v * half, center + u * half - v * half, center + u * half + v * half, center - u * half + v * half };
@@ -643,20 +642,8 @@ public partial class MainWindow
         }
     }
 
-    async Task<JsonElement> RunMeshEditorPythonAsync(Dictionary<string, object> request, CancellationToken cancellation = default)
-    {
-        var executable = BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
-        if (!File.Exists(executable)) throw new FileNotFoundException("The app's Python runtime is missing.", executable);
-        var script = "import sys,json; from HRTFCalculation.MeshEditing import execute; print(json.dumps(execute(json.load(sys.stdin)),allow_nan=False))";
-        var start = new ProcessStartInfo(executable) { WorkingDirectory = packageRoot, UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        start.ArgumentList.Add("-X"); start.ArgumentList.Add("utf8");
-        start.ArgumentList.Add("-c"); start.ArgumentList.Add(script); ApplyProcessEnvironment(start);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, editorLifetime.Token);
-        var result = await ToolProcess.RunAsync(start, JsonSerializer.Serialize(request, jsonOptions), TimeSpan.FromSeconds(600), linked.Token);
-        var stdout = result.Output;
-        if (result.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error) ? "The mesh edit failed." : result.Error.Trim());
-        using var document = JsonDocument.Parse(stdout); return document.RootElement.Clone();
-    }
+    Task<JsonElement> RunMeshEditorPythonAsync(Dictionary<string, object> request, CancellationToken cancellation = default) =>
+        RequestPythonAsync("mesh", request, cancellation);
 
     bool EarReviewIsCurrent(ProjectRecord project, string side, ArtifactInspection? inspection = null)
     {

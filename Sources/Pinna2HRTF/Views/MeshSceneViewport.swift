@@ -1,7 +1,6 @@
 import AppKit
 import SceneKit
 
-// Keep SceneKit's drawable size out of SwiftUI's split-view sizing calculations.
 final class MeshSceneViewport: NSView {
     let sceneView = NavigableSCNView()
     private var resizeEndWork: DispatchWorkItem?
@@ -31,7 +30,6 @@ final class MeshSceneViewport: NSView {
         let visibleSize = newSize.width > 0 && newSize.height > 0
         sceneView.rendersContinuously = visibleSize
         guard visibleSize else { return }
-        // Split-divider drags do not always deliver AppKit's live-resize notifications.
         let work = DispatchWorkItem { [weak self] in
             guard let self, !self.inLiveResize else { return }
             self.finishResizing()

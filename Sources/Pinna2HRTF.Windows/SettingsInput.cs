@@ -7,8 +7,6 @@ namespace Pinna2HRTF.Windows;
 
 public partial class MainWindow
 {
-    // Keep drafts out of the saved project until Enter or focus loss. In particular,
-    // a rounded automatic distance must never become a manual geometry override.
     readonly Dictionary<TextBox, (ProjectRecord? Project, string Text)> settingInputStarts = [];
     readonly HashSet<TextBox> committingSettingInputs = [];
     readonly Dictionary<(Guid Project, string Id), (string Draft, string Error)> invalidSettingDrafts = [];
@@ -122,7 +120,6 @@ public partial class MainWindow
 
     void SetGeometryInputText(string text)
     {
-        // An asynchronous mesh measurement can finish while a user is typing.
         if (earDistanceBox.FocusState != FocusState.Unfocused && HasSettingDraft(earDistanceBox) && !geometryEditing) return;
         earDistanceBox.Text = text;
         RebaseSettingInput(earDistanceBox);

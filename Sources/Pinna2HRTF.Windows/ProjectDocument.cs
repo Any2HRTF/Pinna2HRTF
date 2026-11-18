@@ -4,8 +4,6 @@ using System.Text.Json.Nodes;
 
 namespace Pinna2HRTF.Windows;
 
-// A preserved, validated document is the base. Only fields owned by desktop
-// controls are replaced; supported YAML-only settings survive every app save.
 internal static class ProjectDocument
 {
     internal const string DefaultEvaluationGrid = "ARI_Grid";
@@ -136,7 +134,6 @@ internal static class ProjectDocument
         pre.MeshGammaOpposite = S("preprocessing", "mesh_gamma_opposite", "0.1");
         scan.Enabled = Flag("scan_preparation", "enabled"); scan.ScanPath = S("scan_preparation", "scan_path", "");
         scan.OriginalScanPath = S("scan_preparation", "original_scan_path", scan.ScanPath);
-        // Imported alignment provenance must retain the read-only source for Reset Outputs.
         try
         {
             var note = JsonNode.Parse(File.ReadAllText(Path.ChangeExtension(scan.ScanPath, "json")));

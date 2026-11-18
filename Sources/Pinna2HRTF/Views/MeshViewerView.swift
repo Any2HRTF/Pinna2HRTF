@@ -289,7 +289,6 @@ struct PersistentSceneView: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: MeshSceneViewport, context: Context) -> CGSize? {
-        // Never derive minimum/ideal sizes from the last rendered frame.
         let width = proposal.width.flatMap { $0.isFinite ? max(0, $0) : nil } ?? 0
         let height = proposal.height.flatMap { $0.isFinite ? max(0, $0) : nil } ?? 0
         return CGSize(width: width, height: height)
@@ -352,7 +351,6 @@ struct PersistentSceneView: NSViewRepresentable {
 
         func observeCamera(in viewport: MeshSceneViewport) {
             cameraTimer?.invalidate()
-            // Read and persist camera state on the main thread, outside renderer/layout callbacks.
             let timer = Timer(timeInterval: 1.0 / 15, repeats: true) { [weak self, weak viewport] _ in
                 guard let self, let viewport, viewport.window != nil, !viewport.inLiveResize,
                       let position = viewport.sceneView.pointOfView?.presentation.position,

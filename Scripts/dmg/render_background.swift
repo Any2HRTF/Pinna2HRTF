@@ -1,5 +1,3 @@
-// Renders the DMG window background in the style of the website.
-// usage: swift render_background.swift <website-assets-dir> <out-dir> <version-label>
 import AppKit
 
 let args = CommandLine.arguments
@@ -11,9 +9,8 @@ let assets = URL(fileURLWithPath: args[1])
 let outDir = URL(fileURLWithPath: args[2])
 let version = args[3]
 
-// Window content size in points. Keep in sync with make_dmg.sh.
 let W: CGFloat = 660, H: CGFloat = 440
-// Icon centres in Finder coordinates (top-left origin). Keep in sync with make_dmg.sh.
+
 let appCenter = CGPoint(x: 180, y: 250)
 let linkCenter = CGPoint(x: 480, y: 250)
 
@@ -38,7 +35,6 @@ func attr(_ s: String, _ f: NSFont, _ c: NSColor, kern: CGFloat = 0) -> NSAttrib
     NSAttributedString(string: s, attributes: [.font: f, .foregroundColor: c, .kern: kern])
 }
 
-/// Draws with a top-left origin so coordinates match Finder's icon positions.
 func render(scale: CGFloat) -> NSBitmapImageRep {
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(W * scale), pixelsHigh: Int(H * scale),
                                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
@@ -56,7 +52,6 @@ func render(scale: CGFloat) -> NSBitmapImageRep {
     page.setFill()
     NSRect(x: 0, y: 0, width: W, height: H).fill()
 
-    // Dial rings radiating from the app icon, like the hero's sound source.
     for (i, r) in [70.0, 120.0, 175.0, 235.0, 300.0].enumerated() {
         let ring = NSBezierPath(ovalIn: NSRect(x: appCenter.x - r, y: appCenter.y - r, width: r * 2, height: r * 2))
         ring.lineWidth = 1.5
@@ -64,7 +59,7 @@ func render(scale: CGFloat) -> NSBitmapImageRep {
         if i > 1 { ring.setLineDash([2, 7], count: 2, phase: 0) }
         ring.stroke()
     }
-    // Ticks around the inner ring.
+
     for k in 0..<24 {
         let a = CGFloat(k) / 24 * 2 * .pi
         let major = k % 6 == 0
@@ -77,7 +72,6 @@ func render(scale: CGFloat) -> NSBitmapImageRep {
         p.stroke()
     }
 
-    // Headline with a tilted highlighter behind the last word.
     let line1 = attr("Drag the ear", font(40, .heavy), ink, kern: -2.2)
     let line2a = attr("to ", font(40, .heavy), ink, kern: -2.2)
     let line2b = attr("Applications.", serifItalic(40), ink, kern: -0.6)
@@ -96,7 +90,6 @@ func render(scale: CGFloat) -> NSBitmapImageRep {
     NSGraphicsContext.restoreGraphicsState()
     line2b.draw(at: NSPoint(x: bx, y: 78))
 
-    // Version chip, styled like the primary button.
     let chipText = attr(version.uppercased(), mono(12, .bold), ink, kern: 0.6)
     let cs = chipText.size()
     let chip = NSRect(x: W - 38 - cs.width - 24, y: 40, width: cs.width + 24, height: 28)
@@ -106,7 +99,6 @@ func render(scale: CGFloat) -> NSBitmapImageRep {
     NSBezierPath(roundedRect: chip, xRadius: 14, yRadius: 14).fill()
     chipText.draw(at: NSPoint(x: chip.minX + 12, y: chip.minY + (28 - cs.height) / 2))
 
-    // Dashed sound ray from the app to Applications, with an arrowhead.
     let ray = NSBezierPath()
     let start = NSPoint(x: appCenter.x + 78, y: appCenter.y - 4)
     let end = NSPoint(x: linkCenter.x - 82, y: linkCenter.y - 4)
@@ -125,7 +117,7 @@ func render(scale: CGFloat) -> NSBitmapImageRep {
     head.lineCapStyle = .round
     head.lineJoinStyle = .round
     head.stroke()
-    // Little yellow source dot riding the ray.
+
     let mid = NSPoint(x: (start.x + end.x) / 2, y: start.y - 39)
     for (r, a) in [(22.0, 0.18), (14.0, 0.35)] {
         underline.withAlphaComponent(a).setStroke()
@@ -140,7 +132,6 @@ func render(scale: CGFloat) -> NSBitmapImageRep {
     dot.lineWidth = 2.5
     dot.stroke()
 
-    // Stickers.
     func sticker(_ name: String, center: CGPoint, width: CGFloat, degrees: CGFloat) {
         guard let img = NSImage(contentsOf: assets.appendingPathComponent(name)) else {
             FileHandle.standardError.write("missing sticker \(name)\n".data(using: .utf8)!)
@@ -164,7 +155,6 @@ func render(scale: CGFloat) -> NSBitmapImageRep {
     sticker("sticker-hrtf.svg", center: CGPoint(x: 600, y: 150), width: 92, degrees: 8)
     sticker("sticker-wave.svg", center: CGPoint(x: 606, y: 312), width: 80, degrees: -7)
 
-    // Rotated ticker band along the bottom.
     NSGraphicsContext.saveGraphicsState()
     let bt = NSAffineTransform()
     bt.translateX(by: W / 2, yBy: H - 30)
@@ -177,7 +167,6 @@ func render(scale: CGFloat) -> NSBitmapImageRep {
     tick.draw(at: NSPoint(x: -W / 2 - 40, y: -tick.size().height / 2))
     NSGraphicsContext.restoreGraphicsState()
 
-    // Gatekeeper hint for the ad-hoc signed beta.
     let hint = attr("Beta, not notarized. If macOS blocks the first launch: System Settings › Privacy & Security › Open Anyway.",
                     font(10.5, .medium), muted)
     hint.draw(at: NSPoint(x: (W - hint.size().width) / 2, y: H - 80))

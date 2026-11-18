@@ -180,7 +180,6 @@ struct PPMFittingView: View {
                     .labelsHidden()
                     .accessibilityLabel("Fitting section")
                 Divider()
-                // Plain headings preserve Computer access; GroupBox crashes the helper here.
                 if selectedSection == "Global" {
                     ForEach(["Location", "Rotation", "Scale"], id: \.self) { kind in
                         VStack(alignment: .leading, spacing: 8) {

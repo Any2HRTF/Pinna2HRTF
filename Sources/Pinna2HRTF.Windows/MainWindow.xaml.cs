@@ -163,7 +163,6 @@ public partial class MainWindow : Window
     bool logTailScrollPending;
     bool logTailUserInteraction;
     const double LogHeaderHeight = 48;
-    // Header content + native header border + enclosing border + top margin.
     const double CollapsedLogHeaderHeight = LogHeaderHeight + 2 + 2 + 3;
     bool viewportReady;
     CancellationTokenSource? meshLoadCancellation;
@@ -1275,14 +1274,15 @@ public partial class MainWindow : Window
     GeneratedOutputManifest OutputsFor(ProjectRecord project)
     {
         var root = Path.GetFullPath(project.SaveLocation);
-        // A shared or nested output root would allow one project to erase another's data.
         if (projects.Any(other => other.Id != project.Id && !string.IsNullOrWhiteSpace(other.SaveLocation) &&
             (ContainsPath(root, other.SaveLocation) || ContainsPath(other.SaveLocation, root))))
             throw new IOException("Choose a separate output folder for this project before resetting or running it.");
         var inputs = projects.SelectMany(p => ProtectedInputs(p, project.Id))
             .Where(p => !string.IsNullOrWhiteSpace(p)).OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToArray();
         var key = root + "\n" + SofaDirectory(project) + "\n" + string.Join("\n", inputs);
-        if (!outputStores.TryGetValue(key, out var store)) outputStores[key] = store = new GeneratedOutputManifest(root, inputs, SofaDirectory(project));
+        if (!outputStores.TryGetValue(key, out var store)) outputStores[key] = store = new GeneratedOutputManifest(root, inputs, SofaDirectory(project),
+            request => RequestPythonAsync("outputs", request),
+            () => new CLIWorker(GeometryProcess("-B", "-u", "-m", "HRTFCalculation", "output-worker"), project.Id, TimeSpan.FromHours(1)));
         return store;
     }
 
@@ -1299,7 +1299,7 @@ public partial class MainWindow : Window
             var stages = await Task.Run(store.Reconcile);
             if (project.SaveLocation == root) knownOutputs[project.Id] = stages;
         }
-        catch when (!required) { /* Busy/copied outputs are retried; explicit operations report errors. */ }
+        catch when (!required) { }
         finally { outputScans.Remove(project.Id); lastOutputScan[project.Id] = DateTime.UtcNow; }
     }
 
@@ -1527,8 +1527,6 @@ public partial class MainWindow : Window
         row.Drop += ProjectFolderDrop;
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        // Native Fluent chevrons, as used by WinUI expanders, rather than text
-        // characters whose baseline and weight depend on the content font.
         var toggle = new Button { Content = new FontIcon { FontFamily = new FontFamily("Segoe Fluent Icons"), Glyph = folder.IsExpanded ? "\uE70D" : "\uE76C", FontSize = 12 },
             Width = 28, Height = 28, MinWidth = 0, MinHeight = 0, VerticalAlignment = VerticalAlignment.Center, Padding = new Thickness(0), Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), Tag = folder };
         AutomationProperties.SetName(toggle, (folder.IsExpanded ? "Collapse " : "Expand ") + folder.Name);
@@ -1750,9 +1748,9 @@ public partial class MainWindow : Window
             await Task.Run(() => {
                 using var fresh = FileFingerprints.Fresh();
                 InvalidateManualPositions(project);
-                var receipt = Path.Combine(project.SaveLocation, WindowsPreprocessingReceipt);
+                var receipt = Path.Combine(project.SaveLocation, ".pinna2hrtf-preprocessing-inputs-v1.json");
                 if (PreprocessingFilesPresent(project) && !File.Exists(receipt))
-                    HeadGeometry.AtomicWrite(receipt, PreprocessingStamp(project));
+                    StageReceiptAsync("record-stage", "preprocessing", project).GetAwaiter().GetResult();
             });
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
@@ -1775,7 +1773,7 @@ public partial class MainWindow : Window
     {
         var path = Path.Combine(project.SaveLocation, "Project Settings.yaml");
         if (!File.Exists(path)) return;
-        var result = await RequestPythonAsync("HRTFCalculation.DesktopBridge", new { action = "load", path, folder = project.SaveLocation });
+        var result = await RequestPythonAsync("project", new { action = "load", path, folder = project.SaveLocation });
         if (result.TryGetProperty("warnings", out var notices))
             foreach (var notice in notices.EnumerateArray()) AppendLog(notice.GetString(), project.Id);
         var root = System.Text.Json.Nodes.JsonNode.Parse(result.GetProperty("config").GetRawText())!.AsObject();
@@ -1858,11 +1856,10 @@ public partial class MainWindow : Window
                 var rechecked = await Task.Run(() => PlanRemoval(frozen, roots));
                 if (!rechecked.CanRecycle || rechecked.Root != plan.Root || rechecked.Identity != plan.Identity)
                     throw new IOException("The folder changed after confirmation. Remove it from the list instead.");
-                await ShellRecycle.RecycleAsync(plan.Root!, () =>
-                {
-                    var current = PlanRemoval(frozen, roots);
-                    return current.CanRecycle && current.Identity == plan.Identity && current.Root == plan.Root;
-                }, WinRT.Interop.WindowNative.GetWindowHandle(this));
+                await RequestPythonAsync("project", new {
+                    action = "recycle", path = plan.Root, identity = plan.Identity, owned = true,
+                    @protected = roots.Where(p => p.Id != project.Id).Select(p => p.SaveLocation).ToArray()
+                });
             }
 
             projectLogs.Remove(project.Id);
@@ -1945,8 +1942,6 @@ public partial class MainWindow : Window
         if (path != null && selectedProject == project && box.Text == previous && !shutdownCleanupDone && (project == null || !ProjectBusy(project.Id)))
         {
             box.Text = path;
-            // The compact path field is usually hidden, so a picker selection does not
-            // generate the focus-loss event that normally commits setting edits.
             await CommitSettingInputAsync(box);
         }
     }
@@ -2369,8 +2364,6 @@ public partial class MainWindow : Window
             Child = button,
             IsHitTestVisible = true
         };
-        // Keep one stable tooltip instance. Replacing it while the status timer
-        // refreshes the buttons makes WinUI close an otherwise valid hover.
         ToolTipService.SetToolTip(host, new ToolTip { Content = string.Empty });
         return host;
     }
@@ -2487,7 +2480,7 @@ public partial class MainWindow : Window
     {
         var landmark = Path.Combine(appData, "Cache", "automatic-landmark-" + Guid.NewGuid().ToString("N") + ".json");
         var executable = BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
-        var info = GeometryProcess("-m", "HRTFCalculation.Preprocessing.src.ear_canal_closer", "--ear_path", mesh,
+        var info = GeometryProcess("-m", "HRTFCalculation", "ear-canal", "--ear_path", mesh,
             "--landmark_path", landmark, "--side", side, "--estimate-only");
         Directory.CreateDirectory(Path.GetDirectoryName(landmark)!);
         try
@@ -2712,8 +2705,8 @@ public partial class MainWindow : Window
                 if (!await ConfirmEarDistanceAsync(project)) return;
                 if (!ValidateExternalRuntime(project)) return;
             }
-            var createdRoot = !Directory.Exists(project.SaveLocation);
-            Directory.CreateDirectory(project.SaveLocation);
+            var folder = await RequestPythonAsync("project", new { action = "prepare-folder", path = project.SaveLocation });
+            var createdRoot = folder.GetProperty("created").GetBoolean();
             if (createdRoot) { RecordCreatedFolder(project); Persist(); }
             outputStore = OutputsFor(project);
             await Task.Run(() => outputStore.Begin(OutputStageFor(stage)));
@@ -2725,17 +2718,13 @@ public partial class MainWindow : Window
             }
             if (stage == Stage.Preprocessing || stage == Stage.Inference)
                 runInputStamps[project.Id] = await Task.Run(() => stage == Stage.Preprocessing ? PreprocessingStamp(project) : InferenceStamp(project));
-            var preparedProject=Clone(project);
-            if(stage==Stage.Postprocessing && HasExternalSofa(project))
-            {
-                var staging=Path.Combine(project.SaveLocation,".pinna-export-windows-"+Guid.NewGuid().ToString("N"));
-                stagedSofaOutputs[project.Id]=staging;(preparedProject.Settings.Postprocessing??=new()).OutputFolder=staging;
-            }
-            var config = await PrepareConfigAsync(preparedProject);
+            var config = await PrepareConfigAsync(project);
             if (shutdownCleanupDone) { outputStore.ReleaseForRecovery(); return; }
             if (!SequenceIsCurrent()) return;
             var executable = BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
-            var info = GeometryProcess("-m", "HRTFCalculation.CLI", stage.Value, "--config", config);
+            var info = GeometryProcess("-m", "HRTFCalculation", stage.Value, "--config", config);
+            info.Environment["PINNA2HRTF_OUTPUT_TOKEN"] = outputStore.Token;
+            info.Environment["PINNA2HRTF_PROTECTED_INPUTS"] = JsonSerializer.Serialize(projects.SelectMany(p => ProtectedInputs(p, project.Id)));
             ApplyProcessEnvironment(info);
             var runId = Guid.NewGuid();
             var startedAt = DateTime.Now;
@@ -2792,31 +2781,21 @@ public partial class MainWindow : Window
             try { process.Dispose(); } catch { }
             return;
         }
-        // StopProject may already have handled and disposed this process.
         if (!runs.TryGetValue(project.Id, out var run) || !ReferenceEquals(run.Process, process)) return;
         if (code == 0)
         {
             try
             {
                 if((stage==Stage.Preprocessing||stage==Stage.Inference)&&runInputStamps.TryGetValue(project.Id,out var originalStamp)&&originalStamp!=(stage==Stage.Preprocessing?PreprocessingStamp(project):InferenceStamp(project)))throw new IOException("Project inputs or settings changed while the stage was running; rerun it.");
-                if(stage==Stage.Inference)HeadGeometry.AtomicWrite(Path.Combine(project.SaveLocation,".pinna2hrtf-inference-signature"),InferenceStamp(project));
-                if(stage==Stage.Preprocessing && PreprocessingFilesPresent(project)) HeadGeometry.AtomicWrite(Path.Combine(project.SaveLocation,WindowsPreprocessingReceipt),PreprocessingStamp(project));
-                if(stage==Stage.Postprocessing&&stagedSofaOutputs.TryGetValue(project.Id,out var staging))
-                {
-                    await RequestPythonAsync("HRTFCalculation.DesktopBridge",new{action="validate_outputs",paths=Directory.GetFiles(staging,"*.sofa")});
-                    var external = ExternalOutputsFor(project); var destination = SofaDirectory(project);
-                    await Task.Run(() => external.Publish(staging,destination));
-                }
                 if (stage == Stage.Postprocessing)
                 {
-                    await RequestPythonAsync("HRTFCalculation.DesktopBridge", new { action = "validate_outputs", paths = Directory.GetFiles(SofaDirectory(project), "*.sofa", SearchOption.AllDirectories) });
+                    await RequestPythonAsync("project", new { action = "validate_outputs", paths = Directory.GetFiles(SofaDirectory(project), "*.sofa", SearchOption.AllDirectories) });
                     if (!SpatialOutputsCurrent(project)) throw new IOException("Spatial upsampling outputs are incomplete or stale.");
-                    HeadGeometry.AtomicWrite(PostprocessingReceipt(project), await Task.Run(() => PostprocessingStamp(project)));
                 }
                 await RefreshStatusSnapshotAsync(project, true);
                 if (!StageIsComplete(stage, project, new ArtifactInspection())) throw new IOException("Expected stage outputs are missing, stale or incomplete.");
                 if (stage == Stage.Postprocessing)
-                    await RequestPythonAsync("HRTFCalculation.DesktopBridge", new { action = "validate_outputs", paths = Directory.GetFiles(SofaDirectory(project), "*.sofa") });
+                    await RequestPythonAsync("project", new { action = "validate_outputs", paths = Directory.GetFiles(SofaDirectory(project), "*.sofa") });
             }
             catch (Exception error) { code = -1; AppendLog("Output validation failed: " + error.Message, project.Id); }
         }
@@ -2829,13 +2808,6 @@ public partial class MainWindow : Window
         {
             try { await Task.Run(store.Complete); }
             catch { captured = false; AppendLog("Output tracking is pending; it will be retried before reset.", project.Id); }
-        }
-        if(stagedSofaOutputs.Remove(project.Id,out var completedStaging))
-        {
-            if (code == 0) { try { if (Directory.Exists(completedStaging)) Directory.Delete(completedStaging,true); } catch(IOException) {} }
-            else AppendLog("Postprocessing staging/recovery files were retained: " + completedStaging, project.Id);
-            // The persisted settings always describe the final destination.
-            try{HeadGeometry.AtomicWrite(Path.Combine(project.SaveLocation,"Project Settings.yaml"),Yaml(project));}catch(Exception error){AppendLog(error.Message,project.Id);}
         }
         runs.Remove(project.Id);
         run.Reservation?.Dispose();
@@ -2961,16 +2933,15 @@ public partial class MainWindow : Window
         var prepared = Clone(project);
         if (prepared.InputHandling == InputHandling.Copy)
         {
-            if (!prepared.Settings.ScanPreparation.Enabled && !string.IsNullOrWhiteSpace(project.LeftEar)) prepared.LeftEar = await Task.Run(() => CopyInput(project.LeftEar, Path.Combine(project.SaveLocation, "Input", "Left")));
-            if (!prepared.Settings.ScanPreparation.Enabled && !string.IsNullOrWhiteSpace(project.RightEar)) prepared.RightEar = await Task.Run(() => CopyInput(project.RightEar, Path.Combine(project.SaveLocation, "Input", "Right")));
+            if (!prepared.Settings.ScanPreparation.Enabled && !string.IsNullOrWhiteSpace(project.LeftEar)) prepared.LeftEar = await CopyInputAsync(project.LeftEar, Path.Combine(project.SaveLocation, "Input", "Left"));
+            if (!prepared.Settings.ScanPreparation.Enabled && !string.IsNullOrWhiteSpace(project.RightEar)) prepared.RightEar = await CopyInputAsync(project.RightEar, Path.Combine(project.SaveLocation, "Input", "Right"));
             if (prepared.Settings.ScanPreparation.Enabled && !string.IsNullOrWhiteSpace(project.Settings.ScanPreparation.ScanPath))
-                prepared.Settings.ScanPreparation.ScanPath = await Task.Run(() => CopyInput(project.Settings.ScanPreparation.ScanPath, Path.Combine(project.SaveLocation, "Input", "Scan")));
+                prepared.Settings.ScanPreparation.ScanPath = await CopyInputAsync(project.Settings.ScanPreparation.ScanPath, Path.Combine(project.SaveLocation, "Input", "Scan"));
             RebaseManualPosition(prepared.Settings.Preprocessing.SourcePositionInputLeft, project.LeftEar, prepared.LeftEar);
             RebaseManualPosition(prepared.Settings.Preprocessing.SourcePositionInputRight, project.RightEar, prepared.RightEar);
         }
         var config = Path.Combine(project.SaveLocation, "Project Settings.yaml");
-        var validated = await RequestPythonAsync("HRTFCalculation.DesktopBridge", new { action = "validate", config = ProjectDocument.Build(prepared, environment) });
-        HeadGeometry.AtomicWrite(config, validated.GetProperty("yaml").GetString()!);
+        await RequestPythonAsync("project", new { action = "save", path = config, config = ProjectDocument.Build(prepared, environment) });
         return config;
     }
 
@@ -2979,32 +2950,12 @@ public partial class MainWindow : Window
         if (PositionMatchesMesh(position, source) && !string.IsNullOrWhiteSpace(path)) { position!.MeshPath = path; position.MeshIdentity = MeshIdentity(path); }
     }
 
-    string CopyInput(string path, string folder)
+    async Task<string> CopyInputAsync(string source, string folder)
     {
-        Directory.CreateDirectory(folder);
-        var target = Path.Combine(folder, Path.GetFileName(path));
-        if (File.Exists(target) && PathIdentity.Read(path).Id == PathIdentity.Read(target).Id) return target;
-        string Digest(string file) { using var stream = File.OpenRead(file); return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)); }
-        var digest = Digest(path);
-        if (File.Exists(target) && Digest(target) != digest)
-            target = Path.Combine(folder, Path.GetFileNameWithoutExtension(path) + "-" + digest[..12].ToLowerInvariant() + Path.GetExtension(path));
-        if (File.Exists(target))
-        { if (Digest(target) != digest) throw new IOException("An input copy already exists with different contents: " + target); }
-        else
-        {
-            var temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            try
-            {
-                File.Copy(path, temporary);
-                if (Digest(temporary) != digest || Digest(path) != digest) throw new IOException("The input changed while it was being copied.");
-                File.Move(temporary, target, false);
-            }
-            finally { if (File.Exists(temporary)) File.Delete(temporary); }
-        }
-        return target;
+        var reply = await RequestPythonAsync("project", new { action = "copy-input", source, folder });
+        return reply.GetProperty("path").GetString()!;
     }
 
-    string Yaml(ProjectRecord project) => ProjectDocument.Build(project, environment).ToJsonString();
 
 
     void StopClicked(object sender, RoutedEventArgs e) { if (selectedProject != null) StopProject(selectedProject); }
@@ -3017,8 +2968,6 @@ public partial class MainWindow : Window
             try { run.Owned?.Terminate(); AppendLog("Stopping task and its child processes.", project.Id); }
             catch (Exception error) { AppendLog("Could not stop the task: " + error.Message, project.Id); }
         }
-        // The single completion path retains output ownership until the job is
-        // empty and final logs/capture are settled.
         RefreshPipelineStatus();
     }
     void TryTerminate(Process process)
@@ -3076,8 +3025,6 @@ public partial class MainWindow : Window
         try
         {
             var store=OutputsFor(project);result=await Task.Run(()=>store.Reset(boundary));
-            var externalStore = ExternalOutputsFor(project);
-            var external=await Task.Run(externalStore.Reset);result.Deleted+=external.Deleted;result.Modified+=external.Modified;result.Errors+=external.Errors;result.ProtectedInputs+=external.ProtectedInputs;
         }
         catch { result = new GeneratedOutputManifest.ResetResult { Errors = 1 }; }
         finally { outputOperations.Remove(project.Id); }
@@ -3281,7 +3228,6 @@ public partial class MainWindow : Window
         return description.Length == 0 ? "" : "Inputs: " + description;
     }
 
-    // An inspection lives only for one synchronous refresh, including its dependent status queries.
     sealed class ArtifactInspection
     {
         public bool Background { get; init; }
@@ -3458,7 +3404,6 @@ public partial class MainWindow : Window
             var recorded=System.Text.Json.Nodes.JsonNode.Parse(report.GetProperty("signature").GetProperty("settings").GetRawText())!.AsObject();
             var expected=ProjectDocument.Build(project,environment)["scan_preparation"]!.AsObject();
             foreach(var key in new[]{"require_manual_review","reviewed_left","reviewed_right","scan_path","original_scan_path","prepare_left","prepare_right"}) {recorded.Remove(key);expected.Remove(key);}
-            // The default polygon is YAML-only, and is preserved on import.
             if(!expected.ContainsKey("crop_polygon_xz"))recorded.Remove("crop_polygon_xz");
             if(!ProjectDocument.SameJson(recorded,expected))return false;
             foreach(var side in new[]{"left","right"})
@@ -3558,8 +3503,6 @@ public partial class MainWindow : Window
                     var text = File.ReadAllText(directLog);
                     if (Regex.IsMatch(text, @"(?m)^End time:\s*\S"))
                     {
-                        // -estimate_ram writes the same NC.out with every step header but solves
-                        // nothing; only a solved step reports its own time statistic.
                         var headers = Regex.Matches(text, @"(?m)^Step\s+(\d+),\s+Frequency\s*=");
                         for (var index = 0; index < headers.Count; index++)
                         {
@@ -3776,8 +3719,6 @@ public partial class MainWindow : Window
             changed = true;
         }
         var checkpointName = Path.GetFileNameWithoutExtension(project.Settings.Inference.ModelCheckpoint);
-        // Mac release manifests describe the same bundled checkpoints.
-        // Resolve their names back to PyTorch when importing a Mac project.
         if (checkpointName.EndsWith(".coreml", StringComparison.OrdinalIgnoreCase))
             checkpointName = checkpointName[..^".coreml".Length];
         if (string.IsNullOrWhiteSpace(checkpointName)) checkpointName = modelName;
@@ -3998,7 +3939,6 @@ public partial class MainWindow : Window
             var position = ManualPosition(project, side);
             if (position == null) continue;
             var mesh = PreprocessingMesh(project, side);
-            // Missing or still-pending fingerprints must not erase saved positions.
             if (string.IsNullOrWhiteSpace(mesh)) continue;
             var identity = MeshIdentity(mesh);
             if (string.IsNullOrEmpty(identity)) continue;

@@ -257,7 +257,6 @@ struct MeshEditorView: View {
     }
 }
 
-/// A titled group in the editor inspector, so related controls and their action read as one unit.
 private struct EditorInspectorSection<Content: View>: View {
     let title: String
     let systemImage: String

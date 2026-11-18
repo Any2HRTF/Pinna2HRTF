@@ -2,8 +2,6 @@ import Foundation
 import AppKit
 import UserNotifications
 
-/// Runs pipeline stages and environment setup, tracks generated outputs, captures
-/// technical logs, stops process trees and posts completion notifications.
 @MainActor
 final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     private struct PipelineRun {
@@ -13,8 +11,7 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
 
     @Published private var runs: [UUID: PipelineRun] = [:]
     @Published private(set) var stoppingProjects = Set<UUID>()
-    /// Number of output operations in flight per project; overlapping operations
-    /// each hold their own reference.
+
     @Published private var outputOperationCounts: [UUID: Int] = [:]
     @Published private(set) var environmentProcess: Process?
     @Published var failedStagesByProject: [UUID: Set<Stage>] = [:]
@@ -30,8 +27,6 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
 
     private func log(_ text: String, for projectID: UUID? = nil) { store?.appendLog(text, for: projectID) }
     private var activity: ActivityLog? { store?.activity }
-
-    // MARK: Output operations
 
     func beginOutputOperation(_ id: UUID) { outputOperationCounts[id, default: 0] += 1 }
 
@@ -82,8 +77,6 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
             }
         } catch { log("Could not record saved editor outputs: \(error.localizedDescription)", for: project.id) }
     }
-
-    // MARK: Pipeline stages
 
     func prepareAndRun(stage: Stage, project: ProjectRecord) {
         guard let environment = store?.environment, !isManagingOutputs(project.id), runs[project.id] == nil else { return }
@@ -138,6 +131,11 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
         let process: Process
         do {
             process = try launcher.makeProcess(.pipelineStage(stage, config: configURL), environment: environment, liveEvents: true)
+            var variables = process.environment ?? ProcessInfo.processInfo.environment
+            variables["PINNA2HRTF_OUTPUT_TOKEN"] = outputs.token
+            let protectedInputs = try JSONSerialization.data(withJSONObject: outputs.protectedInputs)
+            variables["PINNA2HRTF_PROTECTED_INPUTS"] = String(decoding: protectedInputs, as: UTF8.self)
+            process.environment = variables
         } catch {
             store?.setStageOutcome(stage, for: project.id, to: .failed)
             log("Could not start \(stage.title): \(error.localizedDescription)", for: project.id)
@@ -210,9 +208,6 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
         if status == 0 && !stopped {
             do {
                 try await Task.detached(priority: .userInitiated) { try OutputValidation.validate(stage: stage, project: project) }.value
-                if [.inference, .postprocessing].contains(stage) {
-                    try await Task.detached { try StageReceipt.record(stage, project) }.value
-                }
                 outcome = .done
             } catch { validationError = error.localizedDescription }
         }
@@ -224,9 +219,6 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
                 scan.reviewedRightPath = nil
                 project.settings.scanPreparation = scan
             }
-        }
-        if stage == .preprocessing, outcome == .done {
-            await Task.detached(priority: .utility) { Self.recordPreprocessingSignature(for: project) }.value
         }
         do {
             try await Task.detached(priority: .userInitiated) { try outputs.complete() }.value
@@ -258,16 +250,6 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
         store.refreshArtifacts()
     }
 
-    nonisolated static func recordPreprocessingSignature(for project: ProjectRecord) {
-        guard !project.saveLocation.isEmpty else { return }
-        let output = URL(fileURLWithPath: project.saveLocation)
-        try? FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        try? ArtifactScanner.preprocessingSignature(for: project)
-            .write(to: output.appendingPathComponent(".pinna2hrtf-preprocessing-mac-v2.json"), atomically: true, encoding: .utf8)
-    }
-
-    // MARK: Stopping
-
     func stop(_ projectID: UUID) {
         guard let run = runs[projectID], !stoppingProjects.contains(projectID) else { return }
         stoppingProjects.insert(projectID)
@@ -281,7 +263,6 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
         }
     }
 
-    /// Stops pipeline runs, environment setup and every helper, then calls `completion`.
     func stopAll(completion: @escaping @MainActor () -> Void) {
         for (id, stage) in runningStages {
             stoppingProjects.insert(id)
@@ -293,8 +274,6 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
             completion()
         }
     }
-
-    // MARK: Environment setup
 
     func setupEnvironment() {
         guard let store else { return }
@@ -435,8 +414,6 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
         }
     }
 
-    // MARK: Notifications
-
     private func configureNotifications() {
         guard !notificationsConfigured else { return }
         notificationsConfigured = true
@@ -485,8 +462,6 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler(AppPreferences.enabled(AppPreferences.notifyAll) ? [.banner, .sound] : [])
     }
-
-    // MARK: Helpers
 
     private func stageStartDetails(stage: Stage, project: ProjectRecord) -> String {
         if stage == .scanPreparation {

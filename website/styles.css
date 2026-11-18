@@ -1,4 +1,3 @@
-/* Shared by the front page and the documentation. */
 :root {
   color-scheme: light dark;
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", "URW Palladio L", P052, Georgia, serif;
@@ -57,7 +56,6 @@ mark { color: inherit; background: linear-gradient(transparent 58%, var(--accent
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .wrap { width: min(100% - 48px, var(--wrap)); margin-inline: auto; }
 
-/* Header and footer */
 .site-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-block: 22px; }
 .brand { display: inline-flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 750; letter-spacing: -.03em; text-decoration: none; white-space: nowrap; }
 .brand:hover { color: inherit; }
@@ -72,7 +70,6 @@ mark { color: inherit; background: linear-gradient(transparent 58%, var(--accent
 .footer-row nav { display: flex; gap: 22px; }
 .wordmark { display: block; margin: 0 0 -.19em; color: var(--soft); font-size: 17.6vw; font-weight: 800; letter-spacing: -.065em; line-height: .8; text-align: center; white-space: nowrap; user-select: none; -webkit-user-select: none; }
 
-/* Buttons */
 .button {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px;
   padding: 10px 22px; border: 0; border-radius: 999px; font: 650 15px/1.2 var(--sans);
@@ -83,7 +80,6 @@ mark { color: inherit; background: linear-gradient(transparent 58%, var(--accent
 .button-primary:active { transform: translateY(2px); box-shadow: 0 1px 0 #d39f00; }
 .text-link { font-weight: 600; }
 
-/* Stickers */
 .content-section { position: relative; scroll-margin-top: 16px; }
 .draggable-sticker {
   --stuck: drop-shadow(0 0 .6px rgba(23, 23, 23, .55)) drop-shadow(0 1.5px 1px rgba(23, 23, 23, .28));
@@ -95,7 +91,6 @@ mark { color: inherit; background: linear-gradient(transparent 58%, var(--accent
   -webkit-tap-highlight-color: transparent;
 }
 .draggable-sticker img { display: block; width: 100%; height: auto; pointer-events: none; -webkit-user-drag: none; }
-/* Glossy vinyl: a soft highlight plus a sheen that sweeps across on hover, both cut to the sticker's shape. */
 .draggable-sticker.has-art::after {
   content: ""; position: absolute; inset: 0; pointer-events: none;
   background:
@@ -105,7 +100,6 @@ mark { color: inherit; background: linear-gradient(transparent 58%, var(--accent
   transition: background-position 700ms ease;
 }
 .draggable-sticker.has-art:hover::after, .draggable-sticker.is-dragging::after { background-position: -30% 0, 0 0; }
-/* Hover peels one edge up; dragging lifts the whole sticker off the page. */
 .draggable-sticker:hover { transform: rotate(calc(var(--sticker-rotation, 0deg) + 3deg)) perspective(500px) rotateX(9deg) rotateY(-7deg) scale(1.04); filter: drop-shadow(0 0 .6px rgba(23, 23, 23, .55)) drop-shadow(3px 7px 5px rgba(23, 23, 23, .26)); }
 .draggable-sticker.is-dragging { z-index: 10; cursor: grabbing; transform: translateY(-12px) rotate(calc(var(--sticker-rotation, 0deg) + 7deg)) scale(1.12); filter: drop-shadow(0 0 .6px rgba(23, 23, 23, .55)) drop-shadow(6px 20px 12px rgba(23, 23, 23, .3)); transition-duration: 140ms; }
 .draggable-sticker.is-released { animation: sticker-release 620ms cubic-bezier(.2, .9, .3, 1) both; }

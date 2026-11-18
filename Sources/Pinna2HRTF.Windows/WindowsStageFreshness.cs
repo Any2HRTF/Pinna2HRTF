@@ -6,6 +6,24 @@ namespace Pinna2HRTF.Windows;
 
 public partial class MainWindow
 {
+    Task<JsonElement> StageReceiptAsync(string action, string stage, ProjectRecord project) =>
+        RequestPythonAsync("project", new { action, stage, config = ProjectDocument.Build(project, environment) });
+
+    bool? SharedStageCurrent(string stage, ProjectRecord project)
+    {
+        var receipt = Path.Combine(project.SaveLocation, $".pinna2hrtf-{stage}-receipt.json");
+        if (!File.Exists(receipt)) return null;
+        using var stream = File.OpenRead(receipt);
+        if (stream.ReadByte() != '{') return null;
+        return StageReceiptIsCurrent(stage, project);
+    }
+
+    bool StageReceiptIsCurrent(string stage, ProjectRecord project)
+    {
+        try { return StageReceiptAsync("stage-status", stage, project).GetAwaiter().GetResult().GetProperty("current").GetBoolean(); }
+        catch (Exception error) when (error is IOException or InvalidOperationException or JsonException or KeyNotFoundException or System.ComponentModel.Win32Exception) { return false; }
+    }
+
     string PostprocessingInputStamp(ProjectRecord project) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
         JsonSerializer.Serialize(new { project.Settings.Postprocessing, preprocessing = PreprocessingStamp(project) }))));
     string PostprocessingStamp(ProjectRecord project)
@@ -36,7 +54,7 @@ public partial class MainWindow
         try
         {
             return SofaFilesPresent(p) && File.Exists(PostprocessingReceipt(p)) &&
-                File.ReadAllText(PostprocessingReceipt(p)) == PostprocessingStamp(p) && SpatialOutputsCurrent(p);
+                (SharedStageCurrent("postprocessing", p) ?? (File.ReadAllText(PostprocessingReceipt(p)) == PostprocessingStamp(p))) && SpatialOutputsCurrent(p);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException or FormatException) { return false; }
     }
@@ -84,6 +102,6 @@ public partial class MainWindow
             Persist(); if (selectedProject == project) { LoadSelectedProject(); RefreshArtifacts(); }
         }
         else if (result == ContentDialogResult.Primary && selectedProject == project) await EditPreparedEarAsync(side);
-        RefreshPipelineStatus(); return false; // Recovery is explicit; never auto-continue.
+        RefreshPipelineStatus(); return false;
     }
 }

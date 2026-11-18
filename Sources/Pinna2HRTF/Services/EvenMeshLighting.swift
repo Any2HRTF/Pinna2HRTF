@@ -1,6 +1,5 @@
 import SceneKit
 
-/// Symmetric illumination in world space keeps both ears equally lit from all sides.
 enum EvenMeshLighting {
     static func install(in scene: SCNScene, camera: SCNNode) {
         let ambient = SCNLight()
@@ -25,8 +24,7 @@ enum EvenMeshLighting {
             node.eulerAngles = rotation
             scene.rootNode.addChildNode(node)
         }
-        // A soft, angled light follows the view, revealing surface contours
-        // without making one side of the model permanently darker.
+
         let key = SCNLight()
         key.type = .directional
         key.intensity = 500

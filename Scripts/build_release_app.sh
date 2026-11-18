@@ -43,8 +43,6 @@ RESOURCES="$CONTENTS/Resources"
 ICON="$ROOT/Sources/Pinna2HRTF/Resources/app_icon.icns"
 ICON_ASSETS="${PINNA2HRTF_ICON_ASSETS:-}"
 if [[ -n "$ICON_ASSETS" ]]; then
-  # A previously compiled icon may be reused only for the exact same source.
-  # This also supports hosts where Apple's Icon Studio exporter cannot run.
   /usr/bin/python3 - "$ROOT/Sources/Pinna2HRTF/Resources/Pinna2HRTF.icon" "$ICON_ASSETS" <<'PYICONCACHE'
 import hashlib, json, sys
 from pathlib import Path
@@ -98,8 +96,6 @@ if [[ ! -f "$ROOT/uv.lock" ]]; then
   exit 1
 fi
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/pinna2hrtf-uv-cache}"
-# A release must contain the native solver, grader and Blender exporter even
-# in a fresh checkout/worktree. Never silently package an incomplete pipeline.
 bash "$ROOT/Scripts/prepare_external_tools.sh" "$EXTERNAL_ROOT"
 EXTERNAL_ROOT="$(cd "$EXTERNAL_ROOT" && pwd)"
 REQUIRED_EXTERNAL_FILES=(
@@ -160,7 +156,6 @@ else
   fi
 
 
-  # Check SwiftUI compiler plugins before spending time packaging the runtime.
   SDK_DIRECT_FLAGS=()
   if [[ -n "$SDK_SWIFT_VERSION" ]]; then
     SDK_DIRECT_FLAGS=(-interface-compiler-version "$SDK_SWIFT_VERSION")
@@ -189,12 +184,19 @@ fi
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS" "$RESOURCES"
 cp "$BUILT_EXECUTABLE" "$MACOS/Pinna2HRTF"
-# Record the minimum macOS version and SDK used for this build.
 xcrun vtool -set-build-version macos 13.0 "$SDK_VERSION" -replace -output "$MACOS/Pinna2HRTF" "$MACOS/Pinna2HRTF"
 cp -R "$ROOT/HRTFCalculation" "$RESOURCES/HRTFCalculation"
+mkdir -p "$RESOURCES/bin"
+cat > "$RESOURCES/bin/Pinna2HRTF" <<'CLI'
+#!/bin/sh
+resources="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)" || exit 1
+export PINNA2HRTF_ROOT="$resources"
+export PYTHONPATH="$resources"
+exec "$resources/.venv/bin/python" -B -P -m HRTFCalculation "$@"
+CLI
+chmod +x "$RESOURCES/bin/Pinna2HRTF"
 cp "$ROOT/pyproject.toml" "$RESOURCES/pyproject.toml"
 cp "$ROOT/uv.lock" "$RESOURCES/uv.lock"
-# Bundle the website documentation for offline native help.
 cp -R "$ROOT/website" "$RESOURCES/Website"
 if [[ -d "$EXTERNAL_ROOT/bin" ]]; then
   mkdir -p "$RESOURCES/External/bin"
@@ -225,8 +227,6 @@ cp "$EXTERNAL_ROOT/src/hrtf_mesh_grading/pmp-library/LICENSE.txt" "$RESOURCES/Th
 if [[ -f "$ICON" ]]; then
   cp "$ICON" "$RESOURCES/app_icon.icns"
 fi
-# Compile the layered icon when full Xcode is available. Command Line Tools
-# builds retain the bundled .icns fallback.
 ICON_DEVELOPER_DIR="${DEVELOPER_DIR:-$(xcode-select -p)}"
 if [[ ! -x "$ICON_DEVELOPER_DIR/usr/bin/actool" && -x /Applications/Xcode.app/Contents/Developer/usr/bin/actool ]]; then
   ICON_DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
@@ -277,8 +277,6 @@ for line in lines:
 path.write_text("\n".join(next_lines) + "\n")
 PY
 find "$RESOURCES/.venv/bin" -mindepth 1 -maxdepth 1 ! -name python ! -name python3 ! -name python3.11 -exec rm -rf {} +
-# Export with build-only tools; none of these conversion packages or PyTorch
-# are kept in the Mac application. Source/Windows installs keep uv.lock intact.
 COREML_TOOLS="$STAGE_ROOT/coreml-tools"
 "$UV_BIN" pip install --python "$RESOURCES/.venv/bin/python" --target "$COREML_TOOLS" \
   'coremltools==9.0' 'numpy==1.26.4'
@@ -310,8 +308,6 @@ for views in (1, 3, 9, 25):
 print("Verified four native Core ML models without PyTorch or conversion dependencies")
 PYCOREMLRUNTIME
 find "$RESOURCES" -type d -name __pycache__ -prune -exec rm -rf {} +
-# Blender can initialize Python with its own cache settings. Precompile its
-# bundled startup/add-on scripts so first launch cannot add sealed resources.
 PYTHONPYCACHEPREFIX="" "$RESOURCES/.venv/bin/python" - <<'PYBLENDERCACHE'
 import compileall
 from pathlib import Path
@@ -369,9 +365,6 @@ fi
 chmod +x "$MACOS/Pinna2HRTF"
 ditto --norsrc --noextattr --noqtn "$APP_DIR" "$CLEAN_APP_DIR"
 xattr -cr "$CLEAN_APP_DIR"
-# Wheels flatten Qt's versioned framework symlinks. Restore the canonical
-# framework layout before signing; duplicate Resources/Info.plist copies make
-# codesign classify a framework as an ambiguous application bundle.
 "$CLEAN_APP_DIR/Contents/Resources/.venv/bin/python" - "$CLEAN_APP_DIR/Contents/Resources/.venv" <<'PYFRAMEWORK'
 from pathlib import Path
 import shutil

@@ -5,8 +5,6 @@ using Microsoft.UI.Xaml.Media;
 
 namespace Pinna2HRTF.Windows;
 
-// NumberBox's built-in X clears its text. In the fitter it instead cancels the
-// current numeric draft. Keep drafts separate from model values until accepted.
 internal static class NumberBoxEditing
 {
     public static void Attach(NumberBox number, UIElement root, Control focusTarget,
@@ -54,7 +52,6 @@ internal static class NumberBoxEditing
                 if (child is TextBox input) { inputBox = input; input.ApplyTemplate(); }
                 if (child is Button { Name: "DeleteButton" } clear && clearButtons.Add(clear)) {
                     clear.Click += (_, args) => {
-                        // Run after the TextBox template's own clear handler.
                         number.DispatcherQueue.TryEnqueue(() => Finish(true));
                     };
                 }
@@ -75,7 +72,6 @@ internal static class NumberBoxEditing
         number.GotFocus += (_, _) => {
             if (!editing) { initial = read(); validatedDraft = null; editing = true; }
             FindClear(number);
-            // TextBox creates its clear-button template lazily on first focus.
             number.DispatcherQueue.TryEnqueue(() => FindClear(number));
         };
         number.LostFocus += (_, _) => {

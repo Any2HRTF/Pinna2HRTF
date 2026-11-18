@@ -6,7 +6,6 @@ private struct ActivityLogEntry {
     var key: String?
 }
 
-/// Per-project activity messages, live status lines and technical log locations.
 @MainActor
 final class ActivityLog: ObservableObject {
     @Published private(set) var text = ""
@@ -20,7 +19,6 @@ final class ActivityLog: ObservableObject {
         selectedProjectID.flatMap { technicalLogURLs[$0] } ?? environmentTechnicalLogURL
     }
 
-    /// Looks up existing technical logs in the background at start-up.
     func discoverExistingLogs(for projects: [ProjectRecord]) {
         Task.detached(priority: .utility) { [weak self] in
             let environmentLog = Self.latestEnvironmentTechnicalLogURL()
@@ -41,7 +39,6 @@ final class ActivityLog: ObservableObject {
         technicalLogURLs[id] = url
     }
 
-    /// Shows the activity of `project`; its latest log file is found off the main thread.
     func select(_ project: ProjectRecord?) {
         selectedProjectID = project?.id
         guard let project else { text = ""; return }
@@ -107,8 +104,6 @@ final class ActivityLog: ObservableObject {
         entries.map { "[\($0.date.formatted(date: .omitted, time: .standard))] \($0.message)" }.joined(separator: "\n")
     }
 
-    // MARK: Log files
-
     nonisolated static func technicalLogURL(project: ProjectRecord, stage: Stage, runID: UUID, date: Date) -> URL {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -156,9 +151,7 @@ final class ActivityLog: ObservableObject {
             if (try? FileManager.default.contentsOfDirectory(atPath: legacyDirectory.path).isEmpty) == true {
                 try? FileManager.default.removeItem(at: legacyDirectory)
             }
-        } catch {
-            // Keep any logs that could not be moved in their legacy location; lookup falls back to it.
-        }
+        } catch {}
     }
 
     private nonisolated static func latestLog(in directory: URL, matching include: (URL) -> Bool = { $0.pathExtension == "log" }) -> URL? {

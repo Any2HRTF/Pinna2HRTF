@@ -6,7 +6,6 @@ enum PipelineConfigWriter {
         if let issue = ProjectValidation.issues(for: project, stage: stage).first { throw ProjectValidation.Failure(message: issue.message) }
 
         let output = URL(fileURLWithPath: project.saveLocation)
-        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let manualPositions = Dictionary(uniqueKeysWithValues: EarSide.allCases.compactMap { side in
             ArtifactScanner.validManualMicrophonePosition(for: project, side: side).map { (side, $0) }
         })
@@ -26,21 +25,18 @@ enum PipelineConfigWriter {
         }
         let configURL = output.appendingPathComponent("Project Settings.yaml")
         let generated = mapping(project: prepared, environment: environment, manualPositions: manualPositions)
-        let mapping = try project.preservedConfigJSON.map { try ProjectConfigDocument.merged(generated: generated, preservedJSON: $0) } ?? generated
-        let document = try ProjectConfigDocument.encode(mapping)
-        try document.write(to: configURL, atomically: true, encoding: .utf8)
+        var request: [String: Any] = ["config": generated, "path": configURL.path, "preserve_fields": true]
+        if let preserved = project.preservedConfigJSON {
+            request["preserved"] = try JSONSerialization.jsonObject(with: Data(preserved.utf8))
+        }
+        _ = try ProjectConfigDocument.request("save", request)
         return configURL
     }
 
     static func copyInput(_ path: String, to folder: URL) throws -> String {
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let source = URL(fileURLWithPath: path)
-        let target = folder.appendingPathComponent(source.lastPathComponent)
-        if source.standardizedFileURL.path == target.standardizedFileURL.path {
-            return source.path
-        }
-        try FilePublication.publish([(source, target)])
-        return target.path
+        struct Reply: Decodable { let path: String }
+        let response = try ProjectConfigDocument.request("copy-input", ["source": path, "folder": folder.path], timeout: 600)
+        return try JSONDecoder().decode(Reply.self, from: response).path
     }
 
     static func mapping(project: ProjectRecord, environment: EnvironmentConfig, manualPositions: [EarSide: ManualMicrophonePosition]? = nil) -> [String: Any] {
@@ -73,7 +69,6 @@ enum PipelineConfigWriter {
         for (side, position) in positions {
             preprocessing["source_position_input_\(side.rawValue)"] = [position.x, position.y, position.z]
         }
-        // Unexposed settings use the pipeline's defaults; imported overrides are merged separately.
         return [
             "paths": [
                 "edited_left_ear": nullable(scan.individualLeftEdit), "edited_right_ear": nullable(scan.individualRightEdit),
@@ -123,8 +118,6 @@ enum PipelineConfigWriter {
                 "resample_hrirs": post.resampleHrirs, "sampling_rate": post.normalizedSamplingRate,
                 "spatial_upsampling": post.spatialUpsampling, "spatial_subdivisions": post.spatialSubdivisions,
                 "spatial_normalize": post.spatialNormalize
-                // matlab_executable and amt_path are deprecated: Python still accepts
-                // them in old configs but no longer uses them, so they are not written.
             ]
         ]
     }

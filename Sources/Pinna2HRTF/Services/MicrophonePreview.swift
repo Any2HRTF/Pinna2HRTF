@@ -2,7 +2,6 @@ import Foundation
 import SceneKit
 import ModelIO
 
-/// Immutable preview input; mesh discovery and coordinate conversion run off the UI thread.
 struct MicrophonePreview {
     let project: ProjectRecord
     let microphonePlacementMeshURL: URL?

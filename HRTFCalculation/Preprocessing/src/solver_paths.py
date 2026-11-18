@@ -25,7 +25,6 @@ def normalize_solver_grid_paths(project):
             source.write_text(text, encoding="utf-8")
         parameters = project / "parameters.json"
         if parameters.is_file():
-            # Mesh2HRTF uses this label to locate and name the output grid.
             import json
             data = json.loads(parameters.read_text(encoding="utf-8"))
             def replace(value):

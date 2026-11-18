@@ -81,10 +81,6 @@ def offaxis(p, x):
 
 
 def _curvefit(model, p, offset, x, y, ftol=1e-6):
-    # Legacy optimset TolFun sets BOTH function and optimality tolerances.
-    # In particular, the reference off-axis fit passes TolFun=1.
-    # MATLAB accepts equal bounds (fixed parameters), SciPy requires strict
-    # bounds. Eliminate fixed parameters without changing the model.
     free = offset > 0
     def unpack(values):
         full = p.copy()
@@ -130,7 +126,6 @@ def subdivide(points, faces, levels, radius):
                                                 (t[:,2],v3,v2),(v1,v2,v3)]]
         t = np.stack(children, axis=1).reshape(-1, 3)
         p = np.concatenate((p, np.asarray(unique)))
-        # MATLAB cart2sph/sph2cart projection, rather than norm division.
         a = np.arctan2(p[:,1], p[:,0])
         e = np.arctan2(p[:,2], np.hypot(p[:,0], p[:,1]))
         p = np.column_stack((radius*np.cos(e)*np.cos(a),radius*np.cos(e)*np.sin(a),radius*np.sin(e)))
@@ -160,12 +155,6 @@ def fit_toa(ir, positions, fs):
     estimated = estimate_toa(ir)
     x = positions[:, :2]*np.pi/180
     initial = fit_onaxis(estimated, positions, fs)
-    # NOTE (kept on purpose, scientific decision): alpha = number of directions
-    # mirrors the original LocaDyn call to ziegelwanger2014 with
-    # outlierDetection=1 so deleteoutliers gets alpha = 1*M (AMT's default is
-    # prod([0.05;0.01])*M). With alpha/(2n) >= 0.5 the Grubbs critical value is
-    # ~0, so roughly half of the directions are excluded from the TOA fits even
-    # for Gaussian residuals. Do not change without re-validating against MATLAB.
     excluded = np.column_stack([outlier_mask(estimated[:,ch]-onaxis(initial[ch],x)*fs, len(ir))
                                 for ch in range(2)])
     on = []
@@ -187,7 +176,6 @@ def fit_toa(ir, positions, fs):
 
 def boundary_faces(points):
     faces=ConvexHull(points).simplices.copy()
-    # freeBoundary uses outward orientation, lowest index first, lexical rows.
     normal=np.cross(points[faces[:,1]]-points[faces[:,0]],points[faces[:,2]]-points[faces[:,0]])
     inward=np.sum(normal*points[faces[:,0]],axis=1)<0
     faces[inward]=faces[inward][:,[0,2,1]]

@@ -1,9 +1,5 @@
 import Foundation
-import CryptoKit
-import Darwin
 
-// Same producer conventions and JSON schema as the Windows app. Only unchanged,
-// owned files are deleted; directories are removed only when empty.
 final class GeneratedOutputManifest {
     enum OutputStage: String, Codable, CaseIterable {
         case scanPreparation = "Scan-Preparation"
@@ -11,27 +7,10 @@ final class GeneratedOutputManifest {
         case numcalc = "Numcalc", postprocessing = "Postprocessing"
         var order: Int { Self.allCases.firstIndex(of: self)! }
     }
-    struct Entry: Codable {
-        var Stage: OutputStage = .inference
-        var Size: Int64
-        var ModifiedUtcTicks: Int64
-        var Sha256 = ""
-    }
-    struct PendingRun: Codable {
-        var Stage: OutputStage
-        var Before: [String: Entry]
-        var Directories: [String]
-    }
-    struct Document: Codable {
-        var Version = 1
-        var Files: [String: Entry] = [:]
-        var Directories: [String: OutputStage] = [:]
-        var Pending: PendingRun?
-    }
-    struct ResetResult {
+    struct ResetResult: Decodable {
         var fromStage: OutputStage? = nil
         var deleted = 0, modified = 0, protectedInputs = 0, nonEmpty = 0, errors = 0
-        // Keeping edited files is intentional; only reset errors block completion.
+
         var success: Bool { errors == 0 }
         var summary: String {
             "Outputs reset (\(fromStage?.rawValue ?? "all")): deleted \(deleted), kept modified \(modified), kept input files \(protectedInputs), kept non-empty directories \(nonEmpty), errors \(errors)."
@@ -50,322 +29,63 @@ final class GeneratedOutputManifest {
             }
         }
     }
+    private let request: [String: Any]
+    let protectedInputs: [String]
     private let root: URL
-    /// The root with every link resolved, computed once.
-    private let realRoot: String
-    private let inputs: [String]
-    private let outputPrefix: String?
     private let gate = NSLock()
-    private var runLock: Int32?
-    private let fm = FileManager.default
-    private var metadata: URL { root.appendingPathComponent(".pinna2hrtf") }
-    private var manifest: URL { metadata.appendingPathComponent("generated-output-manifest.json") }
+    private var worker: CLIWorker?
+    private(set) var token = ""
 
     init(projectRoot: String, inputs: [String], outputFolder: String? = nil) throws {
-        guard !projectRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Failure.invalidRoot }
-        // standardizedFileURL rewrites /private/tmp through the /tmp symlink.
-        // Keep the caller's path so link checks inspect the actual output root.
+        guard !projectRoot.isEmpty, projectRoot != "/" else { throw Failure.invalidRoot }
         root = URL(fileURLWithPath: projectRoot)
-        guard root.path != "/" else { throw Failure.invalidRoot }
-        realRoot = Self.canonicalPath(projectRoot)
-        guard realRoot != "/" else { throw Failure.invalidRoot }
-        if let outputFolder, outputFolder.hasPrefix(root.path + "/") {
-            outputPrefix = String(outputFolder.dropFirst(root.path.count + 1))
-        } else { outputPrefix = nil }
-        self.inputs = inputs.filter { !$0.isEmpty }.map { Self.canonicalPath($0).lowercased() }
+        protectedInputs = inputs
+        request = ["root": projectRoot, "inputs": inputs, "output_folder": outputFolder ?? ""]
     }
-    deinit { if let fd = runLock { close(fd) } }
 
     func begin(_ stage: OutputStage) throws {
-        gate.lock(); defer { gate.unlock() }
-        guard runLock == nil else { throw Failure.busy }
-        let lease = try acquire()
-        do {
-            var doc = try load()
-            try capture(&doc)
-            try reconcile(&doc)
-            let before = try scan()
-            doc.Pending = PendingRun(Stage: stage, Before: before.files, Directories: Array(before.directories))
-            try save(doc)
-            runLock = lease
-        } catch { close(lease); throw error }
+        gate.lock()
+        defer { gate.unlock() }
+        guard worker == nil else { throw Failure.busy }
+        guard let python = ProjectConfigDocument.pythonURL else { throw Failure.invalidRoot }
+        let session = try CLIWorker(pythonURL: python, workingDirectory: Defaults.pipelineRoot,
+                                    command: "output-worker", timeout: 3600)
+        var payload = request
+        payload["stage"] = stage.rawValue
+        let data = try session.execute(JSONSerialization.data(withJSONObject: payload))
+        struct Ready: Decodable { let ready: Bool; let token: String }
+        let ready = try JSONDecoder().decode(Ready.self, from: data)
+        guard ready.ready else { throw Failure.invalidManifest }
+        token = ready.token
+        worker = session
     }
 
     func complete() throws {
-        gate.lock(); defer { gate.unlock() }
-        guard let lease = runLock else { return }
-        defer { close(lease); runLock = nil }
-        var doc = try load()
-        try capture(&doc)
-        try save(doc)
+        gate.lock()
+        defer { gate.unlock() }
+        guard let session = worker else { return }
+        defer { worker = nil }
+        let data = try session.execute(JSONSerialization.data(withJSONObject: ["action": "complete"]))
+        guard (try JSONSerialization.jsonObject(with: data) as? [String: Bool])?["complete"] == true else { throw Failure.invalidManifest }
     }
 
-    // Editors save outside the pipeline. Refresh ownership after each app save
-    // so a later edit is not mistaken for an externally modified output.
+    private func perform(_ fields: [String: Any]) throws -> Data {
+        let payload = request.merging(fields) { _, new in new }
+        return try ProjectConfigDocument.run(["-m", "HRTFCalculation", "outputs"],
+            input: JSONSerialization.data(withJSONObject: payload), timeout: 3600, operation: "Project outputs")
+    }
+
     func recordGeneratedFiles(_ urls: [URL]) throws {
-        gate.lock(); defer { gate.unlock() }
-        guard runLock == nil else { throw Failure.busy }
-        let lease = try acquire(); defer { close(lease) }
-        var doc = try load()
-        try capture(&doc)
-        for url in urls where url.path.hasPrefix(root.path + "/") {
-            let relative = String(url.path.dropFirst(root.path.count + 1))
-            guard let stage = classifyOutput(relative), let safe = safePath(relative),
-                  fm.fileExists(atPath: safe.path) else { continue }
-            // Archived templates are copied once and then reused as sources.
-            // A later fit save must not claim external changes to that copy.
-            if relative.hasPrefix("Manual PPM/Templates/"), doc.Files[relative] != nil { continue }
-            var entry = try fingerprint(safe)
-            entry.Stage = stage
-            doc.Files[relative] = entry
-            var directory = (relative as NSString).deletingLastPathComponent
-            while !directory.isEmpty {
-                doc.Directories[directory] = stage
-                directory = (directory as NSString).deletingLastPathComponent
-            }
-        }
-        try save(doc)
+        _ = try perform(["action": "record", "paths": urls.map(\.path)])
     }
 
-    func reset(from: OutputStage? = nil) -> ResetResult {
-
-        gate.lock(); defer { gate.unlock() }
-        var result = ResetResult(fromStage: from)
+    func reset(from stage: OutputStage? = nil) -> ResetResult {
+        guard FileManager.default.fileExists(atPath: root.path) else { return ResetResult(fromStage: stage) }
         do {
-            guard runLock == nil else { throw Failure.busy }
-            guard fm.fileExists(atPath: root.path) else { return result }
-            let lease = try acquire(); defer { close(lease) }
-            var doc = try load()
-            try capture(&doc)
-            try reconcile(&doc)
-            try save(doc)
-            for (relative, entry) in doc.Files {
-                if relative.hasPrefix("MeshEdits/") || relative.hasPrefix("Manual PPM/") { continue }
-                if let from, entry.Stage.order < from.order { continue }
-                guard let url = safePath(relative, protectingInputs: false) else { result.errors += 1; continue }
-                guard safePath(relative) != nil else { result.protectedInputs += 1; continue }
-
-                do {
-                    guard fm.fileExists(atPath: url.path) else { doc.Files.removeValue(forKey: relative); continue }
-                    let actual = try fingerprint(url)
-                    guard actual.Sha256.caseInsensitiveCompare(entry.Sha256) == .orderedSame else { result.modified += 1; continue }
-                    guard safePath(relative) != nil, try fileMetadata(url).ModifiedUtcTicks == actual.ModifiedUtcTicks else { throw Failure.changingFile }
-                    try fm.removeItem(at: url)
-                    doc.Files.removeValue(forKey: relative)
-                    result.deleted += 1
-                } catch { result.errors += 1 }
-            }
-            let directories = Set(doc.Directories.keys).union(try scan().directories.filter { classifyDirectory($0) != nil })
-            for relative in directories.sorted(by: { $0.count > $1.count }) {
-                if let from, let stage = doc.Directories[relative] ?? classifyDirectory(relative), stage.order < from.order { continue }
-                guard let url = safePath(relative, protectingInputs: false) else { result.errors += 1; continue }
-                guard safePath(relative) != nil else { result.nonEmpty += 1; continue }
-
-                do {
-                    guard fm.fileExists(atPath: url.path) else { doc.Directories.removeValue(forKey: relative); continue }
-                    guard !inputs.contains(where: { $0.hasPrefix(Self.canonicalPath(url.path).lowercased() + "/") }), try fm.contentsOfDirectory(atPath: url.path).isEmpty else { result.nonEmpty += 1; continue }
-                    // POSIX rmdir cannot recursively delete files added concurrently.
-                    guard rmdir(url.path) == 0 else { throw Failure.changingFile }
-                    doc.Directories.removeValue(forKey: relative)
-                } catch { result.errors += 1 }
-            }
-            try save(doc)
-        } catch { result.errors += 1 }
-        return result
-    }
-
-    private func capture(_ doc: inout Document) throws {
-        guard let pending = doc.Pending else { return }
-        let after = try scan()
-        for (relative, entry) in after.files {
-            if let before = pending.Before[relative] {
-                if before.Size == entry.Size && before.ModifiedUtcTicks == entry.ModifiedUtcTicks { continue }
-                guard let owned = doc.Files[relative], owned.Size == before.Size, owned.ModifiedUtcTicks == before.ModifiedUtcTicks else { continue }
-            }
-            guard let stage = classifyOutput(relative), let url = safePath(relative) else { continue }
-            if pending.Stage == .scanPreparation && stage != .scanPreparation { continue }
-            if pending.Stage == .inference && stage != .inference { continue }
-            if pending.Stage == .postprocessing && stage != .postprocessing { continue }
-            var owned = try fingerprint(url); owned.Stage = stage
-            doc.Files[relative] = owned
-        }
-        for relative in after.directories.subtracting(pending.Directories) where Self.directoryCanBeCreated(normalizedOutput(relative), by: pending.Stage) {
-            if doc.Directories[relative] == nil { doc.Directories[relative] = pending.Stage }
-        }
-        removeMissing(&doc)
-        try trackDirectories(&doc, directories: after.directories)
-        doc.Pending = nil
-    }
-
-    private func reconcile(_ doc: inout Document) throws {
-        let current = try scan()
-        removeMissing(&doc)
-        try trackDirectories(&doc, directories: current.directories)
-    }
-    private func removeMissing(_ doc: inout Document) {
-        for relative in doc.Files.keys {
-            if let url = safePath(relative), !fm.fileExists(atPath: url.path) { doc.Files.removeValue(forKey: relative) }
-        }
-        for relative in doc.Directories.keys {
-            if let url = safePath(relative), !fm.fileExists(atPath: url.path) { doc.Directories.removeValue(forKey: relative) }
-        }
-    }
-    private func trackDirectories(_ doc: inout Document, directories: Set<String>) throws {
-        for relative in directories {
-            let stages = doc.Files.filter { $0.key.hasPrefix(relative + "/") }.map { $0.value.Stage }
-            if let first = stages.min(by: { $0.order < $1.order }) {
-                if doc.Directories[relative] == nil || first.order < doc.Directories[relative]!.order { doc.Directories[relative] = first }
-            } else if doc.Directories[relative] == nil, let stage = classifyDirectory(relative), let url = safePath(relative), try fm.contentsOfDirectory(atPath: url.path).isEmpty {
-                doc.Directories[relative] = stage
-            }
-        }
-    }
-
-    private static func match(_ path: String, _ pattern: String) -> Bool {
-        path.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
-    }
-    static func classify(_ path: String) -> OutputStage? {
-        if match(path, #"^\.pinna2hrtf-(inference|postprocessing)-receipt\.json$"#) { return path.contains("inference") ? .inference : .postprocessing }
-        if match(path, #"^HRTF/Upsampled/HRIR_[^/]+/(hrtf_Nd=[0-5](_dense)?\.sofa|upsampling_report\.(txt|mat)|upsampling\.json)$"#) { return .postprocessing }
-        if match(path, #"^HRTF/\.pinna2hrtf-upsampling-[a-z0-9_]{8}/(plan\.json|Upsampled/HRIR_[^/]+/(hrtf_Nd=[0-5](_dense)?\.sofa|upsampling_report\.(txt|mat)|upsampling\.json))$"#) { return .postprocessing }
-        if match(path, #"^Manual PPM/((Left|Right)\.(stl|json|blend[0-9]*)|PPM\.blend[0-9]*|Templates/[0-9a-f-]{36}-PPM\.blend[0-9]*)$"#) { return .preprocessing }
-        if match(path, #"^MeshEdits/((Individual)?(Left|Right)\.(stl|json)|AlignedScan\.(ply|json))$"#) { return .scanPreparation }
-        if match(path, #"^Prepared/inference\.json$"#) { return .inference }
-        if match(path, #"^Prepared/preprocessing\.json$"#) { return .preprocessing }
-        if match(path, #"^Prepared/(Left\.stl|Right\.stl|mesh_preparation\.json)$"#) { return .scanPreparation }
-        if match(path, #"^\.pinna2hrtf_native_run\.yaml$"#) || match(path, #"^(Intermediates/)?Results Inference\.csv$"#) ||
-            match(path, #"^Intermediates/(Left|Right)/(ICP_[^/]+\.stl|Prediction_[^/]+\.stl|Prediction_Parameters_[^/]+\.csv)$"#) ||
-            match(path, #"^(Intermediates/)?(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)/[^/]+\.(stl|csv)$"#) { return .inference }
-        if match(path, #"^Intermediates/(Left|Right)/(input_ear\.stl|source_landmark\.json|closed_ear\.stl|cut_head\.stl|stitched_head\.stl|graded_head\.ply|dummy_head\.stl)$"#) ||
-            match(path, #"^Intermediates/dummy_head\.stl$"#) ||
-            match(path, #"^Projects/(Left|Right)/(parameters\.json|3d Model\.blend[0-9]*|NumCalc/source_[0-9]+/NC\.inp|(ObjectMeshes|EvaluationGrids)/[^/]+/(Nodes|Elements)\.txt)$"#) ||
-            match(path, #"^\.pinna2hrtf-preprocessing-(signature|(mac-v2|windows-v3|inputs-v1)\.json)$"#) { return .preprocessing }
-        if match(path, #"^Projects/(Left|Right)/NumCalc/source_[0-9]+/(NC[0-9]+-[0-9]+_log\.txt|NC([0-9]+-[0-9]+|from[0-9]+|until[0-9]+)?\.out|Memory\.txt|be\.out/be\.[0-9]+/(pBoundary|pEvalGrid|vBoundary|vEvalGrid))$"#) { return .numcalc }
-        if match(path, #"^(HRTF|Projects/(Left|Right)/Output2HRTF)/(HRIR|HRTF)_[^/]+\.(sofa|png|jpg|jpeg|pdf)$"#) ||
-            match(path, #"^Projects/(Left|Right)/Output2HRTF/(report_source_[0-9]+\.csv|report_issues\.(txt|csv))$"#) { return .postprocessing }
-        return nil
-    }
-    private static func classifyEmptyDirectory(_ path: String) -> OutputStage? {
-        if match(path, #"^Manual PPM(/Templates)?$"#) { return .preprocessing }
-        if match(path, #"^MeshEdits$"#) { return .scanPreparation }
-        if match(path, #"^Prepared$"#) { return .scanPreparation }
-        if match(path, #"^Intermediates$"#) || match(path, #"^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)$"#) { return .inference }
-        if match(path, #"^Projects/(Left|Right)/NumCalc/source_[0-9]+/be\.out(/be\.[0-9]+)?$"#) { return .numcalc }
-        if match(path, #"^Intermediates/(Left|Right)$"#) || match(path, #"^Projects$"#) ||
-            match(path, #"^Projects/(Left|Right)(/(ObjectMeshes|EvaluationGrids|NumCalc)(/.*)?)?$"#) { return .preprocessing }
-        if match(path, #"^HRTF(/.*)?$"#) || match(path, #"^Projects/(Left|Right)/Output2HRTF(/.*)?$"#) { return .postprocessing }
-        return nil
-    }
-    private static func directoryCanBeCreated(_ path: String, by stage: OutputStage) -> Bool {
-        switch stage {
-        case .scanPreparation: return match(path, #"^Prepared$"#)
-        case .inference: return match(path, #"^Intermediates(/(Left|Right))?$"#) || match(path, #"^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)$"#)
-        case .preprocessing: return match(path, #"^Intermediates(/(Left|Right))?$"#) || match(path, #"^Projects(/(Left|Right)(/.*)?)?$"#)
-        case .numcalc: return match(path, #"^Projects/(Left|Right)/NumCalc/source_[0-9]+/be\.out(/be\.[0-9]+)?$"#)
-        case .postprocessing: return match(path, #"^HRTF(/.*)?$"#) || match(path, #"^Projects/(Left|Right)/Output2HRTF(/.*)?$"#)
-        }
-    }
-    private func normalizedOutput(_ path: String) -> String {
-        guard let outputPrefix, path == outputPrefix || path.hasPrefix(outputPrefix + "/") else { return path }
-        return "HRTF" + String(path.dropFirst(outputPrefix.count))
-    }
-    private func classifyOutput(_ path: String) -> OutputStage? { Self.classify(normalizedOutput(path)) }
-    private func classifyDirectory(_ path: String) -> OutputStage? { Self.classifyEmptyDirectory(normalizedOutput(path)) }
-    private func safePath(_ relative: String, protectingInputs: Bool = true) -> URL? {
-        let parts = relative.split(separator: "/", omittingEmptySubsequences: false)
-        guard !relative.contains(":"), !relative.contains("\\"), !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." || $0.hasSuffix(" ") || $0.hasSuffix(".") }),
-            (outputPrefix?.hasPrefix(relative + "/") == true || Self.match(normalizedOutput(relative), #"^(Prepared|Intermediates|Projects|HRTF|Manual PPM|MeshEdits)(/|$)|^(Prediction STL|Prediction Parameters|ICP STL) (Left|Right)(/|$)|^Results Inference\.csv$|^\.pinna2hrtf(-preprocessing-(signature|(mac-v2|windows-v3|inputs-v1)\.json)|_native_run\.yaml|-(inference|postprocessing)-receipt\.json)$"#)) else { return nil }
-        let url = root.appendingPathComponent(relative)
-        let candidate = Self.canonicalPath(url.path).lowercased()
-        guard url.path.hasPrefix(root.path + "/"),
-              (!protectingInputs || !inputs.contains(where: { candidate == $0 || candidate.hasPrefix($0 + "/") })),
-              !hasLinkedAncestor(url) else { return nil }
-        return url
-    }
-    /// True when a path component strictly below the project root is a symbolic link.
-    /// Components at or above the root are the user's choice (/tmp, /var/folders,
-    /// a linked Dropbox folder) and are resolved once in `realRoot`.
-    private func hasLinkedAncestor(_ url: URL) -> Bool {
-        let path = url.path
-        guard path != root.path else { return false }
-        guard path.hasPrefix(root.path + "/") else { return true }
-        var current = url
-        while current.path.count > root.path.count {
-            var info = stat()
-            if lstat(current.path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFLNK { return true }
-            current.deleteLastPathComponent()
-        }
-        return false
-    }
-    private static func canonicalPath(_ path: String) -> String {
-        guard let resolved = realpath(path, nil) else { return URL(fileURLWithPath: path).path }
-        defer { free(resolved) }
-        return String(cString: resolved)
-    }
-    private func scan() throws -> (files: [String: Entry], directories: Set<String>) {
-        // The root may be reached through links; it must resolve to a real directory.
-        var isDirectory: ObjCBool = false
-        if fm.fileExists(atPath: realRoot, isDirectory: &isDirectory), !isDirectory.boolValue { throw Failure.unsafePath }
-        var files: [String: Entry] = [:], directories = Set<String>()
-        func visit(_ folder: URL) throws {
-            for url in try fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey]) {
-                let relative = String(url.path.dropFirst(root.path.count + 1))
-                guard safePath(relative) != nil else { continue }
-                let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
-                if values.isDirectory == true { directories.insert(relative); try visit(url) }
-                else if values.isRegularFile == true { files[relative] = try fileMetadata(url) }
-            }
-        }
-        if fm.fileExists(atPath: root.path) { try visit(root) }
-        return (files, directories)
-    }
-    private func fileMetadata(_ url: URL) throws -> Entry {
-        let attrs = try fm.attributesOfItem(atPath: url.path)
-        guard let size = attrs[.size] as? NSNumber, let date = attrs[.modificationDate] as? Date else { throw Failure.changingFile }
-        return Entry(Size: size.int64Value, ModifiedUtcTicks: Int64(date.timeIntervalSince1970 * 10_000_000) + 621355968000000000)
-    }
-    private func fingerprint(_ url: URL) throws -> Entry {
-        let before = try fileMetadata(url)
-        let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }
-        var hash = SHA256()
-        while let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty { hash.update(data: data) }
-        let after = try fileMetadata(url)
-        guard before.Size == after.Size, before.ModifiedUtcTicks == after.ModifiedUtcTicks else { throw Failure.changingFile }
-        var entry = before
-        entry.Sha256 = hash.finalize().map { String(format: "%02X", $0) }.joined()
-        return entry
-    }
-    private func acquire() throws -> Int32 {
-        guard !hasLinkedAncestor(metadata), !hasLinkedAncestor(manifest) else { throw Failure.unsafePath }
-        try fm.createDirectory(at: metadata, withIntermediateDirectories: true)
-        let lock = metadata.appendingPathComponent("outputs.lock")
-        guard !hasLinkedAncestor(lock) else { throw Failure.unsafePath }
-        let fd = open(lock.path, O_CREAT | O_RDWR | O_NOFOLLOW, S_IRUSR | S_IWUSR)
-        guard fd >= 0 else { throw Failure.unsafePath }
-        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { close(fd); throw Failure.busy }
-        return fd
-    }
-    static func rebaseOwnership(in root: URL, unchanged: Set<String>) throws {
-        let store = try GeneratedOutputManifest(projectRoot: root.path, inputs: [])
-        guard FileManager.default.fileExists(atPath: store.manifest.path) else { return }
-        var doc = try store.load()
-        for (path, old) in doc.Files where unchanged.contains(path) && ["json", "yaml", "yml"].contains(URL(fileURLWithPath: path).pathExtension) {
-            guard let url = store.safePath(path), FileManager.default.fileExists(atPath: url.path) else { continue }
-            var entry = try store.fingerprint(url); entry.Stage = old.Stage; doc.Files[path] = entry
-        }
-        try store.save(doc)
-    }
-
-    private func load() throws -> Document {
-        guard !hasLinkedAncestor(manifest) else { throw Failure.unsafePath }
-        guard fm.fileExists(atPath: manifest.path) else { return Document() }
-        let doc = try JSONDecoder().decode(Document.self, from: Data(contentsOf: manifest))
-        guard doc.Version == 1, doc.Files.values.allSatisfy({ Self.match($0.Sha256, #"^[a-fA-F0-9]{64}$"#) }) else { throw Failure.invalidManifest }
-        return doc
-    }
-    private func save(_ doc: Document) throws {
-        guard !hasLinkedAncestor(metadata), !hasLinkedAncestor(manifest) else { throw Failure.unsafePath }
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(doc).write(to: manifest, options: .atomic)
+            let data = try perform(["action": "reset", "stage": stage?.rawValue ?? ""])
+            var result = try JSONDecoder().decode(ResetResult.self, from: data)
+            result.fromStage = stage
+            return result
+        } catch { return ResetResult(fromStage: stage, errors: 1) }
     }
 }

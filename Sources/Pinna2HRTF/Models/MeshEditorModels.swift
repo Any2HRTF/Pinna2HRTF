@@ -16,8 +16,6 @@ struct MeshEditorRequest: Identifiable {
     var title: String { side.map { "Edit \($0.title) Ear" } ?? "Nose and Ear Alignment" }
 }
 
-/// A compact display rectangle around the mesh/plane intersection.
-/// Its size affects only the overlay; the backend still cuts a half-space.
 struct CuttingPlanePreview {
     let center: SIMD3<Float>
     let orientation: simd_quatf
@@ -57,7 +55,6 @@ struct CuttingPlanePreview {
                 }
             }
         }
-        // Keep an out-of-mesh plane visible using the mesh's projected footprint.
         if !intersects {
             sectionMin = SIMD2(lower.x, lower.y); sectionMax = SIMD2(upper.x, upper.y)
         }

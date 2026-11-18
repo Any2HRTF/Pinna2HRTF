@@ -1,8 +1,6 @@
 import AppKit
 import SwiftUI
 
-// Own the pane sizes directly instead of letting SwiftUI's inspector repeatedly
-// change NSHostingView minimum constraints during the window's constraint pass.
 struct NativeMeshWorkspace: NSViewRepresentable {
     @ObservedObject var store: AppStore
     @Binding var logExpanded: Bool
@@ -18,7 +16,6 @@ struct NativeMeshWorkspace: NSViewRepresentable {
     }
 
     func updateNSView(_ split: MeshWorkspaceSplitView, context: Context) {
-        // The hosted views observe the store themselves; keep their identity through resizes.
         if split.displayedLogExpanded != logExpanded {
             split.viewerHost.rootView = AnyView(MeshViewerView(store: store, logExpanded: $logExpanded))
             split.displayedLogExpanded = logExpanded

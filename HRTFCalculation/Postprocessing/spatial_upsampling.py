@@ -40,8 +40,6 @@ def upsample_hrtf_files(output_dir, settings, logger=print):
         raise ValueError("Spatial upsampling requires at least one exported HRIR SOFA file.")
     destination = root / "Upsampled"
     if destination.exists():
-        # The pipeline always passes a fresh staging folder; overwrite handling
-        # happens when that folder is published (RunConfig._publish_export).
         raise FileExistsError(f"Spatial upsampling expects a fresh export folder, but {destination} already exists.")
     originals = []
     for path in sources:
@@ -50,7 +48,6 @@ def upsample_hrtf_files(output_dir, settings, logger=print):
         if ir.ndim != 3 or ir.shape[1] != 2:
             raise ValueError("LocaDyn spatial upsampling requires a binaural HRIR export. Select both left and right ears.")
         originals.append((path, ir.shape, np.asarray(sofa.Data_SamplingRate), file_identity(path)))
-    # Publish the dense exports together only after interpolation and SOFA validation succeed.
     with tempfile.TemporaryDirectory(prefix=".pinna2hrtf-upsampling-", dir=root) as temporary:
         stage = Path(temporary)
         dense_root = stage / "Upsampled"
@@ -143,19 +140,12 @@ def upsample_file(source, folder, subdivisions=3, normalize=True, logger=print):
     original = sf.read_sofa(str(source))
     ir, positions, fs, receivers = validate_input(original)
     values, positions, delays, diagnostics = interpolate(ir, positions, fs, subdivisions, normalize, logger)
-    # With normalize=False the dense set keeps the level of the HRIR export
-    # (normalize/level_offset_db); with normalize=True LocaDyn's frontal
-    # normalisation (frontal RMS 0.01) is applied on purpose.
     output = sf.Sofa('SimpleFreeFieldHRIR', version='1.0')
-    # Preserve descriptive metadata; convention-specific fields use HRIR defaults.
     for name, value in vars(original).items():
         if name.startswith('GLOBAL_') and hasattr(output, name) and name not in output._read_only_attr:
             setattr(output, name, value)
     output.Data_IR = values
     output.Data_SamplingRate = fs
-    # The interpolated IRs already contain the modelled TOA. SOFA Data.Delay is
-    # an additional delay in samples, so it must be zero here; the TOA (seconds)
-    # is kept in upsampling_report.mat as 'toa_seconds'.
     output.Data_Delay = np.zeros((1, values.shape[1]))
     output.SourcePosition = positions
     distance = np.mean(np.abs(receivers[:, 1]))

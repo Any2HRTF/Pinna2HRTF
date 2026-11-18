@@ -2,7 +2,6 @@ import AppKit
 import SceneKit
 import simd
 
-// Shared by mesh previews, fitting, pressure fields, and the ear editor.
 class NavigableSCNView: SCNView {
     static let navigationHelp = "Trackpad: two-finger scroll to rotate, pinch to zoom, Shift-scroll to pan. Mouse: right-drag to rotate, Shift-right-drag or middle-drag to pan, wheel to zoom. Command-scroll also zooms."
     var navigationEnabled: Bool { allowsCameraControl }
@@ -62,8 +61,6 @@ class NavigableSCNView: SCNView {
         }
     }
 
-    // Precise scroll events are two-finger trackpad gestures. They never enter
-    // the primary-button path used for face clicks and lassos.
     override func scrollWheel(with event: NSEvent) {
         guard navigationEnabled else { return }
         navigationWillBegin()
@@ -77,7 +74,6 @@ class NavigableSCNView: SCNView {
             }
             needsDisplay = true
         } else {
-            // A conventional mouse wheel retains zooming.
             zoomCamera(by: Double(event.scrollingDeltaY) * 0.08)
         }
     }

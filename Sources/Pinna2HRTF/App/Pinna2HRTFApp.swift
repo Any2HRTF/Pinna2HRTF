@@ -7,8 +7,6 @@ struct Pinna2HRTFApp: App {
     @StateObject private var store = AppStore()
     @AppStorage(AppPreferences.appearance) private var appearance = "system"
 
-    /// Applied at the AppKit level: `preferredColorScheme(nil)` does not fully revert a forced
-    /// scheme (leaving stale materials and layers), and it never reaches the AppKit editor windows.
     private static func applyAppearance(_ value: String) {
         let name: NSAppearance.Name? = switch value {
         case "light": .aqua
@@ -25,7 +23,6 @@ struct Pinna2HRTFApp: App {
     }
 
     init() {
-        // Writing to a subprocess that already exited must fail with EPIPE, not kill the app.
         signal(SIGPIPE, SIG_IGN)
     }
 
@@ -100,8 +97,6 @@ final class Pinna2HRTFAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Saves pending project-list changes and stops every tracked process tree
-        // (pipeline runs, uv sync, helpers, the fitting worker).
         if let store { store.prepareForTermination() } else { ProcessLauncher.shared.terminateAll() }
     }
 

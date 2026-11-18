@@ -1,8 +1,5 @@
-// Front-page extras: the direction dial, the scroll-tilted screenshot,
-// the pinned workflow, and the typing terminal.
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-// Direction dial
 (() => {
   const dial = document.getElementById("dial");
   if (!dial) return;
@@ -26,8 +23,6 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").match
     ticks.append(line);
   }
 
-  // `angle` runs clockwise from the front; azimuth is reported counter-clockwise.
-  // `radius` is in dial units and maps to a source distance of 0.2 m to 1 m.
   const NEAR = 85, FAR = 240, HEAD = 0.0875, SPEED = 343, WINDOW = 4, POINTS = 240;
   let angle = 35;
   let radius = FAR;
@@ -35,8 +30,6 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").match
   let held = false;
   let hovering = false;
 
-  // A rough spherical-head impulse response: the sound travels straight to an ear it can
-  // see and creeps around the head to one it cannot, arriving later, weaker and duller.
   const trace = (path, distance, cosine, echo) => {
     const visible = Math.acos(HEAD / distance);
     const incidence = Math.acos(Math.min(Math.max(cosine, -1), 1));
@@ -92,10 +85,6 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").match
   svg.addEventListener("pointerenter", () => { hovering = true; });
   svg.addEventListener("pointerleave", () => { hovering = false; });
 
-  // Wavefronts leave the source at a steady speed. When one meets the head it bounces:
-  // the echo spreads back from a mirror image of the source just inside the skull
-  // (the head acts as a convex mirror), so a closer source gives quicker, stronger,
-  // more tightly curved reflections.
   const rings = source.querySelectorAll(".pulse");
   const echoes = source.querySelectorAll(".echo");
   const SKULL = 50, AFTER = 95, SPREAD = (58 * Math.PI) / 180;
@@ -129,7 +118,6 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").match
     const seconds = Math.min((now - last) / 1000, 0.1);
     if (!held && !hovering) {
       angle = (angle + seconds * 14) % 360;
-      // Until someone takes over, drift in and out to show that distance matters too.
       if (!touched) radius = 175 + 65 * Math.cos(now / 2600);
       render();
     }
@@ -142,7 +130,6 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").match
   if (!reduceMotion) requestAnimationFrame(orbit);
 })();
 
-// Screenshot tips up as it scrolls into view
 (() => {
   const picture = document.querySelector(".showcase picture");
   if (!picture || reduceMotion) return;
@@ -156,7 +143,6 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").match
   update();
 })();
 
-// Pinned workflow: the screenshot follows the step in the middle of the screen
 (() => {
   const steps = [...document.querySelectorAll(".flow-steps li")];
   const shots = [...document.querySelectorAll(".flow-stage picture")];
@@ -172,7 +158,6 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").match
   steps.forEach((step) => observer.observe(step));
 })();
 
-// Terminal types its commands the first time it is seen
 (() => {
   const terminal = document.getElementById("terminal");
   if (!terminal || reduceMotion || !("IntersectionObserver" in window)) return;

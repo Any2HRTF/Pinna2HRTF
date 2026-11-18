@@ -2,7 +2,6 @@ import Foundation
 import CryptoKit
 
 enum ArtifactScanner {
-    /// One refresh owns one inspection; subsequent refreshes always read fresh files.
     final class Inspection {
         private var documents: [URL: [String: Any]?] = [:]
         private var metadata: [URL: [FileAttributeKey: Any]?] = [:]
@@ -21,8 +20,6 @@ enum ArtifactScanner {
 
         func attributes(_ url: URL) -> [FileAttributeKey: Any]? {
             if let cached = metadata[url] { return cached }
-            // FileManager's full attribute dictionary also fetches extended attributes.
-            // On SMB volumes those extra requests block status and validation views.
             var freshURL = url
             freshURL.removeAllCachedResourceValues()
             let values = try? freshURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .fileResourceTypeKey])
@@ -31,7 +28,6 @@ enum ArtifactScanner {
                let size = values.fileSize, let modified = values.contentModificationDate {
                 result = [.size: NSNumber(value: size), .modificationDate: modified, .type: FileAttributeType.typeRegular]
             } else if values != nil {
-                // Preserve existing behavior for directories, symbolic links and special files.
                 result = try? FileManager.default.attributesOfItem(atPath: url.path)
             } else {
                 result = nil
@@ -251,9 +247,6 @@ enum ArtifactScanner {
         }
     }
 
-    /// Filesystem timestamps may round slightly when a project is copied between
-    /// volumes or serialized through JSON. Preserve source validation without
-    /// treating sub-microsecond representation differences as changed geometry.
     static func meshIdentityMatches(_ saved: String, _ current: String?) -> Bool {
         guard let current else { return false }
         if saved == current { return true }
@@ -282,8 +275,6 @@ enum ArtifactScanner {
                        ("left_margin_mm", scan.leftMarginMM), ("right_margin_mm", scan.rightMarginMM),
                        ("side_min_mm", scan.sideMinMM), ("side_max_mm", scan.sideMaxMM)]
         guard numbers.allSatisfy({ (settings[$0.0] as? NSNumber)?.doubleValue == Double($0.1) }) else { return false }
-        // Copy-input projects record the portable copy. The source fingerprint still
-        // lets changes to the selected original invalidate the prepared geometry.
         let source = URL(fileURLWithPath: scan.scanPath)
         guard let sourceStamp = report["source_identity"] as? [String: Any],
               matchesStamp(source, sourceStamp, inspection: inspection) else { return false }
@@ -438,7 +429,6 @@ enum ArtifactScanner {
     private static let directRunEndPattern = try! NSRegularExpression(pattern: "^End time:\\s*\\S", options: [.anchorsMatchLines])
     private static let directRunStepPattern = try! NSRegularExpression(pattern: "^Step\\s+(\\d+),\\s+Frequency\\s*=", options: [.anchorsMatchLines])
 
-    /// Steps completed by a direct, all-frequency NumCalc run (single shared `NC.out`).
     static func directCompletedSteps(source: URL, inspection: Inspection = Inspection()) -> Set<Int> {
         guard !inspection.isCancelled() else { return [] }
         if let cached = inspection.directRunSteps[source] { return cached }
@@ -448,8 +438,6 @@ enum ArtifactScanner {
             let text = String(decoding: data, as: UTF8.self)
             let fullRange = NSRange(text.startIndex..<text.endIndex, in: text)
             if directRunEndPattern.firstMatch(in: text, options: [], range: fullRange) != nil {
-                // `-estimate_ram` writes the same NC.out with every step header but solves
-                // nothing; only a solved step reports its own time statistic.
                 let headers = directRunStepPattern.matches(in: text, options: [], range: fullRange)
                 for (index, header) in headers.enumerated() {
                     guard let headerRange = Range(header.range, in: text),
@@ -486,8 +474,6 @@ enum ArtifactScanner {
     }
 }
 
-/// Compares the inputs and effective settings that determine preprocessing results.
-/// Storage locations, input-copy policy, and inactive settings are deliberately absent.
 enum PreprocessingSignature {
     private static let format = "pinna2hrtf-preprocessing-v2"
     private static let cacheLock = NSLock()
@@ -522,7 +508,6 @@ enum PreprocessingSignature {
                         inspection: ArtifactScanner.Inspection = .init()) -> Bool {
         let next = current ?? capture(project, inspection: inspection)
         if saved == next { return true }
-        // A receipt for both ears also covers a later selection of either ear.
         if let oldData = saved.data(using: .utf8), let newData = next.data(using: .utf8),
            var previous = try? JSONSerialization.jsonObject(with: oldData) as? [String: Any],
            var selected = try? JSONSerialization.jsonObject(with: newData) as? [String: Any],
@@ -547,9 +532,6 @@ enum PreprocessingSignature {
             previous["scanPreparation"] = oldScan; selected["scanPreparation"] = newScan
             if covered && encoded(previous) == encoded(selected) { return true }
         }
-        // Early receipts contain seven fields; later ones add three manual-fit
-        // fields and an optional scan-settings field.
-        // Never blindly accept a legacy receipt or re-baseline genuinely changed settings.
         var fields = saved.components(separatedBy: "\n")
         if fields.count == 7 { fields += ["", "", ""] }
         guard fields.count == 10 || fields.count == 11,
@@ -614,8 +596,6 @@ enum PreprocessingSignature {
         let manual = project.settings.manualPPMFitting.useForPreprocessing
         var result: [String: Any] = ["preprocessing": pre,
             "inputMode": manual ? "manual" : project.settings.inference.usePredictionsForPreprocessing ? "inference" : "original"]
-        // Imported physical/geometry overrides also affect results; GUI values are
-        // represented above, and bookkeeping/export-only choices do not affect the solver.
         if let json = project.preservedConfigJSON?.data(using: .utf8),
            let document = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
            var hidden = document["preprocessing"] as? [String: Any] {
@@ -652,8 +632,6 @@ enum PreprocessingSignature {
     private static func resourceMatches(_ old: String, _ new: String, relocations: [(String, String)],
                                         directory: Bool = false, inspection: ArtifactScanner.Inspection) -> Bool {
         if old == new { return true }
-        // A legacy receipt has no resource hashes. A consistent project-root move
-        // is accepted only after both ear stamps were verified above.
         if relocations.contains(where: { from, to in
             (old == from || old.hasPrefix(from + "/")) && to + String(old.dropFirst(from.count)) == new
         }) { return true }
@@ -682,8 +660,6 @@ enum PreprocessingSignature {
 
     static func fileFingerprint(_ path: String) -> String { fingerprint(path, inspection: .init()) }
 
-    /// A Core ML manifest records toolchain versions and changes with every rebuild. The model's
-    /// identity is the checkpoint it was converted from, which also keeps PyTorch-era receipts valid.
     static func checkpointFingerprint(_ path: String, inspection: ArtifactScanner.Inspection = .init()) -> String {
         if path.hasSuffix(".coreml.json"),
            let digest = inspection.document(URL(fileURLWithPath: path))?["source_checkpoint_sha256"] as? String,
@@ -693,7 +669,6 @@ enum PreprocessingSignature {
         return fingerprint(path, inspection: inspection)
     }
 
-    /// The PyTorch checkpoint path a Core ML manifest stands in for.
     static func sourceCheckpointPath(_ path: String) -> String {
         path.hasSuffix(".coreml.json") ? String(path.dropLast(".coreml.json".count)) + ".pth" : path
     }

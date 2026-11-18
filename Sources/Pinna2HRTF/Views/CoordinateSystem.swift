@@ -2,7 +2,6 @@ import AppKit
 import SceneKit
 import simd
 
-// Display-only geometry: excluded from mesh hit testing and saved output.
 enum CoordinateSystem {
     static let colors: [NSColor] = [.systemRed, .systemGreen, .systemBlue]
     static let directions: [SIMD3<Float>] = [SIMD3(1,0,0), SIMD3(0,1,0), SIMD3(0,0,1)]
@@ -13,8 +12,6 @@ enum CoordinateSystem {
         for (index, direction) in directions.enumerated() {
             let axis = SCNNode()
             axis.simdOrientation = simd_quatf(from: SIMD3(0,1,0), to: direction)
-            // Extend well past the scan in both directions, with thickness
-            // based on the mesh size rather than the length of the axis.
             let shaft = SCNCylinder(radius: CGFloat(span * 0.0015), height: CGFloat(span * 10))
             shaft.radialSegmentCount = 8
             let material = SCNMaterial()
@@ -30,8 +27,6 @@ enum CoordinateSystem {
     }
 }
 
-// A camera-linked orientation reference stays visible even when the scan's
-// original origin lies outside the viewport. It never intercepts mesh clicks.
 final class CoordinateOrientationView: NSView {
     var cameraOrientation = simd_quatf(angle: 0, axis: SIMD3(0,0,1)) {
         didSet { if cameraOrientation.vector != oldValue.vector { needsDisplay = true } }

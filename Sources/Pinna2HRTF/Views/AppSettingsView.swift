@@ -34,8 +34,6 @@ struct AppSettingsView: View {
     @State private var paneHeights: [Pane: CGFloat] = [:]
 
     var body: some View {
-        // The window gets an explicit height from the measured pane. Letting the TabView size itself
-        // from the form's ideal height makes AppKit loop on constraint updates while the window resizes.
         TabView(selection: $selectedPane) {
             ForEach(Pane.allCases, id: \.self) { pane in
                 ScrollView(.vertical) {
@@ -51,7 +49,6 @@ struct AppSettingsView: View {
     }
 }
 
-/// One Settings tab, laid out as a System Settings–style grouped form that sizes the window to its content.
 struct SettingsPaneView: View {
     let pane: AppSettingsView.Pane
     @ObservedObject var store: AppStore
@@ -109,8 +106,6 @@ struct SettingsPaneView: View {
             Text("Choose a folder containing Nodes.txt and Elements.txt.")
         }
     }
-
-    // MARK: Panes
 
     @ViewBuilder private var general: some View {
         Section {
@@ -198,8 +193,6 @@ struct SettingsPaneView: View {
                 pathSetting("uv", path: $developerUV, defaultPath: store.library.environment.uvExecutable)
                 pathSetting("External dependencies", path: $developerExternalDir,
                             defaultPath: store.library.environment.externalDir, directory: true)
-                // Both paths together add a "Custom" entry to each project's model menu. PyTorch
-                // checkpoints run only with a Python above that has PyTorch; it is not bundled.
                 pathSetting("Model configuration", path: $developerModelConfig, defaultPath: "Bundled models (.yaml)")
                 pathSetting("Model checkpoint", path: $developerModelCheckpoint,
                             defaultPath: "Bundled models (.pth needs a Python with PyTorch)")
@@ -207,9 +200,6 @@ struct SettingsPaneView: View {
         }
     }
 
-    // MARK: Controls
-
-    /// Safari-style location pop-up: the default, the chosen folder, and "Other…".
     private func locationPicker(_ title: String, path: Binding<String>, defaultTitle: String, choose: @escaping () -> Void) -> some View {
         let selection = Binding<String>(
             get: { path.wrappedValue.isEmpty ? "default" : "custom" },
@@ -252,7 +242,6 @@ struct SettingsPaneView: View {
                     let bounded = min(max(newValue, range.lowerBound), range.upperBound)
                     if bounded != newValue { value.wrappedValue = bounded }
                 }
-            // Reserve the unit column on every row so fields and steppers line up.
             Text(unit ?? "")
                 .foregroundStyle(.secondary)
                 .frame(width: 20, alignment: .leading)
@@ -321,8 +310,6 @@ struct SettingsPaneView: View {
             }
         }
     }
-
-    // MARK: Panels
 
     private func chooseFile(selection: Binding<String>) {
         let panel = NSOpenPanel()

@@ -1,7 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// Owns a resizable editor window for the lifetime of its request.
 struct EditorWindow<Request: Identifiable>: NSViewRepresentable {
     @Binding var request: Request?
     let title: String

@@ -70,11 +70,7 @@ final class PressureFieldModel: ObservableObject {
     private static func read<T: Decodable>(_ command: [String: Any], as type: T.Type) async throws -> T {
         let input = try JSONSerialization.data(withJSONObject: command)
         return try await Task.detached(priority: .userInitiated) {
-            let data = try ProjectConfigDocument.runPython("""
-            import json, sys
-            from HRTFCalculation.PressureField import execute
-            print(json.dumps(execute(json.load(sys.stdin)), allow_nan=False))
-            """, input: input, timeout: 300, operation: "Pressure field loading")
+            let data = try ProjectConfigDocument.run(["-m", "HRTFCalculation", "pressure"], input: input, timeout: 300, operation: "Pressure field loading")
             return try JSONDecoder().decode(type, from: data)
         }.value
     }

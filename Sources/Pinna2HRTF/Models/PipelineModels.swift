@@ -174,7 +174,6 @@ struct ManualPPMFittingSettings: Codable, Equatable {
                 rightSourcePath = nil; rightSourceIdentity = nil
             }
         }
-        // Keep the selected method when generated fits are reset.
         if let templateBlendPath, !FileManager.default.fileExists(atPath: templateBlendPath) {
             self.templateBlendPath = nil
         }
@@ -331,8 +330,6 @@ extension ProjectRecord {
             && URL(fileURLWithPath: scan.scanPath).standardizedFileURL.path == alignedScan
             && scan.originalScanPath != scan.scanPath
         if !canResetAlignment { paths.append(scan.scanPath) }
-        // A project's saved fits are outputs when explicitly resetting that
-        // project; fits used by any other project remain protected inputs.
         if id != resettingProjectID {
             paths += [scan.reviewedLeftPath ?? "", scan.reviewedRightPath ?? "", scan.individualLeftEdit ?? "", scan.individualRightEdit ?? ""]
             let fitting = settings.manualPPMFitting

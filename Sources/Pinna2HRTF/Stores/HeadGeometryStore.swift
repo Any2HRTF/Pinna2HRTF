@@ -8,7 +8,7 @@ extension AppStore {
         geometryKey = generation
         Task { @MainActor in
             let discovered = await Task.detached(priority: .utility) { () -> ([String], [String]) in
-        var arguments = ["-m", "HRTFCalculation.Geometry"]
+        var arguments = ["-m", "HRTFCalculation", "geometry"]
         var stamps = [project.id.uuidString]
         for side in EarSide.allCases {
             let path = project.pipelineEar(for: side)
@@ -58,7 +58,6 @@ extension AppStore {
         }
     }
 
-    /// Runs `HRTFCalculation.Geometry` through the shared launcher (registered, cancellable on quit, time-limited).
     private static func measureGeometry(_ arguments: [String], environment: EnvironmentConfig, failure: String) async throws -> GeometryValues {
         let process = try ProcessLauncher.shared.makeProcess(.python(arguments), environment: environment)
         let result = try await ProcessLauncher.shared.runHelperAsync(process, timeout: 180)
@@ -109,7 +108,7 @@ extension AppStore {
     }
 
     func inspectEarDistance(_ project: ProjectRecord) async throws -> GeometryValues {
-        var arguments = ["-m", "HRTFCalculation.Geometry"]
+        var arguments = ["-m", "HRTFCalculation", "geometry"]
         for side in EarSide.allCases {
             let path = project.pipelineEar(for: side)
             guard !path.isEmpty else { continue }

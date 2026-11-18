@@ -21,8 +21,6 @@ def _completed_direct_run_steps(log_path: Path, size: int, mtime_ns: int) -> fro
     text = log_path.read_text(encoding="utf-8", errors="replace")
     if not re.search(r"(?m)^End time:\s*\S", text):
         return frozenset()
-    # `-estimate_ram` writes the same NC.out with every step header but solves
-    # nothing; only a solved step reports its own time statistic.
     headers = list(re.finditer(r"(?m)^Step\s+(\d+),\s+Frequency\s*=", text))
     ends = [header.start() for header in headers[1:]] + [len(text)]
     return frozenset(
@@ -63,7 +61,6 @@ def resolve_numcalc_executable(numcalc_path: Path) -> Path:
 
 
 def _estimate_ram(executable: Path, adaptive_arguments: list[str], source_dir: Path) -> None:
-    # Keep NumCalc's output outside the project tree; it is only needed to explain failures.
     with tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace", prefix="pinna2hrtf-estimate-ram-") as log:
         return_code = subprocess.run([str(executable), *adaptive_arguments, "-estimate_ram"], cwd=source_dir, stdout=log, stderr=subprocess.STDOUT).returncode
         if return_code != 0 or not (source_dir / "Memory.txt").is_file():
@@ -113,15 +110,11 @@ def run_local_numcalc(project_path: Path | list[Path], numcalc_path: Path, max_r
         signal.signal(signal.SIGTERM, terminate_stage)
     try:
         if isinstance(project_path, (list, tuple)):
-            # Explicit projects from the app/config route; sibling backups such
-            # as Left.previous must never be scheduled.
             projects = [Path(path) for path in project_path if (Path(path) / "parameters.json").exists()]
         else:
             projects = [project_path] if (project_path / "parameters.json").exists() else [path for path in project_path.iterdir() if (path / "parameters.json").exists()]
         if not projects:
             raise FileNotFoundError(f"No Mesh2HRTF projects found at {project_path}")
-        # Snapshot existing names before NumCalc runs. Only newly produced files
-        # can be claimed; pre-existing unrecorded files remain protected.
         from .Preprocessing import _project_files, _sha256, _is_solver_output, EXPORT_RECORD
         import json
         ownership = {}
@@ -195,8 +188,6 @@ def run_local_numcalc(project_path: Path | list[Path], numcalc_path: Path, max_r
                 if used_ram + required_ram > ram_budget:
                     break
                 if running:
-                    # wait_time (as in Mesh2HRTF's manage_numcalc) lets a newly started
-                    # instance ramp up before CPU load decides whether to start another.
                     if time.monotonic() - last_start < wait_time:
                         break
                     if psutil.cpu_percent(interval=0.1) >= max_cpu_load:
@@ -229,7 +220,6 @@ def run_local_numcalc(project_path: Path | list[Path], numcalc_path: Path, max_r
             if pending and not running and pending[0][0] * ram_safety_factor > ram_budget:
                 raise MemoryError(f"The smallest pending NumCalc step requires {pending[0][0] * ram_safety_factor:.2f} GB, above the configured {ram_budget:.2f} GB budget")
             if pending or running:
-                # Completion is polled every second; wait_time only throttles new starts.
                 time.sleep(1)
         for project, (record, existing) in ownership.items():
             recorded = record.get("files", {})

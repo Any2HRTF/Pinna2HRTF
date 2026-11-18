@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Shared chrome for alignment, ear editing, and parametric fitting sheets.
-/// Keep controls as ordinary labelled children; do not combine the inspector's accessibility tree.
 struct EditorSheetLayout<Header: View, Viewport: View, Inspector: View, Footer: View>: View {
     let header: Header
     let viewport: Viewport

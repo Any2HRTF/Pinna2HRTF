@@ -10,7 +10,6 @@ sealed class PipelineLogEvent
     public string? Key { get; init; }
 }
 
-/// <summary>Saves complete child-process output and forwards explicit progress events.</summary>
 sealed class PipelineLogCapture : IDisposable
 {
     public const string EventPrefix = "@@PINNA2HRTF_EVENT@@";

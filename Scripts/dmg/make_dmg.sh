@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Packages an app bundle into a styled drag-to-install DMG.
-# usage: make_dmg.sh <Pinna2HRTF.app> <output.dmg> <volume name> <version label>
 set -euo pipefail
 
 if [[ $# -ne 4 ]]; then
@@ -21,7 +19,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Window geometry. Keep in sync with render_background.swift.
 WIN_W=660
 WIN_H=440
 APP_X=180
@@ -49,7 +46,6 @@ if [[ -z "$MOUNT" || ! -d "$MOUNT" ]]; then
   exit 1
 fi
 
-# Lay out the Finder window. Finder needs the disk by its POSIX path.
 osascript <<OSA
 tell application "Finder"
   set d to (POSIX file "$MOUNT" as alias)
@@ -83,7 +79,6 @@ if [[ ! -f "$MOUNT/.DS_Store" ]]; then
   echo "Finder did not save the window layout." >&2
   exit 1
 fi
-# Finder removes a volume icon during layout, so add it afterwards.
 if [[ -f "$APP_ICNS" ]]; then
   cp "$APP_ICNS" "$MOUNT/.VolumeIcon.icns"
   SetFile -a C "$MOUNT" 2>/dev/null || xcrun SetFile -a C "$MOUNT" 2>/dev/null || true

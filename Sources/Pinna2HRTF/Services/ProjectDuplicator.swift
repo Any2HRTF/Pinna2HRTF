@@ -7,8 +7,6 @@ struct ProjectDuplicationRequest: Identifiable {
     let parentFolder: String
 }
 
-/// Copy into a private staging folder and publish only a complete project.
-/// Internal paths and source fingerprints move together; external inputs stay referenced.
 enum ProjectDuplicator {
     static func destination(name: String, parentFolder: String) throws -> URL {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -25,147 +23,22 @@ enum ProjectDuplicator {
 
     static func duplicate(_ original: ProjectRecord, name: String, parentFolder: String,
                           projectRoots: [String]) throws -> ProjectRecord {
-        let fm = FileManager.default
-        var destination = try destination(name: name, parentFolder: parentFolder)
-        let resolved = destination.resolvingSymlinksInPath().path
-        for path in projectRoots where !path.isEmpty {
-            let root = URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path
-            guard resolved != root, !resolved.hasPrefix(root + "/") else {
-                throw ProjectValidation.Failure(message: "Choose a location outside existing project folders.")
-            }
-        }
-        guard !fm.fileExists(atPath: destination.path) else {
-            throw ProjectValidation.Failure(message: "A folder named \(destination.lastPathComponent) already exists here. Choose another name or save location.")
-        }
-        let source = URL(fileURLWithPath: original.saveLocation, isDirectory: true).standardizedFileURL
-        var isDirectory: ObjCBool = false
-        let sourceExists = !original.saveLocation.isEmpty && fm.fileExists(atPath: source.path, isDirectory: &isDirectory)
+        let destination = try destination(name: name, parentFolder: parentFolder)
         let manual = original.settings.manualPPMFitting
-        let hasStoredInputs = !original.leftEar.isEmpty || !original.rightEar.isEmpty || !original.scanPreparation.scanPath.isEmpty
-            || [manual.leftMeshPath, manual.rightMeshPath, manual.leftParametersPath, manual.rightParametersPath,
-                manual.leftBlendPath, manual.rightBlendPath].contains { !($0 ?? "").isEmpty }
-        guard (sourceExists && isDirectory.boolValue) || (!sourceExists && !hasStoredInputs) else {
-            throw ProjectValidation.Failure(message: "The original project folder is missing. Locate it before duplicating this project.")
-        }
-        let requestedParent = destination.deletingLastPathComponent()
-        try fm.createDirectory(at: requestedParent, withIntermediateDirectories: true)
-        // Standardization can resolve aliases only once their parent exists.
-        // Use the spelling meshIdentity will see after publishing the copy.
-        let parent = requestedParent.standardizedFileURL
-        destination = parent.appendingPathComponent(destination.lastPathComponent, isDirectory: true)
-        let staging = parent.appendingPathComponent(".pinna-duplicate-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: staging) }
-        if !sourceExists {
-            try fm.createDirectory(at: staging, withIntermediateDirectories: false)
-        } else {
-            try fm.copyItem(at: source.resolvingSymlinksInPath(), to: staging)
-        }
-
-        // Spellings of the original root, without trailing slashes, longest first.
-        let oldRoots: [String] = original.saveLocation.isEmpty ? [] : Array(Set(
-            [original.saveLocation, source.path, source.resolvingSymlinksInPath().path].map(Self.withoutTrailingSlash)
-        ).filter { !$0.isEmpty && $0 != "/" }).sorted { $0.count > $1.count }
-        func relocated(_ value: Any) throws -> Any {
-            if let text = value as? String {
-                if !oldRoots.isEmpty {
-                    for oldPath in oldRoots {
-                        if text == oldPath || text.hasPrefix(oldPath + "/") {
-                            return destination.path + String(text.dropFirst(oldPath.count))
-                        }
-                    }
-                }
-                // Imported projects preserve a JSON configuration snapshot as a string.
-                if text.hasPrefix("{"), let data = text.data(using: .utf8),
-                   let object = try? JSONSerialization.jsonObject(with: data) {
-                    let updated = try relocated(object)
-                    return String(decoding: try JSONSerialization.data(withJSONObject: updated, options: [.sortedKeys]), as: UTF8.self)
-                }
-                return text
-            }
-            if let values = value as? [String: Any] { return try values.mapValues { try relocated($0) } }
-            if let values = value as? [Any] { return try values.map { try relocated($0) } }
-            return value
-        }
-        let encoded = try JSONEncoder().encode(original)
-        let object = try relocated(JSONSerialization.jsonObject(with: encoded))
-        var duplicate = try JSONDecoder().decode(ProjectRecord.self, from: JSONSerialization.data(withJSONObject: object))
-        duplicate.id = UUID()
-        duplicate.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        duplicate.saveLocation = destination.path
-        duplicate.stageOutcomes = nil
-
-        var unchangedOwned = Set<String>()
-        let manifestURL = staging.appendingPathComponent(".pinna2hrtf/generated-output-manifest.json")
-        if let data = try? Data(contentsOf: manifestURL), let doc = try? JSONDecoder().decode(GeneratedOutputManifest.Document.self, from: data) {
-            for (path, entry) in doc.Files {
-                let digest = PreprocessingSignature.fileFingerprint(staging.appendingPathComponent(path).path)
-                if digest.lowercased() == "sha256:" + entry.Sha256.lowercased() { unchangedOwned.insert(path) }
-            }
-        }
-        // Rebase structured metadata, including wrapped YAML paths, fitting templates,
-        // prepared-ear provenance and output ownership. Never edit geometry, logs or
-        // user files: only app-produced metadata (known output names or the project
-        // configuration) is considered, and only rewritten when relocation changed it.
-        var metadata: [URL] = []
-        var enumerationError: Error?
-        if let entries = fm.enumerator(at: staging, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
-                                       options: [], errorHandler: { _, error in enumerationError = error; return false }) {
-            for case let url as URL in entries {
-                let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
-                if values.isSymbolicLink == true { entries.skipDescendants(); continue }
-                if values.isRegularFile == true, ["json", "yaml", "yml"].contains(url.pathExtension.lowercased()),
-                   Self.isKnownMetadata(String(url.path.dropFirst(staging.path.count + 1))) {
-                    metadata.append(url)
-                }
-            }
-        }
-        if let enumerationError { throw enumerationError }
-        for url in metadata {
-            let isJSON = url.pathExtension.lowercased() == "json"
-            let data = try Data(contentsOf: url)
-            // Files with non-JSON diagnostic contents are copied without rewriting.
-            if isJSON {
-                guard let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else { continue }
-                let updated = try relocated(object)
-                guard !Self.sameJSON(object, updated) else { continue }
-                try JSONSerialization.data(withJSONObject: updated, options: [.prettyPrinted, .sortedKeys, .fragmentsAllowed]).write(to: url, options: .atomic)
-            } else {
-                let object = try ProjectConfigDocument.parse(String(decoding: data, as: UTF8.self))
-                guard var updated = try relocated(object) as? [String: Any] else { continue }
-                if Self.configurationNames.contains(url.lastPathComponent) {
-                    var pre = updated["preprocessing"] as? [String: Any] ?? [:]
-                    pre["title"] = duplicate.name
-                    updated["preprocessing"] = pre
-                }
-                guard !Self.sameJSON(object, updated) else { continue }
-                try ProjectConfigDocument.encode(updated).write(to: url, atomically: true, encoding: .utf8)
-            }
-        }
-        try GeneratedOutputManifest.rebaseOwnership(in: staging, unchanged: unchangedOwned)
-        // moveItem refuses an existing destination, including a folder created
-        // during the copy. An unsuccessful copy never appears in the project list.
-        try fm.moveItem(at: staging, to: destination)
-        return duplicate
-    }
-
-    private static let configurationNames: Set<String> = ["Project Settings.yaml", "pipeline.yaml", ".pinna2hrtf_native_run.yaml"]
-
-    /// App-written metadata that may hold absolute project paths.
-    static func isKnownMetadata(_ relative: String) -> Bool {
-        if configurationNames.contains(relative) { return true }
-        if relative == ".pinna2hrtf/generated-output-manifest.json" { return true }
-        return GeneratedOutputManifest.classify(relative) != nil
-    }
-
-    static func withoutTrailingSlash(_ path: String) -> String {
-        var path = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        while path.count > 1 && path.hasSuffix("/") { path.removeLast() }
-        return path
-    }
-
-    private static func sameJSON(_ first: Any, _ second: Any) -> Bool {
-        guard let a = try? JSONSerialization.data(withJSONObject: first, options: [.sortedKeys, .fragmentsAllowed]),
-              let b = try? JSONSerialization.data(withJSONObject: second, options: [.sortedKeys, .fragmentsAllowed]) else { return false }
-        return a == b
+        let inputs = [original.leftEar, original.rightEar, original.scanPreparation.scanPath,
+                      manual.leftMeshPath, manual.rightMeshPath, manual.leftParametersPath,
+                      manual.rightParametersPath, manual.leftBlendPath, manual.rightBlendPath]
+        let command: [String: Any] = [
+            "source": original.saveLocation,
+            "parent": destination.deletingLastPathComponent().path,
+            "name": destination.lastPathComponent,
+            "project_roots": projectRoots,
+            "empty_project": inputs.allSatisfy { ($0 ?? "").isEmpty },
+            "mac_record": try JSONSerialization.jsonObject(with: JSONEncoder().encode(original))
+        ]
+        struct Reply: Decodable { let project: ProjectRecord }
+        let response = try ProjectConfigDocument.run(["-m", "HRTFCalculation", "project", "duplicate"],
+            input: JSONSerialization.data(withJSONObject: command), timeout: 600, operation: "Project duplication")
+        return try JSONDecoder().decode(Reply.self, from: response).project
     }
 }

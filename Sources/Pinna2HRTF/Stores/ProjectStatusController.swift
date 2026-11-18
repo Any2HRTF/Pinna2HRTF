@@ -1,7 +1,5 @@
 import Foundation
 
-/// Inspects the selected project's files off the main thread and publishes its
-/// artifacts, stage states and validation issues.
 @MainActor
 final class ProjectStatusController: ObservableObject {
     @Published private(set) var artifacts: [Artifact] = []
@@ -58,8 +56,6 @@ final class ProjectStatusController: ObservableObject {
         let solverQueue = solverRefreshQueue
         let workItem = DispatchWorkItem { [weak self] in
             guard !progress.isCancelled else { return }
-            // Imported projects keep their folder layout. Only migrate app-managed
-            // local projects here; listing a server root can stall.
             if project.saveLocation.hasPrefix(Defaults.appDataURL.appendingPathComponent("Projects", isDirectory: true).path + "/") {
                 ProjectLibrary.migrateProjectDirectory(for: project)
             }

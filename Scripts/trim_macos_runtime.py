@@ -28,9 +28,6 @@ def trim(resources: Path) -> None:
             raise SystemExit(f"Refusing to trim a linked path: {path}")
         return path
 
-    # These exact package test trees contain unit tests and example meshes.
-    # Keep torch.testing, scipy._lib._testutils, Blender scripts, native plugins,
-    # licenses and dist-info metadata: runtime imports can depend on them.
     candidates = [site / "tests", site / "torch/include"]
     for package in ("scipy", "pandas", "pymeshlab", "sympy", "numpy", "networkx", "matplotlib", "shapely", "mpmath", "mesh2hrtf"):
         candidates.extend((site / package).rglob("tests"))
@@ -43,13 +40,10 @@ def trim(resources: Path) -> None:
             raise SystemExit(f"Expected a directory: {path}")
         if not any(parent in path.parents for parent in directories):
             directories.append(path)
-    # Validate every removal before starting; never follow links out of staging.
     for directory in directories:
         for path in directory.rglob("*"):
             checked(path)
 
-    # The manifests authenticate the original source files and every compiled
-    # asset before the training checkpoints are omitted from this release.
     checkpoints = []
     model_dir = resources / "HRTFCalculation/Inference/resources"
     for path in sorted(model_dir.glob("*.pth")):
@@ -75,8 +69,6 @@ def trim(resources: Path) -> None:
     if len(checkpoints) != 4:
         raise SystemExit(f"Expected four source checkpoints, found {len(checkpoints)}")
 
-    # Keep the main project/lockfile compatible with Windows and CLI installs.
-    # Only the packaged Mac environment drops this dependency closure.
     import importlib.metadata as metadata
     import tomllib
     from packaging.requirements import Requirement
@@ -115,8 +107,6 @@ def trim(resources: Path) -> None:
             checked(path)
             if path.is_file():
                 package_files.add(path)
-    # Validate the whole removal set first, including files that other retained
-    # distributions may also own.
     for name in retained:
         for relative in metadata.distribution(name).files or []:
             path = Path(metadata.distribution(name).locate_file(relative)).resolve()

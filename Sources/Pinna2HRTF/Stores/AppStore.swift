@@ -3,17 +3,6 @@ import Combine
 import SceneKit
 import AppKit
 
-/// Coordinates the app's focused stores and is the single object the views observe.
-///
-/// - `ProjectLibrary`: projects, folders, selection, persistence, import/duplicate/remove
-/// - `PipelineRunner`: stage runs, environment setup, output tracking, stop, notifications
-/// - `ProjectStatusController`: file inspection, artifacts, stage states
-/// - `ViewerModel`: scene, camera, microphone placement
-/// - `ActivityLog`: activity messages and technical log locations
-/// - `ProcessLauncher.shared`: every subprocess
-///
-/// Cross-store flows (running a stage, editors, resetting outputs, removing a project)
-/// live here; everything else is forwarded so views keep using `store.…`.
 @MainActor
 final class AppStore: ObservableObject {
     let library = ProjectLibrary()
@@ -55,9 +44,6 @@ final class AppStore: ObservableObject {
         refreshArtifacts(restoringViewer: true)
     }
 
-    // MARK: Change propagation
-
-    /// Called for every change to `projects`; summaries and file checks run once per batch.
     func projectsDidChange() {
         guard !projectsChangePending else { return }
         projectsChangePending = true
@@ -69,7 +55,6 @@ final class AppStore: ObservableObject {
         }
     }
 
-    /// Side effects of choosing another project.
     func selectionDidChange() {
         library.persist()
         activity.select(selectedProject)
@@ -79,8 +64,6 @@ final class AppStore: ObservableObject {
     func refreshArtifacts(restoringViewer: Bool = false) {
         status.refresh(restoringViewer: restoringViewer)
     }
-
-    // MARK: Forwarded state
 
     var projects: [ProjectRecord] {
         get { library.projects }
@@ -137,8 +120,6 @@ final class AppStore: ObservableObject {
     var isPlacingMicrophone: Bool { viewer.isPlacingMicrophone }
     var isCalculatingAutomaticMicrophone: Bool { viewer.isCalculatingAutomaticMicrophone }
 
-    // MARK: Forwarded actions
-
     func persist() { library.persist() }
     func recoverProjectRegistry() { library.recoverProjectRegistry() }
     @discardableResult func createFolder(named name: String) -> UUID { library.createFolder(named: name) }
@@ -173,13 +154,10 @@ final class AppStore: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
-    /// Saves pending changes and stops every subprocess tree; called when the app quits.
     func prepareForTermination() {
         library.flushPersistence()
         ProcessLauncher.shared.terminateAll()
     }
-
-    // MARK: Selection
 
     var selectedProject: ProjectRecord? { library.selectedProject }
     var selectedProjectIndex: Int? { library.selectedProjectIndex }
@@ -209,13 +187,10 @@ final class AppStore: ObservableObject {
         return options
     }
 
-    // MARK: Project edits
-
     func setStageOutcome(_ stage: Stage, for id: UUID, to outcome: StageState) {
         setStageOutcomes([stage], for: id, to: outcome)
     }
 
-    /// Applies several outcomes as one change.
     func setStageOutcomes(_ stages: [Stage], for id: UUID, to outcome: StageState) {
         guard let index = projects.firstIndex(where: { $0.id == id }) else { return }
         var project = projects[index]
@@ -231,7 +206,6 @@ final class AppStore: ObservableObject {
         persist()
     }
 
-    /// Changes a project regardless of selection and saves.
     func mutateProject(_ id: UUID, _ update: (inout ProjectRecord) -> Void) {
         guard let index = projects.firstIndex(where: { $0.id == id }) else { return }
         var project = projects[index]
@@ -294,7 +268,6 @@ final class AppStore: ObservableObject {
         var config = inferenceResourceURL.appendingPathComponent("Local \(name).yaml").path
         var checkpoint = Defaults.modelCheckpointURL(resources: inferenceResourceURL, stem: "Local \(name)").path
         if name == Self.customModelName {
-            // Without the developer paths there is nothing to switch to; keep the project's model.
             guard let custom = AppPreferences.developerModel else { return }
             (config, checkpoint) = custom
         }
@@ -326,8 +299,6 @@ final class AppStore: ObservableObject {
             appendLog("Previous microphone positions cleared.", for: projectID)
         }
     }
-
-    // MARK: Adding projects
 
     func createProject() {
         let project = library.newProject()
@@ -367,7 +338,6 @@ final class AppStore: ObservableObject {
                 let imported = try await Task.detached(priority: .userInitiated) {
                     try ProjectLibrary.importedRecord(from: folder, index: index, packageRoot: root)
                 }.value
-                // Another import of the same folder may have finished meanwhile.
                 if showExistingProject(at: folder) { return }
                 runner.failedStagesByProject[imported.project.id] = []
                 library.add(imported.project)
@@ -386,8 +356,6 @@ final class AppStore: ObservableObject {
         appendLog("This project is already in the list.")
         return true
     }
-
-    // MARK: Removing projects
 
     func canRemoveProject(_ id: UUID) -> Bool {
         projects.contains { $0.id == id }
@@ -417,6 +385,14 @@ final class AppStore: ObservableObject {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
             finishRemovingProject(projectID)
         case .trash(let projectFolder):
+            let protected = library.projects.filter { $0.id != projectID }.map(\.saveLocation)
+            let request: [String: Any] = ["path": projectFolder.path, "protected": protected, "owned": true]
+            struct Plan: Decodable { let identity: String }
+            guard let data = try? ProjectConfigDocument.request("recycle-plan", request),
+                  let plan = try? JSONDecoder().decode(Plan.self, from: data) else {
+                showProjectRemovalError("The project folder could not be identified.")
+                return
+            }
             let alert = NSAlert()
             alert.messageText = "Move \(project.name) to Trash?"
             alert.informativeText = "The project folder and its contents will move to Trash, and the project will be removed from the list."
@@ -425,16 +401,16 @@ final class AppStore: ObservableObject {
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
             library.beginRemoving(projectID)
-            NSWorkspace.shared.recycle([projectFolder]) { [weak self] _, error in
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.library.endRemoving(projectID)
-                    if let error {
-                        self.showProjectRemovalError("The project folder could not be moved to Trash. The project remains in the app. \(error.localizedDescription)")
-                        return
-                    }
-                    self.finishRemovingProject(projectID)
-                }
+            Task {
+                defer { library.endRemoving(projectID) }
+                do {
+                    let path = projectFolder.path
+                    _ = try await Task.detached {
+                        try ProjectConfigDocument.request("recycle", ["path": path, "protected": protected,
+                            "owned": true, "identity": plan.identity])
+                    }.value
+                    finishRemovingProject(projectID)
+                } catch { showProjectRemovalError(error.localizedDescription) }
             }
         }
     }
@@ -455,14 +431,11 @@ final class AppStore: ObservableObject {
         alert.runModal()
     }
 
-    // MARK: Editors
-
     func beginScanAlignment() {
         guard let project = selectedProject, !selectedProjectIsRunning else { return }
         let destination = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("MeshEdits/AlignedScan.ply")
         var source = project.scanPreparation.originalScanPath ?? project.scanPreparation.scanPath
         if !source.isEmpty, Self.samePath(source, destination.path) {
-            // The aligned scan cannot be its own source. Recover the original from the alignment report.
             let report = destination.deletingPathExtension().appendingPathExtension("json")
             guard let data = try? Data(contentsOf: report),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -616,8 +589,6 @@ final class AppStore: ObservableObject {
         viewer.openMesh(request.destination, resetCamera: true)
     }
 
-    // MARK: Running
-
     func runNextStage() {
         guard selectedProject != nil else {
             appendLog("Create or select a project before running.")
@@ -707,8 +678,6 @@ final class AppStore: ObservableObject {
         runner.prepareAndRun(stage: stage, project: project)
     }
 
-    // MARK: Resetting outputs
-
     func confirmResetSelectedProjectOutputs() {
         guard selectedProject != nil, !selectedProjectIsRunning else { return }
         if confirmResetOutputs() {
@@ -720,7 +689,6 @@ final class AppStore: ObservableObject {
         guard let project = selectedProject, !selectedProjectIsRunning else { return }
         guard project.settings.inference.usePredictionsForPreprocessing != enabled else { return }
         Task { @MainActor in
-            // File checks run off the main thread.
             let hasOutputs = await Task.detached(priority: .userInitiated) { Self.hasGeneratedOutputs(project) }.value
             guard selectedProject == project, !selectedProjectIsRunning else { return }
             if hasOutputs {

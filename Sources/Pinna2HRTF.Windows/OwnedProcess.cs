@@ -7,8 +7,6 @@ using System.Text;
 
 namespace Pinna2HRTF.Windows;
 
-// Each tool belongs to its own kill-on-close job before its first instruction.
-// Callers supply argument arrays; this is the only Windows quoting boundary.
 internal sealed class OwnedProcess : IDisposable
 {
     sealed class Handle : SafeHandleZeroOrMinusOneIsInvalid
@@ -231,7 +229,6 @@ internal static class ToolProcess
         { throw new TimeoutException($"The tool exceeded its {timeout.TotalSeconds:g}-second time limit."); }
         finally
         {
-            // Observe both readers even when cancellation/launch/protocol failed.
             if (!stdout.IsCompleted || !stderr.IsCompleted) { try { owned.Terminate(); } catch { } }
             try { if (owned.ActiveCount != 0) { owned.Terminate(); await owned.WaitForEmptyAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); } } catch { }
             _ = stdout.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);

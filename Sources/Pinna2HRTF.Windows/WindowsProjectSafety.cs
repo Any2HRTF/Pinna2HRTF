@@ -27,7 +27,6 @@ public partial class MainWindow
             var candidate = PathIdentity.Read(project.SaveLocation);
             if (candidate.Id != project.OwnedFolderIdentity) return ListOnly("The folder identity changed. Its files stay on disk.");
             var root = Path.GetPathRoot(candidate.Path)!;
-            // Remote/removable roots have not established safe Shell recycling.
             var drive = new DriveInfo(root);
             if (candidate.Path.StartsWith(@"\\") || drive.DriveType != DriveType.Fixed) return ListOnly("Folder recycling is not enabled for this storage location.");
             if (candidate.Path.Equals(Path.TrimEndingDirectorySeparator(root), StringComparison.OrdinalIgnoreCase)) return ListOnly("A drive root is protected.");

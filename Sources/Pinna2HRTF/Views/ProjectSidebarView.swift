@@ -8,7 +8,6 @@ struct ProjectSidebarView: View {
     @State private var movingProjectID: UUID?
     @State private var selectedFolderID: UUID?
 
-
     var body: some View {
         VStack(spacing: 0) {
             if let message = store.persistenceMessage {

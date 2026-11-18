@@ -24,8 +24,6 @@ if (-not (Test-Path -LiteralPath (Join-Path $torch '__init__.py')) -or -not (Tes
     throw 'The packaged CPU PyTorch runtime is incomplete.'
 }
 
-# Ship prebuilt inference, not the C++ extension SDK. Keep every DLL, Python
-# extension, license and metadata file; limit removal to these exact locations.
 $developmentLibraries = @(Get-ChildItem -LiteralPath $libraries -File -Filter '*.lib' -Force)
 foreach ($file in $developmentLibraries) { Assert-PackagePath $file.FullName }
 $headerItems = @()

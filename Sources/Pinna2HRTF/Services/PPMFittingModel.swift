@@ -35,7 +35,7 @@ final class PPMFittingModel: ObservableObject {
     private let maximumHistoryCount = 100
     private var previewGeneration = 0
     private var previewWorkerTask: Task<Void, Never>?
-    private var pythonWorker: PPMFittingPythonWorker?
+    private var pythonWorker: CLIWorker?
     private var targetNode: SCNNode?
     private var ppmNode: SCNNode?
     private var skeletonNode: SCNNode?
@@ -196,7 +196,6 @@ final class PPMFittingModel: ObservableObject {
         error = nil
         defer { busy = false }
         do {
-            try FileManager.default.createDirectory(at: request.destinationMesh.deletingLastPathComponent(), withIntermediateDirectories: true)
             let generated = workspace.appendingPathComponent("saved-fit.stl")
             let generatedBlend = workspace.appendingPathComponent("saved-fit.blend")
             let result = try await execute(["action": "save", "parameters": parameters,
@@ -212,19 +211,25 @@ final class PPMFittingModel: ObservableObject {
             guard FileManager.default.fileExists(atPath: generatedBlend.path) else {
                 throw ProjectValidation.Failure(message: "The PPM fitting engine did not produce an editable Blender file.")
             }
-            let archivedTemplate = try archiveTemplateIfNeeded()
-            if let archivedTemplate { templateBlendPath = archivedTemplate.path }
+            let template = archivedTemplate()
             let document: [String: Any] = [
                 "version": 1,
-                "template_blend": archivedTemplate?.path ?? templateBlendPath,
+                "template_blend": template?.destination.path ?? templateBlendPath,
                 "parameters": parameters
             ]
             let data = try JSONSerialization.data(withJSONObject: document, options: [.sortedKeys, .prettyPrinted])
             let generatedParameters = workspace.appendingPathComponent("saved-fit.json")
             try data.write(to: generatedParameters, options: .atomic)
             try await Task.detached(priority: .userInitiated) { [request] in
-                try FilePublication.publish([(generated, request.destinationMesh), (generatedBlend, request.destinationBlend), (generatedParameters, request.destinationParameters)])
+                var files = [(generated, request.destinationMesh), (generatedBlend, request.destinationBlend), (generatedParameters, request.destinationParameters)]
+                if let template, template.source != template.destination { files.append((template.source, template.destination)) }
+                let root = request.destinationMesh.deletingLastPathComponent().deletingLastPathComponent()
+                _ = try ProjectConfigDocument.request("publish-editor", [
+                    "root": root.path, "protected": [request.targetMesh.path],
+                    "files": files.map { ["source": $0.0.path, "destination": $0.1.path] }
+                ], timeout: 600)
             }.value
+            if let template { templateBlendPath = template.destination.path }
             try installPPM(at: generated, isAlreadyMirrored: request.side == .right)
             savedControlValues = controlValues
             message = "Saved the fitted PPM for the \(request.side.rawValue) ear."
@@ -298,11 +303,10 @@ final class PPMFittingModel: ObservableObject {
 
     private func execute(_ command: [String: Any]) async throws -> [String: Any] {
         let input = try JSONSerialization.data(withJSONObject: command, options: [.sortedKeys])
-        let worker: PPMFittingPythonWorker
+        let worker: CLIWorker
         if let pythonWorker, pythonWorker.isRunning {
             worker = pythonWorker
         } else {
-            // A worker that died keeps no fitting state; only a fresh "initialize" can use a new one.
             if pythonWorker != nil, command["action"] as? String != "initialize" {
                 throw ProjectValidation.Failure(message: "The PPM fitting worker stopped unexpectedly. Reopen the editor to retry.")
             }
@@ -310,7 +314,7 @@ final class PPMFittingModel: ObservableObject {
                 throw ProjectValidation.Failure(message: "The bundled Python runtime is unavailable.")
             }
             worker = try await Task.detached(priority: .userInitiated) {
-                try PPMFittingPythonWorker(pythonURL: pythonURL, workingDirectory: Defaults.pipelineRoot)
+                try CLIWorker(pythonURL: pythonURL, workingDirectory: Defaults.pipelineRoot, command: "fit-worker")
             }.value
             pythonWorker = worker
         }
@@ -382,7 +386,6 @@ final class PPMFittingModel: ObservableObject {
             let material = SCNMaterial()
             material.lightingModel = .constant
             material.diffuse.contents = name.hasSuffix("-Bendy") ? NSColor.cyan : NSColor.systemYellow
-            // Draw through the surface, like Blender's armature In Front option.
             material.readsFromDepthBuffer = false
             material.writesToDepthBuffer = false
             let boneNode = SCNNode()
@@ -658,15 +661,13 @@ final class PPMFittingModel: ObservableObject {
         EvenMeshLighting.install(in: scene, camera: node)
     }
 
-    private func archiveTemplateIfNeeded() throws -> URL? {
+    private func archivedTemplate() -> (source: URL, destination: URL)? {
         guard !templateBlendPath.isEmpty else { return nil }
         let source = URL(fileURLWithPath: templateBlendPath)
         guard FileManager.default.fileExists(atPath: source.path) else { return nil }
         let folder = request.destinationMesh.deletingLastPathComponent().appendingPathComponent("Templates", isDirectory: true)
-        if source.standardizedFileURL.path.hasPrefix(folder.standardizedFileURL.path + "/") { return source }
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        if source.standardizedFileURL.path.hasPrefix(folder.standardizedFileURL.path + "/") { return (source, source) }
         let destination = folder.appendingPathComponent("\(UUID().uuidString)-PPM.blend")
-        try FileManager.default.copyItem(at: source, to: destination)
-        return destination
+        return (source, destination)
     }
 }

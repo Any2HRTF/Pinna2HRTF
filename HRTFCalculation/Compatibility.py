@@ -20,7 +20,6 @@ def import_legacy_distance(data):
     result = copy.deepcopy(data)
     settings = result.get("preprocessing", {})
     if isinstance(settings, dict) and "head_radius" in settings:
-        # Version compatibility only; remove in a future release.
         legacy = settings.pop("head_radius")
         if "ear_distance" not in settings:
             settings["ear_distance"] = legacy
@@ -40,8 +39,6 @@ def read_settings(path):
             raw.decode("utf-8")
             encoding = "utf-8"
         except UnicodeDecodeError:
-            # Older Windows builds wrote ANSI settings. cp1252 leaves five bytes
-            # undefined; latin-1 decodes every byte, so loading cannot fail here.
             try:
                 raw.decode("cp1252")
                 encoding = "cp1252"
@@ -70,8 +67,6 @@ def annotate_legacy_distance(path, text, encoding, raw):
     newline = "\r\n" if "\r\n" in text else "\r" if "\r" in text else "\n"
     lines = text.splitlines(keepends=True)
     if settings.flow_style:
-        # Expand only this mapping: an inline YAML comment would swallow its
-        # closing brace and following members.
         entries = []
         for k, v in settings.value:
             entry = text[k.start_mark.index:v.end_mark.index]
@@ -101,7 +96,6 @@ def annotate_legacy_distance(path, text, encoding, raw):
         updated = "".join(lines)
     if updated == text:
         return
-    # Never replace a concurrently edited file or write unparseable YAML.
     if import_legacy_distance(yaml.safe_load(updated)) != import_legacy_distance(yaml.safe_load(text)):
         raise ValueError("Compatibility annotation changed settings unexpectedly.")
     path = Path(path)
@@ -110,7 +104,6 @@ def annotate_legacy_distance(path, text, encoding, raw):
     try:
         if path.read_bytes() != raw:
             raise OSError("Settings changed while loading; original file was preserved.")
-        # Respect read-only files even where directory replacement is permitted.
         if not path.stat().st_mode & 0o222:
             raise PermissionError("Settings file is read-only.")
         if not backup.exists():

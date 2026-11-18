@@ -20,7 +20,6 @@ internal static class NumericInput
         var value = localized ? local : canonical;
         if (!double.IsFinite(value)) throw new InvalidDataException("Enter a finite number.");
         if (localized && invariant && local != canonical) throw new InvalidDataException("Use the local decimal separator; thousands separators are not supported.");
-        // A dot may mean an invariant decimal or a localized thousands group.
         var group = culture.NumberFormat.NumberGroupSeparator;
         var decimalMark = culture.NumberFormat.NumberDecimalSeparator;
         var groupedSpelling = group.Length > 0 && System.Text.RegularExpressions.Regex.IsMatch(draft,

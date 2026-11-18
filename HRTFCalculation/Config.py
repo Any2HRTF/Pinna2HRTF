@@ -34,7 +34,7 @@ def worktree_root() -> Path:
                 return root.parent
             if (root / "pyproject.toml").exists() and (root / "HRTFCalculation").exists():
                 return root
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parent.parent
 
 
 def default_resource(name: str) -> Path:
@@ -55,8 +55,6 @@ def executable_name(name: str) -> str:
 class PathsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # No implicit demo ears: a one-ear project saved with exclude_none must
-    # reload as a one-ear project.
     edited_left_ear: Path | None = None
     edited_right_ear: Path | None = None
     left_ear: Path | None = None
@@ -96,7 +94,6 @@ class ScanPreparationConfig(BaseModel):
             raise ValueError("side_max_mm must exceed side_min_mm")
         if len(self.crop_polygon_xz) < 3:
             raise ValueError("crop_polygon_xz requires at least three vertices")
-        # The archived half-plane crop requires a strictly convex polygon.
         points = self.crop_polygon_xz
         turns = []
         for i in range(len(points)):
@@ -161,7 +158,6 @@ class PreprocessingConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def legacy_distance(cls, data):
-        # Version compatibility only; remove in a future release.
         return import_legacy_distance({"preprocessing": data})["preprocessing"] if isinstance(data, dict) else data
 
     @field_validator("ear_distance")
@@ -234,8 +230,6 @@ class PostprocessingConfig(BaseModel):
     spatial_upsampling: bool = False
     spatial_subdivisions: int = Field(default=3, ge=0, le=5)
     spatial_normalize: bool = False
-    # Deprecated and ignored: spatial upsampling runs in Python. Still accepted
-    # because the desktop apps write these keys and extra fields are forbidden.
     matlab_executable: Path | None = Field(default=None, deprecated="Ignored; spatial upsampling no longer uses MATLAB.")
     amt_path: Path | None = Field(default=None, deprecated="Ignored; spatial upsampling no longer uses the AMT.")
 

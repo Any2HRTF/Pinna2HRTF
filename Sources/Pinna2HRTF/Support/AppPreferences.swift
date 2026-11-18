@@ -22,7 +22,6 @@ enum AppPreferences {
     static let developerModelConfig = "preferences.developerModelConfig"
     static let developerModelCheckpoint = "preferences.developerModelCheckpoint"
 
-    /// Custom inference model offered in the project's model menu while developer mode is on.
     static var developerModel: (config: String, checkpoint: String)? {
         guard let config = developerOverride(developerModelConfig),
               let checkpoint = developerOverride(developerModelCheckpoint) else { return nil }

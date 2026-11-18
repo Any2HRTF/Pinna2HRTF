@@ -1,21 +1,12 @@
 import Foundation
 import Darwin
 
-/// Single entry point for every subprocess the app starts.
-///
-/// It builds the Python/uv command lines (packaged app: bundled interpreter;
-/// development: `uv run --no-sync` in the source tree), registers each running
-/// process so it can be cancelled and is stopped with its whole process tree on
-/// quit, and applies timeouts to short helper calls.
 final class ProcessLauncher: @unchecked Sendable {
     static let shared = ProcessLauncher()
 
     enum Command {
-        /// `Pinna2HRTF <stage> --config <file>`
         case pipelineStage(Stage, config: URL)
-        /// `python <arguments>` in the pipeline environment.
         case python([String])
-        /// `uv sync --no-editable` (development builds only).
         case uvSync
     }
 
@@ -33,8 +24,6 @@ final class ProcessLauncher: @unchecked Sendable {
     private let lock = NSLock()
     private var tracked: [ObjectIdentifier: Process] = [:]
     private var terminating = false
-
-    // MARK: Command construction
 
     static var packageURL: URL { Defaults.pipelineRoot }
     static var runtimePythonURL: URL { packageURL.appendingPathComponent(".venv/bin/python") }
@@ -90,7 +79,6 @@ final class ProcessLauncher: @unchecked Sendable {
         return values
     }
 
-    /// A configured, not yet started process for `command`.
     func makeProcess(_ command: Command, environment: EnvironmentConfig, liveEvents: Bool = false) throws -> Process {
         let resolved = try Self.command(command, environment: environment)
         let process = Process()
@@ -102,8 +90,6 @@ final class ProcessLauncher: @unchecked Sendable {
         process.environment = values
         return process
     }
-
-    // MARK: Tracking
 
     var hasRunningProcesses: Bool {
         lock.lock(); defer { lock.unlock() }
@@ -120,8 +106,6 @@ final class ProcessLauncher: @unchecked Sendable {
         tracked[ObjectIdentifier(process)] = nil
     }
 
-    /// Starts `process` with combined output captured into `capture` and keeps
-    /// it registered until it exits.
     func launch(_ process: Process, capturing capture: PipelineLogCapture?, onExit: @escaping @Sendable (Process) -> Void) throws {
         try refuseWhileTerminating()
         register(process)
@@ -136,8 +120,6 @@ final class ProcessLauncher: @unchecked Sendable {
         }
     }
 
-    /// Starts `process` (its I/O already configured) and keeps it registered
-    /// until it exits. Any termination handler already set is preserved.
     func launch(_ process: Process) throws {
         try refuseWhileTerminating()
         let previous = process.terminationHandler
@@ -153,9 +135,6 @@ final class ProcessLauncher: @unchecked Sendable {
         }
     }
 
-    /// Runs a short helper to completion on the calling thread, collecting
-    /// stdout and stderr together. The helper and its children are stopped
-    /// when `timeout` elapses.
     func runHelper(_ process: Process, timeout: TimeInterval) throws -> HelperResult {
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -177,7 +156,6 @@ final class ProcessLauncher: @unchecked Sendable {
             ProcessTreeTerminator.terminate(process)
             _ = exited.wait(timeout: .now() + 5)
         }
-        // A grandchild can keep the pipe open; stop reading shortly after exit.
         stopReading.value = Date().addingTimeInterval(2)
         readerDone.wait()
         try? reader.close()
@@ -187,7 +165,6 @@ final class ProcessLauncher: @unchecked Sendable {
         return HelperResult(status: process.terminationStatus, output: output.value)
     }
 
-    /// Async wrapper around `runHelper` that never blocks the caller's thread.
     func runHelperAsync(_ process: Process, timeout: TimeInterval) async throws -> HelperResult {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -197,9 +174,6 @@ final class ProcessLauncher: @unchecked Sendable {
         }
     }
 
-    // MARK: Cancellation
-
-    /// Stops `process` and its descendants on a background queue.
     func cancel(_ process: Process, completion: (@Sendable () -> Void)? = nil) {
         DispatchQueue.global(qos: .userInitiated).async {
             ProcessTreeTerminator.terminate(process)
@@ -207,7 +181,6 @@ final class ProcessLauncher: @unchecked Sendable {
         }
     }
 
-    /// Stops every tracked process tree. Blocks until all are gone; used on quit.
     func terminateAll() {
         lock.lock()
         terminating = true
@@ -227,13 +200,10 @@ final class ProcessLauncher: @unchecked Sendable {
         if terminating { throw Failure(message: "The app is quitting.") }
     }
 
-    /// Reads what is already buffered in `descriptor` without blocking past `deadline`.
-    /// Stops at EOF or when the deadline passes (a grandchild may still hold the pipe).
     static func drain(_ descriptor: Int32, deadline: Date) -> Data {
         drain(descriptor) { deadline }
     }
 
-    /// Reads until EOF or until the (re-evaluated) deadline passes.
     static func drain(_ descriptor: Int32, until deadline: () -> Date) -> Data {
         let flags = fcntl(descriptor, F_GETFL)
         if flags >= 0 { _ = fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) }

@@ -32,8 +32,6 @@ def install_windows_paths():
             with Dataset(str(path), mode, *args, **kwargs) as dataset:
                 yield dataset
             return
-        # Names outside the active Windows code page use native Python file I/O
-        # and netCDF's in-memory API. No system locale or process cwd is changed.
         if mode == "r":
             with Dataset("Pinna2HRTF-memory.sofa", mode, *args, memory=path.read_bytes(), **kwargs) as dataset:
                 yield dataset

@@ -1,6 +1,5 @@
 import Foundation
 
-/// Filesystem work for a selected project. Build on a worker queue; rendering only reads the result.
 struct ProjectStatusSnapshot {
     let project: ProjectRecord
     let environment: EnvironmentConfig
@@ -17,8 +16,6 @@ struct ProjectStatusSnapshot {
     let pipelineSides: Set<EarSide>
     let checkingSolverResults: Bool
 
-    /// Configured paths can be offered before directory discovery completes.
-    /// Opening a preview still validates and loads the actual file.
     static func configuredPreviewArtifacts(for project: ProjectRecord) -> [Artifact] {
         var files: [Artifact] = []
         if project.scanPreparation.enabled {
@@ -66,12 +63,11 @@ struct ProjectStatusSnapshot {
         let existingSignatureURL = FileManager.default.fileExists(atPath: signatureURL.path) ? signatureURL : legacySignatureURL
         var needsRerun = false
         if completed.contains(.preprocessing), !project.saveLocation.isEmpty {
-            let signature = ArtifactScanner.preprocessingSignature(for: project, inspection: inspection)
-            if let saved = try? String(contentsOf: existingSignatureURL, encoding: .utf8) {
-                needsRerun = !PreprocessingSignature.matches(saved, project: project, current: signature, inspection: inspection)
-                if !needsRerun && existingSignatureURL != signatureURL {
-                    try? saved.write(to: signatureURL, atomically: true, encoding: .utf8)
-                }
+            let shared = URL(fileURLWithPath: project.saveLocation).appendingPathComponent(".pinna2hrtf-preprocessing-inputs-v1.json")
+            if FileManager.default.fileExists(atPath: shared.path) {
+                needsRerun = !StageReceipt.current(.preprocessing, project)
+            } else if let saved = try? String(contentsOf: existingSignatureURL, encoding: .utf8) {
+                needsRerun = !PreprocessingSignature.matches(saved, project: project, current: ArtifactScanner.preprocessingSignature(for: project, inspection: inspection), inspection: inspection)
             } else if !FileManager.default.fileExists(atPath: existingSignatureURL.path) {
                 needsRerun = true
             }
@@ -79,7 +75,6 @@ struct ProjectStatusSnapshot {
         var reasons: [Stage: String] = [:]
         for stage in Stage.allCases {
             reasons[stage] = unavailableReason(stage, project: project, environment: environment, projects: projects,
-                                               // Microphone placement is checked live by the run controls, not cached here.
                                                placingMicrophone: false, inspection: inspection, completed: completed, resolveOutputLocations: false)
         }
         if needsRerun {

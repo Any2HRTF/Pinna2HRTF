@@ -8,8 +8,6 @@ using System.Text.Json;
 
 namespace Pinna2HRTF.Windows;
 
-// One title-bar contract for main and editor windows. All layout sizes are DIPs;
-// Windows reports caption insets in physical pixels, including on mixed-DPI PCs.
 internal sealed class WindowChrome : IDisposable
 {
     readonly Window window;
@@ -80,9 +78,6 @@ internal sealed class WindowChrome : IDisposable
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             var immersive = dark ? 1 : 0;
             _ = DwmSetWindowAttribute(hwnd, 20, ref immersive, sizeof(int));
-            // Win11's non-client frame is outside the XAML background. Theme it
-            // explicitly: the default light frame otherwise remains a thin strip.
-            // Unsupported attributes return HRESULTs on Win10 without changing it.
             var border = background.R | background.G << 8 | background.B << 16;
             var borderResult = DwmSetWindowAttribute(hwnd, 34, ref border, sizeof(int));
             Diagnose(hwnd, scale, borderResult);
@@ -108,7 +103,7 @@ internal sealed class WindowChrome : IDisposable
                 header = new[] { header.ActualWidth, header.ActualHeight }, captionInset = window.AppWindow.TitleBar.RightInset, borderResult,
                 displays }) + Environment.NewLine);
         }
-        catch (Exception) { } // Optional diagnostics must never prevent a window from opening.
+        catch (Exception) { }
     }
     public void Dispose()
     {

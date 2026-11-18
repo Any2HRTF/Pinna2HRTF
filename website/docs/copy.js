@@ -1,4 +1,3 @@
-// Add a Copy button to every code block.
 document.querySelectorAll("pre").forEach((pre) => {
   const block = document.createElement("div");
   block.className = "code-block";

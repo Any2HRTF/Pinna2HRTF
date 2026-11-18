@@ -10,8 +10,6 @@ using Windows.System;
 
 namespace Pinna2HRTF.Windows;
 
-// Presentation-only build flavor. Controls, project models and pipeline services
-// are shared with the Windows review; the default build keeps its original layout.
 public partial class MainWindow
 {
 #if PINNA_MAC_LAYOUT
@@ -44,8 +42,6 @@ public partial class MainWindow
 
     void UseNeutralCheckedState(ToggleButton button)
     {
-        // Keep native checked semantics, using the inactive hover palette.
-        // Resolve aliases within each theme rather than capturing a theme's brush.
         const string aliases = """
             <StaticResource x:Key="ToggleButtonBackgroundChecked" ResourceKey="ToggleButtonBackgroundPointerOver" />
             <StaticResource x:Key="ToggleButtonBackgroundCheckedPointerOver" ResourceKey="ToggleButtonBackgroundPointerOver" />
@@ -95,8 +91,6 @@ public partial class MainWindow
         contentGrid.ColumnDefinitions[3].MinWidth = 0; contentGrid.ColumnDefinitions[3].MaxWidth = 6; contentGrid.ColumnDefinitions[3].Width = new GridLength(6);
         if (projectsPaneBorder?.Child is Grid sidebar && projectsActions != null)
         {
-            // Keep all five commands in the header, with a second header line
-            // when the sidebar is too narrow for the heading and commands.
             projectsActions.Spacing = 4;
             void ArrangeProjectHeader()
             {

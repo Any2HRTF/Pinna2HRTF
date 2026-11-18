@@ -12,19 +12,24 @@ public partial class MainWindow
     readonly TextBox scanRotationBox = new(), targetEdgeBox = new(), leftMarginBox = new(), rightMarginBox = new(), sideMinBox = new(), sideMaxBox = new(), sofaFolderBox = new();
     readonly CheckBox requireReviewBox = new() { Content = "Require ear review before continuing" };
     readonly HashSet<Window> editorWindows = [];
-    readonly Dictionary<Guid,string> stagedSofaOutputs = [];
     readonly Dictionary<Guid,string> runInputStamps = [];
     readonly CancellationTokenSource editorLifetime = new();
 
-    async Task<JsonElement> RequestPythonAsync(string module, object request, CancellationToken token = default)
+    async Task<JsonElement> RequestPythonAsync(string commandName, object request, CancellationToken token = default)
     {
-        var info = GeometryProcess("-B", "-m", module);
-        info.RedirectStandardInput = true;
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, editorLifetime.Token);
         var payload = JsonSerializer.Serialize(request);
         using var command = JsonDocument.Parse(payload);
-        var duplicate = command.RootElement.TryGetProperty("action", out var action) && action.GetString() == "duplicate";
-        var timeout = TimeSpan.FromSeconds(module.Contains("PressureField") ? 180 : duplicate ? 600 : 60);
+        var action = command.RootElement.GetProperty("action").GetString();
+        var arguments = new List<string> { "-B", "-m", "HRTFCalculation", commandName };
+        if (commandName == "project") arguments.Add(action!);
+        var info = GeometryProcess(arguments.ToArray());
+        info.RedirectStandardInput = true;
+        var timeout = TimeSpan.FromSeconds(commandName switch {
+            "outputs" => 3600, "pressure" => 180, "mesh" => 600,
+            _ when action is "duplicate" or "publish-editor" or "copy-input" or "stage-status" or "record-stage" => 600,
+            _ => 60
+        });
         var result = await ToolProcess.RunAsync(info, payload, timeout, linked.Token).ConfigureAwait(false);
         if (result.ExitCode != 0) throw new IOException(string.IsNullOrWhiteSpace(result.Error) ? "The Python operation failed." : result.Error.Trim());
         using var document = JsonDocument.Parse(result.Output);
@@ -108,7 +113,6 @@ public partial class MainWindow
         if (manual.Left is { } l && !File.Exists(l.Mesh)) manual.Left = null;
         if (manual.Right is { } r && !File.Exists(r.Mesh)) manual.Right = null;
         if (!File.Exists(manual.TemplateBlend)) manual.TemplateBlend = null;
-        // Resetting generated files keeps the project method and prompts for missing fits.
         InvalidateManualPositions(p);
     }
 
@@ -155,10 +159,12 @@ public partial class MainWindow
     bool InferenceStampIsCurrent(ProjectRecord p)
     {
         var path=Path.Combine(p.SaveLocation,".pinna2hrtf-inference-signature");
-        return File.Exists(path)&&File.ReadAllText(path)==InferenceStamp(p);
+        return SharedStageCurrent("inference", p) ?? (File.Exists(path) && File.ReadAllText(path) == InferenceStamp(p));
     }
     bool PreprocessingStampIsCurrent(ProjectRecord p)
     {
+        if (File.Exists(Path.Combine(p.SaveLocation, ".pinna2hrtf-preprocessing-inputs-v1.json")))
+            return StageReceiptIsCurrent("preprocessing", p);
         var path = Path.Combine(p.SaveLocation, WindowsPreprocessingReceipt);
         if (!File.Exists(path)) {
             var legacy = Path.Combine(p.SaveLocation, ".pinna2hrtf-preprocessing-signature");
@@ -193,8 +199,6 @@ public partial class MainWindow
         catch(IOException){return false;}
     }
 
-    ExternalSofaOutputs ExternalOutputsFor(ProjectRecord p) => new(p.SaveLocation, projects.SelectMany(other => ProtectedInputs(other,p.Id)), SofaDirectory(p));
-    bool HasExternalSofa(ProjectRecord p) => !ContainsPath(p.SaveLocation,SofaDirectory(p));
     string? SofaConflict(ProjectRecord p)
     {
         var destination=SofaDirectory(p);
@@ -228,10 +232,8 @@ public partial class MainWindow
         outputOperations.Add(original.Id);
         try
         {
-            var result = await RequestPythonAsync("HRTFCalculation.DesktopBridge", new { action = "duplicate", source = original.SaveLocation, parent = folder.Text, name = name.Text, project = original });
+            var result = await RequestPythonAsync("project", new { action = "duplicate", source = original.SaveLocation, parent = folder.Text, name = name.Text, project = original });
             var duplicate = JsonSerializer.Deserialize<ProjectRecord>(result.GetProperty("project").GetRawText(), jsonOptions) ?? throw new IOException("The project copy returned no data.");
-            // Fingerprints include platform timestamps; rebase valid fitting
-            // references to their copied source without accepting stale originals.
             await Task.Run(() => {
                 using var fresh = FileFingerprints.Fresh();
                 foreach (var side in new[] { "left", "right" })

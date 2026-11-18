@@ -1,10 +1,5 @@
 import Foundation
 
-/// Reads and writes `projects.json`.
-///
-/// Writes run on a private serial queue and are atomic. The bytes last known to be
-/// on disk are kept in memory, so a save only needs to decode the file on disk when
-/// someone else changed it. Status properties are safe to read from any thread.
 final class ProjectRegistryStore: @unchecked Sendable {
     let url: URL
     let rootURL: URL
@@ -14,7 +9,6 @@ final class ProjectRegistryStore: @unchecked Sendable {
     private var _recoveryMessage: String?
     private var _savingBlocked = false
     private var _lastError: String?
-    /// Bytes most recently read from or written to `url` (ioQueue only, or before first save).
     private var lastGoodData: Data?
 
     private(set) var recoveryMessage: String? {
@@ -30,7 +24,6 @@ final class ProjectRegistryStore: @unchecked Sendable {
         set { stateLock.lock(); _lastError = newValue; stateLock.unlock() }
     }
     var backupURL: URL { url.deletingPathExtension().appendingPathExtension("backup.json") }
-
 
     init(rootURL: URL, packageURL: URL, url: URL = Defaults.appDataURL.appendingPathComponent("projects.json")) {
         self.rootURL = rootURL
@@ -49,7 +42,6 @@ final class ProjectRegistryStore: @unchecked Sendable {
     func load() -> ProjectRegistry {
         if let data = try? Data(contentsOf: url), let registry = decode(data) {
             lastGoodData = data
-            // Preserve the exact original before geometry migration is persisted.
             if let object = try? JSONSerialization.jsonObject(with: data),
                let geometry = try? HeadGeometrySettings.migrateRegistry(object),
                let before = try? JSONSerialization.data(withJSONObject: object, options: .sortedKeys),
@@ -125,13 +117,11 @@ final class ProjectRegistryStore: @unchecked Sendable {
         return value
     }
 
-    /// Saves synchronously (start-up and quit).
     @discardableResult
     func save(_ registry: ProjectRegistry) -> Bool {
         ioQueue.sync { write(registry) }
     }
 
-    /// Saves on the background queue; `completion` runs on the main queue.
     func saveInBackground(_ registry: ProjectRegistry, completion: @escaping @Sendable (Bool) -> Void) {
         ioQueue.async { [self] in
             let saved = write(registry)
@@ -139,7 +129,6 @@ final class ProjectRegistryStore: @unchecked Sendable {
         }
     }
 
-    /// Waits for queued background saves to finish.
     func waitForPendingSaves() { ioQueue.sync {} }
 
     private func write(_ registry: ProjectRegistry) -> Bool {
@@ -148,7 +137,6 @@ final class ProjectRegistryStore: @unchecked Sendable {
         do {
             let data = try JSONEncoder.pretty.encode(registry)
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            // Keep the last readable version before replacing the primary file.
             if FileManager.default.fileExists(atPath: url.path) {
                 guard let previous = try? Data(contentsOf: url) else {
                     savingBlocked = true
@@ -157,7 +145,6 @@ final class ProjectRegistryStore: @unchecked Sendable {
                     return false
                 }
                 if previous == data { lastGoodData = data; lastError = nil; return true }
-                // Only a file someone else changed needs a full decode.
                 guard previous == lastGoodData || decode(previous) != nil else {
                     savingBlocked = true
                     recoveryMessage = "The project list on disk became unreadable. It has been preserved. Restore the in-memory project list to continue saving changes."
