@@ -6,6 +6,22 @@ namespace Pinna2HRTF.Windows;
 
 public partial class MainWindow
 {
+    static void AddEditorSaveShortcut(Microsoft.UI.Xaml.UIElement root, Func<Task> save, Func<bool>? isActive = null)
+    {
+        root.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
+        var shortcut = new Microsoft.UI.Xaml.Input.KeyboardAccelerator {
+            Key = global::Windows.System.VirtualKey.S,
+            Modifiers = global::Windows.System.VirtualKeyModifiers.Control
+        };
+        shortcut.Invoked += async (_, args) =>
+        {
+            if (isActive?.Invoke() == false) return;
+            args.Handled = true;
+            await save();
+        };
+        root.KeyboardAccelerators.Add(shortcut);
+    }
+
     async Task ObserveUiTaskAsync(Task task, string operation, ProjectRecord? project = null)
     {
         try { await task; }

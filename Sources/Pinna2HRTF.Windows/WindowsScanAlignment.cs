@@ -17,12 +17,52 @@ public partial class MainWindow
     JsonElement? pendingAlignment;
     Guid? alignmentProjectId;
     Guid? alignmentSessionProject;
+    string? alignmentSessionSource;
     int alignmentGeneration;
     bool alignmentSaving;
+    bool alignmentDiscardPromptOpen;
     readonly HashSet<string> activeAlignmentWorkspaces = [];
     readonly CheckBox coordinateToggle = new() { Content = "Show coordinate system", IsChecked = true };
     readonly ProgressRing alignmentLoadingRing = new() { Width = 20, Height = 20, IsActive = false, Visibility = Visibility.Collapsed };
     readonly List<LineGeometryModel3D> alignmentAxes = [];
+
+    static bool IsGeneratedAlignment(ProjectRecord project, string path) =>
+        (!string.IsNullOrWhiteSpace(project.SaveLocation) && SamePath(path, Path.Combine(project.SaveLocation, "MeshEdits", "AlignedScan.ply")))
+        || ProjectDocument.ReadAlignmentOriginal(path) != null;
+
+    static string ResolveAlignmentSource(ProjectRecord project)
+    {
+        var scan = project.Settings.ScanPreparation;
+        var recorded = scan.OriginalScanPath;
+        var generated = IsGeneratedAlignment(project, scan.ScanPath);
+        if (!generated) return scan.ScanPath;
+        if (!string.IsNullOrWhiteSpace(recorded) && !IsGeneratedAlignment(project, recorded) && File.Exists(recorded)) return recorded;
+        var original = ProjectDocument.ReadAlignmentOriginal(scan.ScanPath);
+        if (original != null && !IsGeneratedAlignment(project, original)) return original;
+        return !string.IsNullOrWhiteSpace(recorded) && !IsGeneratedAlignment(project, recorded) ? recorded : "";
+    }
+
+    async Task<bool> ConfirmCancelAlignmentAsync()
+    {
+        if (!scanAlignmentMode) return true;
+        if (alignmentSaving || alignmentDiscardPromptOpen) return false;
+        var session = alignmentGeneration;
+        if (scanAlignmentLandmarks.Count != 0)
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "Discard unsaved alignment?", PrimaryButtonText = "Discard",
+                CloseButtonText = "Keep editing", DefaultButton = ContentDialogButton.Close, XamlRoot = Root.XamlRoot
+            };
+            alignmentDiscardPromptOpen = true;
+            try { if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary) return false; }
+            finally { alignmentDiscardPromptOpen = false; }
+        }
+        if (!scanAlignmentMode || session != alignmentGeneration || alignmentSaving) return false;
+        EndScanAlignment();
+        RefreshArtifacts();
+        return true;
+    }
 
     void UpdateAlignmentSaveEnabled()
     {
@@ -58,7 +98,7 @@ public partial class MainWindow
     async Task PreviewOrSaveAlignmentAsync()
     {
         var project=selectedProject;
-        if(!scanAlignmentMode||project==null||runs.ContainsKey(project.Id)||outputOperations.Contains(project.Id))return;
+        if(!scanAlignmentMode||project==null||alignmentSessionProject!=project.Id||alignmentDiscardPromptOpen||runs.ContainsKey(project.Id)||outputOperations.Contains(project.Id))return;
         using var reservation = projectOperations.TryReserve(project.Id);
         if (reservation == null) return;
         var session = alignmentGeneration;
@@ -92,7 +132,8 @@ public partial class MainWindow
             }
             if(scanAlignmentLandmarks.Count!=3)return;
             ClearAlignmentPreview();alignmentProjectId=project.Id;
-            alignmentSource=File.Exists(project.Settings.ScanPreparation.OriginalScanPath)?project.Settings.ScanPreparation.OriginalScanPath:project.Settings.ScanPreparation.ScanPath;
+            alignmentSource=alignmentSessionSource;
+            if (alignmentSource == null || !File.Exists(alignmentSource)) throw new IOException("The original scan is missing. Reopen alignment to locate it.");
             alignmentWorkspace=Path.Combine(Path.GetTempPath(),"pinna-align-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(alignmentWorkspace);
             workspace = alignmentWorkspace; activeAlignmentWorkspaces.Add(workspace); session = alignmentGeneration;
             var preview=Path.Combine(alignmentWorkspace,"aligned.ply");var frame=Path.Combine(alignmentWorkspace,"frame");

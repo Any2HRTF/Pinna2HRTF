@@ -52,6 +52,25 @@ internal static class ProjectDocument
         catch(Exception error) when(error is FormatException or InvalidDataException or OverflowException){return error.Message;}
     }
     static JsonNode? Value(object? value) => JsonSerializer.SerializeToNode(value);
+
+    internal static string? ReadAlignmentOriginal(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        try
+        {
+            var note = JsonNode.Parse(File.ReadAllText(Path.ChangeExtension(path, "json")));
+            if (note?["kind"]?.GetValue<string>() != "alignment") return null;
+            var original = note["source_path"]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(original)) return null;
+            var fullPath = Path.GetFullPath(path);
+            var source = Path.GetFullPath(original, Path.GetDirectoryName(fullPath)!);
+            return string.Equals(source, fullPath, StringComparison.OrdinalIgnoreCase) ? null : source;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
     internal static JsonObject Build(ProjectRecord p, EnvironmentConfig environment)
     {
         var root = p.PreservedConfigJSON == null ? new JsonObject() : JsonNode.Parse(p.PreservedConfigJSON)!.AsObject();
@@ -134,15 +153,8 @@ internal static class ProjectDocument
         pre.MeshGammaOpposite = S("preprocessing", "mesh_gamma_opposite", "0.1");
         scan.Enabled = Flag("scan_preparation", "enabled"); scan.ScanPath = S("scan_preparation", "scan_path", "");
         scan.OriginalScanPath = S("scan_preparation", "original_scan_path", scan.ScanPath);
-        try
-        {
-            var note = JsonNode.Parse(File.ReadAllText(Path.ChangeExtension(scan.ScanPath, "json")));
-            var original = note?["source_path"]?.GetValue<string>();
-            if (note?["kind"]?.GetValue<string>() == "alignment" && File.Exists(original) &&
-                !string.Equals(Path.GetFullPath(original!), Path.GetFullPath(scan.ScanPath), StringComparison.OrdinalIgnoreCase))
-                scan.OriginalScanPath = original!;
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException) { }
+        if (ReadAlignmentOriginal(scan.ScanPath) is string original && File.Exists(original))
+            scan.OriginalScanPath = original;
 
         scan.PrepareLeft = Flag("scan_preparation", "prepare_left", true); scan.PrepareRight = Flag("scan_preparation", "prepare_right", true);
         scan.RotationDegrees = S("scan_preparation", "rotation_degrees", "0"); scan.TargetEdgeMM = S("scan_preparation", "target_edge_mm", "0.75");

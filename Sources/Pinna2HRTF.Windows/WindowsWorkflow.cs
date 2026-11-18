@@ -106,6 +106,7 @@ public partial class MainWindow
             Persist(); LoadSelectedProject(); RefreshArtifacts(); RefreshPipelineStatus();
         };
         var prepare = workflowPages[1]; prepare.Children.Add(workflowPreparation);
+        workflowPreparation.Children.Add(WorkflowGroupHeading("Head scan"));
         var scanActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         scanActions.Children.Add(alignScanButton);
         alignScanButton.Click += BeginScanAlignmentClicked;
@@ -141,7 +142,7 @@ public partial class MainWindow
             AddSettingPanel("Inner crop limit (mm)", "scan_preparation.side_min", sideMinBox),
             AddSettingPanel("Outer crop limit (mm)", "scan_preparation.side_max", sideMaxBox), WorkflowText("Use an aligned scan in mm. A saved, current ear edit is used automatically.")]);
         requireReviewBox.Click += (_, _) => { if (!loading && selectedProject is { } p) { p.Settings.ScanPreparation.RequireManualReview = requireReviewBox.IsChecked == true; Persist(); RefreshPipelineStatus(); } };
-        prepare.Children.Add(WorkflowText("Inspect and optionally edit each ear. Original files are preserved."));
+        prepare.Children.Add(WorkflowGroupHeading("Ears"));
         foreach (var side in new[] { "left", "right" }) {
             var row = new StackPanel { Spacing = 6 };
             var status = WorkflowText("");
@@ -181,8 +182,10 @@ public partial class MainWindow
             workflowManual.Children.Add(row); workflowFitRows.Add((side, row, status, fit));
         }
         workflowManual.Children.Add(WorkflowText("Save a current fit for every included ear to continue."));
-        var simulation = workflowPages[2]; simulation.Children.Add(GeometryPanel());
-        simulation.Children.Add(new TextBlock { Text = "Microphone positions", FontWeight = FontWeights.SemiBold });
+        var simulation = workflowPages[2];
+        simulation.Children.Add(WorkflowGroupHeading("Head"));
+        simulation.Children.Add(GeometryPanel());
+        simulation.Children.Add(WorkflowGroupHeading("Microphones"));
         simulation.Children.Add(WorkflowText("Automatic positioning remains the default; adjust only when needed."));
         var microphoneActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         placeLeftButton.Content = "Adjust left…"; placeRightButton.Content = "Adjust right…";
@@ -190,11 +193,12 @@ public partial class MainWindow
         AutomationProperties.SetName(placeRightButton, "Adjust right microphone");
         microphoneActions.Children.Add(placeLeftButtonHost!); microphoneActions.Children.Add(placeRightButtonHost!);
         simulation.Children.Add(microphoneActions);
+        AddSetting(simulation, "Microphone faces", "mesh2hrtf.microphone_faces", microphoneFacesBox);
+        simulation.Children.Add(WorkflowGroupHeading("Frequencies"));
         simulation.Children.Add(PathSettingPanel("Evaluation grid", "mesh2hrtf.evaluation_grid", evaluationGridBox, BrowseEvaluationGridClicked, directory: true));
         AddSetting(simulation, "Min frequency", "mesh2hrtf.min_frequency", minFrequencyBox);
         AddSetting(simulation, "Max frequency", "mesh2hrtf.max_frequency", maxFrequencyBox);
         AddSetting(simulation, "Frequency steps", "mesh2hrtf.frequency_steps", frequencyStepsBox);
-        AddSetting(simulation, "Microphone faces", "mesh2hrtf.microphone_faces", microphoneFacesBox);
         AddExpander(simulation, "Advanced mesh grading", [WorkflowText("Required safety step"),
             AddSettingPanel("Min edge length", "mesh_grading.min_edge_length", meshMinEdgeBox), AddSettingPanel("Max edge length", "mesh_grading.max_edge_length", meshMaxEdgeBox),
             AddSettingPanel("Max error", "mesh_grading.max_error", meshMaxErrorBox), AddSettingPanel("Gamma", "mesh_grading.gamma", meshGammaBox), AddSettingPanel("Gamma opposite", "mesh_grading.gamma_opposite", meshGammaOppositeBox)]);
@@ -264,6 +268,10 @@ public partial class MainWindow
     }
 
     Border WorkflowDivider() => new() { Height = 1, Background = borderBrush, Margin = new Thickness(0, 4, 0, 4) };
+    static TextBlock WorkflowGroupHeading(string text) => new()
+    {
+        Text = text, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 6, 0, 0)
+    };
 
     Grid WorkflowEarRow(string side, TextBlock status, FrameworkElement actions)
     {

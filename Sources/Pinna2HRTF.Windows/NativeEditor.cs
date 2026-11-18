@@ -25,7 +25,7 @@ internal sealed class NativeEditor
     public StackPanel FooterActions { get; } = new() { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
     public Border FooterHost { get; } = new() { Visibility = Visibility.Collapsed, Padding = new Thickness(12) };
     readonly DefaultEffectsManager effects = new();
-    public NativeEditor(string title, FrameworkElement? owner = null)
+    public NativeEditor(string title, FrameworkElement? owner = null, bool compactInspector = false)
     {
         Window.Title = title;
         Viewport = new Viewport3DX { EffectsManager = effects, UseDefaultGestures = true, InputController = new MeshInputController(),
@@ -49,6 +49,19 @@ internal sealed class NativeEditor
         var inspector = new Grid(); inspector.RowDefinitions.Add(new() { Height = GridLength.Auto }); inspector.RowDefinitions.Add(new());
         inspector.Children.Add(PinnedControls); Grid.SetRow(scroll, 1); inspector.Children.Add(scroll);
         Grid.SetColumn(inspector, 1); body.Children.Add(inspector); Grid.SetRow(body, 1); root.Children.Add(body);
+        if (compactInspector)
+        {
+            body.RowDefinitions.Add(new());
+            body.RowDefinitions.Add(new() { Height = GridLength.Auto });
+            body.SizeChanged += (_, args) =>
+            {
+                var stack = args.NewSize.Width < 760;
+                body.ColumnDefinitions[1].Width = new GridLength(stack ? 0 : MainWindow.MacLayout ? 320 : 370);
+                Grid.SetColumn(inspector, stack ? 0 : 1);
+                Grid.SetRow(inspector, stack ? 1 : 0);
+                inspector.MaxHeight = stack ? 240 : double.PositiveInfinity;
+            };
+        }
         if (MainWindow.MacLayout)
         {
             var actions = new Grid(); actions.ColumnDefinitions.Add(new()); actions.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
@@ -56,7 +69,7 @@ internal sealed class NativeEditor
             FooterHost.Child = actions; root.RowDefinitions.Add(new() { Height = GridLength.Auto }); Grid.SetRow(FooterHost, 3); root.Children.Add(FooterHost);
         }
         Window.Content = root;
-        var chrome = new WindowChrome(Window, root, header, drag, minimumWidth: 900, minimumHeight: 640);
+        var chrome = new WindowChrome(Window, root, header, drag, minimumWidth: compactInspector ? 500 : 900, minimumHeight: 640);
         var navigation = new SharedNavigation(Viewport);
         void Appearance()
         {

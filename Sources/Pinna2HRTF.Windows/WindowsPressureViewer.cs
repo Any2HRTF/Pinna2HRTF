@@ -13,7 +13,7 @@ public partial class MainWindow
 {
     async Task OpenPressureViewerAsync(Artifact artifact)
     {
-        var editor = new NativeEditor(artifact.Title, Root);
+        var editor = new NativeEditor(artifact.Title, Root, compactInspector: true);
         editorWindows.Add(editor.Window);
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(editorLifetime.Token);
         editor.Window.Closed += (_, _) => { lifetime.Cancel(); editorWindows.Remove(editor.Window); };
@@ -23,7 +23,14 @@ public partial class MainWindow
         var locked = new CheckBox { Content = "Lock color scale" };
         var legend = new TextBlock { TextWrapping = TextWrapping.Wrap };
         var refresh = new Button { Content = "Refresh" }; var reset = NavigationHelp.Command("Reset view");
-        editor.Toolbar.Children.Add(refresh); editor.Toolbar.Children.Add(reset);
+        editor.Toolbar.Children.Add(refresh);
+        editor.ViewportHost.Children.Remove(editor.NavigationButton);
+        editor.NavigationButton.Margin = new Thickness(0);
+        var viewportCommands = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(12) };
+        viewportCommands.Children.Add(editor.NavigationButton);
+        viewportCommands.Children.Add(reset);
+        editor.ViewportHost.Children.Add(viewportCommands);
         foreach (var element in new FrameworkElement[] { steps, surfaces, quantities, locked, legend }) editor.Controls.Children.Add(element);
         editor.Controls.Children.Add(new TextBlock { Text = "Raw solver pressure before SOFA normalization.", TextWrapping = TextWrapping.Wrap });
         var catalog = new List<JsonElement>(); var changing = false; var revision = 0;

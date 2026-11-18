@@ -22,9 +22,16 @@ namespace Pinna2HRTF.Windows;
 
 public partial class MainWindow
 {
+    readonly Dictionary<(Guid Project, string Side), Window> earEditorWindows = [];
+
     async Task EditPreparedEarAsync(string side)
     {
         var project = selectedProject;
+        if (project != null && earEditorWindows.TryGetValue((project.Id, side), out var existing))
+        {
+            existing.Activate();
+            return;
+        }
         if (project == null || ProjectBusy(project.Id) || string.IsNullOrWhiteSpace(project.SaveLocation)) return;
         using var reservation = projectOperations.TryReserve(project.Id);
         if (reservation == null) return;
@@ -100,7 +107,6 @@ public partial class MainWindow
         string? savedPath = null;
         var isBusy = true;
         var throughMesh = false;
-        var addSelection = false;
         var flipPlane = false;
         var fitPlane = true;
         var offset = 0d;
@@ -118,8 +124,9 @@ public partial class MainWindow
 
         var editorWindow = new Window { Title = $"Edit {side} ear" };
         editorWindows.Add(editorWindow);
+        earEditorWindows[(project.Id, side)] = editorWindow;
         var closed = new TaskCompletionSource();
-        editorWindow.Closed += (_, _) => { session.Cancel(); closed.TrySetResult(); };
+        editorWindow.Closed += (_, _) => { earEditorWindows.Remove((project.Id, side)); session.Cancel(); closed.TrySetResult(); };
         var saveButton = new Button { Content = "Save Reviewed Ear", IsEnabled = false };
         var cancelButton = new Button { Content = "Cancel" };
         cancelButton.Click += (_, _) => editorWindow.Close();
@@ -158,14 +165,15 @@ public partial class MainWindow
         var planeToolButton = new Button { Content = "Cutting Plane" };
         Grid.SetColumn(planeToolButton, 1);
         toolRow.Children.Add(selectToolButton); toolRow.Children.Add(planeToolButton);
-        panel.Children.Add(new TextBlock { Text = Path.GetFileName(source) + " · Original mesh is preserved", FontSize = 12, Foreground = mutedTextBrush, TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(new TextBlock { Text = Path.GetFileName(source), FontSize = 12, Foreground = mutedTextBrush, TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(WorkflowGroupHeading("Tool"));
         panel.Children.Add(toolRow);
         var selectionPanel = new StackPanel { Spacing = 10 };
+        selectionPanel.Children.Add(WorkflowGroupHeading("Selection"));
         selectionPanel.Children.Add(new TextBlock { Text = "Select faces to remove", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        selectionPanel.Children.Add(new TextBlock { Text = "Click a face or draw a closed lasso. Selected faces appear red.", TextWrapping = TextWrapping.Wrap, FontSize = 12 });
+        selectionPanel.Children.Add(new TextBlock { Text = "Click to toggle a face. Shift-drag to add faces.", TextWrapping = TextWrapping.Wrap, FontSize = 12 });
         var throughToggle = new CheckBox { Content = "Select through mesh" };
-        var addToggle = new CheckBox { Content = "Add to current selection" };
-        selectionPanel.Children.Add(throughToggle); selectionPanel.Children.Add(addToggle);
+        selectionPanel.Children.Add(throughToggle);
         var selectionStatus = new TextBlock { Text = "0 faces selected", FontFamily = new FontFamily("Consolas"), FontSize = 12 };
         selectionPanel.Children.Add(selectionStatus);
         var deleteButton = new Button { Content = "Remove selected faces", IsEnabled = false, HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -178,7 +186,8 @@ public partial class MainWindow
         selectionActions.Children.Add(clearButton); Grid.SetColumn(invertButton, 1); selectionActions.Children.Add(invertButton);
         selectionPanel.Children.Add(selectionActions); selectionPanel.Children.Add(deleteButton);
         var planePanel = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
-        planePanel.Children.Add(new TextBlock { Text = "The preview fits the mesh at the cut. The cut extends through the mesh; the red side is removed.", TextWrapping = TextWrapping.Wrap, FontSize = 12 });
+        planePanel.Children.Add(WorkflowGroupHeading("Plane settings"));
+        ToolTipService.SetToolTip(planeToolButton, "The red side is removed.");
         var normalBoxes = new[] { new TextBox { Text = "0", PlaceholderText = "X", Header = "Normal X" }, new TextBox { Text = "1", PlaceholderText = "Y", Header = "Normal Y" }, new TextBox { Text = "0", PlaceholderText = "Z", Header = "Normal Z" } };
         var axisPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         var axisButtons = new List<Button>();
@@ -219,6 +228,7 @@ public partial class MainWindow
         var redoButton = NavigationHelp.Command("Redo"); redoButton.IsEnabled = false;
         historyRow.Children.Add(undoButton); historyRow.Children.Add(redoButton);
         var largestButton = new Button { Content = "Keep Largest Component", HorizontalAlignment = HorizontalAlignment.Stretch, MinHeight = deleteButton.MinHeight, Padding = deleteButton.Padding };
+        panel.Children.Add(WorkflowGroupHeading("Mesh cleanup"));
         panel.Children.Add(largestButton);
         var message = new TextBlock { Text = "Loading mesh…", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = mutedTextBrush };
         panel.Children.Add(message);
@@ -460,7 +470,6 @@ public partial class MainWindow
         planeToolButton.Click += (_, _) => SetTool(true);
         resetButton.Click += (_, _) => { if (mesh != null) { var max = (float)Math.Max(mesh.MaximumDimension * 1.7, 120); var camera = new PerspectiveCamera { FieldOfView = 38, Position = new Vector3(0, (side == "right" ? -1 : 1)*max, max * 0.12f), LookDirection = new Vector3(0, (side == "right" ? 1 : -1)*max, -max * 0.12f), UpDirection = Vector3.UnitZ }; viewport.Camera = camera;  } };
         throughToggle.Checked += (_, _) => throughMesh = true; throughToggle.Unchecked += (_, _) => throughMesh = false;
-        addToggle.Checked += (_, _) => addSelection = true; addToggle.Unchecked += (_, _) => addSelection = false;
         fitToggle.Checked += (_, _) => { fitPlane = true; UpdateControls(); RefreshPlane(); }; fitToggle.Unchecked += (_, _) => { fitPlane = false; UpdateControls(); RefreshPlane(); };
         widthBox.TextChanged += (_, _) => { if (double.TryParse(widthBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) manualWidth = value; RefreshPlane(); };
         heightBox.TextChanged += (_, _) => { if (double.TryParse(heightBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) manualHeight = value; RefreshPlane(); };
@@ -515,7 +524,8 @@ public partial class MainWindow
             if (activePointer == uint.MaxValue || e.GetCurrentPoint(viewport).PointerId != activePointer) return;
             var end = e.GetCurrentPoint(viewport).Position; var wasClick = Math.Abs(end.X - pointerStart.X) + Math.Abs(end.Y - pointerStart.Y) < 7;
             activePointer = uint.MaxValue; viewport.ReleasePointerCapture(e.Pointer); lassoCanvas.Children.Clear();
-            if (wasClick) SelectNearestFace(end); else SelectLasso(lasso);
+            if (wasClick) SelectNearestFace(end);
+            else SelectLasso(lasso, e.KeyModifiers.HasFlag(VirtualKeyModifiers.Shift));
             e.Handled = true;
         }), true);
         var navigation = new SharedNavigation(viewport, () => { activePointer = uint.MaxValue; lasso.Clear(); lassoCanvas.Children.Clear(); viewport.ReleasePointerCaptures(); });
@@ -523,12 +533,14 @@ public partial class MainWindow
         resetButton.Visibility = Visibility.Visible;
         undoButton.IsEnabled = false; redoButton.IsEnabled = false;
         Task? saveOperation = null;
-        saveButton.Click += async (_, args) =>
+        async Task SaveOnceAsync()
         {
-            if (saveOperation is { IsCompleted: false }) return;
+            if (!saveButton.IsEnabled || saveOperation is { IsCompleted: false }) return;
             saveOperation = SaveEarAsync();
             await saveOperation;
-        };
+        }
+        saveButton.Click += async (_, _) => await SaveOnceAsync();
+        AddEditorSaveShortcut(windowRoot, SaveOnceAsync);
         async Task SaveEarAsync()
         {
             if (isBusy || selectedFaces.Count != 0 || planePanel.Visibility == Visibility.Visible || versions.Count == 0) return;
@@ -597,7 +609,6 @@ public partial class MainWindow
                 if (d < distance) { distance = d; nearest = i / 3; }
             }
             if (nearest < 0) return;
-            if (!addSelection && !selectedFaces.Contains(nearest)) selectedFaces.Clear();
             if (!selectedFaces.Add(nearest)) selectedFaces.Remove(nearest);
             RefreshSelectionOverlay();
         }
@@ -609,11 +620,11 @@ public partial class MainWindow
             hit = result.PointHit; return true;
         }
 
-        void SelectLasso(IReadOnlyList<global::Windows.Foundation.Point> polygon)
+        void SelectLasso(IReadOnlyList<global::Windows.Foundation.Point> polygon, bool extend)
         {
             if (mesh == null || polygon.Count < 3) return;
-            if (!addSelection) selectedFaces.Clear();
             var camera = viewport.Camera as PerspectiveCamera; if (camera == null) return;
+            if (!extend) selectedFaces.Clear();
             var forward = Vector3.Normalize(camera.LookDirection); var right = Vector3.Normalize(Vector3.Cross(forward, camera.UpDirection)); var up = Vector3.Normalize(Vector3.Cross(right, forward));
             var focal = (float)(viewport.ActualHeight / (2 * Math.Tan(camera.FieldOfView * Math.PI / 360)));
             var cameraPos = camera.Position;

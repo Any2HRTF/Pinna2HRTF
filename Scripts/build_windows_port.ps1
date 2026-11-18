@@ -74,6 +74,10 @@ exit /b %errorlevel%
 '@ | Set-Content -LiteralPath (Join-Path $dist "Pinna2HRTF-CLI.cmd") -Encoding ascii
 Copy-Item (Join-Path $root "pyproject.toml") (Join-Path $dist "pyproject.toml") -Force
 Copy-Item (Join-Path $root "ProjectSettingHelp.json") (Join-Path $dist "ProjectSettingHelp.json") -Force
+$revision = & git -C $root rev-parse HEAD 2>$null
+if ($LASTEXITCODE -eq 0 -and $revision -match '^[0-9a-f]{40}$') {
+    $revision | Set-Content -LiteralPath (Join-Path $dist "build-revision.txt") -Encoding ascii
+}
 if (Test-Path (Join-Path $windowsProject "Resources\app_icon.ico")) {
     Copy-Item (Join-Path $windowsProject "Resources\app_icon.ico") (Join-Path $dist "app_icon.ico") -Force
 }

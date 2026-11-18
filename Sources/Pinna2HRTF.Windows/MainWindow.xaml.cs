@@ -227,11 +227,13 @@ public partial class MainWindow : Window
         {
             if (args.Key != VirtualKey.Escape) return;
             if (placementSide != null) EndPlacement();
-            else if (scanAlignmentMode) EndScanAlignment();
+            else if (scanAlignmentMode) _ = ConfirmCancelAlignmentAsync();
             else if (workflowStopItem?.IsEnabled == true) StopClicked(this, new RoutedEventArgs());
             else return;
             args.Handled = true;
         };
+        AddEditorSaveShortcut(Root, () => pendingAlignment != null && applyScanAlignmentButton.IsEnabled
+            ? ApplyScanAlignmentAsync() : Task.CompletedTask, () => scanAlignmentMode);
         foreach (var (shortcut, action) in new (string, RoutedEventHandler)[]
         {
             ("Ctrl+R", RunNextClicked),
@@ -715,23 +717,22 @@ public partial class MainWindow : Window
         viewerGrid.Children.Add(viewerPlaceholder);
         viewerInteractionHint = new Border
         {
-            HorizontalAlignment = HorizontalAlignment.Left,
+            HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(16),
+            Margin = new Thickness(0),
             Padding = new Thickness(0),
             CornerRadius = new CornerRadius(5),
             Background = new SolidColorBrush(Colors.Transparent),
             Visibility = Visibility.Collapsed,
             Child = NavigationHelp.Create()
         };
-        viewerGrid.Children.Add(viewerInteractionHint);
         var resetViewButton = NavigationHelp.Command("Reset view");
         resetViewButton.Click += ResetViewClicked;
         resetViewButtonHost = new Border
         {
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(16),
+            Margin = new Thickness(0),
             CornerRadius = new CornerRadius(5),
             Background = new SolidColorBrush(Colors.Transparent),
             Visibility = Visibility.Collapsed,
@@ -739,7 +740,11 @@ public partial class MainWindow : Window
             Child = resetViewButton
         };
         ToolTipService.SetToolTip(resetViewButton, "Reset this mesh view");
-        viewerGrid.Children.Add(resetViewButtonHost);
+        var viewportCommands = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(16) };
+        viewportCommands.Children.Add(viewerInteractionHint);
+        viewportCommands.Children.Add(resetViewButtonHost);
+        viewerGrid.Children.Add(viewportCommands);
         placementBorder = new Border { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(10, 12, 10, 0), Visibility = Visibility.Collapsed, Background = viewerHintBackgroundBrush, CornerRadius = new CornerRadius(5), Padding = new Thickness(10, 7, 10, 7) };
         placementPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         placementCoordinates = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Text = "Click the mesh to place the microphone" };
@@ -764,9 +769,12 @@ public partial class MainWindow : Window
         };
         applyScanAlignmentButton.Click += async (_, _) => await ApplyScanAlignmentAsync();
         var cancelAlignment = new Button { Content = "Cancel" };
-        cancelAlignment.Click += (_, _) => { EndScanAlignment(); RefreshArtifacts(); };
+        cancelAlignment.Click += async (_, _) => await ConfirmCancelAlignmentAsync();
         var restartAlignment = new Button { Content = "Restart picks" };
-        restartAlignment.Click += (_, _) => BeginScanAlignmentClicked(this, new RoutedEventArgs());
+        restartAlignment.Click += async (_, _) =>
+        {
+            if (await ConfirmCancelAlignmentAsync()) await BeginScanAlignmentAsync();
+        };
         var alignmentMessage = new Grid { ColumnSpacing = 8 };
         alignmentMessage.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         alignmentMessage.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1114,11 +1122,19 @@ public partial class MainWindow : Window
         settingControls["mesh2hrtf.evaluation_grid"] = evaluationGridBox;
     }
 
-    void ProjectSelectionChanged(object sender, SelectionChangedEventArgs e)
+    async void ProjectSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (reconcilingProjectRows) return;
         if (projectList.SelectedItem is Grid { Tag: ProjectRecord project } && !ReferenceEquals(selectedProject, project))
         {
+            if (scanAlignmentMode)
+            {
+                reconcilingProjectRows = true;
+                try { if (selectedProject is { } current && projectRows.TryGetValue(current.Id, out var row)) projectList.SelectedItem = row.Root; }
+                finally { reconcilingProjectRows = false; }
+                if (await ConfirmCancelAlignmentAsync()) SelectProjectFromContext(project);
+                return;
+            }
             SaveMeshCamera();
             ResetViewer();
             selectedProject = project;
@@ -1137,6 +1153,7 @@ public partial class MainWindow : Window
 
     void SelectProjectFromContext(ProjectRecord project)
     {
+        if (scanAlignmentMode) return;
         if (!projects.Contains(project)) return;
         if (!ReferenceEquals(selectedProject, project)) { SaveMeshCamera(); ResetViewer(); selectedProject = project; }
         if (projectRows.TryGetValue(project.Id, out var row) && !ReferenceEquals(projectList.SelectedItem, row.Root)) projectList.SelectedItem = row.Root;
@@ -1653,7 +1670,10 @@ public partial class MainWindow : Window
             MoveProjectToFolder(project, folder.Id);
     }
 
-    void BeginScanAlignmentClicked(object sender, RoutedEventArgs e)
+    void BeginScanAlignmentClicked(object sender, RoutedEventArgs e) =>
+        _ = ObserveUiTaskAsync(BeginScanAlignmentAsync(), "Open scan alignment", selectedProject);
+
+    async Task BeginScanAlignmentAsync()
     {
         var project = selectedProject;
         if (project == null) return;
@@ -1662,12 +1682,23 @@ public partial class MainWindow : Window
             AppendLog("Wait for the running project stage to finish before aligning its scan.", project.Id);
             return;
         }
-        var source = !string.IsNullOrWhiteSpace(project.Settings.ScanPreparation.OriginalScanPath)
-            ? project.Settings.ScanPreparation.OriginalScanPath : project.Settings.ScanPreparation.ScanPath;
+        var source = ResolveAlignmentSource(project);
         if (string.IsNullOrWhiteSpace(source) || !File.Exists(source))
         {
-            AppendLog("Choose a full-head scan before aligning it.", project.Id);
-            return;
+            var dialog = new ContentDialog
+            {
+                Title = "Original head scan needed",
+                Content = string.IsNullOrWhiteSpace(source) ? "Choose the original full-head scan to start alignment."
+                    : $"Could not find the original scan: {source}",
+                PrimaryButtonText = "Choose scan…", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = Root.XamlRoot
+            };
+            if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary || selectedProject != project) return;
+            if (!await ChoosePathAsync(scanPathBox, false, source, path => !IsGeneratedAlignment(project, path))) return;
+            if (selectedProject != project || ProjectBusy(project.Id)) return;
+            var replacement = ResolveAlignmentSource(project);
+            if (!File.Exists(replacement)) return;
+            source = replacement;
         }
         if (string.IsNullOrWhiteSpace(project.SaveLocation))
         {
@@ -1675,6 +1706,7 @@ public partial class MainWindow : Window
             return;
         }
         ResetScanAlignmentPicks();
+        alignmentSessionSource = source;
         alignmentSessionProject = project.Id;
         if (placementSide != null) EndPlacement();
         scanAlignmentMode = true;
@@ -1690,6 +1722,7 @@ public partial class MainWindow : Window
     {
         if (alignmentSaving) return;
         alignmentSessionProject = null;
+        alignmentSessionSource = null;
         scanAlignmentMode = false;
         artifactPicker.IsEnabled = true;
         ClearAlignmentPreview();
@@ -1935,15 +1968,18 @@ public partial class MainWindow : Window
         }
     }
 
-    async Task ChoosePathAsync(TextBox box, bool folder)
+    async Task<bool> ChoosePathAsync(TextBox box, bool folder, string? startAt = null, Func<string, bool>? accept = null)
     {
         var project = selectedProject; var previous = box.Text;
-        var path = folder ? await PickFolderAsync(previous) : await PickFileAsync(previous);
-        if (path != null && selectedProject == project && box.Text == previous && !shutdownCleanupDone && (project == null || !ProjectBusy(project.Id)))
+        var path = folder ? await PickFolderAsync(startAt ?? previous) : await PickFileAsync(startAt ?? previous);
+        if (path != null && selectedProject == project && box.Text == previous && !shutdownCleanupDone && (project == null || !ProjectBusy(project.Id))
+            && (accept == null || accept(path)))
         {
             box.Text = path;
             await CommitSettingInputAsync(box);
+            return true;
         }
+        return false;
     }
 
     async Task<string?> PickFileAsync(string? currentPath = null)
@@ -3549,15 +3585,37 @@ public partial class MainWindow : Window
     void ShowAboutClicked(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(ShowAboutAsync(), "ShowAbout", selectedProject);
     async Task ShowAboutAsync()
     {
-        var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "1.2.0";
+        var assembly = Assembly.GetExecutingAssembly();
+        var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "Unknown";
+        var build = assembly.GetName().Version;
+        var revision = ReadBuildDetail(Path.Combine(packageRoot, "build-revision.txt")) ?? "Unknown";
+        var meshVersion = ReadBuildDetail(Path.Combine(packageRoot, "External", "src", "Mesh2HRTF", "VERSION"));
+        var details = new List<string> { $"Version {version} ({build})", $"Revision {revision}", $"Windows {Environment.OSVersion.Version}" };
+        if (meshVersion != null) details.Add($"Mesh2HRTF {meshVersion}");
         var content = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
         var logoPath = Path.Combine(AppContext.BaseDirectory, "app_icon.png");
         if (File.Exists(logoPath)) content.Children.Add(new Image { Source = new BitmapImage(new Uri(logoPath)), Width = 96, Height = 96, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center });
         content.Children.Add(new TextBlock { Text = "Pinna2HRTF", FontSize = 24, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center });
-        content.Children.Add(new TextBlock { Text = "Version " + version, FontSize = 13, HorizontalAlignment = HorizontalAlignment.Center });
-        content.Children.Add(new TextBlock { Text = "A desktop pipeline for ear-mesh preprocessing, Mesh2PPM inference, Mesh2HRTF simulation, and SOFA export.", FontSize = 13, TextWrapping = TextWrapping.Wrap, MaxWidth = 540, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center });
+        content.Children.Add(new TextBlock { Text = string.Join(Environment.NewLine, details), IsTextSelectionEnabled = true,
+            FontSize = 13, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap });
+        var copy = new Button { Content = "Copy Version Info", HorizontalAlignment = HorizontalAlignment.Center };
+        copy.Click += (_, _) =>
+        {
+            var data = new global::Windows.ApplicationModel.DataTransfer.DataPackage();
+            data.SetText("Pinna2HRTF" + Environment.NewLine + string.Join(Environment.NewLine, details));
+            global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data);
+            copy.Content = "Copied";
+        };
+        content.Children.Add(copy);
         var dialog = new ContentDialog { Title = "About Pinna2HRTF", Content = content, CloseButtonText = "Close", XamlRoot = Root.XamlRoot };
         await ShowDialogAsync(dialog);
+
+        static string? ReadBuildDetail(string path)
+        {
+            try { var value = File.ReadAllText(path).Trim(); return value.Length > 0 ? value : null; }
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
+        }
     }
 
     void LoadSettingHelp()
@@ -3659,7 +3717,7 @@ public partial class MainWindow : Window
 
     void AppWindowClosing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
     {
-        if (closingConfirmed || (runs.Count == 0 && editorWindows.Count == 0)) { ShutdownForAppClose(); return; }
+        if (closingConfirmed || (runs.Count == 0 && editorWindows.Count == 0 && !scanAlignmentMode)) { ShutdownForAppClose(); return; }
         args.Cancel = true;
         _ = ConfirmQuitAsync(sender);
     }

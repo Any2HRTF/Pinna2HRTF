@@ -275,9 +275,11 @@ public partial class MainWindow
             }
             Appearance(); save.IsEnabled = !busy; HistoryState();
         }
+        TaskCompletionSource? previewCompleted = null;
         async Task Preview()
         {
             if (previewRunning || busy || lifetime.IsCancellationRequested) return;
+            previewCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             previewRunning = true; save.IsEnabled = false; HistoryState();
             try
             {
@@ -292,7 +294,12 @@ public partial class MainWindow
             }
             catch (OperationCanceledException) { }
             catch (Exception error) { if (!lifetime.IsCancellationRequested) editor.Status.Text = error.Message; }
-            finally { previewRunning = false; if (!lifetime.IsCancellationRequested) { save.IsEnabled = !busy; HistoryState(); } }
+            finally
+            {
+                previewRunning = false;
+                if (!lifetime.IsCancellationRequested) { save.IsEnabled = !busy; HistoryState(); }
+                previewCompleted.TrySetResult();
+            }
         }
         void Restore(Dictionary<string,double> snapshot)
         {
@@ -318,11 +325,21 @@ public partial class MainWindow
             finally { busy=false; if (!lifetime.IsCancellationRequested) { HistoryState(); save.IsEnabled=true; } }
         };
         Task? saveOperation = null;
-        save.Click += async (_,_) =>
+        async Task SaveOnceAsync()
         {
-            if (saveOperation is { IsCompleted: false }) return;
-            saveOperation = SaveFitAsync(); await saveOperation;
-        };
+            if (busy || saveOperation is { IsCompleted: false }) return;
+            saveOperation = CommitAndSaveAsync();
+            await saveOperation;
+        }
+        async Task CommitAndSaveAsync()
+        {
+            if (Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(((FrameworkElement)editor.Window.Content).XamlRoot) is TextBox)
+                editor.NavigationButton.Focus(FocusState.Programmatic);
+            while (previewRunning && previewCompleted != null) await previewCompleted.Task;
+            if (save.IsEnabled && !lifetime.IsCancellationRequested) await SaveFitAsync();
+        }
+        save.Click += async (_, _) => await SaveOnceAsync();
+        AddEditorSaveShortcut((UIElement)editor.Window.Content, SaveOnceAsync);
         async Task SaveFitAsync()
         {
             if (busy || previewRunning || lifetime.IsCancellationRequested) return;
