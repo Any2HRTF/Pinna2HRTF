@@ -116,8 +116,11 @@ struct MeshEditorView: View {
                 Button("Clear Selection") { model.selectedFaces.removeAll(); model.refreshOverlays() }
                     .disabled(model.selectedFaces.isEmpty)
             }
-            Button("Delete Selected Faces", role: .destructive) {
+            Button(role: .destructive) {
                 Task { await model.edit("delete", actionName: "Delete Faces", arguments: ["faces": model.selectedFaces.sorted()]) }
+            } label: {
+                Label("Delete Selected Faces", systemImage: "trash")
+                    .foregroundStyle(model.selectedFaces.isEmpty ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.red))
             }
             .disabled(model.selectedFaces.isEmpty)
         }
