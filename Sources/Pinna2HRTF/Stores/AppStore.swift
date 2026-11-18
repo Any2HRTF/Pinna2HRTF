@@ -17,6 +17,7 @@ final class AppStore: ObservableObject {
     @Published var workflowRevealRequest = UUID()
     @Published var meshEditorRequest: MeshEditorRequest?
     @Published var meshEditorError: String?
+    @Published var missingOriginalScan: String?
     @Published var ppmFittingRequest: PPMFittingRequest?
     @Published var ppmFittingError: String?
     @Published var editorRevealRequest = UUID()
@@ -457,8 +458,9 @@ final class AppStore: ObservableObject {
             }
             source = original
         }
-        guard !source.isEmpty, FileManager.default.fileExists(atPath: source) else {
-            meshEditorError = "Choose a full-head scan first."; return
+        guard !source.isEmpty else { meshEditorError = "Choose a full-head scan first."; return }
+        guard FileManager.default.fileExists(atPath: source) else {
+            missingOriginalScan = URL(fileURLWithPath: source).lastPathComponent; return
         }
         if let conflict = outputLocationConflict(for: project) {
             meshEditorError = conflict; return
@@ -468,6 +470,30 @@ final class AppStore: ObservableObject {
             destination: destination,
             side: nil, preparedGeneration: nil, preparedReport: nil,
             prepareLeft: project.scanPreparation.prepareLeft, prepareRight: project.scanPreparation.prepareRight)
+    }
+
+    func setHeadScan(_ path: String) {
+        updateSelectedProject { project in
+            var scan = project.scanPreparation
+            guard scan.scanPath != path else { return }
+            scan.scanPath = path
+            scan.originalScanPath = nil
+            scan.rotationDegrees = "0"
+            scan.reviewedLeftPath = nil
+            scan.reviewedRightPath = nil
+            project.settings.scanPreparation = scan
+        }
+    }
+
+    func chooseHeadScanAndAlign() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        setHeadScan(url.path)
+        beginScanAlignment()
     }
 
     private static func samePath(_ lhs: String, _ rhs: String) -> Bool {

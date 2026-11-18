@@ -49,6 +49,12 @@ struct ContentView: View {
             if let request = store.ppmFittingRequest { PPMFittingView.present(request, store: store) }
         }
         .onChange(of: store.editorRevealRequest) { _ in EditorWindowController.revealOpenEditors() }
+        .alert("Original Scan Not Found", isPresented: Binding(get: { store.missingOriginalScan != nil }, set: { if !$0 { store.missingOriginalScan = nil } })) {
+            Button("Choose Scan…") { store.missingOriginalScan = nil; store.chooseHeadScanAndAlign() }
+            Button("Cancel", role: .cancel) { store.missingOriginalScan = nil }
+        } message: {
+            Text("“\(store.missingOriginalScan ?? "")” was moved or deleted. Choose the full-head scan to align it again.")
+        }
         .alert("Cannot Edit Mesh", isPresented: Binding(get: { store.meshEditorError != nil }, set: { if !$0 { store.meshEditorError = nil } })) {
             Button("OK") { store.meshEditorError = nil }
         } message: { Text(store.meshEditorError ?? "") }

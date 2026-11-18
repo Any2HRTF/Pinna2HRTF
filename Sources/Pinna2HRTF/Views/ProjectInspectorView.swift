@@ -81,7 +81,7 @@ struct ProjectInspectorView: View {
             }
             .pickerStyle(.radioGroup)
             if store.selectedProject?.scanPreparation.enabled == true {
-                PathField("Head scan", helpID: "scan.path", text: scanTextBinding(\.scanPath), mode: .file)
+                PathField("Head scan", helpID: "scan.path", text: Binding(get: { store.selectedProject?.scanPreparation.scanPath ?? "" }, set: { store.setHeadScan($0) }), mode: .file)
             } else {
                 PathField("Left ear", helpID: "project.left_ear", text: projectStringBinding(\.leftEar), mode: .file)
                 PathField("Right ear", helpID: "project.right_ear", text: projectStringBinding(\.rightEar), mode: .file)
@@ -310,11 +310,6 @@ struct ProjectInspectorView: View {
                 var scan = project.scanPreparation
                 guard scan[keyPath: keyPath] != value else { return }
                 scan[keyPath: keyPath] = value
-                if keyPath == \.scanPath {
-                    scan.originalScanPath = nil
-                    scan.rotationDegrees = "0"
-                    scan.reviewedLeftPath = nil; scan.reviewedRightPath = nil
-                }
                 project.settings.scanPreparation = scan
             }
         })
