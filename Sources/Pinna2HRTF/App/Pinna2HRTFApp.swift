@@ -20,7 +20,7 @@ struct Pinna2HRTFApp: App {
         .windowStyle(.titleBar)
         .commands {
             CommandGroup(replacing: .appInfo) {
-                Button("About Pinna2HRTF") { AboutWindow.show(externalDirectory: store.environment.externalDir) }
+                AboutCommand()
             }
             SidebarCommands()
             ProjectInspectorCommands()
@@ -31,6 +31,7 @@ struct Pinna2HRTFApp: App {
                 }
             }
         }
+        AboutScene(info: AboutInfo(externalDirectory: store.environment.externalDir))
         Settings {
             AppSettingsView(store: store)
         }

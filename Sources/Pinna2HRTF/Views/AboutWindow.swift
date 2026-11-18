@@ -15,9 +15,8 @@ struct AboutInfo {
         build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
         revision = bundle.object(forInfoDictionaryKey: "Pinna2HRTFGitHead") as? String ?? "unknown"
         let versionFile = URL(fileURLWithPath: externalDirectory).appendingPathComponent("src/Mesh2HRTF/VERSION")
-        mesh2HRTFVersion = (try? String(contentsOf: versionFile, encoding: .utf8))?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nilIfEmpty
+        let mesh2HRTF = (try? String(contentsOf: versionFile, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        mesh2HRTFVersion = mesh2HRTF?.isEmpty == false ? mesh2HRTF : nil
     }
 
     var versionLine: String { build.isEmpty ? "Version \(version)" : "Version \(version) (\(build))" }
@@ -25,91 +24,76 @@ struct AboutInfo {
     var mesh2HRTFLine: String? { mesh2HRTFVersion.map { "Mesh2HRTF \($0)" } }
 
     var copyText: String {
-        let system = ProcessInfo.processInfo.operatingSystemVersion
-        return ([name, versionLine, revisionLine, mesh2HRTFLine,
-                 "macOS \(system.majorVersion).\(system.minorVersion).\(system.patchVersion)"] as [String?])
+        let system = ProcessInfo.processInfo.operatingSystemVersionString
+        return ([name, versionLine, revisionLine, mesh2HRTFLine, "macOS \(system)"] as [String?])
             .compactMap { $0 }
             .joined(separator: "\n")
     }
 }
 
-private extension String {
-    var nilIfEmpty: String? { isEmpty ? nil : self }
-}
-
 struct AboutView: View {
     let info: AboutInfo
-    @State private var copied = false
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 8) {
             Image(nsImage: NSApp.applicationIconImage)
                 .resizable()
                 .frame(width: 96, height: 96)
                 .accessibilityHidden(true)
-                .padding(.bottom, 12)
             Text(info.name)
-                .font(.title2.weight(.bold))
-                .padding(.bottom, 6)
-            Text(info.versionLine)
-                .padding(.bottom, 4)
-            Group {
-                Text(info.revisionLine)
-                if let line = info.mesh2HRTFLine { Text(line) }
+                .font(.title2.bold())
+            VStack(spacing: 4) {
+                Text(info.versionLine)
+                Group {
+                    Text(info.revisionLine)
+                    if let line = info.mesh2HRTFLine { Text(line) }
+                }
+                .foregroundStyle(.secondary)
             }
-            .foregroundStyle(.secondary)
-            .padding(.bottom, 2)
-            Button {
+            .textSelection(.enabled)
+            Button("Copy Version Info", systemImage: "doc.on.doc") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(info.copyText, forType: .string)
-                copied = true
-                Task {
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    copied = false
-                }
-            } label: {
-                Label(copied ? "Copied" : "Copy Version Info", systemImage: copied ? "checkmark" : "doc.on.doc")
             }
-            .controlSize(.large)
-            .padding(.top, 14)
+            .padding(.top, 8)
         }
-        .textSelection(.enabled)
-        .multilineTextAlignment(.center)
         .padding(.horizontal, 40)
-        .padding(.top, 36)
-        .padding(.bottom, 28)
+        .padding(.vertical, 24)
         .frame(minWidth: 280)
-        .fixedSize()
-        .ignoresSafeArea()
     }
 }
 
-@MainActor
-enum AboutWindow {
-    private static var window: NSWindow?
+struct AboutScene: Scene {
+    static let id = "about"
+    let info: AboutInfo
 
-    static func show(externalDirectory: String) {
-        if let window {
-            window.makeKeyAndOrderFront(nil)
-            return
+    var body: some Scene {
+        Window("About \(info.name)", id: Self.id) {
+            AboutView(info: info)
+                .modifier(AboutWindowChrome())
         }
-        let info = AboutInfo(externalDirectory: externalDirectory)
-        let hosting = NSHostingController(rootView: AboutView(info: info))
-        hosting.sizingOptions = []
-        let window = NSWindow(contentViewController: hosting)
-        window.styleMask = [.titled, .closable, .fullSizeContentView]
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = true
-        window.isReleasedWhenClosed = false
-        window.tabbingMode = .disallowed
-        window.collectionBehavior.insert(.fullScreenNone)
-        window.standardWindowButton(.miniaturizeButton)?.isEnabled = false
-        window.standardWindowButton(.zoomButton)?.isEnabled = false
-        window.title = "About \(info.name)"
-        window.setContentSize(hosting.view.fittingSize)
-        window.center()
-        Self.window = window
-        window.makeKeyAndOrderFront(nil)
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+    }
+}
+
+private struct AboutWindowChrome: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content
+                .toolbar(removing: .title)
+                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+                .containerBackground(.thickMaterial, for: .window)
+        } else {
+            content
+        }
+    }
+}
+
+struct AboutCommand: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("About Pinna2HRTF") { openWindow(id: AboutScene.id) }
     }
 }
