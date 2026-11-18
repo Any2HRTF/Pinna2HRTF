@@ -22,7 +22,6 @@ final class EditorSCNView: NavigableSCNView {
         lasso.zPosition = 100
         layer?.addSublayer(lasso)
         orientationView.isHidden = true
-        orientationView.toolTip = "Scan axes: X red, Y green, Z blue"
         orientationView.setAccessibilityElement(true)
         orientationView.setAccessibilityRole(.image)
         orientationView.setAccessibilityLabel("Scan coordinate orientation: X red, Y green, Z blue")
@@ -55,6 +54,7 @@ final class EditorSCNView: NavigableSCNView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
         guard let model, !model.busy else { return }
         start = convert(event.locationInWindow, from: nil)
         if model.tool == .selection {

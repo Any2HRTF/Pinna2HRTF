@@ -55,7 +55,6 @@ final class ActivityLog: ObservableObject {
         if let projectID { technicalLogURLs[projectID] = url }
     }
 
-    func setEnvironmentLog(_ url: URL) { environmentTechnicalLogURL = url }
 
     func clearSelected() {
         guard let selectedProjectID else { return }

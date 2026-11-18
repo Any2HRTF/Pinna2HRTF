@@ -10,27 +10,13 @@ struct MeshViewerView: View {
     var body: some View {
         VStack(spacing: 0) {
             if store.selectedProject == nil {
-                VStack(spacing: 12) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 44))
-                        .foregroundStyle(.secondary)
-                    Text("No project selected")
-                        .font(.title2.weight(.semibold))
-                    Text("Create or import a project.")
-                        .foregroundStyle(.secondary)
-                    HStack {
-                        Button("New project", action: store.createProject)
-                        Button("Import project…", action: store.importProject)
-                    }
-                    .buttonStyle(.bordered)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                noProject
             } else {
                 HStack {
                     let previews = store.artifacts.filter(\.exists)
                     let previewTitle = previews.first(where: { $0.url == store.selectedMesh })?.title
                         ?? store.selectedMesh?.lastPathComponent
-                        ?? (previews.isEmpty ? "No artifacts" : "Select artifact")
+                        ?? (previews.isEmpty ? "No Files" : "Choose File")
                     Menu {
                         ForEach(previews) { artifact in
                             Button {
@@ -46,7 +32,7 @@ struct MeshViewerView: View {
                     } label: {
                         Text(previewTitle)
                     }
-                    .accessibilityLabel("Artifact to view")
+                    .accessibilityLabel("Preview")
                     .accessibilityValue(Text(previewTitle))
                     .disabled(store.isPlacingMicrophone || previews.isEmpty)
                     Spacer()
@@ -70,7 +56,7 @@ struct MeshViewerView: View {
     var viewer: some View {
         ZStack {
             Rectangle()
-                .fill(colorScheme == .dark ? Color(nsColor: NSColor(calibratedWhite: 0.12, alpha: 1)) : Color(nsColor: NSColor(calibratedWhite: 0.93, alpha: 1)))
+                .fill(Color(nsColor: .viewportBackground(darkMode: colorScheme == .dark)))
             if let source = store.selectedPressure {
                 PressureFieldView(source: source).id(source)
             } else if let image = store.selectedImage {
@@ -79,15 +65,9 @@ struct MeshViewerView: View {
                     .scaledToFit()
                     .padding(18)
             } else if store.selectedMesh == nil {
-                VStack(spacing: 10) {
-                    Image(systemName: "cube.transparent")
-                        .font(.system(size: 36))
-                        .foregroundStyle(.secondary)
-                    Text("Select a file to preview")
-                        .foregroundStyle(.secondary)
-                }
+                noPreview
             } else {
-                PersistentSceneView(scene: store.selectedScene, darkMode: colorScheme == .dark, tintMesh: true, placementMode: store.isPlacingMicrophone, cameraPositionChanged: { [scene = store.selectedScene] position, target, orientation in
+                PersistentSceneView(scene: store.selectedScene, darkMode: colorScheme == .dark, tintMesh: true, placementMode: store.isPlacingMicrophone, resetView: store.resetSelectedMeshView, cameraPositionChanged: { [scene = store.selectedScene] position, target, orientation in
                     guard store.selectedScene === scene else { return }
                     store.updateCameraPosition(position, target: target, orientation: orientation)
                 }, surfaceSelected: store.previewMicrophonePosition)
@@ -95,23 +75,10 @@ struct MeshViewerView: View {
             }
         }
         .frame(maxHeight: .infinity)
-        .overlay(alignment: .bottomTrailing) {
-            if store.selectedMesh != nil && store.selectedImage == nil && store.selectedPressure == nil {
-                NavigationHelpButton().padding(16)
-            }
-        }
         .overlay(alignment: .topTrailing) {
-            VStack(alignment: .trailing, spacing: 8) {
-                if store.selectedMesh != nil && store.selectedImage == nil && store.selectedPressure == nil {
-                    Button(action: store.resetSelectedMeshView) {
-                        Label("Reset view", systemImage: "arrow.counterclockwise")
-                    }
-                    .modifier(ViewerGlassButtonStyle())
-                    .controlSize(.regular)
-                    .help("Restore the default view of this mesh")
-                }
+            if store.selectedMesh != nil && store.selectedImage == nil && store.selectedPressure == nil {
+                ViewerOverlayControls(resetView: store.resetSelectedMeshView) { EmptyView() }
             }
-            .padding(16)
         }
         .overlay(alignment: .bottom) {
             if let side = store.microphonePlacementSide {
@@ -120,15 +87,14 @@ struct MeshViewerView: View {
                         Label("Place \(side.title) Microphone", systemImage: "scope")
                             .font(.callout.weight(.semibold))
                         Spacer()
-                        Text("Click the mesh to place the microphone")
-                            .font(.caption)
+                        Text("Click the mesh")
                             .foregroundStyle(.secondary)
                     }
                     Text(microphoneCoordinates)
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                     HStack(spacing: 10) {
-                        Button("Find automatic position") {
+                        Button("Use Automatic Position") {
                             store.useAutomaticMicrophonePosition(side)
                         }.disabled(store.isCalculatingAutomaticMicrophone)
                         if store.isCalculatingAutomaticMicrophone {
@@ -136,11 +102,9 @@ struct MeshViewerView: View {
                                 ProgressView()
                                     .controlSize(.small)
                                 Text("Finding position…")
-                                    .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                             .accessibilityElement(children: .combine)
-                            .accessibilityLabel("Searching for automatic microphone position")
                         }
                         Spacer()
                         Button("Cancel") {
@@ -165,63 +129,85 @@ struct MeshViewerView: View {
     }
 
     var logPanel: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button {
-                    withAnimation(.snappy) {
-                        logExpanded.toggle()
-                    }
-                } label: {
-                    Label("Activity", systemImage: logExpanded ? "chevron.down" : "chevron.right")
+        DisclosureGroup(isExpanded: $logExpanded.animation(.snappy)) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(store.logText.isEmpty ? "No activity yet" : store.logText)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 8)
+                        .textSelection(.enabled)
+                        .id("log-bottom")
                 }
-                .buttonStyle(.plain)
-                .font(.headline)
+                .onChange(of: store.logText) { _ in
+                    proxy.scrollTo("log-bottom", anchor: .bottom)
+                }
+            }
+            .frame(height: 170)
+        } label: {
+            HStack {
+                Text("Activity")
+                    .font(.headline)
                 Spacer()
                 Text(logSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 if logExpanded {
-                Button {
-                    store.openTechnicalLog()
-                } label: {
-                    Label("Technical log", systemImage: "doc.text.magnifyingglass")
-                }
-                .buttonStyle(.borderless)
-                .help("Open the complete technical output for this project")
-                .accessibilityLabel("Open Technical Log")
-                .disabled(store.selectedTechnicalLogURL == nil)
-                Button("Clear activity") { store.clearSelectedProjectLog() }
+                    Button {
+                        store.openTechnicalLog()
+                    } label: {
+                        Label("Technical Log", systemImage: "doc.text.magnifyingglass")
+                    }
                     .buttonStyle(.borderless)
-                    .disabled(store.logText.isEmpty)
-                    .help("Clear the activity timeline. Technical logs remain available.")
+                    .help("Open Technical Log")
+                    .disabled(store.selectedTechnicalLogURL == nil)
+                    Button("Clear") { store.clearSelectedProjectLog() }
+                        .buttonStyle(.borderless)
+                        .disabled(store.logText.isEmpty)
+                        .help("Clear Activity")
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            if logExpanded {
-                Divider()
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        Text(store.logText.isEmpty ? "No activity yet" : store.logText)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
-                            .textSelection(.enabled)
-                            .id("log-bottom")
-                    }
-                    .onChange(of: store.logText) { _ in
-                        proxy.scrollTo("log-bottom", anchor: .bottom)
-                    }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+
+    @ViewBuilder private var noProject: some View {
+        if #available(macOS 14.0, *) {
+            ContentUnavailableView {
+                Label("No Project Selected", systemImage: "folder")
+            } actions: {
+                HStack {
+                    Button("New Project", action: store.createProject)
+                    Button("Import Project…", action: store.importProject)
                 }
-                .frame(height: 170)
             }
+        } else {
+            VStack(spacing: 12) {
+                Text("No Project Selected")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button("New Project", action: store.createProject)
+                    Button("Import Project…", action: store.importProject)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder private var noPreview: some View {
+        if #available(macOS 14.0, *) {
+            ContentUnavailableView("No Preview", systemImage: "cube.transparent")
+        } else {
+            Text("No Preview")
+                .font(.title2)
+                .foregroundStyle(.secondary)
         }
     }
 
     var logSummary: String {
-        if store.environmentProcess != nil { return "Setting up environment" }
         if let project = store.selectedProject, let stage = store.runningStages[project.id] { return "\(stage.title) running" }
         if store.selectedProjectIsRunning { return "Checking outputs" }
         if let project = store.selectedProject, let status = store.liveLogStatusByProject[project.id] { return status }
@@ -230,7 +216,7 @@ struct MeshViewerView: View {
     }
 
     var microphoneCoordinates: String {
-        guard let position = store.pendingMicrophonePosition else { return "No position selected" }
+        guard let position = store.pendingMicrophonePosition else { return "No position" }
         return String(format: "X %.2f · Y %.2f · Z %.2f mm", position.x, position.y, position.z)
     }
 }
@@ -249,6 +235,38 @@ struct ViewerGlassButtonStyle: ViewModifier {
     }
 }
 
+struct ViewerOverlayControls<Leading: View>: View {
+    let resetView: () -> Void
+    @ViewBuilder let leading: () -> Leading
+
+    var body: some View {
+        HStack(spacing: 8) {
+            leading()
+            Button(action: resetView) {
+                Label("Reset View", systemImage: "arrow.counterclockwise")
+            }
+            .help("Reset View")
+            NavigationHelpButton()
+                .help("Navigation")
+        }
+        .labelStyle(.iconOnly)
+        .controlSize(.large)
+        .modifier(ViewerGlassButtonStyle())
+        .modifier(ViewerGlassContainer())
+        .padding(16)
+    }
+}
+
+private struct ViewerGlassContainer: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer { content }
+        } else {
+            content
+        }
+    }
+}
+
 struct MicrophonePlacementSurface: ViewModifier {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -256,7 +274,7 @@ struct MicrophonePlacementSurface: ViewModifier {
         if reduceTransparency {
             content.background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 16))
         } else if #available(macOS 26.0, *) {
-            content.glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 16))
+            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16))
         } else {
             content.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
         }
@@ -268,6 +286,7 @@ struct PersistentSceneView: NSViewRepresentable {
     let darkMode: Bool
     var tintMesh = false
     let placementMode: Bool
+    let resetView: () -> Void
     let cameraPositionChanged: (SCNVector3, SCNVector3, SCNQuaternion) -> Void
     let surfaceSelected: (SCNVector3) -> Void
 
@@ -281,6 +300,7 @@ struct PersistentSceneView: NSViewRepresentable {
         view.scene = scene
         view.configureNavigation(camera: scene.rootNode.childNodes.first { $0.camera != nil })
         view.allowsCameraControl = true
+        view.resetView = resetView
         view.autoenablesDefaultLighting = false
         applyAppearance(to: view)
         view.addGestureRecognizer(NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.selectSurface(_:))))
@@ -299,6 +319,7 @@ struct PersistentSceneView: NSViewRepresentable {
         context.coordinator.placementMode = placementMode
         context.coordinator.cameraPositionChanged = cameraPositionChanged
         context.coordinator.surfaceSelected = surfaceSelected
+        view.resetView = resetView
         if view.scene !== scene {
             view.scene = scene
             view.configureNavigation(camera: scene.rootNode.childNodes.first { $0.camera != nil })
@@ -308,7 +329,7 @@ struct PersistentSceneView: NSViewRepresentable {
     }
 
     private func applyAppearance(to view: SCNView) {
-        let background = darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
+        let background = NSColor.viewportBackground(darkMode: darkMode)
         view.backgroundColor = background
         scene.background.contents = background
         if tintMesh {

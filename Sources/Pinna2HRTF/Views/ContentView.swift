@@ -4,47 +4,51 @@ struct ContentView: View {
     @ObservedObject var store: AppStore
     @SceneStorage("logExpanded.v2") private var logExpanded = false
     @SceneStorage("inspectorPresented") private var inspectorPresented = true
+    @State private var selectedFolderID: UUID?
+    @State private var folderEditor: FolderEditorRequest?
 
     var body: some View {
         workspace
-        .disabled(store.meshEditorRequest != nil || store.ppmFittingRequest != nil || store.projectDuplicationRequest != nil)
+        .disabled(store.projectDuplicationRequest != nil)
         .navigationTitle(store.selectedProject?.name ?? "Pinna2HRTF")
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                if !inspectorPresented && store.selectedProjectIsRunning { Button("Show progress") { inspectorPresented = true } }
+        .toolbar(id: "main") {
+            ToolbarItem(id: "activity", placement: .primaryAction) {
                 Button {
                     withAnimation { logExpanded.toggle() }
                 } label: {
-                    Label(logExpanded ? "Hide activity" : "Show activity", systemImage: "terminal")
+                    Label(logExpanded ? "Hide Activity" : "Show Activity", systemImage: "terminal")
                 }
-                .help(logExpanded ? "Hide activity" : "Show activity")
+                .help(logExpanded ? "Hide Activity" : "Show Activity")
+            }
+            ToolbarItem(id: "run", placement: .primaryAction) {
+                RunToolbarButton(store: store, canRun: commandContext.canRunProject)
+            }
+            ToolbarItem(id: "inspector", placement: .primaryAction) {
                 Button {
                     withAnimation { inspectorPresented.toggle() }
                 } label: {
-                    Label(inspectorPresented ? "Hide workflow" : "Show workflow", systemImage: "sidebar.right")
+                    Label(inspectorPresented ? "Hide Inspector" : "Show Inspector", systemImage: "sidebar.trailing")
                 }
-                .help(inspectorPresented ? "Hide workflow" : "Show workflow")
+                .help(inspectorPresented ? "Hide Inspector" : "Show Inspector")
             }
         }
-        .alert("Project list recovery", isPresented: $store.registryRecoveryPresented) {
-            Button("Restore displayed project list") { store.recoverProjectRegistry() }
-            Button("Keep original file protected", role: .cancel) {}
+        .alert("Restore the project list?", isPresented: $store.registryRecoveryPresented) {
+            Button("Restore") { store.recoverProjectRegistry() }
+            Button("Keep Original", role: .cancel) {}
         } message: {
-            Text(store.registryStore.recoveryMessage ?? store.persistenceMessage ?? "The original project list will be preserved before recovery.")
+            Text(store.registryStore.recoveryMessage ?? store.persistenceMessage ?? "The original file is kept.")
         }
         .onChange(of: store.workflowRevealRequest) { _ in inspectorPresented = true }
-        .sheet(item: editorPresentation) { editor in
-            switch editor {
-            case .duplicate(let request):
-                ProjectDuplicationView(store: store, request: request)
-            case .mesh(let request):
-                MeshEditorView(request: request, saved: store.finishMeshEditing)
-            case .ppm(let request):
-                PPMFittingView(request: request) { request, templateBlendPath in
-                    store.finishManualPPMFitting(request, templateBlendPath: templateBlendPath)
-                }
-            }
+        .sheet(item: $store.projectDuplicationRequest) { request in
+            ProjectDuplicationView(store: store, request: request)
         }
+        .onChange(of: store.meshEditorRequest?.id) { _ in
+            if let request = store.meshEditorRequest { MeshEditorView.present(request, store: store) }
+        }
+        .onChange(of: store.ppmFittingRequest?.id) { _ in
+            if let request = store.ppmFittingRequest { PPMFittingView.present(request, store: store) }
+        }
+        .onChange(of: store.editorRevealRequest) { _ in EditorWindowController.revealOpenEditors() }
         .alert("Cannot Edit Mesh", isPresented: Binding(get: { store.meshEditorError != nil }, set: { if !$0 { store.meshEditorError = nil } })) {
             Button("OK") { store.meshEditorError = nil }
         } message: { Text(store.meshEditorError ?? "") }
@@ -54,54 +58,40 @@ struct ContentView: View {
         .focusedSceneValue(\.pipelineCommands, commandContext)
     }
 
-    private var editorPresentation: Binding<ProjectEditorPresentation?> {
-        Binding(get: {
-            if let request = store.projectDuplicationRequest { return .duplicate(request) }
-            if let request = store.meshEditorRequest { return .mesh(request) }
-            if let request = store.ppmFittingRequest { return .ppm(request) }
-            return nil
-        }, set: { value in
-            if value == nil {
-                store.projectDuplicationRequest = nil
-                store.meshEditorRequest = nil
-                store.ppmFittingRequest = nil
-            }
-        })
-    }
-
     @ViewBuilder var workspace: some View {
         if #available(macOS 14.0, *) {
-            navigationWorkspace
+            navigationWorkspace {
+                meshViewer
+                    .inspector(isPresented: $inspectorPresented) {
+                        ProjectInspectorView(store: store)
+                            .inspectorColumnWidth(min: 320, ideal: 340, max: 560)
+                    }
+            }
         } else {
             HSplitView {
-                navigationWorkspace
+                navigationWorkspace { meshViewer }
                     .frame(minWidth: PressureFieldView.minimumViewerWidth + 180, maxWidth: .infinity)
                     .layoutPriority(1)
                 if inspectorPresented {
                     ProjectInspectorView(store: store)
-                        .frame(minWidth: 300, idealWidth: 320, maxWidth: 720)
+                        .frame(minWidth: 320, idealWidth: 340, maxWidth: 560)
                 }
             }
         }
     }
 
-    var navigationWorkspace: some View {
+    private func navigationWorkspace<Detail: View>(@ViewBuilder detail: () -> Detail) -> some View {
         NavigationSplitView {
-            ProjectSidebarView(store: store)
+            ProjectSidebarView(store: store, selectedFolderID: $selectedFolderID, folderEditor: $folderEditor)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 240, max: 320)
         } detail: {
-            meshViewer
-                .frame(minWidth: PressureFieldView.minimumViewerWidth, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+            detail()
         }
-        .navigationSplitViewStyle(.balanced)
     }
 
-    @ViewBuilder var meshViewer: some View {
-        if #available(macOS 14.0, *) {
-            NativeMeshWorkspace(store: store, logExpanded: $logExpanded, inspectorPresented: inspectorPresented)
-        } else {
-            MeshViewerView(store: store, logExpanded: $logExpanded)
-        }
+    private var meshViewer: some View {
+        MeshViewerView(store: store, logExpanded: $logExpanded)
+            .frame(minWidth: PressureFieldView.minimumViewerWidth, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
     }
 
     var commandContext: PipelineCommandContext {
@@ -110,6 +100,8 @@ struct ContentView: View {
         return PipelineCommandContext(
             canRemoveProject: store.canRemoveSelectedProject,
             canDuplicateProject: selectedProject != nil && !store.selectedProjectIsRunning,
+            canShowProjectInFinder: !(selectedProject?.saveLocation.isEmpty ?? true),
+            folderSelected: selectedFolderID != nil,
             canRunProject: selectedProject != nil && !store.selectedProjectIsRunning && store.workflowNextAction.enabled,
             canRunStage: { stage in store.canRun(stage: stage) },
             canStopProject: selectedProjectIsRunning,
@@ -123,9 +115,16 @@ struct ContentView: View {
             isLogExpanded: logExpanded,
             isInspectorPresented: inspectorPresented,
             createProject: { store.createProject() },
+            createFolder: { folderEditor = FolderEditorRequest() },
             importProject: { store.importProject() },
             duplicateProject: { store.duplicateSelectedProject() },
             removeProject: { store.removeSelectedProject() },
+            removeFolder: {
+                guard let id = selectedFolderID else { return }
+                selectedFolderID = nil
+                store.removeFolder(id)
+            },
+            showProjectInFinder: { store.showSelectedProjectInFinder() },
             runNextStage: { store.performWorkflowAction() },
             runStage: { store.run(stage: $0) },
             stopProject: { store.stopRunningProcess() },
@@ -139,16 +138,30 @@ struct ContentView: View {
     }
 }
 
-private enum ProjectEditorPresentation: Identifiable {
-    case duplicate(ProjectDuplicationRequest)
-    case mesh(MeshEditorRequest)
-    case ppm(PPMFittingRequest)
+private struct RunToolbarButton: View {
+    @ObservedObject var store: AppStore
+    let canRun: Bool
 
-    var id: String {
-        switch self {
-        case .duplicate(let request): return "duplicate-\(request.id)"
-        case .mesh(let request): return "mesh-\(request.id)"
-        case .ppm(let request): return "ppm-\(request.id)"
+    private var running: Bool { store.selectedProjectID.flatMap { store.runningProcesses[$0] } != nil }
+
+    var body: some View {
+        Button {
+            store.performWorkflowAction()
+        } label: {
+            Label(running ? "Stop" : "Run Next Step", systemImage: running ? "stop.fill" : "play.fill")
+        }
+        .help(running ? "Stop" : store.workflowNextAction.title)
+        .disabled(!running && !canRun)
+        .modifier(ProminentToolbarButtonStyle())
+    }
+}
+
+private struct ProminentToolbarButtonStyle: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.buttonStyle(.glassProminent)
+        } else {
+            content.buttonStyle(.borderedProminent)
         }
     }
 }

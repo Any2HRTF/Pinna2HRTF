@@ -181,7 +181,7 @@
   {
     "id": "mesh_grading.gamma",
     "title": "Gamma",
-    "description": "The grading factor used to estimate the active ear-canal entrance for mesh grading. The default is 0.2.",
+    "description": "Grading factor near the active ear-canal entrance. Default: 0.2.",
     "publications": [
       {
         "title": "Palm et al. (2021)",
@@ -196,7 +196,7 @@
   {
     "id": "mesh_grading.gamma_opposite",
     "title": "Gamma opposite",
-    "description": "The grading factor used to estimate the contralateral ear-canal entrance while grading the active side. The default is 0.1.",
+    "description": "Grading factor near the opposite ear-canal entrance. Default: 0.1.",
     "publications": [
       {
         "title": "Palm et al. (2021)",
@@ -258,25 +258,25 @@
   {
     "id": "scan.rotation",
     "title": "Crop rotation",
-    "description": "Rotation around Z, in degrees, that sets the scan orientation for cropping. Align the scan with the nose tip and both ear-canal entrances in the app to set this to zero. Prepared ears use this crop frame (left +Y, right -Y).",
+    "description": "Rotation around Z, in degrees, used for cropping. Aligning the scan in the app sets this to zero. Left ear is +Y, right ear is −Y.",
     "publications": []
   },
   {
     "id": "scan.prepare_left",
     "title": "Prepare left ear",
-    "description": "Extract and prepare the person's left ear from the aligned head scan when you run Scan Preparation. Clear this option to prepare only the right ear. At least one ear must be selected. The original scan is preserved.",
+    "description": "Extract and prepare the left ear from the aligned scan. At least one ear must be selected.",
     "publications": []
   },
   {
     "id": "scan.prepare_right",
     "title": "Prepare right ear",
-    "description": "Extract and prepare the person's right ear from the aligned head scan when you run Scan Preparation. Clear this option to prepare only the left ear. At least one ear must be selected. The original scan is preserved.",
+    "description": "Extract and prepare the right ear from the aligned scan. At least one ear must be selected.",
     "publications": []
   },
   {
     "id": "scan.target_edge",
     "title": "Target edge",
-    "description": "Target remeshing edge length, in mm. Default: 0.75 mm. Scan holes are closed using Screened Poisson reconstruction; one attachment boundary per ear is preserved.",
+    "description": "Target remeshing edge length, in mm. Default: 0.75 mm. Holes are closed with Screened Poisson reconstruction.",
     "publications": []
   },
   {
@@ -306,7 +306,7 @@
   {
     "id": "postprocessing.spatial_upsampling",
     "title": "Spatial HRTF upsampling",
-    "description": "Interpolate HRTFs for more source directions and estimate when sound from each new direction reaches each ear. The sampling rate and response length stay the same. The app keeps the original SOFA files and saves the denser set in Upsampled.",
+    "description": "Interpolate HRTFs to add source directions while keeping arrival times. Results are saved in Upsampled; the original SOFA files are kept.",
     "publications": [
       {
         "title": "Ziegelwanger & Majdak (2014)",
@@ -321,13 +321,13 @@
   {
     "id": "postprocessing.spatial_subdivisions",
     "title": "Subdivision level",
-    "description": "Controls how densely the app adds source directions to the upsampled SOFA file. Level 0 adds no subdivisions. Higher levels add more directions, which take longer to calculate and create larger files. The default is 3.",
+    "description": "How many source directions to add. Level 0 adds none. Higher levels take longer and create larger files. Default: 3.",
     "publications": []
   },
   {
     "id": "postprocessing.spatial_normalize",
     "title": "Normalize to frontal reference",
-    "description": "Scale the upsampled set using the frontal (0°, 0°) response as a −40 dB reference. This replaces the level chosen by the level offset. Off by default, so the upsampled HRIRs keep the level of the exported HRIRs.",
+    "description": "Scale the upsampled set so the frontal (0°, 0°) response is −40 dB. This replaces the level offset. Off by default.",
     "publications": []
   },
   {
@@ -339,20 +339,35 @@
   {
     "id": "ear_model.mesh2ppm",
     "title": "Mesh2PPM",
-    "description": "Predicts the parameters of a parametric pinna model from each included ear mesh. The predicted model is used for simulation preprocessing.",
-    "publications": [{ "title": "Pausch et al. (2026)", "url": "https://doi.org/10.1121/10.0043919" }]
+    "description": "Predict a parametric pinna model (PPM) from each ear mesh and use it for simulation setup.",
+    "publications": [
+      {
+        "title": "Pausch et al. (2026)",
+        "url": "https://doi.org/10.1121/10.0043919"
+      }
+    ]
   },
   {
     "id": "ear_model.manual",
     "title": "Manual PPM fitting",
-    "description": "Adjust a parametric pinna model to each included ear mesh, then save the fit for simulation preprocessing. Perfler et al. describe the underlying model, not this editor.",
-    "publications": [{ "title": "Perfler et al. (2025)", "url": "https://doi.org/10.1016/j.compbiomed.2025.109817" }]
+    "description": "Fit a parametric pinna model to each ear mesh by hand and use the saved fit for simulation setup.",
+    "publications": [
+      {
+        "title": "Perfler et al. (2025)",
+        "url": "https://doi.org/10.1016/j.compbiomed.2025.109817"
+      }
+    ]
   },
   {
     "id": "ear_model.none",
     "title": "No PPM",
-    "description": "Uses the current ear meshes without replacing them with a parametric model. Mesh preparation for the Mesh2HRTF calculation still runs; the paper provides simulation background.",
-    "publications": [{ "title": "Ziegelwanger et al. (2015)", "url": "https://doi.org/10.1121/1.4922518" }]
+    "description": "Use the ear meshes as they are, without a parametric model.",
+    "publications": [
+      {
+        "title": "Ziegelwanger et al. (2015)",
+        "url": "https://doi.org/10.1121/1.4922518"
+      }
+    ]
   },
   {
     "id": "postprocessing.amt_path",

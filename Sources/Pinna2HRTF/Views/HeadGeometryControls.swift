@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 
 struct HeadGeometryControls: View {
     @ObservedObject var store: AppStore
@@ -23,13 +22,8 @@ struct HeadGeometryControls: View {
     }
     func focusRequested() {
         guard store.earDistanceFocusRequest != nil else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            focused = true
-            DispatchQueue.main.async {
-                (NSApp.keyWindow?.firstResponder as? NSTextView)?.selectAll(nil)
-                store.earDistanceFocusRequest = nil
-            }
-        }
+        focused = true
+        store.earDistanceFocusRequest = nil
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -39,22 +33,23 @@ struct HeadGeometryControls: View {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     if let values = store.geometryValues {
-                        Text("Left: \(values.left.map { display($0) } ?? "—") mm; Right: \(values.right.map { display($0) } ?? "—") mm.")
+                        Text("Left \(values.left.map { display($0) } ?? "—") mm · Right \(values.right.map { display($0) } ?? "—") mm")
                     }
                     if !store.geometryMessage.isEmpty { Text(store.geometryMessage) }
                 }
                 .font(.caption).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
-                Button("Reset from meshes") { store.editGeometry(ear: true, text: "", reset: true); sync() }
+                Button("Reset") { store.editGeometry(ear: true, text: "", reset: true); sync() }
                     .fixedSize()
+                    .help("Recalculate from the ear meshes")
             }
         }
         .disabled(store.selectedProjectIsRunning || store.geometryEditing)
-        .onAppear { store.refreshGeometry(); sync(); focusRequested() }
+        .onAppear { store.refreshGeometry(); sync() }
+        .task(id: store.earDistanceFocusRequest) { focusRequested() }
         .onChange(of: store.geometryValues) { _ in sync() }
         .onChange(of: store.selectedProjectID) { _ in focused = false; sync() }
         .onChange(of: focused) { value in if value { editStart = distance } else { commit() } }
-        .onChange(of: store.earDistanceFocusRequest) { _ in focusRequested() }
     }
 }

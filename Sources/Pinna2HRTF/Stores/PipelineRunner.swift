@@ -13,9 +13,7 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
     @Published private(set) var stoppingProjects = Set<UUID>()
 
     @Published private var outputOperationCounts: [UUID: Int] = [:]
-    @Published private(set) var environmentProcess: Process?
     @Published var failedStagesByProject: [UUID: Set<Stage>] = [:]
-    private var environmentSetupCancelled = false
     private var outputStores: [String: GeneratedOutputManifest] = [:]
     private var notificationsConfigured = false
     private let launcher = ProcessLauncher.shared
@@ -275,84 +273,6 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
         }
     }
 
-    func setupEnvironment() {
-        guard let store else { return }
-        guard environmentProcess == nil else {
-            log("Environment setup is already running.")
-            return
-        }
-        do {
-            try prepareRuntimeProject()
-        } catch {
-            log("Could not prepare runtime folder: \(error.localizedDescription)")
-            return
-        }
-        if !Defaults.isPackagedApp {
-            copyPathToolsIntoEnvironment()
-        }
-        let logProjectID = store.selectedProjectID
-        let process: Process
-        do {
-            process = try launcher.makeProcess(.uvSync, environment: store.environment, liveEvents: true)
-        } catch {
-            log(error.localizedDescription)
-            return
-        }
-        environmentProcess = process
-        environmentSetupCancelled = false
-        let runID = UUID()
-        let projectForLog = logProjectID.flatMap { id in store.projects.first { $0.id == id } }
-        let logDirectory = projectForLog.flatMap(ActivityLog.projectLogDirectory(for:))
-            ?? Defaults.appDataURL.appendingPathComponent("Logs", isDirectory: true)
-        let logURL = logDirectory.appendingPathComponent("Environment-\(runID.uuidString).log")
-        let capture: PipelineLogCapture?
-        do {
-            capture = try PipelineLogCapture(fileURL: logURL, header: "Pinna2HRTF environment setup\nStarted: \(Date().formatted(date: .complete, time: .standard))\n\n--- stdout and stderr ---\n\n", onEvent: { _ in }, onFailure: { [weak self] message in
-                Task { @MainActor [weak self] in
-                    self?.log("Could not save complete environment setup output: \(message)", for: logProjectID)
-                }
-            })
-            activity?.setEnvironmentLog(logURL)
-            activity?.setTechnicalLog(logURL, for: logProjectID)
-        } catch {
-            capture = nil
-            log("Could not create an environment setup log: \(error.localizedDescription)", for: logProjectID)
-        }
-        log("Environment setup started.", for: logProjectID)
-        if let logProjectID { activity?.liveStatusByProject[logProjectID] = "Setting up environment" }
-        let onExit: @Sendable (Process) -> Void = { [weak self] process in
-            let status = process.terminationStatus
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                let cancelled = self.environmentSetupCancelled
-                let result = cancelled ? "Environment setup cancelled."
-                    : status == 0 ? "Environment setup finished."
-                    : "Environment setup failed (status \(status)). Technical output: \(logURL.lastPathComponent)."
-                self.log(result, for: logProjectID)
-                if let logProjectID {
-                    self.activity?.liveStatusByProject[logProjectID] = cancelled ? "Environment setup cancelled"
-                        : status == 0 ? "Environment ready" : "Environment setup failed"
-                }
-                self.environmentProcess = nil
-                self.store?.refreshArtifacts()
-            }
-        }
-        do {
-            try launcher.launch(process, capturing: capture, onExit: onExit)
-        } catch {
-            environmentProcess = nil
-            if let logProjectID { activity?.liveStatusByProject[logProjectID] = "Could not start environment setup" }
-            log("Could not start environment setup: \(error.localizedDescription)")
-        }
-    }
-
-    func cancelEnvironmentSetup() {
-        guard let process = environmentProcess, !environmentSetupCancelled else { return }
-        environmentSetupCancelled = true
-        log("Cancelling environment setup…", for: store?.selectedProjectID)
-        launcher.cancel(process)
-    }
-
     func prepareRuntimeProject() throws {
         guard Defaults.isPackagedApp else { return }
         for directory in ["Cache/matplotlib", "Cache/python", "Blender/config", "Blender/scripts", "Blender/datafiles"] {
@@ -369,49 +289,6 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
         return FileManager.default.fileExists(atPath: package.appendingPathComponent("HRTFCalculation/RunConfig.py").path) &&
             FileManager.default.fileExists(atPath: package.appendingPathComponent("HRTFCalculation/__main__.py").path) &&
             FileManager.default.isExecutableFile(atPath: pythonPath)
-    }
-
-    private func copyPathToolsIntoEnvironment() {
-        guard let store else { return }
-        let bin = URL(fileURLWithPath: store.environment.externalDir).appendingPathComponent("bin", isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
-        } catch {
-            log("Could not prepare dependency folder \(bin.path): \(error.localizedDescription)")
-            return
-        }
-        let tools = [
-            ("uv", \EnvironmentConfig.uvExecutable),
-            ("NumCalc", \EnvironmentConfig.numcalcExecutable),
-            ("hrtf_mesh_grading", \EnvironmentConfig.meshGradingExecutable)
-        ]
-        for tool in tools {
-            let current = store.environment[keyPath: tool.1]
-            if FileManager.default.isExecutableFile(atPath: current) {
-                continue
-            }
-            guard let source = Defaults.which(tool.0) else {
-                log("\(tool.0) is missing from the app bundle and PATH.")
-                continue
-            }
-            let target = bin.appendingPathComponent(tool.0)
-            do {
-                if FileManager.default.fileExists(atPath: target.path) {
-                    try FileManager.default.removeItem(at: target)
-                }
-                try FileManager.default.copyItem(at: URL(fileURLWithPath: source), to: target)
-                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target.path)
-                store.updateEnvironment {
-                    switch tool.0 {
-                    case "uv": $0.uvExecutable = target.path
-                    case "NumCalc": $0.numcalcExecutable = target.path
-                    default: $0.meshGradingExecutable = target.path
-                    }
-                }
-            } catch {
-                log("Could not copy \(tool.0) into the app dependencies: \(error.localizedDescription)")
-            }
-        }
     }
 
     private func configureNotifications() {

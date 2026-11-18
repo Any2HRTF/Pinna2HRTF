@@ -5,22 +5,6 @@ import AppKit
 struct Pinna2HRTFApp: App {
     @NSApplicationDelegateAdaptor(Pinna2HRTFAppDelegate.self) private var appDelegate
     @StateObject private var store = AppStore()
-    @AppStorage(AppPreferences.appearance) private var appearance = "system"
-
-    private static func applyAppearance(_ value: String) {
-        let name: NSAppearance.Name? = switch value {
-        case "light": .aqua
-        case "dark": .darkAqua
-        default: nil
-        }
-        NSApp.appearance = name.flatMap(NSAppearance.init(named:))
-        for window in NSApp.windows {
-            window.appearance = nil
-            window.invalidateShadow()
-            window.contentView?.needsDisplay = true
-            window.contentView?.needsLayout = true
-        }
-    }
 
     init() {
         signal(SIGPIPE, SIG_IGN)
@@ -29,11 +13,7 @@ struct Pinna2HRTFApp: App {
     var body: some Scene {
         Window("Pinna2HRTF", id: "main") {
             ContentView(store: store)
-                .onAppear {
-                    appDelegate.store = store
-                    Self.applyAppearance(appearance)
-                }
-                .onChange(of: appearance) { Self.applyAppearance($0) }
+                .onAppear { appDelegate.store = store }
                 .frame(minWidth: PressureFieldView.minimumViewerWidth + 630, maxWidth: .infinity, minHeight: 650, maxHeight: .infinity)
         }
         .defaultSize(width: 1320, height: 900)
@@ -65,6 +45,7 @@ struct Pinna2HRTFApp: App {
         Settings {
             AppSettingsView(store: store)
         }
+        .windowResizability(.contentSize)
     }
 }
 
@@ -75,21 +56,41 @@ final class Pinna2HRTFAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let store else { return .terminateNow }
         if store.hasOutputOperations || store.geometryEditing || store.projectDuplicationRequest != nil {
-            let alert = NSAlert(); alert.messageText = "Project files are being updated"
-            alert.informativeText = "Wait for the operation to finish before quitting."; alert.addButton(withTitle: "OK"); alert.runModal()
+            let alert = NSAlert(); alert.messageText = "Project files are being updated."
+            alert.informativeText = "Quit after the operation finishes."; alert.addButton(withTitle: "OK"); alert.runModal()
             return .terminateCancel
         }
-        if store.meshEditorRequest != nil || store.ppmFittingRequest != nil {
-            let alert = NSAlert(); alert.messageText = "Close the editor before quitting"
-            alert.informativeText = "Save your changes or cancel editing, then quit."; alert.addButton(withTitle: "OK"); alert.runModal()
+        if EditorWindowController.isSavingAny {
+            let alert = NSAlert(); alert.messageText = "Project files are being updated."
+            alert.informativeText = "Quit after the operation finishes."; alert.addButton(withTitle: "OK"); alert.runModal()
             return .terminateCancel
         }
-        guard !store.runningProcesses.isEmpty || store.environmentProcess != nil || store.isCalculatingAutomaticMicrophone else { return .terminateNow }
+        if EditorWindowController.hasUnsavedChanges {
+            let alert = NSAlert()
+            alert.messageText = "Review unsaved changes before quitting?"
+            alert.informativeText = "If you don’t review them, your changes will be lost."
+            alert.addButton(withTitle: "Review Changes…")
+            alert.addButton(withTitle: "Cancel")
+            alert.addButton(withTitle: "Discard Changes").hasDestructiveAction = true
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                EditorWindowController.reviewAll { closed in
+                    if closed { DispatchQueue.main.async { NSApp.terminate(nil) } }
+                }
+                return .terminateCancel
+            case .alertThirdButtonReturn:
+                break
+            default:
+                return .terminateCancel
+            }
+        }
+        EditorWindowController.discardAll()
+        guard !store.runningProcesses.isEmpty || store.isCalculatingAutomaticMicrophone else { return .terminateNow }
         let alert = NSAlert()
-        alert.messageText = "A pipeline task is still running"
-        alert.informativeText = "Quitting will stop the task and may leave incomplete outputs. Do you want to quit anyway?"
+        alert.messageText = "Quit while a task is running?"
+        alert.informativeText = "The task stops and its outputs may be incomplete."
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Quit").hasDestructiveAction = true
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
         store.stopAllRunningProcesses { sender.reply(toApplicationShouldTerminate: true) }

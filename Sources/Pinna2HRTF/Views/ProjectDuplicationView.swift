@@ -21,70 +21,71 @@ struct ProjectDuplicationView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Duplicate project").font(.headline)
-            Text("Copy \(request.project.name), including saved meshes, fits, and results.")
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Project name").font(.subheadline.weight(.medium))
-                TextField("Project name", text: $name)
-                    .textFieldStyle(.roundedBorder)
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Duplicate “\(request.project.name)”")
+                .font(.headline)
+                .padding([.horizontal, .top], 20)
+            Form {
+                TextField("Name", text: $name)
                     .accessibilityIdentifier("duplicate.projectName")
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Save location").font(.subheadline.weight(.medium))
-                HStack {
-                    TextField("Parent folder", text: $parentFolder)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityLabel("Save location")
-                        .accessibilityIdentifier("duplicate.parentFolder")
-                    Button("Choose…") {
-                        let panel = NSOpenPanel()
-                        panel.canChooseFiles = false
-                        panel.canChooseDirectories = true
-                        panel.canCreateDirectories = true
-                        panel.allowsMultipleSelection = false
-                        panel.prompt = "Choose"
-                        panel.message = "Choose the parent folder for the duplicate project."
-                        panel.directoryURL = URL(fileURLWithPath: (parentFolder as NSString).expandingTildeInPath)
-                        if panel.runModal() == .OK, let url = panel.url { parentFolder = url.path }
+                LabeledContent("Location") {
+                    HStack(spacing: 6) {
+                        Text(URL(fileURLWithPath: (parentFolder as NSString).expandingTildeInPath, isDirectory: true).lastPathComponent)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help(destination?.path ?? parentFolder)
+                        Button("Choose…", action: chooseParentFolder)
+                            .fixedSize()
+                            .accessibilityLabel("Choose Location")
                     }
-                    .accessibilityLabel("Choose save location")
                 }
-                Text("A project folder and any missing parent folders will be created here.")
-                    .font(.caption).foregroundStyle(.secondary)
+                if let error {
+                    FieldWarning(error)
+                        .textSelection(.enabled)
+                }
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("New project folder").font(.caption.weight(.semibold))
-                Text(destination?.path ?? "Enter a valid project name and save location.")
-                    .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let error { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
-            Divider()
+            .formStyle(.grouped)
+            .scrollDisabled(true)
+            .fixedSize(horizontal: false, vertical: true)
             HStack {
-                if busy { ProgressView().controlSize(.small); Text("Copying project…").font(.caption) }
+                if busy {
+                    ProgressView().controlSize(.small)
+                    Text("Copying…").foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button("Cancel") { store.projectDuplicationRequest = nil }
                     .keyboardShortcut(.cancelAction)
-                Button("Duplicate") {
-                    busy = true
-                    error = nil
-                    Task { @MainActor in
-                        do {
-                            try await store.duplicateProject(request, name: name, parentFolder: parentFolder)
-                            store.projectDuplicationRequest = nil
-                        } catch { self.error = error.localizedDescription }
-                        busy = false
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(destination == nil)
+                Button("Duplicate", action: duplicate)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(destination == nil)
             }
+            .padding([.horizontal, .bottom], 20)
         }
-        .padding(20).frame(width: 520)
+        .frame(width: 460)
         .disabled(busy)
         .interactiveDismissDisabled(busy)
+    }
+
+    private func chooseParentFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.directoryURL = URL(fileURLWithPath: (parentFolder as NSString).expandingTildeInPath)
+        if panel.runModal() == .OK, let url = panel.url { parentFolder = url.path }
+    }
+
+    private func duplicate() {
+        busy = true
+        error = nil
+        Task { @MainActor in
+            do {
+                try await store.duplicateProject(request, name: name, parentFolder: parentFolder)
+                store.projectDuplicationRequest = nil
+            } catch { self.error = error.localizedDescription }
+            busy = false
+        }
     }
 }

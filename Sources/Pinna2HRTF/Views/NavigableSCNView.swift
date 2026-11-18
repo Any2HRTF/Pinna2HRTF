@@ -2,9 +2,15 @@ import AppKit
 import SceneKit
 import simd
 
+extension NSColor {
+    static func viewportBackground(darkMode: Bool) -> NSColor {
+        NSColor(calibratedWhite: darkMode ? 0.12 : 0.93, alpha: 1)
+    }
+}
+
 class NavigableSCNView: SCNView {
-    static let navigationHelp = "Trackpad: two-finger scroll to rotate, pinch to zoom, Shift-scroll to pan. Mouse: right-drag to rotate, Shift-right-drag or middle-drag to pan, wheel to zoom. Command-scroll also zooms."
     var navigationEnabled: Bool { allowsCameraControl }
+    var resetView: (() -> Void)?
     private(set) var navigationSpan = 1.0
     private var dragButton: Int?
     private var lastDragPoint = CGPoint.zero
@@ -29,7 +35,17 @@ class NavigableSCNView: SCNView {
 
     func navigationWillBegin() {}
 
-    override func rightMouseDown(with event: NSEvent) { beginCameraDrag(event) }
+    override var acceptsFirstResponder: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        super.mouseDown(with: event)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        beginCameraDrag(event)
+    }
     override func otherMouseDown(with event: NSEvent) {
         if event.buttonNumber == 2 { beginCameraDrag(event) } else { super.otherMouseDown(with: event) }
     }
@@ -84,6 +100,48 @@ class NavigableSCNView: SCNView {
         zoomCamera(by: Double(event.magnification))
     }
 
+    override func smartMagnify(with event: NSEvent) {
+        guard navigationEnabled, let resetView else { return super.smartMagnify(with: event) }
+        navigationWillBegin()
+        resetView()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        guard navigationEnabled, !modifiers.contains(.command), !modifiers.contains(.control) else {
+            return super.keyDown(with: event)
+        }
+        let step: Float = 20
+        let panning = modifiers.contains(.shift)
+        let movement: (x: Float, y: Float)?
+        switch event.specialKey {
+        case .leftArrow?: movement = (-step, 0)
+        case .rightArrow?: movement = (step, 0)
+        case .upArrow?: movement = (0, step)
+        case .downArrow?: movement = (0, -step)
+        default: movement = nil
+        }
+        if let movement {
+            navigationWillBegin()
+            if panning {
+                panCamera(x: -movement.x, y: movement.y)
+            } else {
+                orbitCamera(x: -movement.x * 0.5, y: movement.y * 0.5)
+            }
+            return
+        }
+        switch event.charactersIgnoringModifiers {
+        case "+", "=":
+            navigationWillBegin()
+            zoomCamera(by: 0.2)
+        case "-", "_":
+            navigationWillBegin()
+            zoomCamera(by: -0.2)
+        default:
+            super.keyDown(with: event)
+        }
+    }
+
     func orbitCamera(x: Float, y: Float) {
         guard navigationEnabled else { return }
         defaultCameraController.rotateBy(x: x, y: y)
@@ -111,5 +169,4 @@ class NavigableSCNView: SCNView {
         defaultCameraController.dolly(toTarget: next - distance)
         needsDisplay = true
     }
-
 }

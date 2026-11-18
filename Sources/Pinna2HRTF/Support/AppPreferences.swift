@@ -12,7 +12,6 @@ enum AppPreferences {
     static let notifyAll = "preferences.notifyAll"
     static let notifyCompletion = "preferences.notifyCompletion"
     static let notifyFailure = "preferences.notifyFailure"
-    static let appearance = "preferences.appearance"
     static let developerMode = "preferences.developerMode"
     static let developerNumCalc = "preferences.developerNumCalc"
     static let developerMeshGrading = "preferences.developerMeshGrading"

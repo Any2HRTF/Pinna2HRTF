@@ -153,7 +153,7 @@ final class ViewerModel: ObservableObject {
         let bounds = scene.rootNode.boundingBox
         let center = SCNVector3((bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2, (bounds.min.z + bounds.max.z) / 2)
         let maximumDimension = max(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z)
-        scene.background.contents = backgroundColor(darkMode: darkMode)
+        scene.background.contents = NSColor.viewportBackground(darkMode: darkMode)
         if let microphone {
             let markerNode = microphoneMarkerNode()
             markerNode.position = microphone
@@ -216,15 +216,11 @@ final class ViewerModel: ObservableObject {
     }
 
     func updateSceneBackground(darkMode: Bool) {
-        selectedScene.background.contents = Self.backgroundColor(darkMode: darkMode)
+        selectedScene.background.contents = NSColor.viewportBackground(darkMode: darkMode)
         selectedScene.rootNode.enumerateChildNodes { node, _ in
             guard node.categoryBitMask == 1 else { return }
             node.geometry?.firstMaterial?.diffuse.contents = Self.meshColor(darkMode: darkMode)
         }
-    }
-
-    private nonisolated static func backgroundColor(darkMode: Bool) -> NSColor {
-        darkMode ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1)
     }
 
     private nonisolated static func meshColor(darkMode: Bool) -> NSColor {

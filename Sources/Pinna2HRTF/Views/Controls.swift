@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 import Foundation
 import AppKit
 
@@ -40,14 +39,11 @@ struct SettingHelpButton: View {
             isPresented.toggle()
         } label: {
             Image(systemName: "info.circle")
-                .font(.caption)
-                .frame(width: 24, height: 24)
-                .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
-        .accessibilityLabel("About \(SettingHelpCatalog.entry(helpID)?.title ?? "this setting")")
-        .help("Show information")
+        .accessibilityLabel("About \(SettingHelpCatalog.entry(helpID)?.title ?? "This Setting")")
+        .help("Show Information")
         .popover(isPresented: $isPresented) {
             if let entry = SettingHelpCatalog.entry(helpID) {
                 SettingHelpPopover(entry: entry)
@@ -58,34 +54,17 @@ struct SettingHelpButton: View {
 
 struct SettingHelpPopover: View {
     let entry: SettingHelpEntry
-    @Environment(\.dismiss) private var dismiss
-    @FocusState private var closeFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(entry.title)
-                    .font(.headline)
-                Spacer()
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.borderless)
-                .focused($closeFocused)
-                .keyboardShortcut(.cancelAction)
-                .accessibilityLabel("Close Information")
-                .help("Close Information")
-            }
+            Text(entry.title)
+                .font(.headline)
             Text(entry.description)
-                .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
             if !entry.publications.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Publications")
-                        .font(.caption.weight(.semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
                     ForEach(entry.publications) { publication in
                         Button(publication.title) {
@@ -94,14 +73,13 @@ struct SettingHelpPopover: View {
                             }
                         }
                         .buttonStyle(.link)
-                        .font(.callout)
+                        .multilineTextAlignment(.leading)
                     }
                 }
             }
         }
         .padding(14)
-        .frame(width: 340, alignment: .leading)
-        .onAppear { closeFocused = true }
+        .frame(width: 320, alignment: .leading)
     }
 }
 
@@ -110,10 +88,8 @@ struct SettingLabel: View {
     let helpID: String
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 4) {
             Text(title)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
             SettingHelpButton(helpID: helpID)
         }
     }
@@ -125,68 +101,28 @@ struct SettingToggle: View {
     @Binding var isOn: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
+        LabeledContent {
             Toggle(title, isOn: $isOn)
-                .toggleStyle(.checkbox)
-            SettingHelpButton(helpID: helpID)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+        } label: {
+            SettingLabel(title: title, helpID: helpID)
         }
     }
 }
 
-struct SettingsDisclosure<Content: View>: View {
-    let title: String
-    let systemImage: String
-    let expandRequest: UUID?
-    @State private var isExpanded: Bool
-    @ViewBuilder let content: () -> Content
+struct FieldWarning: View {
+    let message: String
 
-    init(_ title: String, systemImage: String, expanded: Bool = false, expandRequest: UUID? = nil, @ViewBuilder content: @escaping () -> Content) {
-        self.title = title
-        self.systemImage = systemImage
-        self.expandRequest = expandRequest
-        self._isExpanded = State(initialValue: expanded)
-        self.content = content
-    }
+    init(_ message: String) { self.message = message }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.snappy) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "chevron.right")
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .frame(width: 18, height: 18)
-                    Label(title, systemImage: systemImage)
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 9) {
-                    content()
-                }
-                .padding(.top, 8)
-                .padding(.leading, 2)
-            }
-        }
-        .onChange(of: expandRequest) { value in if value != nil { isExpanded = true } }
-    }
-}
-
-struct WorkspaceScrollEdges: ViewModifier {
-    @ViewBuilder func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content.scrollEdgeEffectStyle(.soft, for: .vertical)
-        } else {
-            content
-        }
+        Label(message, systemImage: "exclamationmark.triangle.fill")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .symbolRenderingMode(.multicolor)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -206,49 +142,46 @@ struct LabeledTextField: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            SettingLabel(title: title, helpID: helpID)
-            TextField(title, text: $text)
-                .textFieldStyle(.roundedBorder)
-                .labelsHidden()
-                .disabled(!fieldEnabled)
-                .opacity(fieldEnabled ? 1 : 0.55)
-            if fieldEnabled, let error = validationError ?? ProjectValidation.fieldMessage(helpID, text: text) {
-                Text(error).font(.caption).foregroundStyle(.red)
+        LabeledContent {
+            VStack(alignment: .trailing, spacing: 4) {
+                TextField(title, text: $text)
+                    .labelsHidden()
+                    .multilineTextAlignment(.trailing)
+                    .disabled(!fieldEnabled)
+                if fieldEnabled, let error = validationError ?? ProjectValidation.fieldMessage(helpID, text: text) {
+                    FieldWarning(error)
+                }
             }
+        } label: {
+            SettingLabel(title: title, helpID: helpID)
         }
     }
 }
 
-struct LabeledMillimeterSlider: View {
+struct NumberStepperField: View {
     let title: String
-    let helpID: String
-    let sliderEnabled: Bool
-    @Binding var value: Double
-    let range: ClosedRange<Double>
-
-    init(_ title: String, helpID: String, value: Binding<Double>, range: ClosedRange<Double>, sliderEnabled: Bool = true) {
-        self.title = title
-        self.helpID = helpID
-        self.sliderEnabled = sliderEnabled
-        self._value = value
-        self.range = range
-    }
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+    var step = 1
+    var unit: String?
 
     var body: some View {
-        HStack(spacing: 8) {
-            SettingLabel(title: title, helpID: helpID)
-            if sliderEnabled {
-                Slider(value: $value, in: range)
-                    .controlSize(.regular)
-                    .accessibilityLabel(title)
-                    .accessibilityValue("\(Int(value.rounded())) mm")
-            }
-            Text("\(Int(value.rounded())) mm")
-                .font(.caption.monospacedDigit())
+        HStack(spacing: 6) {
+            TextField(title, value: $value, format: .number)
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 72)
+                .onChange(of: value) { newValue in
+                    let bounded = min(max(newValue, range.lowerBound), range.upperBound)
+                    if bounded != newValue { value = bounded }
+                }
+            Text(unit ?? " ")
                 .foregroundStyle(.secondary)
-                .opacity(sliderEnabled ? 1 : 0.55)
-                .frame(width: 48, alignment: .trailing)
+                .frame(width: 20, alignment: .leading)
+                .accessibilityHidden(unit == nil)
+            Stepper(title, value: $value, in: range, step: step)
+                .labelsHidden()
         }
     }
 }
@@ -256,116 +189,61 @@ struct LabeledMillimeterSlider: View {
 enum PathFieldMode {
     case file
     case directory
-    case any
 }
 
 struct PathField: View {
     let title: String
     let helpID: String
     @Binding var text: String
-    var mode: PathFieldMode = .any
-    var showsOpenButton = false
-    @State private var editingPath = false
-    @State private var folderExists = false
+    let mode: PathFieldMode
 
-    init(_ title: String, helpID: String, text: Binding<String>, mode: PathFieldMode = .any, showsOpenButton: Bool = false) {
+    init(_ title: String, helpID: String, text: Binding<String>, mode: PathFieldMode) {
         self.title = title
         self.helpID = helpID
         self._text = text
         self.mode = mode
-        self.showsOpenButton = showsOpenButton
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            SettingLabel(title: title, helpID: helpID)
+        LabeledContent {
             HStack(spacing: 6) {
-                Text(text.isEmpty ? "No file selected" : URL(fileURLWithPath: text, isDirectory: mode == .directory).lastPathComponent)
+                Text(text.isEmpty ? "None" : URL(fileURLWithPath: text, isDirectory: mode == .directory).lastPathComponent)
+                    .foregroundStyle(text.isEmpty ? .secondary : .primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                     .help(text)
                     .contextMenu {
-                        Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
-                        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: text)]) }
-                            .disabled(text.isEmpty)
+                        Button("Copy Path") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(text, forType: .string)
+                        }
+                        .disabled(text.isEmpty)
+                        Button("Reveal in Finder") {
+                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: text)])
+                        }
+                        .disabled(text.isEmpty)
                     }
-                Button("Choose…") {
-                    let panel = NSOpenPanel()
-                    panel.canChooseFiles = mode != .directory
-                    panel.canChooseDirectories = mode != .file
-                    if panel.runModal() == .OK, let url = panel.url {
-                        text = url.path
-                    }
-                }
-                if showsOpenButton {
-                    Button("Open") {
-                        guard folderExists else { return }
-                        NSWorkspace.shared.open(URL(fileURLWithPath: text, isDirectory: true))
-                    }
-                    .accessibilityLabel("Open Save Location in Finder")
-                    .help(folderExists ? "Open this project folder in Finder" : "This folder does not exist yet")
-                    .disabled(!folderExists)
-                }
+                Button("Choose…", action: choose)
+                    .fixedSize()
+                    .accessibilityLabel("Choose \(title)")
             }
-            DisclosureGroup("Path", isExpanded: $editingPath) {
-                TextField(title, text: $text).textFieldStyle(.roundedBorder).labelsHidden()
-            }
-            .font(.caption)
-        }
-        .task(id: text) {
-            guard showsOpenButton else { return }
-            let path = text
-            folderExists = false
-            let exists = await Task.detached(priority: .utility) {
-                var isDirectory: ObjCBool = false
-                return !path.isEmpty && FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
-            }.value
-            guard !Task.isCancelled, text == path else { return }
-            folderExists = exists
+        } label: {
+            SettingLabel(title: title, helpID: helpID)
         }
     }
-}
 
-struct ToolPathField: View {
-    let title: String
-    @Binding var text: String
-
-    init(_ title: String, text: Binding<String>) {
-        self.title = title
-        self._text = text
-    }
-
-    var isInstalled: Bool {
-        FileManager.default.isExecutableFile(atPath: text)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Image(systemName: isInstalled ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundStyle(isInstalled ? .green : .red)
-                Text(title)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Text(isInstalled ? "Installed" : "Missing")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(isInstalled ? .green : .red)
-                Spacer()
-            }
-            HStack(spacing: 6) {
-                TextField(title, text: $text)
-                    .textFieldStyle(.roundedBorder)
-                    .labelsHidden()
-                Button("Choose") {
-                    let panel = NSOpenPanel()
-                    panel.canChooseFiles = true
-                    panel.canChooseDirectories = false
-                    if panel.runModal() == .OK, let url = panel.url {
-                        text = url.path
-                    }
-                }
-            }
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = mode == .file
+        panel.canChooseDirectories = mode == .directory
+        panel.canCreateDirectories = mode == .directory
+        panel.allowsMultipleSelection = false
+        if !text.isEmpty {
+            let current = URL(fileURLWithPath: text, isDirectory: mode == .directory)
+            panel.directoryURL = mode == .directory ? current : current.deletingLastPathComponent()
+        }
+        if panel.runModal() == .OK, let url = panel.url {
+            text = url.path
         }
     }
 }
@@ -382,31 +260,28 @@ struct ModelPicker: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            SettingLabel(title: "Model", helpID: helpID)
-            Picker("Model", selection: $selection) {
-                if options.isEmpty {
-                    Text("No bundled models found").tag(selection)
-                } else {
-                    ForEach(options, id: \.self) { option in
-                        Text(option).tag(option)
-                    }
+        Picker(selection: $selection) {
+            if options.isEmpty {
+                Text("No Models").tag(selection)
+            } else {
+                ForEach(options, id: \.self) { option in
+                    Text(option).tag(option)
                 }
             }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            SettingLabel(title: "Model", helpID: helpID)
         }
+        .pickerStyle(.menu)
     }
 }
 
-extension UTType {
-    static var yaml: UTType { UTType(filenameExtension: "yaml")! }
-}
-
 struct ViewportControlsMaterial: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     @ViewBuilder func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
+        if reduceTransparency {
+            content.background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+        } else if #available(macOS 26.0, *) {
             content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
         } else {
             content.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))

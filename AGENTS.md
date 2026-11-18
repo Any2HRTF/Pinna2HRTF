@@ -15,6 +15,13 @@ Pinna2HRTF is a headless application with two native clients. A user with the in
 - Before adding a function, find the existing operation and inspect its callers. Consolidate equivalent behavior at its owner. Compare units, coordinate frames, platform path semantics, side effects, and failure behavior before merging similar functions. Extract an abstraction only when it removes real duplication or isolates a concrete dependency.
 - Migrate one complete operation at a time. Exercise it from the installed CLI and through both UI entry points on copies of representative projects. Check legacy inputs, expected outputs, and relevant failure or cancellation paths before deleting superseded code.
 
+# Mac interface design
+
+- Follow Apple's Human Interface Guidelines (https://developer.apple.com/design/human-interface-guidelines) strictly for every Mac window, sheet, menu, toolbar, sidebar, inspector, control and settings pane. Prefer standard SwiftUI and AppKit components over custom drawing, and keep every toolbar command available in the menu bar with standard keyboard shortcuts.
+- Adopt Liquid Glass as the HIG describes it. Use it only for the functional layer that floats above content: toolbars, sidebars, inspectors, popovers and floating controls. Never put glass in the content layer or stack glass on glass. Let standard components pick up glass automatically, use `glassEffect`, `GlassEffectContainer` and the glass button styles only for custom floating controls, and avoid custom backgrounds or tints on bars. Respect Reduce Transparency, Increase Contrast and the user's glass preference.
+- Keep interface text short, plain and specific, written the way Apple writes its own apps. Use labels, titles and standard control names rather than explanatory sentences. Do not add helper paragraphs, captions or status prose under controls; put rarely needed explanations in help tags (`.help`) or the documentation. Avoid AI-sounding wording such as filler, hedging, marketing tone, and phrases like "seamlessly", "effortlessly", or "Let's". Use title case for menu items, buttons and window titles, sentence case for labels, and end with an ellipsis only when the command asks for more input before it acts.
+- Verify UI changes in the running app with screenshots in light and dark appearance before reporting them done.
+
 # Mac app updates
 
 After making and verifying Mac app changes, replace `/Applications/Pinna2HRTF.app` with the updated build. The user has authorized this as the default workflow. Preserve any unsaved work before restarting the running app.

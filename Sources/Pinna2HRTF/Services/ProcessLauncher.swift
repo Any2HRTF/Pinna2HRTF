@@ -7,7 +7,6 @@ final class ProcessLauncher: @unchecked Sendable {
     enum Command {
         case pipelineStage(Stage, config: URL)
         case python([String])
-        case uvSync
     }
 
     struct Failure: LocalizedError {
@@ -51,12 +50,6 @@ final class ProcessLauncher: @unchecked Sendable {
             if Defaults.isPackagedApp { return (runtimePythonURL, arguments) }
             let uv = try uvCommand()
             return (uv.0, uv.1 + ["run", "--no-sync", "python"] + arguments)
-        case .uvSync:
-            let uv = try uvCommand()
-            guard bundledUV || Defaults.which("uv") != nil else {
-                throw Failure(message: "UV is missing. Install uv for development or use the self-contained release app.")
-            }
-            return (uv.0, uv.1 + ["sync", "--no-editable"])
         }
     }
 

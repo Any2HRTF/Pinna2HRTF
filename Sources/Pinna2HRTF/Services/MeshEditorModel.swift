@@ -4,17 +4,19 @@ import AppKit
 import simd
 
 @MainActor
-final class MeshEditorModel: ObservableObject {
+final class MeshEditorModel: EditorDocument {
     enum Tool: String, CaseIterable, Identifiable {
         case landmarks = "Landmarks", selection = "Select Faces", plane = "Cutting Plane"
         var id: String { rawValue }
     }
     let request: MeshEditorRequest
+    let undoManager = EditorUndoManager()
+    private let saved: (MeshEditorRequest) -> Void
     let scene = SCNScene()
     let workspace = URL(fileURLWithPath: "/private/tmp/pinna-mesh-editor-\(UUID().uuidString)")
     @Published var tool: Tool
-    @Published var busy = false
-    @Published var message = "Loading mesh…"
+    @Published var busy = false { didSet { undoManager.isSuspended = busy } }
+    @Published private(set) var isSaving = false
     @Published var error: String?
     @Published var selectedFaces = Set<Int>()
     @Published var throughSelection = false
@@ -22,9 +24,9 @@ final class MeshEditorModel: ObservableObject {
     @Published var landmarks: [SCNVector3] = []
     @Published var landmarkSlot = 0
     @Published var showCoordinateSystem = true { didSet { coordinateNode?.isHidden = !showCoordinateSystem } }
-    @Published var planeX = "0"
-    @Published var planeY = "1"
-    @Published var planeZ = "0"
+    @Published var planeNormalX = 0.0
+    @Published var planeNormalY = 1.0
+    @Published var planeNormalZ = 0.0
     @Published var planeOffset = 0.0
     @Published var flipPlane = false
     @Published var fitPlanePreview = true
@@ -50,22 +52,24 @@ final class MeshEditorModel: ObservableObject {
     private var targetNode: SCNNode?
     private var markerNodes: [SCNNode] = []
 
-    init(request: MeshEditorRequest) {
+    init(request: MeshEditorRequest, saved: @escaping (MeshEditorRequest) -> Void) {
         self.request = request
+        self.saved = saved
         self.tool = request.isAlignment ? .landmarks : .selection
     }
     deinit { try? FileManager.default.removeItem(at: workspace) }
 
     var tools: [Tool] { request.isAlignment ? [.landmarks] : [.selection, .plane] }
-    var canUndo: Bool { !busy && currentVersion > 0 }
-    var canRedo: Bool { !busy && currentVersion + 1 < versions.count }
     var hasAlignment: Bool { operations.prefix(currentVersion).contains { $0["action"] as? String == "align" } }
-    var canSave: Bool { !busy && !versions.isEmpty && selectedFaces.isEmpty && tool != .plane && (!request.isAlignment || hasAlignment) }
+    var canSaveDocument: Bool { !busy && !versions.isEmpty && (!request.isAlignment || hasAlignment) }
+    var canSave: Bool { canSaveDocument && selectedFaces.isEmpty && tool != .plane }
+    var hasUnsavedChanges: Bool { currentVersion > 0 || !landmarks.isEmpty }
+    var faceCount: Int { faces.count / 3 }
     var span: Double { max(Double(simd_length(boundsMax - boundsMin)), 1) }
     var center: SIMD3<Float> { (boundsMin + boundsMax) / 2 }
     var normal: SIMD3<Float>? {
-        guard let x = Float(planeX), let y = Float(planeY), let z = Float(planeZ), x.isFinite, y.isFinite, z.isFinite else { return nil }
-        let vector = SIMD3<Float>(x, y, z)
+        let vector = SIMD3<Float>(Float(planeNormalX), Float(planeNormalY), Float(planeNormalZ))
+        guard vector.x.isFinite, vector.y.isFinite, vector.z.isFinite else { return nil }
         guard simd_length(vector) > 0.000001 else { return nil }
         return simd_normalize(vector) * (flipPlane ? -1 : 1)
     }
@@ -122,11 +126,10 @@ final class MeshEditorModel: ObservableObject {
             originalSHA256 = result["source_sha256"] as? String ?? ""
             versions = [first]
             try install(result)
-            message = request.isAlignment ? "Choose Landmarks, then click the nose tip, left ear-canal entrance, and right ear-canal entrance." : "Select and delete faces to open the canal. Use a cutting plane to trim the attachment area."
         } catch { self.error = error.localizedDescription }
     }
 
-    func edit(_ action: String, arguments: [String: Any] = [:]) async {
+    func edit(_ action: String, actionName: String, arguments: [String: Any] = [:]) async {
         guard !busy, !versions.isEmpty else { return }
         busy = true
         error = nil
@@ -148,22 +151,30 @@ final class MeshEditorModel: ObservableObject {
                 if let value = result[key] { operation[key] = value }
             }
             operations = Array(operations.prefix(currentVersion)) + [operation]
+            registerVersionChange(restoring: currentVersion, actionName: actionName)
             currentVersion += 1
             selectedFaces.removeAll()
             if action == "align" { landmarks.removeAll(); refreshMarkers(); tool = .landmarks; resetCamera() }
             if action == "cut" { tool = .selection; planeOffset = 0 }
             refreshOverlays()
-            message = "\(faces.count / 3) faces · Edit applied. Undo is available."
             revision += 1
         } catch { self.error = error.localizedDescription }
     }
 
-    func moveHistory(_ offset: Int) async {
-        let index = currentVersion + offset
-        guard !busy, versions.indices.contains(index) else { return }
+    private func registerVersionChange(restoring version: Int, actionName: String) {
+        undoManager.registerUndo(withTarget: self) { model in
+            model.registerVersionChange(restoring: model.currentVersion, actionName: actionName)
+            model.busy = true
+            Task { await model.showVersion(version) }
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    private func showVersion(_ index: Int) async {
         busy = true
         error = nil
         defer { busy = false }
+        guard versions.indices.contains(index) else { return }
         do {
             let result = try await Self.send(["action": "inspect", "source": versions[index].path,
                                              "frame": workspace.appendingPathComponent("frame").path])
@@ -175,27 +186,27 @@ final class MeshEditorModel: ObservableObject {
             tool = request.isAlignment ? .landmarks : .selection
             refreshOverlays()
             revision += 1
-            message = "\(faces.count / 3) faces · \(offset < 0 ? "Undone" : "Redone")"
         } catch { self.error = error.localizedDescription }
     }
 
-    func save() async -> Bool {
-        guard canSave else { return false }
+    func saveDocument() async -> Bool {
+        guard canSaveDocument else { return false }
         busy = true
+        isSaving = true
         error = nil
-        defer { busy = false }
+        defer { busy = false; isSaving = false }
         do {
             var command: [String: Any] = ["action": "save", "kind": request.isAlignment ? "alignment" : "ear",
                 "source": versions[currentVersion].path, "original_source": request.originalSource.path,
                 "original_sha256": originalSHA256, "destination": request.destination.path,
                 "operations": Array(operations.prefix(currentVersion))]
             if let side = request.side { command["side"] = side.rawValue }
-            if let side = request.side, let report = request.preparedReport, let generation = request.preparedGeneration {
-                command["side"] = side.rawValue
+            if let report = request.preparedReport, let generation = request.preparedGeneration, request.side != nil {
                 command["prepared_report"] = report.path
                 command["prepared_generation"] = generation
             }
             _ = try await Self.send(command)
+            saved(request)
             return true
         } catch { self.error = error.localizedDescription; return false }
     }
@@ -267,8 +278,9 @@ final class MeshEditorModel: ObservableObject {
         return SCNGeometry(sources: [vertex, normal], elements: [element])
     }
 
+    func closeDocument() {}
+
     private func configureCamera() {
-        scene.background.contents = NSColor(calibratedWhite: 0.16, alpha: 1)
         let target = SCNNode(); target.simdPosition = center
         scene.rootNode.addChildNode(target); targetNode = target
         let node = SCNNode(); let camera = SCNCamera()
@@ -329,7 +341,6 @@ final class MeshEditorModel: ObservableObject {
             chosen.insert(face)
         }
         if addToSelection { selectedFaces.formUnion(chosen) } else { selectedFaces = chosen }
-        message = "\(selectedFaces.count) faces selected. Review the red area, then Delete Selected Faces."
         refreshOverlays()
     }
 

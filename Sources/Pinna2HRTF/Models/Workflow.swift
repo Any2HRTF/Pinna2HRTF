@@ -52,11 +52,11 @@ extension ProjectRecord {
 extension Stage {
     var workflowRunTitle: String {
         switch self {
-        case .scanPreparation: "Run \(WorkflowStep.prepare.title)"
+        case .scanPreparation: "Prepare Ears"
         case .inference: "Run Mesh2PPM"
-        case .preprocessing: "Run \(WorkflowStep.simulation.title)"
-        case .numcalc: "Run \(WorkflowStep.calculate.title)"
-        case .postprocessing: "Run \(WorkflowStep.results.title)"
+        case .preprocessing: "Set Up Simulation"
+        case .numcalc: "Calculate"
+        case .postprocessing: "Export SOFA"
         }
     }
 }
@@ -98,7 +98,7 @@ extension AppStore {
 
     var workflowNextAction: WorkflowAction {
         if let issue = workflowInputIssue { return .init(title: issue, step: .inputs) }
-        if isPlacingMicrophone { return .init(title: "Finish microphone placement", step: .simulation) }
+        if isPlacingMicrophone { return .init(title: "Finish Microphone Placement", step: .simulation) }
         if isCheckingProjectFiles { return .init(title: "Checking project files…", step: workflowStep, enabled: false) }
         if let p = selectedProject, p.scanPreparation.enabled,
            !(selectedProjectStatus?.completed.contains(.scanPreparation) ?? false) {
@@ -107,16 +107,16 @@ extension AppStore {
         if let issue = selectedValidationIssues.first(where: { $0.id.hasPrefix("ear_edit.") }) {
             return .init(title: issue.message, step: .prepare)
         }
-        if earModelMethod == nil { return .init(title: "Choose one ear modelling method", step: .prepare) }
+        if earModelMethod == nil { return .init(title: "Choose an Ear Modelling Method", step: .prepare) }
         if earModelMethod == .manual,
            let side = workflowSides.first(where: { !(selectedProjectStatus?.validFitSides.contains($0) ?? false) }) {
-            return .init(title: "Fit \(side.rawValue) ear", step: .prepare, fit: side)
+            return .init(title: "Fit \(side.title) Ear", step: .prepare, fit: side)
         }
         if let stage = nextStage {
             let step = stage == .inference ? WorkflowStep.prepare : WorkflowStep.allCases.first(where: { $0.stage == stage })
             if let step { return .init(title: stage.workflowRunTitle, step: step, stage: stage, enabled: canRun(stage: stage)) }
         }
-        return .init(title: "Open results", step: .results)
+        return .init(title: "Open Results", step: .results)
     }
 
     func performWorkflowAction() {

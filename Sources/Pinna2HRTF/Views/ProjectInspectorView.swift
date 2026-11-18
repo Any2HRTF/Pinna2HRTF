@@ -5,65 +5,107 @@ struct ProjectInspectorView: View {
     @ObservedObject var store: AppStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Workflow").font(.headline).padding(12)
-            VStack(spacing: 2) {
-                ForEach(WorkflowStep.allCases) { step in
-                    let status = store.workflowStatus(step)
-                    Button { store.workflowStep = step } label: {
-                        HStack {
-                            Text("\(step.rawValue + 1). \(step.title)")
-                            Spacer(minLength: 4)
-                            Label(status, systemImage: store.workflowSymbol(for: status))
-                                .font(.caption)
-                                .foregroundStyle(statusColor(status))
-                        }.padding(.horizontal, 10)
-                            .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
-                            .background(store.workflowStep == step ? Color.accentColor.opacity(0.14) : Color.clear)
-                            .clipShape(RoundedRectangle(cornerRadius: 5))
-                            .contentShape(Rectangle())
-                    }.buttonStyle(.plain)
-                        .accessibilityAddTraits(store.workflowStep == step ? .isSelected : [])
+        Group {
+            if store.selectedProject == nil {
+                NoProjectSelectedView()
+            } else {
+                VStack(spacing: 0) {
+                    stepList
+                    Divider()
+                    Form { stageContent }
+                        .formStyle(.grouped)
+                        .disabled(store.selectedProjectIsRunning)
+                        .safeAreaInset(edge: .bottom, spacing: 0) { WorkflowFooter(store: store) }
+                        .modifier(FooterScrollEdge())
                 }
-            }.padding(.horizontal, 8)
-            Divider().padding(.top, 8)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text(store.workflowStep.title).font(.title3.weight(.semibold))
-                    stageContent
-                }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                    .disabled(store.selectedProject == nil || store.selectedProjectIsRunning)
             }
-            Divider()
-            WorkflowFooter(store: store).padding(12)
         }
         .onChange(of: store.earDistanceFocusRequest) { _ in store.workflowStep = .simulation }
+    }
+
+    private var stepList: some View {
+        List(selection: Binding<WorkflowStep?>(get: { store.workflowStep }, set: { if let step = $0 { store.workflowStep = step } })) {
+            ForEach(WorkflowStep.allCases) { step in
+                let status = store.workflowStatus(step)
+                HStack(spacing: 6) {
+                    Label {
+                        Text(step.title).lineLimit(1)
+                    } icon: {
+                        Image(systemName: store.workflowSymbol(for: status)).foregroundStyle(statusColor(status))
+                    }
+                    Spacer(minLength: 4)
+                    Text(status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                .tag(step)
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .listStyle(.inset)
+        .scrollContentBackground(.hidden)
+        .scrollDisabled(true)
+        .frame(height: CGFloat(WorkflowStep.allCases.count) * 26 + 12)
+        .accessibilityLabel("Workflow")
     }
 
     private func statusColor(_ status: String) -> Color {
         if status == "Complete" { return .green }
         if status == "Failed" { return .red }
-        if status == "Needs rerun" || status == "Stopped" || status.hasPrefix("Needs") || status == "Choose method" { return .orange }
-        if status == "Ready" || status.hasPrefix("Running") { return .blue }
+        if status == "Stopped" || status.hasPrefix("Needs") || status == "Choose method" { return .orange }
+        if status == "Ready" || status.hasPrefix("Running") { return .accentColor }
         return .secondary
     }
 
     @ViewBuilder var stageContent: some View {
         switch store.workflowStep {
-        case .inputs: requiredPanel
-        case .prepare:
+        case .inputs: projectSections
+        case .prepare: prepareSections
+        case .simulation: simulationSections
+        case .calculate: calculationSections
+        case .results: exportSections
+        }
+    }
+
+    @ViewBuilder var projectSections: some View {
+        Section {
+            LabeledTextField("Project name", helpID: "project.name", text: projectStringBinding(\.name))
+            PathField("Save location", helpID: "project.save_location", text: projectStringBinding(\.saveLocation), mode: .directory)
+        }
+        Section {
+            Picker("Input", selection: scanBoolBinding(\.enabled)) {
+                Text("Full-head scan").tag(true)
+                Text("Ear meshes").tag(false)
+            }
+            .pickerStyle(.radioGroup)
             if store.selectedProject?.scanPreparation.enabled == true {
-                HStack(spacing: 8) {
-                    Button("Align scan…") { store.beginScanAlignment() }
-                    Text("Prepare").font(.caption).foregroundStyle(.secondary)
-                    Toggle("Left", isOn: scanBoolBinding(\.prepareLeft))
-                        .toggleStyle(.checkbox).fixedSize().accessibilityLabel("Prepare left ear")
-                    Toggle("Right", isOn: scanBoolBinding(\.prepareRight))
-                        .toggleStyle(.checkbox).fixedSize().accessibilityLabel("Prepare right ear")
+                PathField("Head scan", helpID: "scan.path", text: scanTextBinding(\.scanPath), mode: .file)
+            } else {
+                PathField("Left ear", helpID: "project.left_ear", text: projectStringBinding(\.leftEar), mode: .file)
+                PathField("Right ear", helpID: "project.right_ear", text: projectStringBinding(\.rightEar), mode: .file)
+            }
+        }
+    }
+
+    @ViewBuilder var prepareSections: some View {
+        if store.selectedProject?.scanPreparation.enabled == true {
+            Section("Head Scan") {
+                LabeledContent("Alignment") {
+                    Button("Align Scan…") { store.beginScanAlignment() }
                 }
-                Text("Use an already aligned scan, or align it here before preparing ears.").font(.caption).foregroundStyle(.secondary)
-                DisclosureGroup("Advanced settings · scan preparation") {
-                    Toggle("Require ear review before continuing", isOn: Binding(
+                LabeledContent("Prepare") {
+                    HStack(spacing: 12) {
+                        Toggle("Left", isOn: scanBoolBinding(\.prepareLeft))
+                            .accessibilityLabel("Prepare left ear")
+                        Toggle("Right", isOn: scanBoolBinding(\.prepareRight))
+                            .accessibilityLabel("Prepare right ear")
+                    }
+                    .toggleStyle(.checkbox)
+                }
+                DisclosureGroup("Advanced") {
+                    Toggle("Review ears before continuing", isOn: Binding(
                         get: { store.selectedProject?.scanPreparation.requireManualReview ?? false },
                         set: { value in store.updateSelectedProject { project in
                             var scan = project.scanPreparation
@@ -76,188 +118,179 @@ struct ProjectInspectorView: View {
                     LabeledTextField("Right crop margin (mm)", helpID: "scan.right_margin", text: scanTextBinding(\.rightMarginMM))
                     LabeledTextField("Inner crop limit (mm)", helpID: "scan.side_min", text: scanTextBinding(\.sideMinMM))
                     LabeledTextField("Outer crop limit (mm)", helpID: "scan.side_max", text: scanTextBinding(\.sideMaxMM))
-                    Text("Use an aligned scan in mm. Ears are cropped, remeshed, and repaired. A saved, current ear edit is used automatically.")
-                        .font(.caption).foregroundStyle(.secondary)
-
                 }
             }
-            Text("Inspect and optionally edit each ear. Original input files are preserved.").font(.caption).foregroundStyle(.secondary)
+        }
+        Section("Ears") {
             ForEach(store.workflowSides) { side in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
-                        Text("\(side.title) ear").fontWeight(.semibold)
-                        HStack(spacing: 8) {
-                            Button("Inspect") {
-                                if let p = store.selectedProject, let url = ArtifactScanner.sourceEar(for: p, side: side) {
-                                    store.openArtifact(Artifact(title: "\(side.title) ear", url: url))
-                                }
-                            }
-                            Button("Edit…") { store.beginEarEditing(side) }
-                        }.disabled(!(store.selectedProjectStatus?.fittableSides.contains(side) ?? false))
-                    }
-                    if let p = store.selectedProject,
-                       (p.scanPreparation.earEdit(side)) != nil {
-                        Text(store.selectedProjectStatus.map { $0.currentEarEdits.contains(side) ? "Saved edit in use" : "Saved edit outdated" } ?? "Checking saved edit…").font(.caption)
-                        Button("Use original ear") {
-                            store.updateSelectedProject {
-                                var scan = $0.scanPreparation
-                                scan.setEarEdit(nil, side: side)
-                                $0.settings.scanPreparation = scan
-                            }
-                        }
-                    }
-                }
+                earRow(side)
             }
-            Divider().padding(.vertical, 4)
-            Picker("Ear modelling method", selection: Binding<EarModelMethod?>(get: { store.earModelMethod }, set: { if let value = $0 { store.selectEarModelMethod(value) } })) {
+        }
+        Section {
+            Picker(selection: Binding<EarModelMethod?>(get: { store.earModelMethod }, set: { if let value = $0 { store.selectEarModelMethod(value) } })) {
                 ForEach(EarModelMethod.allCases) { method in
-                    HStack(spacing: 5) {
-                        Text(method.title)
-                        SettingHelpButton(helpID: "ear_model.\(method.rawValue)")
-                    }.tag(Optional(method))
+                    Text(method.title).tag(Optional(method))
                 }
-            }.pickerStyle(.radioGroup)
-            if store.earModelMethod == .manual {
-                manualPPMPanel
-            } else if store.earModelMethod == .mesh2ppm {
-                ModelPicker(selection: modelNameBinding, options: store.modelOptions, helpID: "inference.model")
-            } else if store.earModelMethod == nil {
-                Text("This project has conflicting methods. Choose one above before continuing.").foregroundStyle(.orange)
+            } label: {
+                SettingLabel(title: "Ear model", helpID: "ear_model.\((store.earModelMethod ?? .mesh2ppm).rawValue)")
             }
-        case .simulation:
-            HeadGeometryControls(store: store)
-            Text("Microphone positions").fontWeight(.semibold)
-            Text("Automatic positioning remains the default; adjust only when needed.").font(.caption).foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                ForEach(store.workflowSides) { side in
-                    Button("Adjust \(side.rawValue)…") { store.beginMicrophonePlacement(side) }
-                        .accessibilityLabel("Adjust \(side.rawValue) microphone")
-                        .disabled(!(store.selectedProjectStatus?.pipelineSides.contains(side) ?? false))
+            .pickerStyle(.radioGroup)
+            if store.earModelMethod == nil {
+                FieldWarning("Choose one method")
+            }
+            switch store.earModelMethod {
+            case .manual: manualPPMRows
+            case .mesh2ppm: ModelPicker(selection: modelNameBinding, options: store.modelOptions, helpID: "inference.model")
+            default: EmptyView()
+            }
+        }
+    }
+
+    private func earRow(_ side: EarSide) -> some View {
+        let fittable = store.selectedProjectStatus?.fittableSides.contains(side) ?? false
+        let hasEdit = store.selectedProject?.scanPreparation.earEdit(side) != nil
+        let editOutdated = hasEdit && store.selectedProjectStatus.map { !$0.currentEarEdits.contains(side) } == true
+        return LabeledContent {
+            HStack(spacing: 6) {
+                Button("Inspect") {
+                    if let project = store.selectedProject, let url = ArtifactScanner.sourceEar(for: project, side: side) {
+                        store.openArtifact(Artifact(title: "\(side.title) ear", url: url))
+                    }
+                }
+                .disabled(!fittable)
+                Button("Edit…") { store.beginEarEditing(side) }
+                    .disabled(!fittable)
+                if hasEdit {
+                    Button("Use Original") {
+                        store.updateSelectedProject {
+                            var scan = $0.scanPreparation
+                            scan.setEarEdit(nil, side: side)
+                            $0.settings.scanPreparation = scan
+                        }
+                    }
+                    .help("Discard the saved edit for the \(side.rawValue) ear")
                 }
             }
-            VStack(alignment: .leading, spacing: 9) {
-                    PathField("Evaluation grid", helpID: "mesh2hrtf.evaluation_grid", text: optionalPreprocessingBinding(\.evaluationGrid), mode: .directory)
-                    LabeledTextField("Min frequency", helpID: "mesh2hrtf.min_frequency", text: preprocessingBinding(\.minFrequency))
-                    LabeledTextField("Max frequency", helpID: "mesh2hrtf.max_frequency", text: preprocessingBinding(\.maxFrequency), validationError: validationMessage("mesh2hrtf.max_frequency"))
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            SettingLabel(title: "Frequency steps", helpID: "mesh2hrtf.frequency_steps")
-                            Spacer()
-                            TextField("Frequency steps", text: preprocessingBinding(\.frequencyStepCount))
-                                .labelsHidden()
-                                .textFieldStyle(.roundedBorder)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 52)
-                            Stepper("", value: frequencyStepCountBinding, in: 2...10000)
-                                .labelsHidden()
-                                .fixedSize()
-                                .accessibilityLabel("Adjust Frequency steps")
-                        }
-                        if let error = validationMessage("mesh2hrtf.frequency_steps") { Text(error).font(.caption).foregroundStyle(.red) }
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            SettingLabel(title: "Microphone faces", helpID: "mesh2hrtf.microphone_faces")
-                            Spacer()
-                            TextField("Microphone faces", text: optionalPreprocessingBinding(\.sourceAssignmentFaceCount))
-                                .labelsHidden()
-                                .textFieldStyle(.roundedBorder)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 52)
-                            Stepper("", value: sourceAssignmentFaceCountBinding, in: 1...100)
-                                .labelsHidden()
-                                .fixedSize()
-                                .accessibilityLabel("Adjust Microphone faces")
-                        }
-                        if let error = validationMessage("mesh2hrtf.microphone_faces") { Text(error).font(.caption).foregroundStyle(.red) }
-                    }
-                SettingsDisclosure("Advanced mesh grading", systemImage: "ruler") {
-                    Text("Required safety step")
-                        .font(.caption)
+            .fixedSize()
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(side.title) ear")
+                if editOutdated { FieldWarning("Edit outdated") }
+            }
+        }
+    }
+
+    @ViewBuilder var manualPPMRows: some View {
+        ForEach(store.workflowSides) { side in
+            LabeledContent {
+                HStack(spacing: 8) {
+                    Text(manualPPMStatus(for: side))
                         .foregroundStyle(.secondary)
-                    LabeledTextField("Min edge length", helpID: "mesh_grading.min_edge_length", text: preprocessingBinding(\.meshMinEdgeLength))
-                    LabeledTextField("Max edge length", helpID: "mesh_grading.max_edge_length", text: preprocessingBinding(\.meshMaxEdgeLength), validationError: validationMessage("mesh_grading.max_edge_length"))
-                    LabeledTextField("Max error", helpID: "mesh_grading.max_error", text: preprocessingBinding(\.meshMaxError))
-                    LabeledTextField("Gamma", helpID: "mesh_grading.gamma", text: preprocessingBinding(\.meshGamma))
-                    LabeledTextField("Gamma opposite", helpID: "mesh_grading.gamma_opposite", text: preprocessingBinding(\.meshGammaOpposite))
-                }
-            }
-        case .calculate:
-            Text(store.selectedProjectStatus?.numcalcStatus ?? "Checking project files…").font(.caption)
-            LabeledTextField("Parallel instances", helpID: "numcalc.parallel_instances", text: numcalcBinding(\.maxInstances))
-            LabeledTextField("CPU limit (%)", helpID: "numcalc.cpu_limit", text: numcalcBinding(\.maxCPULoad))
-            SettingToggle(title: "Adaptive FMM expansion length", helpID: "numcalc.adaptive_fmm", isOn: numcalcBoolBinding(\.adaptiveFmmLength))
-        case .results:
-            SettingToggle(title: "Apply level offset", helpID: "postprocessing.normalize", isOn: postprocessingNormalizeBinding)
-            if postprocessingNormalizeBinding.wrappedValue {
-                LabeledTextField("Level offset (dB)", helpID: "postprocessing.level_offset", text: postprocessingLevelOffsetBinding)
-            }
-            SettingToggle(title: "Resample HRIRs", helpID: "postprocessing.resample_hrirs", isOn: postprocessingResampleBinding)
-            if postprocessingResampleBinding.wrappedValue {
-                LabeledTextField("Sampling rate (Hz)", helpID: "postprocessing.sampling_rate", text: postprocessingSamplingRateBinding)
-            }
-            SettingToggle(title: "Spatially upsample HRTFs", helpID: "postprocessing.spatial_upsampling", isOn: postprocessingValue(\.spatialUpsampling))
-            if store.selectedProject?.settings.postprocessing?.spatialUpsampling == true {
-                Stepper("Subdivision level: \(postprocessingValue(\.spatialSubdivisions).wrappedValue)", value: postprocessingValue(\.spatialSubdivisions), in: 0...5)
-                SettingToggle(title: "Normalize to frontal reference", helpID: "postprocessing.spatial_normalize", isOn: postprocessingValue(\.spatialNormalize))
-                Text("Adds source directions while preserving arrival times. Results are saved in Upsampled; originals are kept.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            PathField("SOFA output folder (optional)", helpID: "postprocessing.output_folder", text: postprocessingOutputFolderBinding, mode: .directory)
-            Button("Open output folder") {
-                if let p = store.selectedProject { NSWorkspace.shared.open(ArtifactScanner.postprocessingDirectory(for: p)) }
-            }
-        }
-    }
-
-    var requiredPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            LabeledTextField("Project name", helpID: "project.name", text: projectStringBinding(\.name))
-            PathField("Save location", helpID: "project.save_location", text: projectStringBinding(\.saveLocation), mode: .directory, showsOpenButton: true)
-            Picker("Input source", selection: scanBoolBinding(\.enabled)) {
-                Text("Full-head scan").tag(true)
-                Text("Individual ear meshes").tag(false)
-            }.pickerStyle(.radioGroup)
-            if store.selectedProject?.scanPreparation.enabled == true {
-                PathField("Full-head scan", helpID: "scan.path", text: scanTextBinding(\.scanPath), mode: .file)
-                Text("Choose which ears to extract in Ear preparation & modelling.").font(.caption)
-            } else {
-                PathField("Left ear", helpID: "project.left_ear", text: projectStringBinding(\.leftEar), mode: .file)
-                PathField("Right ear", helpID: "project.right_ear", text: projectStringBinding(\.rightEar), mode: .file)
-                Text("Choose at least one ear. Inspection and editing are available in Ear preparation & modelling.").font(.caption)
-            }
-        }
-    }
-
-    func validationMessage(_ id: String) -> String? {
-        return store.selectedValidationIssues.first { $0.id == id }?.message
-    }
-
-    var manualPPMPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Fit a PPM to either ear.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            ForEach(store.workflowSides) { side in
-                HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(side.title) ear")
-                        Text(manualPPMStatus(for: side))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
                     Button("Fit…") { store.beginManualPPMFitting(side) }
                         .disabled(!canFitManually(side))
                 }
-            }
-            Text("Save a current fit for every included ear to continue.").font(.caption)
-            if let issue = store.selectedValidationIssues.first(where: { $0.id.hasPrefix("manual_ppm") }) {
-                Text(issue.message)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+            } label: {
+                Text("\(side.title) fit")
             }
         }
+        if let issue = store.selectedValidationIssues.first(where: { $0.id.hasPrefix("manual_ppm") }) {
+            FieldWarning(issue.message)
+        }
+    }
+
+    @ViewBuilder var simulationSections: some View {
+        Section("Head") {
+            HeadGeometryControls(store: store)
+        }
+        Section("Microphones") {
+            LabeledContent("Position") {
+                HStack(spacing: 6) {
+                    ForEach(store.workflowSides) { side in
+                        Button("Adjust \(side.title)…") { store.beginMicrophonePlacement(side) }
+                            .accessibilityLabel("Adjust \(side.title) Microphone")
+                            .disabled(!(store.selectedProjectStatus?.pipelineSides.contains(side) ?? false))
+                    }
+                }
+                .fixedSize()
+            }
+            numberRow("Microphone faces", helpID: "mesh2hrtf.microphone_faces", value: sourceAssignmentFaceCountBinding, range: 1...100)
+        }
+        Section("Frequencies") {
+            PathField("Evaluation grid", helpID: "mesh2hrtf.evaluation_grid", text: optionalPreprocessingBinding(\.evaluationGrid), mode: .directory)
+            LabeledTextField("Min frequency (Hz)", helpID: "mesh2hrtf.min_frequency", text: preprocessingBinding(\.minFrequency))
+            LabeledTextField("Max frequency (Hz)", helpID: "mesh2hrtf.max_frequency", text: preprocessingBinding(\.maxFrequency), validationError: validationMessage("mesh2hrtf.max_frequency"))
+            numberRow("Frequency steps", helpID: "mesh2hrtf.frequency_steps", value: frequencyStepCountBinding, range: 2...10000)
+        }
+        Section {
+            DisclosureGroup("Mesh Grading") {
+                LabeledTextField("Min edge length (mm)", helpID: "mesh_grading.min_edge_length", text: preprocessingBinding(\.meshMinEdgeLength))
+                LabeledTextField("Max edge length (mm)", helpID: "mesh_grading.max_edge_length", text: preprocessingBinding(\.meshMaxEdgeLength), validationError: validationMessage("mesh_grading.max_edge_length"))
+                LabeledTextField("Max error (mm)", helpID: "mesh_grading.max_error", text: preprocessingBinding(\.meshMaxError))
+                LabeledTextField("Gamma", helpID: "mesh_grading.gamma", text: preprocessingBinding(\.meshGamma))
+                LabeledTextField("Gamma opposite", helpID: "mesh_grading.gamma_opposite", text: preprocessingBinding(\.meshGammaOpposite))
+            }
+        }
+    }
+
+    @ViewBuilder var calculationSections: some View {
+        Section {
+            LabeledContent("Progress") {
+                Text(numcalcProgress).monospacedDigit()
+            }
+        }
+        Section {
+            LabeledTextField("Parallel instances", helpID: "numcalc.parallel_instances", text: numcalcBinding(\.maxInstances))
+            LabeledTextField("CPU limit (%)", helpID: "numcalc.cpu_limit", text: numcalcBinding(\.maxCPULoad))
+            SettingToggle(title: "Adaptive FMM expansion", helpID: "numcalc.adaptive_fmm", isOn: numcalcBoolBinding(\.adaptiveFmmLength))
+        }
+    }
+
+    @ViewBuilder var exportSections: some View {
+        Section {
+            SettingToggle(title: "Apply level offset", helpID: "postprocessing.normalize", isOn: postprocessingValue(\.normalize))
+            if postprocessingValue(\.normalize).wrappedValue {
+                LabeledTextField("Level offset (dB)", helpID: "postprocessing.level_offset", text: postprocessingValue(\.levelOffsetDB))
+            }
+            SettingToggle(title: "Resample HRIRs", helpID: "postprocessing.resample_hrirs", isOn: postprocessingValue(\.resampleHrirs))
+            if postprocessingValue(\.resampleHrirs).wrappedValue {
+                LabeledTextField("Sampling rate (Hz)", helpID: "postprocessing.sampling_rate", text: postprocessingValue(\.samplingRate))
+            }
+        }
+        Section {
+            SettingToggle(title: "Spatial upsampling", helpID: "postprocessing.spatial_upsampling", isOn: postprocessingValue(\.spatialUpsampling))
+            if postprocessingValue(\.spatialUpsampling).wrappedValue {
+                numberRow("Subdivision level", helpID: "postprocessing.spatial_subdivisions", value: postprocessingValue(\.spatialSubdivisions), range: 0...5)
+                SettingToggle(title: "Normalize to frontal reference", helpID: "postprocessing.spatial_normalize", isOn: postprocessingValue(\.spatialNormalize))
+            }
+        }
+        Section {
+            PathField("Output folder", helpID: "postprocessing.output_folder", text: postprocessingOutputFolderBinding, mode: .directory)
+            LabeledContent("Results") {
+                Button("Open Output Folder") {
+                    if let project = store.selectedProject { NSWorkspace.shared.open(ArtifactScanner.postprocessingDirectory(for: project)) }
+                }
+            }
+        }
+    }
+
+    private func numberRow(_ title: String, helpID: String, value: Binding<Int>, range: ClosedRange<Int>) -> some View {
+        LabeledContent {
+            VStack(alignment: .trailing, spacing: 4) {
+                NumberStepperField(title: title, value: value, range: range)
+                if let error = validationMessage(helpID) { FieldWarning(error) }
+            }
+        } label: {
+            SettingLabel(title: title, helpID: helpID)
+        }
+    }
+
+    private var numcalcProgress: String {
+        guard let status = store.selectedProjectStatus?.numcalcStatus else { return "Checking…" }
+        return status.hasPrefix("NumCalc: ") ? String(status.dropFirst("NumCalc: ".count)) : status
+    }
+
+    func validationMessage(_ id: String) -> String? {
+        store.selectedValidationIssues.first { $0.id == id }?.message
     }
 
     func canFitManually(_ side: EarSide) -> Bool {
@@ -267,15 +300,8 @@ struct ProjectInspectorView: View {
     func manualPPMStatus(for side: EarSide) -> String {
         guard let project = store.selectedProject,
               project.settings.manualPPMFitting.meshPath(for: side) != nil else { return "Not fitted" }
-        guard let status = store.selectedProjectStatus else { return "Checking saved fit…" }
-        return status.validFitSides.contains(side) ? "Saved fit" : "Source changed · refit needed"
-    }
-
-    var manualPPMBinding: Binding<Bool> {
-        Binding(
-            get: { store.selectedProject?.settings.manualPPMFitting.useForPreprocessing ?? false },
-            set: { store.setManualPPMFitting($0) }
-        )
+        guard let status = store.selectedProjectStatus else { return "Checking…" }
+        return status.validFitSides.contains(side) ? "Fitted" : "Refit needed"
     }
 
     func scanTextBinding(_ keyPath: WritableKeyPath<ScanPreparationSettings, String>) -> Binding<String> {
@@ -304,18 +330,6 @@ struct ProjectInspectorView: View {
         })
     }
 
-    var bezierPPMBinding: Binding<Bool> {
-        Binding(
-            get: { store.selectedProject?.settings.inference.usePredictionsForPreprocessing ?? false },
-            set: { value in
-                let current = store.selectedProject?.settings.inference.usePredictionsForPreprocessing ?? false
-                guard value != current else { return }
-                guard !store.selectedProjectIsRunning else { return }
-                store.confirmSetBezierPPM(value)
-            }
-        )
-    }
-
     func projectStringBinding(_ keyPath: WritableKeyPath<ProjectRecord, String>) -> Binding<String> {
         Binding(
             get: { store.selectedProject?[keyPath: keyPath] ?? "" },
@@ -323,24 +337,10 @@ struct ProjectInspectorView: View {
         )
     }
 
-    func inferenceBinding(_ keyPath: WritableKeyPath<InferenceSettings, String>) -> Binding<String> {
-        Binding(
-            get: { store.selectedProject?.settings.inference[keyPath: keyPath] ?? "" },
-            set: { value in store.updateSelectedProject { $0.settings.inference[keyPath: keyPath] = value } }
-        )
-    }
-
     var modelNameBinding: Binding<String> {
         Binding(
             get: { store.selectedModelName(for: store.selectedProject) },
             set: { value in store.setSelectedModelName(value) }
-        )
-    }
-
-    func inferenceBoolBinding(_ keyPath: WritableKeyPath<InferenceSettings, Bool>) -> Binding<Bool> {
-        Binding(
-            get: { store.selectedProject?.settings.inference[keyPath: keyPath] ?? false },
-            set: { value in store.updateSelectedProject { $0.settings.inference[keyPath: keyPath] = value } }
         )
     }
 
@@ -355,13 +355,6 @@ struct ProjectInspectorView: View {
         Binding(
             get: { store.selectedProject?.settings.preprocessing[keyPath: keyPath] ?? "" },
             set: { value in store.updateSelectedProject { $0.settings.preprocessing[keyPath: keyPath] = value.isEmpty ? nil : value } }
-        )
-    }
-
-    func preprocessingBoolBinding(_ keyPath: WritableKeyPath<PreprocessingSettings, Bool?>) -> Binding<Bool> {
-        Binding(
-            get: { store.selectedProject?.settings.preprocessing[keyPath: keyPath] ?? false },
-            set: { value in store.updateSelectedProject { $0.settings.preprocessing[keyPath: keyPath] = value } }
         )
     }
 
@@ -417,14 +410,6 @@ struct ProjectInspectorView: View {
         })
     }
 
-    func postprocessingOptionalPath(_ keyPath: WritableKeyPath<PostprocessingSettings, String?>) -> Binding<String> {
-        let value = postprocessingValue(keyPath)
-        return Binding(get: { value.wrappedValue ?? "" }, set: {
-            let path = $0.trimmingCharacters(in: .whitespacesAndNewlines)
-            value.wrappedValue = path.isEmpty ? nil : path
-        })
-    }
-
     var postprocessingOutputFolderBinding: Binding<String> {
         Binding(
             get: { store.selectedProject?.settings.postprocessing?.outputFolder ?? "" },
@@ -437,56 +422,27 @@ struct ProjectInspectorView: View {
             }
         )
     }
+}
 
-    var postprocessingResampleBinding: Binding<Bool> {
-        Binding(
-            get: { store.selectedProject?.settings.postprocessing?.resampleHrirs ?? false },
-            set: { value in
-                store.updateSelectedProject {
-                    var settings = $0.settings.postprocessing ?? PostprocessingSettings()
-                    settings.resampleHrirs = value
-                    $0.settings.postprocessing = settings
-                }
-            }
-        )
+struct NoProjectSelectedView: View {
+    var body: some View {
+        if #available(macOS 14.0, *) {
+            ContentUnavailableView("No Project Selected", systemImage: "folder")
+        } else {
+            Text("No Project Selected")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
+}
 
-    var postprocessingSamplingRateBinding: Binding<String> {
-        Binding(
-            get: { store.selectedProject?.settings.postprocessing?.samplingRate ?? "48000" },
-            set: { value in
-                store.updateSelectedProject {
-                    var settings = $0.settings.postprocessing ?? PostprocessingSettings()
-                    settings.samplingRate = value
-                    $0.settings.postprocessing = settings
-                }
-            }
-        )
-    }
-
-    var postprocessingNormalizeBinding: Binding<Bool> {
-        Binding(
-            get: { store.selectedProject?.settings.postprocessing?.normalize ?? true },
-            set: { value in
-                store.updateSelectedProject {
-                    var settings = $0.settings.postprocessing ?? PostprocessingSettings()
-                    settings.normalize = value
-                    $0.settings.postprocessing = settings
-                }
-            }
-        )
-    }
-
-    var postprocessingLevelOffsetBinding: Binding<String> {
-        Binding(
-            get: { store.selectedProject?.settings.postprocessing?.levelOffsetDB ?? "-30" },
-            set: { value in
-                store.updateSelectedProject {
-                    var settings = $0.settings.postprocessing ?? PostprocessingSettings()
-                    settings.levelOffsetDB = value
-                    $0.settings.postprocessing = settings
-                }
-            }
-        )
+private struct FooterScrollEdge: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.scrollEdgeEffectStyle(.hard, for: .bottom)
+        } else {
+            content
+        }
     }
 }

@@ -6,18 +6,17 @@ import AppKit
 import simd
 
 @MainActor
-final class PPMFittingModel: ObservableObject {
+final class PPMFittingModel: EditorDocument {
     let request: PPMFittingRequest
+    let undoManager = EditorUndoManager()
+    private let saved: (PPMFittingRequest, String) -> Void
     let scene = SCNScene()
     let workspace = FileManager.default.temporaryDirectory.appendingPathComponent("pinna-ppm-fit-\(UUID().uuidString)", isDirectory: true)
 
     @Published var controls: [PPMFittingControl] = []
     @Published private(set) var metrics: [PPMFittingMetric] = []
-    @Published var busy = false
+    @Published var busy = false { didSet { undoManager.isSuspended = busy } }
     @Published private(set) var isSaving = false
-    @Published private(set) var canUndo = false
-    @Published private(set) var canRedo = false
-    @Published var message = "Preparing the PPM fit…"
     @Published var error: String?
     @Published var templateBlendPath = ""
     @Published var showTarget = true { didSet { updateTargetOpacity() } }
@@ -28,11 +27,8 @@ final class PPMFittingModel: ObservableObject {
     @Published private(set) var isUpdatingPreview = false
 
     private var parameters: [String: Double] = [:]
-    private var undoHistory: [[String: Double]] = []
-    private var redoHistory: [[String: Double]] = []
     private var activeEditSnapshot: [String: Double]?
     private var activeEditWasRecorded = false
-    private let maximumHistoryCount = 100
     private var previewGeneration = 0
     private var previewWorkerTask: Task<Void, Never>?
     private var pythonWorker: CLIWorker?
@@ -44,18 +40,20 @@ final class PPMFittingModel: ObservableObject {
     private var cameraConfigured = false
     private var cameraExtent: CGFloat = 1
 
-    init(request: PPMFittingRequest) {
+    init(request: PPMFittingRequest, saved: @escaping (PPMFittingRequest, String) -> Void) {
         self.request = request
+        self.saved = saved
+        undoManager.levelsOfUndo = 100
     }
 
     deinit { try? FileManager.default.removeItem(at: workspace) }
 
-    func cancel() { previewWorkerTask?.cancel(); pythonWorker?.cancel() }
+    func closeDocument() { previewWorkerTask?.cancel(); pythonWorker?.cancel() }
 
     private var savedControlValues: [String: Double] = [:]
     var hasUnsavedChanges: Bool { !controls.isEmpty && controlValues != savedControlValues }
 
-    var canSave: Bool { !busy && !isUpdatingPreview && !controls.isEmpty && !parameters.isEmpty }
+    var canSaveDocument: Bool { !busy && !isUpdatingPreview && !controls.isEmpty && !parameters.isEmpty }
 
     var globalControls: [PPMFittingControl] { controls.filter { $0.section == "global" } }
     var convexGroups: [String] {
@@ -79,10 +77,8 @@ final class PPMFittingModel: ObservableObject {
             try await initialize(usingSavedParameters: request.savedParameters)
             try loadTarget()
             savedControlValues = controlValues
-            message = "Adjust a control to update the PPM preview. Fit globally, then local bone controls, then shape keys."
         } catch {
             self.error = error.localizedDescription
-            message = "Could not open the fitting workspace."
         }
     }
 
@@ -106,26 +102,6 @@ final class PPMFittingModel: ObservableObject {
         activeEditWasRecorded = false
     }
 
-    func undo() {
-        guard !busy else { return }
-        endControlEditing()
-        guard let snapshot = undoHistory.popLast() else { return }
-        appendHistory(controlValues, to: &redoHistory)
-        restoreControlValues(snapshot)
-        updateHistoryAvailability()
-        requestPreviewUpdate()
-    }
-
-    func redo() {
-        guard !busy else { return }
-        endControlEditing()
-        guard let snapshot = redoHistory.popLast() else { return }
-        appendHistory(controlValues, to: &undoHistory)
-        restoreControlValues(snapshot)
-        updateHistoryAvailability()
-        requestPreviewUpdate()
-    }
-
     private func restoreControlValues(_ values: [String: Double]) {
         controls = controls.map { control in
             var restored = control
@@ -137,33 +113,26 @@ final class PPMFittingModel: ObservableObject {
     private func recordHistoryBeforeControlChange() {
         if let activeEditSnapshot {
             guard !activeEditWasRecorded else { return }
-            appendHistory(activeEditSnapshot, to: &undoHistory)
+            registerUndo(restoring: activeEditSnapshot, actionName: "Adjust Fit")
             activeEditWasRecorded = true
         } else {
-            appendHistory(controlValues, to: &undoHistory)
-        }
-        redoHistory.removeAll(keepingCapacity: true)
-        updateHistoryAvailability()
-    }
-
-    private func appendHistory(_ snapshot: [String: Double], to history: inout [[String: Double]]) {
-        history.append(snapshot)
-        if history.count > maximumHistoryCount {
-            history.removeFirst(history.count - maximumHistoryCount)
+            registerUndo(restoring: controlValues, actionName: "Adjust Fit")
         }
     }
 
-    private func updateHistoryAvailability() {
-        canUndo = !undoHistory.isEmpty
-        canRedo = !redoHistory.isEmpty
+    private func registerUndo(restoring values: [String: Double], actionName: String) {
+        undoManager.registerUndo(withTarget: self) { model in
+            model.endControlEditing()
+            model.registerUndo(restoring: model.controlValues, actionName: actionName)
+            model.restoreControlValues(values)
+            model.requestPreviewUpdate()
+        }
+        undoManager.setActionName(actionName)
     }
 
     private func requestPreviewUpdate() {
         if error != nil { error = nil }
-        if !isUpdatingPreview {
-            isUpdatingPreview = true
-            message = "Updating the PPM preview…"
-        }
+        isUpdatingPreview = true
         schedulePreview()
     }
 
@@ -176,16 +145,13 @@ final class PPMFittingModel: ObservableObject {
         do {
             try await initialize(usingSavedParameters: nil)
             if previousValues != controlValues {
-                appendHistory(previousValues, to: &undoHistory)
-                redoHistory.removeAll(keepingCapacity: true)
-                updateHistoryAvailability()
+                registerUndo(restoring: previousValues, actionName: "Reset Adjustments")
             }
-            message = "Restored the starting PPM parameters."
         } catch { self.error = error.localizedDescription }
     }
 
-    func save() async -> Bool {
-        guard canSave else { return false }
+    func saveDocument() async -> Bool {
+        guard canSaveDocument else { return false }
         isSaving = true
         defer { isSaving = false }
         guard ArtifactScanner.meshIdentity(request.targetMesh) == request.sourceIdentity else {
@@ -232,7 +198,7 @@ final class PPMFittingModel: ObservableObject {
             if let template { templateBlendPath = template.destination.path }
             try installPPM(at: generated, isAlreadyMirrored: request.side == .right)
             savedControlValues = controlValues
-            message = "Saved the fitted PPM for the \(request.side.rawValue) ear."
+            saved(request, templateBlendPath)
             return true
         } catch {
             self.error = error.localizedDescription
@@ -274,13 +240,11 @@ final class PPMFittingModel: ObservableObject {
                 install(result)
                 try installPPM(meshDataAt: previewMeshURL)
                 isUpdatingPreview = false
-                message = "Preview is up to date. Continue fitting or save this side."
                 return
             } catch {
                 if generation != previewGeneration { continue }
                 self.error = error.localizedDescription
                 isUpdatingPreview = false
-                message = "Could not update the PPM preview."
                 return
             }
         }

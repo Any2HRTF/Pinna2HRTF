@@ -15,11 +15,11 @@ struct PressureFieldView: View {
             Divider()
             ZStack(alignment: .bottomLeading) {
                 PersistentSceneView(scene: model.scene, darkMode: colorScheme == .dark,
-                    placementMode: false, cameraPositionChanged: { _, _, _ in }, surfaceSelected: { _ in })
+                    placementMode: false, resetView: model.resetCamera, cameraPositionChanged: { _, _, _ in }, surfaceSelected: { _ in })
                     .id(model.cameraRevision)
                     .opacity(model.loading ? 0.3 : 1)
                 if model.error == nil && !model.loading {
-                    legend.padding(14)
+                    legend.padding(16)
                 }
                 if model.loading {
                     ProgressView("Loading pressure…").frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -35,8 +35,18 @@ struct PressureFieldView: View {
                     .background(.regularMaterial)
                 }
             }
+            .overlay(alignment: .topTrailing) {
+                ViewerOverlayControls(resetView: model.resetCamera) {
+                    Button {
+                        Task { await model.open(); await model.load() }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .help("Refresh")
+                    .disabled(model.loading)
+                }
+            }
         }
-        .overlay(alignment: .bottomTrailing) { NavigationHelpButton().padding(12) }
         .task { await model.open() }
         .task(id: model.selection) { await model.load() }
         .onChange(of: model.quantity) { _ in model.changeQuantity() }
@@ -56,13 +66,14 @@ struct PressureFieldView: View {
             ForEach(PressureQuantity.allCases) { Text($0.rawValue).tag($0) }
         }
         .frame(width: 165)
-        Button("Reset view", systemImage: "arrow.counterclockwise", action: model.resetCamera)
-            .labelStyle(.iconOnly)
-            .help("Reset pressure view")
-        Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.open(); await model.load() } }
-            .labelStyle(.iconOnly)
-            .help("Reload available NumCalc results")
-            .disabled(model.loading)
+    }
+
+    private var legendHelp: String {
+        switch model.quantity {
+        case .level: "Raw NumCalc pressure before SOFA normalization. Zero values use the −160 dB floor."
+        case .phase: "Raw NumCalc pressure before SOFA normalization. Gray marks undefined phase at zero pressure."
+        default: "Raw NumCalc pressure before SOFA normalization."
+        }
     }
 
     private var legend: some View {
@@ -76,16 +87,10 @@ struct PressureFieldView: View {
                 Text(model.range.upperBound, format: .number.precision(.significantDigits(4)))
             }.font(.caption.monospacedDigit()).frame(width: 210)
             Toggle("Lock color scale", isOn: $model.lockScale).toggleStyle(.checkbox)
-                .help("Keep the displayed range when changing frequencies. Values outside it use the end colors.")
-            Text("Raw NumCalc pressure · before SOFA normalization")
-                .font(.caption2).foregroundStyle(.secondary)
-            if model.quantity == .level {
-                Text("Zero values use the −160 dB display floor.").font(.caption2).foregroundStyle(.secondary)
-            } else if model.quantity == .phase {
-                Text("Gray indicates undefined phase at zero pressure.").font(.caption2).foregroundStyle(.secondary)
-            }
+                .help("Keep the range when changing frequency")
         }
         .padding(10)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .help(legendHelp)
     }
 }

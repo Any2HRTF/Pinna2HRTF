@@ -22,8 +22,8 @@ struct NativeProjectSidebar: NSViewRepresentable {
         outline.floatsGroupRows = false
         outline.backgroundColor = .clear
         outline.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-        outline.intercellSpacing = NSSize(width: 0, height: 4)
-        outline.indentationPerLevel = 14
+        outline.rowSizeStyle = .default
+        outline.usesAutomaticRowHeights = true
         outline.autoresizingMask = [.width]
         outline.dataSource = context.coordinator
         outline.delegate = context.coordinator
@@ -132,11 +132,6 @@ struct NativeProjectSidebar: NSViewRepresentable {
             case .root: return false
             }
         }
-        func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
-            guard let node = item as? Node else { return 30 }
-            if case .project = node.kind { return 40 }
-            return 28
-        }
         func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
             guard let node = item as? Node else { return nil }
             let view: AnyView
@@ -145,19 +140,13 @@ struct NativeProjectSidebar: NSViewRepresentable {
                 view = AnyView(Text("Projects").font(.caption.weight(.semibold)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading))
             case let .folder(id):
                 guard let folder = parent.store.folders.first(where: { $0.id == id }) else { return nil }
-                view = AnyView(Label(folder.name, systemImage: "folder.fill").lineLimit(1).frame(maxWidth: .infinity, alignment: .leading))
+                view = AnyView(Label(folder.name, systemImage: "folder").lineLimit(1).frame(maxWidth: .infinity, alignment: .leading))
             case let .project(id):
                 guard let project = parent.store.projects.first(where: { $0.id == id }) else { return nil }
                 let summary = parent.store.projectSummaries[id] ?? URL(fileURLWithPath: project.saveLocation, isDirectory: true).lastPathComponent
                 view = AnyView(ProjectRow(project: project, runningStage: parent.store.runningStages[id], summary: summary))
             }
-            let hosting = SidebarRowHostingView(rootView: view)
-            hosting.toolTip = {
-                if case .root = node.kind { return "Drop a project here to move it out of a folder" }
-                if case .folder = node.kind { return "Drop a project here to move it into this folder" }
-                return nil
-            }()
-            return hosting
+            return SidebarRowHostingView(rootView: view)
         }
         func outlineViewSelectionDidChange(_ notification: Notification) {
             guard !updating, let outline, let node = outline.item(atRow: outline.selectedRow) as? Node else { return }
@@ -249,16 +238,17 @@ struct NativeProjectSidebar: NSViewRepresentable {
             menu.autoenablesItems = false
             switch node.kind {
             case .root:
-                add("New project", to: menu) { self.parent.store.createProject() }
-                add("New folder…", to: menu) { self.parent.editFolder(nil, nil) }
+                add("New Project", to: menu) { self.parent.store.createProject() }
+                add("New Folder…", to: menu) { self.parent.editFolder(nil, nil) }
             case let .folder(id):
                 guard let folder = parent.store.folders.first(where: { $0.id == id }) else { return nil }
-                add("Rename folder…", to: menu) { self.parent.editFolder(folder, nil) }
+                add("Rename Folder…", to: menu) { self.parent.editFolder(folder, nil) }
                 add("New Project in Folder", to: menu) {
                     self.parent.store.createProject()
                     if let projectID = self.parent.store.selectedProjectID { self.parent.store.moveProject(projectID, toFolder: id) }
                 }
-                add("Remove folder", to: menu) {
+                menu.addItem(.separator())
+                add("Remove Folder", to: menu) {
                     if self.parent.selectedFolderID == id { self.parent.selectedFolderID = nil }
                     self.parent.store.removeFolder(id)
                 }
@@ -271,11 +261,13 @@ struct NativeProjectSidebar: NSViewRepresentable {
                     add(folder.name, to: submenu) { self.parent.store.moveProject(id, toFolder: folder.id) }
                 }
                 submenu.addItem(.separator())
-                add("New folder…", to: submenu) { self.parent.editFolder(nil, id) }
+                add("New Folder…", to: submenu) { self.parent.editFolder(nil, id) }
                 move.submenu = submenu
                 menu.addItem(move)
-                add("Duplicate project", to: menu) { self.parent.store.selectedProjectID = id; self.parent.store.duplicateSelectedProject() }
-                add("Remove project", to: menu, enabled: parent.store.canRemoveProject(id)) { self.parent.store.selectedProjectID = id; self.parent.store.removeSelectedProject() }
+                add("Show in Finder", to: menu) { self.parent.store.selectedProjectID = id; self.parent.store.showSelectedProjectInFinder() }
+                add("Duplicate Project…", to: menu) { self.parent.store.selectedProjectID = id; self.parent.store.duplicateSelectedProject() }
+                menu.addItem(.separator())
+                add("Remove Project", to: menu, enabled: parent.store.canRemoveProject(id)) { self.parent.store.selectedProjectID = id; self.parent.store.removeSelectedProject() }
             }
             return menu
         }
@@ -284,14 +276,6 @@ struct NativeProjectSidebar: NSViewRepresentable {
 
 private final class ProjectOutlineView: NSOutlineView {
     var contextMenuForRow: ((Int) -> NSMenu?)?
-
-    override func mouseDown(with event: NSEvent) {
-        if event.modifierFlags.contains(.control), let menu = menu(for: event) {
-            NSMenu.popUpContextMenu(menu, with: event, for: self)
-            return
-        }
-        super.mouseDown(with: event)
-    }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)

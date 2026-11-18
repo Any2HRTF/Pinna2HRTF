@@ -19,6 +19,7 @@ final class AppStore: ObservableObject {
     @Published var meshEditorError: String?
     @Published var ppmFittingRequest: PPMFittingRequest?
     @Published var ppmFittingError: String?
+    @Published var editorRevealRequest = UUID()
     @Published var projectDuplicationRequest: ProjectDuplicationRequest?
 
     @Published var earDistanceFocusRequest: UUID?
@@ -100,7 +101,6 @@ final class AppStore: ObservableObject {
 
     var runningProcesses: [UUID: Process] { runner.runningProcesses }
     var runningStages: [UUID: Stage] { runner.runningStages }
-    var environmentProcess: Process? { runner.environmentProcess }
     var hasOutputOperations: Bool { runner.hasOutputOperations }
 
     var logText: String { activity.text }
@@ -129,6 +129,10 @@ final class AppStore: ObservableObject {
         library.moveProject(id, toFolder: folderID, before: destinationID)
     }
     func revealSelectedProject() { library.revealSelectedProject() }
+    func showSelectedProjectInFinder() {
+        guard let project = selectedProject, !project.saveLocation.isEmpty else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: project.saveLocation, isDirectory: true)])
+    }
 
     func openArtifact(_ artifact: Artifact) { viewer.openArtifact(artifact) }
     func resetSelectedMeshView() { viewer.resetSelectedMeshView() }
@@ -142,8 +146,6 @@ final class AppStore: ObservableObject {
     func cancelMicrophonePlacement() { viewer.cancelMicrophonePlacement() }
     func useAutomaticMicrophonePosition(_ side: EarSide) { viewer.useAutomaticMicrophonePosition(side) }
 
-    func setupEnvironment() { runner.setupEnvironment() }
-    func cancelEnvironmentSetup() { runner.cancelEnvironmentSetup() }
     func stopRunningProcess() { if let id = selectedProjectID { runner.stop(id) } }
     func stopAllRunningProcesses(completion: @escaping @MainActor () -> Void) { runner.stopAll(completion: completion) }
 
@@ -168,10 +170,6 @@ final class AppStore: ObservableObject {
             || meshEditorRequest?.projectID == id
             || ppmFittingRequest?.projectID == id
             || library.projectsBeingRemoved.contains(id)
-    }
-
-    var selectedProjectIsManagingOutputs: Bool {
-        selectedProjectID.map(runner.isManagingOutputs) ?? false
     }
 
     var inferenceResourceURL: URL {
@@ -377,13 +375,15 @@ final class AppStore: ObservableObject {
         switch library.removalPlan(for: project) {
         case .listOnly(let reason):
             let alert = NSAlert()
-            alert.messageText = "Remove \(project.name) from the list?"
-            alert.informativeText = reason ?? "The project has no folder on disk. It will be removed from the list."
+            alert.messageText = "Remove “\(project.name)” from the list?"
+            alert.informativeText = reason ?? "The project has no folder on disk."
             alert.alertStyle = .warning
-            alert.addButton(withTitle: "Remove from List")
+            alert.addButton(withTitle: "Remove").hasDestructiveAction = true
             alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-            finishRemovingProject(projectID)
+            presentProjectAlert(alert) { [self] response in
+                guard response == .alertFirstButtonReturn, canRemoveProject(projectID) else { return }
+                finishRemovingProject(projectID)
+            }
         case .trash(let projectFolder):
             let protected = library.projects.filter { $0.id != projectID }.map(\.saveLocation)
             let request: [String: Any] = ["path": projectFolder.path, "protected": protected, "owned": true]
@@ -394,23 +394,25 @@ final class AppStore: ObservableObject {
                 return
             }
             let alert = NSAlert()
-            alert.messageText = "Move \(project.name) to Trash?"
-            alert.informativeText = "The project folder and its contents will move to Trash, and the project will be removed from the list."
+            alert.messageText = "Move “\(project.name)” to the Trash?"
+            alert.informativeText = "The project folder and its contents move to the Trash."
             alert.alertStyle = .warning
-            alert.addButton(withTitle: "Move to Trash")
+            alert.addButton(withTitle: "Move to Trash").hasDestructiveAction = true
             alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-            library.beginRemoving(projectID)
-            Task {
-                defer { library.endRemoving(projectID) }
-                do {
-                    let path = projectFolder.path
-                    _ = try await Task.detached {
-                        try ProjectConfigDocument.request("recycle", ["path": path, "protected": protected,
-                            "owned": true, "identity": plan.identity])
-                    }.value
-                    finishRemovingProject(projectID)
-                } catch { showProjectRemovalError(error.localizedDescription) }
+            presentProjectAlert(alert) { [self] response in
+                guard response == .alertFirstButtonReturn, canRemoveProject(projectID) else { return }
+                library.beginRemoving(projectID)
+                Task {
+                    defer { library.endRemoving(projectID) }
+                    do {
+                        let path = projectFolder.path
+                        _ = try await Task.detached {
+                            try ProjectConfigDocument.request("recycle", ["path": path, "protected": protected,
+                                "owned": true, "identity": plan.identity])
+                        }.value
+                        finishRemovingProject(projectID)
+                    } catch { showProjectRemovalError(error.localizedDescription) }
+                }
             }
         }
     }
@@ -424,14 +426,23 @@ final class AppStore: ObservableObject {
 
     private func showProjectRemovalError(_ message: String) {
         let alert = NSAlert()
-        alert.messageText = "Could not move project to Trash"
+        alert.messageText = "The project couldn’t be moved to the Trash."
         alert.informativeText = message
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
-        alert.runModal()
+        presentProjectAlert(alert) { _ in }
+    }
+
+    private func presentProjectAlert(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        if let window = NSApp.mainWindow, window.attachedSheet == nil {
+            alert.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            completion(alert.runModal())
+        }
     }
 
     func beginScanAlignment() {
+        guard meshEditorRequest == nil else { editorRevealRequest = UUID(); return }
         guard let project = selectedProject, !selectedProjectIsRunning else { return }
         let destination = URL(fileURLWithPath: project.saveLocation).appendingPathComponent("MeshEdits/AlignedScan.ply")
         var source = project.scanPreparation.originalScanPath ?? project.scanPreparation.scanPath
@@ -465,6 +476,7 @@ final class AppStore: ObservableObject {
     }
 
     func beginEarEditing(_ side: EarSide) {
+        guard meshEditorRequest == nil else { editorRevealRequest = UUID(); return }
         guard let project = selectedProject, !selectedProjectIsRunning else { return }
         guard !project.saveLocation.isEmpty else { meshEditorError = "Choose a save location first."; return }
         if let conflict = outputLocationConflict(for: project) { meshEditorError = conflict; return }
@@ -499,6 +511,7 @@ final class AppStore: ObservableObject {
     }
 
     func beginManualPPMFitting(_ side: EarSide) {
+        guard ppmFittingRequest == nil else { editorRevealRequest = UUID(); return }
         guard let project = selectedProject, !selectedProjectIsRunning else { return }
         guard !project.saveLocation.isEmpty else {
             ppmFittingError = "Choose a project save location first."; return
@@ -589,14 +602,6 @@ final class AppStore: ObservableObject {
         viewer.openMesh(request.destination, resetCamera: true)
     }
 
-    func runNextStage() {
-        guard selectedProject != nil else {
-            appendLog("Create or select a project before running.")
-            return
-        }
-        run(stage: nextStage ?? .postprocessing)
-    }
-
     var nextStage: Stage? {
         guard let project = selectedProject else { return nil }
         return Stage.allCases.filter { ($0 != .scanPreparation || project.scanPreparation.enabled) && ($0 != .inference || project.settings.inference.usePredictionsForPreprocessing) }.first {
@@ -615,16 +620,9 @@ final class AppStore: ObservableObject {
         guard let project = selectedProject else { return "Select a project first." }
         if meshEditorRequest != nil || ppmFittingRequest != nil { return "Finish editing before running the pipeline." }
         if selectedProjectIsRunning { return runner.stoppingProjects.contains(project.id) ? "Waiting for the task to stop." : "Wait for the current task and output checks to finish." }
-        if environmentProcess != nil { return "Wait for dependency setup to finish." }
         if stage == .preprocessing && isPlacingMicrophone { return "Finish microphone placement first." }
         guard let status = selectedProjectStatus, !isCheckingProjectFiles else { return "Checking project files…" }
         return status.unavailableReasons[stage]
-    }
-
-    func canRunNextStage() -> Bool {
-        guard let project = selectedProject, runningProcesses[project.id] == nil else { return false }
-        guard let next = nextStage else { return false }
-        return canRun(stage: next)
     }
 
     func stageUnavailableReason(_ stage: Stage, project: ProjectRecord) -> String? {
@@ -649,13 +647,8 @@ final class AppStore: ObservableObject {
             appendLog("A task is already running.")
             return
         }
-        guard environmentProcess == nil else {
-            appendLog("Wait for dependency setup to finish.")
-            return
-        }
         if [.numcalc, .postprocessing].contains(stage), preprocessingNeedsRerun(for: project) {
-            guard confirmRerunPreprocessing() else { return }
-            run(stage: .preprocessing)
+            confirmRerunPreprocessing { [self] in run(stage: .preprocessing) }
             return
         }
         guard !stageBlocked(stage) else {
@@ -680,7 +673,9 @@ final class AppStore: ObservableObject {
 
     func confirmResetSelectedProjectOutputs() {
         guard selectedProject != nil, !selectedProjectIsRunning else { return }
-        if confirmResetOutputs() {
+        let projectID = selectedProjectID
+        confirmResetOutputs { [self] in
+            guard selectedProjectID == projectID, !selectedProjectIsRunning else { return }
             resetSelectedProjectOutputs()
         }
     }
@@ -692,10 +687,12 @@ final class AppStore: ObservableObject {
             let hasOutputs = await Task.detached(priority: .userInitiated) { Self.hasGeneratedOutputs(project) }.value
             guard selectedProject == project, !selectedProjectIsRunning else { return }
             if hasOutputs {
-                guard confirmResetOutputs() else { return }
-                resetSelectedProjectOutputs { success in
-                    guard success, self.selectedProjectID == project.id else { return }
-                    self.setBezierPPM(enabled)
+                confirmResetOutputs { [self] in
+                    guard selectedProject == project, !selectedProjectIsRunning else { return }
+                    resetSelectedProjectOutputs { success in
+                        guard success, self.selectedProjectID == project.id else { return }
+                        self.setBezierPPM(enabled)
+                    }
                 }
                 return
             }
@@ -717,24 +714,27 @@ final class AppStore: ObservableObject {
             || ArtifactScanner.stageIsComplete(.postprocessing, project: project)
     }
 
-    private func confirmRerunPreprocessing() -> Bool {
+    private func confirmRerunPreprocessing(then run: @escaping () -> Void) {
         let alert = NSAlert()
-        alert.messageText = "Preprocessing is out of date"
-        alert.informativeText = "Run Simulation setup again before continuing?"
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: Stage.preprocessing.workflowRunTitle)
+        alert.messageText = "Run simulation setup again?"
+        alert.informativeText = "The simulation setup is out of date."
+        alert.addButton(withTitle: "Run Setup")
         alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
+        presentProjectAlert(alert) { response in
+            if response == .alertFirstButtonReturn { run() }
+        }
     }
 
-    private func confirmResetOutputs() -> Bool {
+    private func confirmResetOutputs(then reset: @escaping () -> Void) {
         let alert = NSAlert()
         alert.messageText = "Reset generated outputs?"
-        alert.informativeText = "Remove generated pipeline results? Original inputs, saved ear edits, scan alignments, manual PPM fits, microphone positions, settings, logs, and modified or unrelated files are kept."
+        alert.informativeText = "Generated results are removed. Inputs, edits, fits, microphone positions, settings and logs are kept."
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Reset outputs")
+        alert.addButton(withTitle: "Reset").hasDestructiveAction = true
         alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
+        presentProjectAlert(alert) { response in
+            if response == .alertFirstButtonReturn { reset() }
+        }
     }
 
     func resetSelectedProjectOutputs(completion: ((Bool) -> Void)? = nil) {

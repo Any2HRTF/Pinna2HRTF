@@ -1,119 +1,121 @@
 import SwiftUI
 
+struct FolderEditorRequest: Identifiable {
+    let id = UUID()
+    var folder: ProjectFolder?
+    var movingProjectID: UUID?
+}
+
 struct ProjectSidebarView: View {
     @ObservedObject var store: AppStore
-    @State private var showingFolderEditor = false
-    @State private var folderName = ""
-    @State private var editingFolderID: UUID?
-    @State private var movingProjectID: UUID?
-    @State private var selectedFolderID: UUID?
+    @Binding var selectedFolderID: UUID?
+    @Binding var folderEditor: FolderEditorRequest?
 
     var body: some View {
-        VStack(spacing: 0) {
+        NativeProjectSidebar(store: store, selectedFolderID: $selectedFolderID) { folder, projectID in
+            folderEditor = FolderEditorRequest(folder: folder, movingProjectID: projectID)
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
             if let message = store.persistenceMessage {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(message).font(.caption).foregroundStyle(.orange)
+                    FieldWarning(message)
                     if store.registryStore.savingBlocked {
-                        Button("Review recovery options") { store.registryRecoveryPresented = true }
+                        Button("Recovery Options…") { store.registryRecoveryPresented = true }
+                            .controlSize(.small)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
             }
-            NativeProjectSidebar(store: store, selectedFolderID: $selectedFolderID) { folder, projectID in
-                editFolder(folder, moving: projectID)
-            }
         }
-        .navigationTitle("Projects")
-        .onChange(of: store.selectedProjectID) { _ in selectedFolderID = nil }
-        .safeAreaInset(edge: .bottom) {
-            HStack(spacing: 8) {
-                Button {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack(spacing: 4) {
+                Menu {
+                    Button("New Project", action: store.createProject)
+                    Button("New Folder…") { folderEditor = FolderEditorRequest() }
+                    Divider()
+                    Button("Import Project…", action: store.importProject)
+                } label: {
+                    Label("Add", systemImage: "plus")
+                } primaryAction: {
                     store.createProject()
-                } label: {
-                    Label("New project", systemImage: "plus")
-                        .frame(width: 28, height: 28)
                 }
-                .help("Create a new empty project")
-                Button(role: .destructive) {
-                    if let id = selectedFolderID {
-                        selectedFolderID = nil
-                        store.removeFolder(id)
-                    } else {
-                        store.removeSelectedProject()
-                    }
-                } label: {
-                    Label(selectedFolderID == nil ? "Remove project" : "Remove folder", systemImage: "minus")
-                        .frame(width: 28, height: 28)
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("New Project")
+                Button(action: removeSelection) {
+                    Label(selectedFolderID == nil ? "Remove Project" : "Remove Folder", systemImage: "minus")
                 }
-                .help(selectedFolderID == nil ? "Remove the selected project (its folder moves to Trash only if the app created it)" : "Remove the selected folder and keep its projects")
+                .buttonStyle(.borderless)
+                .help(selectedFolderID == nil ? "Remove Project" : "Remove Folder")
                 .disabled(selectedFolderID == nil && !store.canRemoveSelectedProject)
-                Button { editFolder() } label: {
-                    Label("New folder", systemImage: "folder.badge.plus").frame(width: 28, height: 28)
-                }
-                .help("Create a folder to organize projects")
-                Button {
-                    store.importProject()
-                } label: {
-                    Label("Import Project", systemImage: "square.and.arrow.down")
-                        .frame(width: 28, height: 28)
-                }
-                .help("Import an existing project folder")
-                Button {
-                    store.duplicateSelectedProject()
-                } label: {
-                    Label("Duplicate project", systemImage: "plus.square.on.square")
-                        .frame(width: 28, height: 28)
-                }
-                .help("Duplicate the selected project, including its results")
-                .disabled(store.selectedProject == nil || store.selectedProjectIsRunning)
                 Spacer(minLength: 0)
             }
-            .buttonStyle(.borderless)
             .labelStyle(.iconOnly)
-            .controlSize(.small)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
         }
-        .sheet(isPresented: $showingFolderEditor) {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(editingFolderID == nil ? "New folder" : "Rename Folder")
-                    .font(.headline)
-                TextField("Folder name", text: $folderName)
-                    .onSubmit { saveFolder() }
-                HStack {
-                    Spacer()
-                    Button("Cancel") { showingFolderEditor = false }
-                        .keyboardShortcut(.cancelAction)
-                    Button("Save") { saveFolder() }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(folderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .onChange(of: store.selectedProjectID) { _ in selectedFolderID = nil }
+        .sheet(item: $folderEditor) { request in
+            FolderEditorSheet(request: request) { name in
+                if let folder = request.folder {
+                    store.renameFolder(folder.id, to: name)
+                } else {
+                    let id = store.createFolder(named: name)
+                    if let projectID = request.movingProjectID { store.moveProject(projectID, toFolder: id) }
                 }
             }
-            .padding(20)
-            .frame(width: 300)
         }
-        .modifier(WorkspaceScrollEdges())
     }
 
-    private func editFolder(_ folder: ProjectFolder? = nil, moving projectID: UUID? = nil) {
-        editingFolderID = folder?.id
-        movingProjectID = projectID
-        folderName = folder?.name ?? ""
-        showingFolderEditor = true
-    }
-
-    private func saveFolder() {
-        let name = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-        if let id = editingFolderID {
-            store.renameFolder(id, to: name)
+    private func removeSelection() {
+        if let id = selectedFolderID {
+            selectedFolderID = nil
+            store.removeFolder(id)
         } else {
-            let id = store.createFolder(named: name)
-            if let projectID = movingProjectID { store.moveProject(projectID, toFolder: id) }
+            store.removeSelectedProject()
         }
-        showingFolderEditor = false
+    }
+}
+
+private struct FolderEditorSheet: View {
+    let request: FolderEditorRequest
+    let save: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+
+    init(request: FolderEditorRequest, save: @escaping (String) -> Void) {
+        self.request = request
+        self.save = save
+        _name = State(initialValue: request.folder?.name ?? "")
     }
 
+    private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(request.folder == nil ? "New Folder" : "Rename Folder")
+                .font(.headline)
+            TextField("Name", text: $name)
+                .onSubmit(commit)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button(request.folder == nil ? "Create" : "Rename", action: commit)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(trimmedName.isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 300)
+    }
+
+    private func commit() {
+        guard !trimmedName.isEmpty else { return }
+        save(trimmedName)
+        dismiss()
+    }
 }
 
 struct ProjectRow: View {
@@ -122,17 +124,18 @@ struct ProjectRow: View {
     let summary: String
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "folder")
-                .foregroundStyle(.secondary)
-                .frame(width: 16)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(project.name)
-                    .lineLimit(1)
-                Text(summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+        HStack(spacing: 8) {
+            Label {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(project.name)
+                        .lineLimit(1)
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            } icon: {
+                Image(systemName: "ear")
             }
             Spacer(minLength: 6)
             if let runningStage {
@@ -141,5 +144,6 @@ struct ProjectRow: View {
                     .help("\(runningStage.title) running")
             }
         }
+        .padding(.vertical, 3)
     }
 }

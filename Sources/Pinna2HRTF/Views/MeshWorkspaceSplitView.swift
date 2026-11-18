@@ -4,7 +4,6 @@ import SwiftUI
 final class MeshWorkspaceSplitView: NSSplitView, NSSplitViewDelegate {
     let viewerHost = NSHostingView(rootView: AnyView(EmptyView()))
     let inspectorHost = NSHostingView(rootView: AnyView(EmptyView()))
-    var displayedLogExpanded = false
     private var inspectorVisible = true
     private var inspectorWidth: CGFloat
     private let minimumViewerWidth: CGFloat

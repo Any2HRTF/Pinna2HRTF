@@ -4,11 +4,10 @@ import UserNotifications
 
 struct AppSettingsView: View {
     enum Pane: Hashable, CaseIterable {
-        case general, projects, computing, notifications, tools
+        case projects, computing, notifications, tools
 
         var title: String {
             switch self {
-            case .general: "General"
             case .projects: "New Projects"
             case .computing: "Computing"
             case .notifications: "Notifications"
@@ -18,7 +17,6 @@ struct AppSettingsView: View {
 
         var symbol: String {
             switch self {
-            case .general: "gearshape"
             case .projects: "folder.badge.plus"
             case .computing: "cpu"
             case .notifications: "bell.badge"
@@ -30,22 +28,15 @@ struct AppSettingsView: View {
     static let paneWidth: CGFloat = 540
 
     @ObservedObject var store: AppStore
-    @State private var selectedPane: Pane = .general
-    @State private var paneHeights: [Pane: CGFloat] = [:]
 
     var body: some View {
-        TabView(selection: $selectedPane) {
+        TabView {
             ForEach(Pane.allCases, id: \.self) { pane in
-                ScrollView(.vertical) {
-                    SettingsPaneView(pane: pane, store: store)
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { paneHeights[pane] = $0 }
-                }
-                .tabItem { Label(pane.title, systemImage: pane.symbol) }
-                .tag(pane)
+                SettingsPaneView(pane: pane, store: store)
+                    .tabItem { Label(pane.title, systemImage: pane.symbol) }
+                    .tag(pane)
             }
         }
-        .frame(width: Self.paneWidth,
-               height: min(paneHeights[selectedPane] ?? 200, max(160, (NSScreen.main?.visibleFrame.height ?? 820) - 120)))
     }
 }
 
@@ -63,7 +54,6 @@ struct SettingsPaneView: View {
     @AppStorage(AppPreferences.notifyAll) private var notifyAll = true
     @AppStorage(AppPreferences.notifyCompletion) private var notifyCompletion = true
     @AppStorage(AppPreferences.notifyFailure) private var notifyFailure = true
-    @AppStorage(AppPreferences.appearance) private var appearance = "system"
     @AppStorage(AppPreferences.developerMode) private var developerMode = false
     @AppStorage(AppPreferences.developerNumCalc) private var developerNumCalc = ""
     @AppStorage(AppPreferences.developerMeshGrading) private var developerMeshGrading = ""
@@ -77,7 +67,6 @@ struct SettingsPaneView: View {
     var body: some View {
         Form {
             switch pane {
-            case .general: general
             case .projects: projects
             case .computing: computing
             case .notifications: notifications
@@ -100,21 +89,10 @@ struct SettingsPaneView: View {
         .onChange(of: notifyAll) { enabled in
             if !enabled { UNUserNotificationCenter.current().removeAllPendingNotificationRequests() }
         }
-        .alert("Invalid evaluation grid", isPresented: $invalidGrid) {
+        .alert("The folder isn’t an evaluation grid.", isPresented: $invalidGrid) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Choose a folder containing Nodes.txt and Elements.txt.")
-        }
-    }
-
-    @ViewBuilder private var general: some View {
-        Section {
-            Picker("Appearance", selection: $appearance) {
-                Text("Match System").tag("system")
-                Divider()
-                Text("Light").tag("light")
-                Text("Dark").tag("dark")
-            }
+            Text("Choose a folder with Nodes.txt and Elements.txt.")
         }
     }
 
@@ -134,15 +112,15 @@ struct SettingsPaneView: View {
             locationPicker("Evaluation grid", path: $evaluationGrid,
                            defaultTitle: "ARI Grid (91 directions)", choose: chooseGrid)
             LabeledContent("Lowest frequency") {
-                numberField("Lowest frequency", value: $minimumFrequency,
-                            range: 0...max(0, min(maximumFrequency - 1, 95999)), step: 100, unit: "Hz")
+                NumberStepperField(title: "Lowest frequency", value: $minimumFrequency,
+                                   range: 0...max(0, min(maximumFrequency - 1, 95999)), step: 100, unit: "Hz")
             }
             LabeledContent("Highest frequency") {
-                numberField("Highest frequency", value: $maximumFrequency,
-                            range: max(1, min(minimumFrequency + 1, 96000))...96000, step: 100, unit: "Hz")
+                NumberStepperField(title: "Highest frequency", value: $maximumFrequency,
+                                   range: max(1, min(minimumFrequency + 1, 96000))...96000, step: 100, unit: "Hz")
             }
             LabeledContent("Frequency steps") {
-                numberField("Frequency steps", value: $frequencySteps, range: 2...8193)
+                NumberStepperField(title: "Frequency steps", value: $frequencySteps, range: 2...8193)
             }
         } header: {
             Text("Simulation Defaults")
@@ -152,10 +130,10 @@ struct SettingsPaneView: View {
     @ViewBuilder private var computing: some View {
         Section {
             LabeledContent("Parallel NumCalc instances") {
-                numberField("Parallel NumCalc instances", value: $maxInstances, range: 1...1024)
+                NumberStepperField(title: "Parallel NumCalc instances", value: $maxInstances, range: 1...1024)
             }
             LabeledContent("CPU load limit") {
-                numberField("CPU load limit", value: $maxCPULoad, range: 1...100, unit: "%")
+                NumberStepperField(title: "CPU load limit", value: $maxCPULoad, range: 1...100, unit: "%")
             }
         }
     }
@@ -228,27 +206,6 @@ struct SettingsPaneView: View {
         let icon = NSWorkspace.shared.icon(forFile: path)
         icon.size = NSSize(width: 16, height: 16)
         return icon
-    }
-
-    private func numberField(_ title: String, value: Binding<Int>, range: ClosedRange<Int>,
-                             step: Int = 1, unit: String? = nil) -> some View {
-        HStack(spacing: 6) {
-            TextField(title, value: value, format: .number)
-                .labelsHidden()
-                .textFieldStyle(.roundedBorder)
-                .multilineTextAlignment(.trailing)
-                .frame(width: 72)
-                .onChange(of: value.wrappedValue) { newValue in
-                    let bounded = min(max(newValue, range.lowerBound), range.upperBound)
-                    if bounded != newValue { value.wrappedValue = bounded }
-                }
-            Text(unit ?? "")
-                .foregroundStyle(.secondary)
-                .frame(width: 20, alignment: .leading)
-                .accessibilityHidden(unit == nil)
-            Stepper(title, value: value, in: range, step: step)
-                .labelsHidden()
-        }
     }
 
     private func toolStatus(_ title: String, path: String, directory: Bool = false) -> some View {
