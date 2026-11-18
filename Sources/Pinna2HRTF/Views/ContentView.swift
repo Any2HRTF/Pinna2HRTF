@@ -109,6 +109,7 @@ struct ContentView: View {
             canShowProjectInFinder: !(selectedProject?.saveLocation.isEmpty ?? true),
             folderSelected: selectedFolderID != nil,
             canRunProject: selectedProject != nil && !store.selectedProjectIsRunning && store.workflowNextAction.enabled,
+            nextActionTitle: store.workflowNextAction.title,
             canRunStage: { stage in store.canRun(stage: stage) },
             canStopProject: selectedProjectIsRunning,
             canResetProject: selectedProject != nil && !store.selectedProjectIsRunning,
@@ -155,7 +156,7 @@ private struct RunToolbarButton: View {
             store.performWorkflowAction()
         } label: {
             let aligning = store.activeWorkflowAlignment != nil
-            Label(running ? "Stop" : (aligning ? "Save Alignment" : "Run Next Step"),
+            Label(running ? "Stop" : (aligning ? "Save Alignment" : store.workflowNextAction.title),
                   systemImage: running ? "stop.fill" : (aligning ? "checkmark" : "play.fill"))
         }
         .help(running ? "Stop" : store.workflowNextAction.title)

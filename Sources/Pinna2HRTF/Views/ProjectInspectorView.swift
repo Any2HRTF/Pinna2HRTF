@@ -216,7 +216,8 @@ struct ProjectInspectorView: View {
             numberRow("Microphone faces", helpID: "mesh2hrtf.microphone_faces", value: sourceAssignmentFaceCountBinding, range: 1...100)
         }
         Section("Frequencies") {
-            PathField("Evaluation grid", helpID: "mesh2hrtf.evaluation_grid", text: optionalPreprocessingBinding(\.evaluationGrid), mode: .directory)
+            PathField("Evaluation grid", helpID: "mesh2hrtf.evaluation_grid", text: optionalPreprocessingBinding(\.evaluationGrid), mode: .directory,
+                      defaultName: Defaults.evaluationGrid)
             LabeledTextField("Min frequency (Hz)", helpID: "mesh2hrtf.min_frequency", text: preprocessingBinding(\.minFrequency))
             LabeledTextField("Max frequency (Hz)", helpID: "mesh2hrtf.max_frequency", text: preprocessingBinding(\.maxFrequency), validationError: validationMessage("mesh2hrtf.max_frequency"))
             numberRow("Frequency steps", helpID: "mesh2hrtf.frequency_steps", value: frequencyStepCountBinding, range: 2...10000)
@@ -264,7 +265,8 @@ struct ProjectInspectorView: View {
             }
         }
         Section {
-            PathField("Output folder", helpID: "postprocessing.output_folder", text: postprocessingOutputFolderBinding, mode: .directory)
+            PathField("Output folder", helpID: "postprocessing.output_folder", text: postprocessingOutputFolderBinding, mode: .directory,
+                      defaultName: "HRTF", defaultPath: store.selectedProject.map { ArtifactScanner.postprocessingDirectory(for: $0).path })
             LabeledContent("Results") {
                 Button("Open Output Folder") {
                     if let project = store.selectedProject { NSWorkspace.shared.open(ArtifactScanner.postprocessingDirectory(for: project)) }

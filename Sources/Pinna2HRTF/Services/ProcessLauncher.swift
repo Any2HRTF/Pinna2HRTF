@@ -39,12 +39,13 @@ final class ProcessLauncher: @unchecked Sendable {
         let python = environment.pythonExecutable.map { URL(fileURLWithPath: $0) }
         switch command {
         case .pipelineStage(let stage, let config):
-            if let python { return (python, ["-m", "HRTFCalculation", stage.rawValue, "--config", config.path]) }
+            let stageArguments = [stage.rawValue, "--config", config.path] + (stage == .numcalc ? ["--numcalc-mode", "local"] : [])
+            if let python { return (python, ["-m", "HRTFCalculation"] + stageArguments) }
             if Defaults.isPackagedApp {
-                return (runtimePythonURL, ["-m", "HRTFCalculation", stage.rawValue, "--config", config.path])
+                return (runtimePythonURL, ["-m", "HRTFCalculation"] + stageArguments)
             }
             let uv = try uvCommand()
-            return (uv.0, uv.1 + ["run", "--no-sync", "Pinna2HRTF", stage.rawValue, "--config", config.path])
+            return (uv.0, uv.1 + ["run", "--no-sync", "Pinna2HRTF"] + stageArguments)
         case .python(let arguments):
             if let python { return (python, arguments) }
             if Defaults.isPackagedApp { return (runtimePythonURL, arguments) }

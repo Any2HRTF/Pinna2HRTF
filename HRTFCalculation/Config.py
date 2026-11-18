@@ -8,13 +8,14 @@ from typing import Any, Literal
 
 import yaml
 import warnings
-from .Compatibility import import_legacy_distance, read_settings, annotate_legacy_distance
+from .Compatibility import LEGACY_DISTANCE_IMPORTED, import_legacy_distance, read_settings
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 DEFAULT_EVALUATION_GRID = "ARI_Grid"
 BUNDLED_EVALUATION_GRID_PATH = Path(__file__).resolve().parent / "EvaluationGrids" / DEFAULT_EVALUATION_GRID
+OUTPUT_DIR_REQUIRED = "Set paths.output_dir to a writable project folder. Only settings loaded from a YAML file default to that file's folder."
 
 
 def worktree_root() -> Path:
@@ -59,7 +60,7 @@ class PathsConfig(BaseModel):
     edited_right_ear: Path | None = None
     left_ear: Path | None = None
     right_ear: Path | None = None
-    output_dir: Path = Field(default_factory=lambda: worktree_root() / "Data" / "temp" / "GuiRun")
+    output_dir: Path | None = None
     external_deps_dir: Path = Field(default_factory=lambda: worktree_root() / "External")
     mesh2hrtf_path: Path | None = None
     numcalc_executable: Path | None = None
@@ -270,6 +271,10 @@ class PipelineConfig(BaseModel):
             clone.manual_ppm.enabled = method == "manual"
             clone.inference.enabled = clone.inference.use_predictions_for_preprocessing = method == "mesh2ppm"
         base = Path(base_dir or Path.cwd()).resolve()
+        if clone.paths.output_dir is None:
+            if base_dir is None:
+                raise ValueError(OUTPUT_DIR_REQUIRED)
+            clone.paths.output_dir = base
         for section_name in ("paths", "scan_preparation", "inference", "manual_ppm", "postprocessing", "ui"):
             section = getattr(clone, section_name)
             for name, value in section:
@@ -308,13 +313,12 @@ def resolve_path(path: Path, base: Path) -> Path:
 
 def load_config(path: str | Path) -> PipelineConfig:
     config_path = Path(path).expanduser().resolve()
-    raw, text, encoding = read_settings(config_path)
+    _, text, _ = read_settings(config_path)
     data = yaml.safe_load(text) or {}
     config = PipelineConfig.model_validate(import_legacy_distance(data)).resolved(config_path.parent)
-    try:
-        annotate_legacy_distance(config_path, text, encoding, raw)
-    except (OSError, ValueError, yaml.YAMLError) as error:
-        warnings.warn(f"Legacy head_radius was imported, but the settings file could not be updated: {error}", UserWarning)
+    preprocessing = data.get("preprocessing")
+    if isinstance(preprocessing, dict) and "head_radius" in preprocessing and "ear_distance" not in preprocessing:
+        warnings.warn(LEGACY_DISTANCE_IMPORTED, UserWarning)
     return config
 
 
@@ -324,10 +328,6 @@ def save_config(config: PipelineConfig | dict[str, Any], path: str | Path) -> No
     data = config.yaml_dict() if isinstance(config, PipelineConfig) else PipelineConfig.model_validate(import_legacy_distance(config)).yaml_dict()
     with config_path.open("w", encoding="utf-8") as file:
         yaml.safe_dump(data, file, sort_keys=False)
-
-
-def default_config() -> PipelineConfig:
-    return PipelineConfig().resolved(worktree_root())
 
 
 def template_config() -> dict[str, Any]:

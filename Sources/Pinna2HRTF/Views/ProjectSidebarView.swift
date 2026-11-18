@@ -129,10 +129,12 @@ struct ProjectRow: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(project.name)
                         .lineLimit(1)
-                    Text(summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    if !summary.isEmpty {
+                        Text(summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             } icon: {
                 Image(systemName: "ear")

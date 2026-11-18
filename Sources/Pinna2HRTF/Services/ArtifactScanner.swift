@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 
 enum ArtifactScanner {
     final class Inspection {
@@ -189,23 +188,16 @@ enum ArtifactScanner {
         })
     }
 
-    static func summary(for project: ProjectRecord, inspection: Inspection = Inspection()) -> String {
-        if project.stageOutcomes?.values.contains(.failed) == true { return "Latest run failed · previous results may remain" }
-        if project.stageOutcomes?.values.contains(.stopped) == true { return "Task stopped · previous results may remain" }
-        if project.pipelineEar(for: .left, inspection: inspection).isEmpty && project.pipelineEar(for: .right, inspection: inspection).isEmpty { return "Not configured" }
-        if stageIsComplete(.postprocessing, project: project, inspection: inspection) { return "HRTFs ready" }
-        if stageIsComplete(.numcalc, project: project, inspection: inspection) { return "Simulation complete" }
-        if stageIsComplete(.preprocessing, project: project, inspection: inspection) { return "Simulation ready" }
-        if project.settings.inference.usePredictionsForPreprocessing && stageIsComplete(.inference, project: project, inspection: inspection) { return "Mesh2PPM Inference ready" }
-        return URL(fileURLWithPath: project.saveLocation, isDirectory: true).lastPathComponent
-    }
-
     static func numcalcStatus(for project: ProjectRecord, inspection: Inspection = Inspection()) -> String {
         let output = URL(fileURLWithPath: project.saveLocation, isDirectory: true)
-        let sides = [("Left", project.pipelineEar(for: .left, inspection: inspection)), ("Right", project.pipelineEar(for: .right, inspection: inspection))].compactMap { side, ear in
-            ear.isEmpty ? nil : "\(side) \(numcalcCompleted(output.appendingPathComponent("Projects/\(side)"), inspection: inspection))/\(numcalcTotal(output.appendingPathComponent("Projects/\(side)"), inspection: inspection))"
+        let ears = [("Left", project.pipelineEar(for: .left, inspection: inspection)), ("Right", project.pipelineEar(for: .right, inspection: inspection))].filter { !$0.1.isEmpty }
+        if ears.isEmpty { return "NumCalc: No ear selected" }
+        let sides = ears.compactMap { side, _ -> String? in
+            let folder = output.appendingPathComponent("Projects/\(side)")
+            let total = numcalcTotal(folder, inspection: inspection)
+            return total > 0 ? "\(side) \(numcalcCompleted(folder, inspection: inspection))/\(total)" : nil
         }
-        return sides.isEmpty ? "NumCalc: no ear selected" : "NumCalc: " + sides.joined(separator: " · ")
+        return sides.isEmpty ? "NumCalc: Not started" : "NumCalc: " + sides.joined(separator: " · ")
     }
 
     static func stageIsComplete(_ stage: Stage, project: ProjectRecord, inspection: Inspection = Inspection(), validateReceipt: Bool = true) -> Bool {
@@ -241,9 +233,7 @@ enum ArtifactScanner {
                     || numcalcIsComplete(folder, inspection: inspection)
             }
         case .postprocessing:
-            if validateReceipt && !StageReceipt.current(stage, project) { return false }
-            let folder = postprocessingDirectory(for: project)
-            return containsSOFA(folder, inspection: inspection) && spatialUpsamplingIsCurrent(project, inspection: inspection)
+            return containsSOFA(postprocessingDirectory(for: project), inspection: inspection) && StageReceipt.current(stage, project)
         }
     }
 
@@ -257,10 +247,6 @@ enum ArtifactScanner {
               a[a.count - 2] == b[b.count - 2],
               let first = Double(a[a.count - 1]), let second = Double(b[b.count - 1]) else { return false }
         return abs(first - second) < 0.000001
-    }
-
-    static func preprocessingSignature(for project: ProjectRecord, inspection: Inspection = Inspection()) -> String {
-        PreprocessingSignature.capture(project, inspection: inspection)
     }
 
     static func scanPreparationIsCurrent(_ project: ProjectRecord, inspection: Inspection = Inspection()) -> Bool {
@@ -361,25 +347,6 @@ enum ArtifactScanner {
         return URL(fileURLWithPath: project.saveLocation, isDirectory: true).appendingPathComponent("HRTF")
     }
 
-    static func spatialUpsamplingIsCurrent(_ project: ProjectRecord, inspection: Inspection = Inspection()) -> Bool {
-        let settings = project.settings.postprocessing ?? PostprocessingSettings()
-        guard settings.spatialUpsampling else { return true }
-        let root = postprocessingDirectory(for: project)
-        guard let files = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { return false }
-        let sources = files.filter { $0.lastPathComponent.hasPrefix("HRIR_") && $0.pathExtension.lowercased() == "sofa" }
-        let denseName = "hrtf_Nd=\(settings.spatialSubdivisions)\(settings.spatialSubdivisions == 0 ? "_dense" : "").sofa"
-        return !sources.isEmpty && sources.allSatisfy { source in
-            let folder = root.appendingPathComponent("Upsampled/\(source.deletingPathExtension().lastPathComponent)", isDirectory: true)
-            let target = folder.appendingPathComponent(denseName, isDirectory: false)
-            guard let receipt = inspection.document(folder.appendingPathComponent("upsampling.json", isDirectory: false)),
-                  receipt["method"] as? String == "LocaDyn-1948",
-                  receipt["subdivisions"] as? Int == settings.spatialSubdivisions,
-                  receipt["normalize"] as? Bool == settings.spatialNormalize,
-                  let inputStamp = receipt["input"] as? [String: Any], let outputStamp = receipt["output"] as? [String: Any] else { return false }
-            return matchesStamp(source, inputStamp, inspection: inspection) && matchesStamp(target, outputStamp, inspection: inspection) && isSOFAContainer(target, inspection: inspection)
-        }
-    }
-
     static func fileHasData(_ url: URL, inspection: Inspection = Inspection()) -> Bool {
         guard let attributes = inspection.attributes(url),
               attributes[.type] as? FileAttributeType == .typeRegular else { return false }
@@ -471,245 +438,5 @@ enum ArtifactScanner {
     static func numcalcTotal(_ project: URL, inspection: Inspection = Inspection()) -> Int {
         guard let object = inspection.document(project.appendingPathComponent("parameters.json", isDirectory: false)), let total = object["numFrequencies"] as? Int else { return 0 }
         return total
-    }
-}
-
-enum PreprocessingSignature {
-    private static let format = "pinna2hrtf-preprocessing-v2"
-    private static let cacheLock = NSLock()
-    private static var digests: [String: String] = [:]
-
-    static func capture(_ project: ProjectRecord, inspection: ArtifactScanner.Inspection) -> String {
-        var value = configuration(project)
-        value["format"] = format
-        var inputs: [String: String] = [:]
-        for side in EarSide.allCases {
-            inputs[side.rawValue] = fingerprint(project.pipelineEar(for: side, inspection: inspection), inspection: inspection)
-            if project.settings.manualPPMFitting.useForPreprocessing {
-                inputs["fitted_" + side.rawValue] = fingerprint(project.settings.manualPPMFitting.meshPath(for: side) ?? "", inspection: inspection)
-            } else if project.settings.inference.usePredictionsForPreprocessing {
-                inputs["predicted_" + side.rawValue] = fingerprint(ArtifactScanner.preprocessingMesh(for: project, side: side, inspection: inspection)?.path ?? "", inspection: inspection)
-            }
-        }
-        if project.settings.inference.usePredictionsForPreprocessing && !project.settings.manualPPMFitting.useForPreprocessing {
-            inputs["model_config"] = fingerprint(project.settings.inference.modelConfig, inspection: inspection)
-            inputs["model_checkpoint"] = checkpointFingerprint(project.settings.inference.modelCheckpoint, inspection: inspection)
-        }
-        if project.scanPreparation.enabled { inputs["scan"] = fingerprint(project.scanPreparation.scanPath, inspection: inspection) }
-        let grid = gridPath(project.settings.preprocessing.evaluationGrid)
-        for name in ["Nodes.txt", "Elements.txt"] {
-            inputs["grid_" + name] = fingerprint(URL(fileURLWithPath: grid).appendingPathComponent(name).path, inspection: inspection)
-        }
-        value["inputs"] = inputs
-        return encoded(value)
-    }
-
-    static func matches(_ saved: String, project: ProjectRecord, current: String? = nil,
-                        inspection: ArtifactScanner.Inspection = .init()) -> Bool {
-        let next = current ?? capture(project, inspection: inspection)
-        if saved == next { return true }
-        if let oldData = saved.data(using: .utf8), let newData = next.data(using: .utf8),
-           var previous = try? JSONSerialization.jsonObject(with: oldData) as? [String: Any],
-           var selected = try? JSONSerialization.jsonObject(with: newData) as? [String: Any],
-           var oldScan = previous["scanPreparation"] as? [String: Any],
-           var newScan = selected["scanPreparation"] as? [String: Any] {
-            var covered = true
-            for side in EarSide.allCases {
-                let key = side == .left ? "prepareLeft" : "prepareRight"
-                let enabled = side == .left ? project.scanPreparation.prepareLeft : project.scanPreparation.prepareRight
-                if enabled && oldScan[key] as? Bool != true { covered = false }
-                oldScan.removeValue(forKey: key); newScan.removeValue(forKey: key)
-                if !enabled {
-                    for name in ["inputs", "preprocessing"] {
-                        var oldValues = previous[name] as? [String: Any] ?? [:]
-                        var newValues = selected[name] as? [String: Any] ?? [:]
-                        let keys = name == "inputs" ? [side.rawValue, "fitted_" + side.rawValue, "predicted_" + side.rawValue] : [side == .left ? "sourcePositionInputLeft" : "sourcePositionInputRight"]
-                        for key in keys { oldValues.removeValue(forKey: key); newValues.removeValue(forKey: key) }
-                        previous[name] = oldValues; selected[name] = newValues
-                    }
-                }
-            }
-            previous["scanPreparation"] = oldScan; selected["scanPreparation"] = newScan
-            if covered && encoded(previous) == encoded(selected) { return true }
-        }
-        var fields = saved.components(separatedBy: "\n")
-        if fields.count == 7 { fields += ["", "", ""] }
-        guard fields.count == 10 || fields.count == 11,
-              let inference = decode(InferenceSettings.self, fields[5]),
-              let preprocessing = decode(PreprocessingSettings.self, fields[6]) else { return false }
-        var previous = project
-        previous.leftEar = fields[0]; previous.rightEar = fields[1]
-        previous.settings.inference = inference
-        previous.settings.preprocessing = preprocessing
-        if fields[7].isEmpty { previous.settings.manualPPMFitting = ManualPPMFittingSettings() }
-        else if let manual = decode(ManualPPMFittingSettings.self, fields[7]) { previous.settings.manualPPMFitting = manual }
-        else { return false }
-        previous.settings.scanPreparation = nil
-        if fields.count == 11 {
-            guard let scan = decode(ScanPreparationSettings.self, fields[10]) else { return false }
-            previous.settings.scanPreparation = scan
-        }
-        guard encoded(configuration(previous)) == encoded(configuration(project)) else { return false }
-        var relocations: [(String, String)] = []
-        for (old, new) in [(previous.leftEar, project.leftEar), (previous.rightEar, project.rightEar)] {
-            guard !old.isEmpty, !new.isEmpty else { continue }
-            let a = URL(fileURLWithPath: old).pathComponents
-            let b = URL(fileURLWithPath: new).pathComponents
-            var count = 0
-            while count < min(a.count, b.count), a[a.count - count - 1] == b[b.count - count - 1] { count += 1 }
-            if count > 0 && count < min(a.count, b.count) {
-                let from = NSString.path(withComponents: Array(a.dropLast(count)))
-                let to = NSString.path(withComponents: Array(b.dropLast(count)))
-                if from != "/", to != "/" { relocations.append((from, to)) }
-            }
-        }
-        for (old, new, stamp) in [(fields[0], project.pipelineEar(for: .left, inspection: inspection), fields[3]),
-                                   (fields[1], project.pipelineEar(for: .right, inspection: inspection), fields[4])] {
-            guard legacyInputMatches(old, new, stamp: stamp, inspection: inspection) else { return false }
-        }
-        if project.settings.manualPPMFitting.useForPreprocessing {
-            for (side, index) in [(EarSide.left, 8), (.right, 9)] {
-                guard legacyInputMatches(previous.settings.manualPPMFitting.meshPath(for: side) ?? "",
-                                         project.settings.manualPPMFitting.meshPath(for: side) ?? "",
-                                         stamp: fields[index], inspection: inspection) else { return false }
-            }
-        } else if project.settings.inference.usePredictionsForPreprocessing {
-            guard resourceMatches(inference.modelConfig, project.settings.inference.modelConfig, relocations: relocations, inspection: inspection),
-                  resourceMatches(inference.modelCheckpoint, sourceCheckpointPath(project.settings.inference.modelCheckpoint), relocations: relocations, inspection: inspection) else { return false }
-        }
-        if project.scanPreparation.enabled &&
-            !resourceMatches(previous.scanPreparation.scanPath, project.scanPreparation.scanPath, relocations: relocations, inspection: inspection) { return false }
-        return resourceMatches(gridPath(previous.settings.preprocessing.evaluationGrid), gridPath(project.settings.preprocessing.evaluationGrid),
-                               relocations: relocations, directory: true, inspection: inspection)
-    }
-
-    private static func configuration(_ project: ProjectRecord) -> [String: Any] {
-        var pre = object(project.settings.preprocessing)
-        pre.removeValue(forKey: "evaluationGrid")
-        pre["skipMeshGrading"] = project.settings.preprocessing.skipMeshGrading ?? false
-        pre["sourceAssignmentFaceCount"] = project.settings.preprocessing.sourceAssignmentFaceCount ?? "6"
-        for (name, position) in [("sourcePositionInputLeft", project.settings.preprocessing.sourcePositionInputLeft),
-                                  ("sourcePositionInputRight", project.settings.preprocessing.sourcePositionInputRight)] {
-            pre.removeValue(forKey: name)
-            if let position { pre[name] = [position.x, position.y, position.z] }
-        }
-        let manual = project.settings.manualPPMFitting.useForPreprocessing
-        var result: [String: Any] = ["preprocessing": pre,
-            "inputMode": manual ? "manual" : project.settings.inference.usePredictionsForPreprocessing ? "inference" : "original"]
-        if let json = project.preservedConfigJSON?.data(using: .utf8),
-           let document = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
-           var hidden = document["preprocessing"] as? [String: Any] {
-            for key in ["title", "enabled", "write_intermediates", "pictures", "material_search_paths",
-                        "min_frequency", "max_frequency", "frequency_step_count", "mesh_min_edge_length",
-                        "mesh_max_edge_length", "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite",
-                        "head_radius", "skip_mesh_grading", "source_assignment_face_count", "source_position_input_left", "source_position_input_right"] {
-                hidden.removeValue(forKey: key)
-            }
-            if !hidden.isEmpty { result["importedPreprocessing"] = hidden }
-        }
-        if project.scanPreparation.enabled {
-            var scan = object(project.scanPreparation)
-            for key in ["scanPath", "originalScanPath", "reviewedLeftPath", "reviewedRightPath", "requireManualReview"] { scan.removeValue(forKey: key) }
-            result["scanPreparation"] = scan
-        }
-        return normalized(result) as? [String: Any] ?? result
-    }
-
-    private static func legacyInputMatches(_ old: String, _ new: String, stamp: String,
-                                           inspection: ArtifactScanner.Inspection) -> Bool {
-        if old.isEmpty || new.isEmpty { return old.isEmpty && new.isEmpty }
-        let fields = stamp.components(separatedBy: "|")
-        if fields.count >= 3, let size = Int64(fields[fields.count - 2]), let modified = Double(fields[fields.count - 1]),
-           let attrs = inspection.attributes(URL(fileURLWithPath: new)),
-           (attrs[.size] as? NSNumber)?.int64Value == size,
-           let date = attrs[.modificationDate] as? Date,
-           abs(date.timeIntervalSince1970 - modified) < 0.00001 { return true }
-        if old == new { return stamp.isEmpty && ArtifactScanner.meshIdentity(URL(fileURLWithPath: new), inspection: inspection) == nil }
-        let oldDigest = fingerprint(old, inspection: inspection)
-        return oldDigest.hasPrefix("sha256:") && oldDigest == fingerprint(new, inspection: inspection)
-    }
-
-    private static func resourceMatches(_ old: String, _ new: String, relocations: [(String, String)],
-                                        directory: Bool = false, inspection: ArtifactScanner.Inspection) -> Bool {
-        if old == new { return true }
-        if relocations.contains(where: { from, to in
-            (old == from || old.hasPrefix(from + "/")) && to + String(old.dropFirst(from.count)) == new
-        }) { return true }
-        if directory {
-            return ["Nodes.txt", "Elements.txt"].allSatisfy { name in
-                resourceMatches(URL(fileURLWithPath: old).appendingPathComponent(name).path,
-                                URL(fileURLWithPath: new).appendingPathComponent(name).path,
-                                relocations: [], inspection: inspection)
-            }
-        }
-        let digest = fingerprint(old, inspection: inspection)
-        return digest.hasPrefix("sha256:") && digest == fingerprint(new, inspection: inspection)
-    }
-
-    private static func gridPath(_ value: String?) -> String {
-        let value = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let name = value.isEmpty ? Defaults.evaluationGrid : value
-        if name == Defaults.evaluationGrid {
-            return Defaults.pipelineRoot.appendingPathComponent("HRTFCalculation/EvaluationGrids/").appendingPathComponent(name).path
-        }
-        if !name.contains("/") {
-            return Defaults.pipelineRoot.appendingPathComponent("External/src/Mesh2HRTF/mesh2hrtf/Mesh2Input/EvaluationGrids/Data").appendingPathComponent(name).path
-        }
-        return name
-    }
-
-    static func fileFingerprint(_ path: String) -> String { fingerprint(path, inspection: .init()) }
-
-    static func checkpointFingerprint(_ path: String, inspection: ArtifactScanner.Inspection = .init()) -> String {
-        if path.hasSuffix(".coreml.json"),
-           let digest = inspection.document(URL(fileURLWithPath: path))?["source_checkpoint_sha256"] as? String,
-           digest.count == 64, digest.allSatisfy(\.isHexDigit) {
-            return "sha256:" + digest.lowercased()
-        }
-        return fingerprint(path, inspection: inspection)
-    }
-
-    static func sourceCheckpointPath(_ path: String) -> String {
-        path.hasSuffix(".coreml.json") ? String(path.dropLast(".coreml.json".count)) + ".pth" : path
-    }
-    private static func fingerprint(_ path: String, inspection: ArtifactScanner.Inspection) -> String {
-        if path.isEmpty { return "" }
-        let url = URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath()
-        guard let attrs = inspection.attributes(url), attrs[.type] as? FileAttributeType == .typeRegular,
-              let size = attrs[.size] as? NSNumber, let date = attrs[.modificationDate] as? Date else { return "unavailable" }
-        let key = "\(url.path)|\(size.int64Value)|\(date.timeIntervalSince1970)"
-        cacheLock.lock(); let cached = digests[key]; cacheLock.unlock()
-        if let cached { return cached }
-        guard let file = try? FileHandle(forReadingFrom: url) else { return "unavailable" }
-        defer { try? file.close() }
-        do {
-            var hash = SHA256()
-            while let data = try file.read(upToCount: 1_048_576), !data.isEmpty { hash.update(data: data) }
-            let digest = "sha256:" + hash.finalize().map { String(format: "%02x", $0) }.joined()
-            cacheLock.lock()
-            if digests.count > 512 { digests.removeAll(keepingCapacity: true) }
-            digests[key] = digest
-            cacheLock.unlock()
-            return digest
-        } catch { return "unavailable" }
-    }
-
-    private static func object<T: Encodable>(_ value: T) -> [String: Any] {
-        guard let data = try? JSONEncoder().encode(value),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
-        return object
-    }
-    private static func decode<T: Decodable>(_ type: T.Type, _ text: String) -> T? {
-        text.data(using: .utf8).flatMap { try? JSONDecoder().decode(type, from: $0) }
-    }
-    private static func normalized(_ value: Any) -> Any {
-        if let values = value as? [String: Any] { return values.mapValues(normalized) }
-        if let values = value as? [Any] { return values.map(normalized) }
-        if let text = value as? String, let number = Double(text), number.isFinite { return number }
-        return value
-    }
-    private static func encoded(_ value: [String: Any]) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return "" }
-        return String(decoding: data, as: UTF8.self)
     }
 }

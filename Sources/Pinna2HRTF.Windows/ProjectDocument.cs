@@ -124,7 +124,7 @@ internal static class ProjectDocument
         Set("preprocessing", "frequency_step_count", int.Parse(pre.FrequencyStepCount, CultureInfo.InvariantCulture));
         Set("preprocessing", "source_assignment_face_count", int.Parse(pre.SourceAssignmentFaceCount, CultureInfo.InvariantCulture));
         Set("preprocessing", "skip_mesh_grading", false);
-        Set("numcalc", "enabled", false); Set("numcalc", "mode", "local");
+        Set("numcalc", "enabled", false);
         Set("numcalc", "max_instances", int.Parse(num.MaxInstances, CultureInfo.InvariantCulture));
         Set("numcalc", "max_cpu_load", Number(num.MaxCpuLoad)); Set("numcalc", "adaptive_fmm_length", num.AdaptiveFmmLength);
         Set("postprocessing", "enabled", false); Set("postprocessing", "overwrite", true);

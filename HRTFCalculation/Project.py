@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import contextlib
+import copy
+import hashlib
 import json
 import os
 import stat as stat_module
@@ -17,6 +19,11 @@ import yaml
 
 from .Config import PipelineConfig, load_config
 from .Compatibility import read_settings
+from .MicrophonePlacement import SIDES, ignore_stale_placements, placement_key, record_placements, statuses
+
+
+class SettingsRevisionConflict(Exception):
+    pass
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -160,6 +167,7 @@ def _duplicate_locked(command: dict, source: Path | None) -> dict:
             record = relocate(command["mac_record"], roots, destination)
             record.update(id=str(uuid.uuid4()), name=name, saveLocation=str(destination))
             record.pop("stageOutcomes", None)
+            record.pop("settingsRevision", None)
             if record.get("preservedConfigJSON"):
                 record["preservedConfigJSON"] = json.dumps(relocate(json.loads(record["preservedConfigJSON"]), roots, destination))
             publish_copy(staging, destination)
@@ -169,6 +177,7 @@ def _duplicate_locked(command: dict, source: Path | None) -> dict:
             return {"path": str(destination)}
         project = relocate(command["project"], roots, destination)
         project.update(Id=str(uuid.uuid4()), Name=name, SaveLocation=str(destination))
+        project.pop("SettingsRevision", None)
         project["Settings"]["Preprocessing"]["SourcePositionInputLeft"] = None
         project["Settings"]["Preprocessing"]["SourcePositionInputRight"] = None
         preserved = project.get("PreservedConfigJSON")
@@ -211,7 +220,7 @@ EDITABLE_SETTINGS = {
         "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite", "skip_mesh_grading",
     ),
     "numcalc": (
-        "mode", "max_instances", "max_cpu_load", "adaptive_fmm_length",
+        "max_instances", "max_cpu_load", "adaptive_fmm_length",
     ),
     "postprocessing": (
         "overwrite", "output_sofa_dir", "normalize", "level_offset_db", "resample_hrirs",
@@ -219,6 +228,67 @@ EDITABLE_SETTINGS = {
         "matlab_executable", "amt_path",
     ),
 }
+
+
+def settings_revision(path: Path | None) -> str | None:
+    try:
+        return sha256(path) if path is not None else None
+    except FileNotFoundError:
+        return None
+
+
+@contextlib.contextmanager
+def settings_lock(path: Path):
+    metadata = path.parent / ".pinna2hrtf"
+    metadata.mkdir(parents=True, exist_ok=True)
+    with (metadata / "settings.lock").open("a+b") as handle:
+        if os.name == "nt":
+            import msvcrt
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def saved_settings(path: Path | None) -> dict | None:
+    if path is None or not path.is_file():
+        return None
+    _, text, _ = read_settings(path)
+    mapping = yaml.safe_load(text)
+    return mapping if isinstance(mapping, dict) else {}
+
+
+def merge_settings(edited: dict, preserved: dict | None, saved: dict | None) -> dict:
+    merged = copy.deepcopy(preserved if preserved is not None else saved or {})
+    previous = saved if saved is not None else preserved or {}
+    for section, keys in EDITABLE_SETTINGS.items():
+        changes = edited.get(section) or {}
+        if not isinstance(merged.get(section), dict):
+            merged[section] = dict(changes)
+        values = merged[section]
+        earlier = previous.get(section) if isinstance(previous.get(section), dict) else {}
+        for key in keys:
+            if key in changes:
+                values[key] = changes[key]
+            elif key in earlier:
+                values[key] = earlier[key]
+            else:
+                values.pop(key, None)
+        if not values:
+            merged.pop(section)
+    if "ear_distance" in (edited.get("preprocessing") or {}):
+        merged["preprocessing"].pop("head_radius", None)
+    return merged
 
 
 def copy_input(source: Path, folder: Path) -> Path:
@@ -287,15 +357,24 @@ def execute(command: dict) -> dict:
         validate_prepared(load_config(command["path"]))
         return {"valid": True}
     if action == "read":
-        _, text, _ = read_settings(command["path"])
+        raw, text, _ = read_settings(command["path"])
         mapping = yaml.safe_load(text)
         if not isinstance(mapping, dict):
             raise ValueError("Project settings must contain a mapping")
+        if command.get("with_revision"):
+            try:
+                placements = statuses(PipelineConfig.model_validate(mapping).resolved(Path(command["path"]).resolve().parent))
+            except ValueError:
+                placements = {}
+            return {"config": mapping, "revision": hashlib.sha256(raw).hexdigest(), "microphone_placements": placements}
         return mapping
     if action == "load":
         with warnings.catch_warnings(record=True) as notices:
             warnings.simplefilter("always")
             config = load_config(command["path"])
+        revision = settings_revision(Path(command["path"]))
+        notices = [str(notice.message) for notice in notices]
+        ignore_stale_placements(config, notices.append)
         mapping = config.model_dump(mode="json")
         if command.get("folder"):
             _, text, _ = read_settings(command["path"])
@@ -317,31 +396,29 @@ def execute(command: dict) -> dict:
                 return value
             mapping = portable(mapping)
             mapping["paths"]["output_dir"] = new_root
-        return {"config": mapping, "warnings": [str(notice.message) for notice in notices]}
+        return {"config": mapping, "warnings": notices, "revision": revision}
     if action in {"validate", "save"}:
-        current = command["config"]
-        if "preserved" in command:
-            saved = command["preserved"]
-            for section, keys in EDITABLE_SETTINGS.items():
-                edited = current.get(section) or {}
-                values = saved.get(section) if isinstance(saved.get(section), dict) else dict(edited)
-                saved[section] = values
-                for key in keys:
-                    if key in edited:
-                        values[key] = edited[key]
-                    else:
-                        values.pop(key, None)
-            current = saved
-        config = PipelineConfig.model_validate(current)
-        mapping = config.model_dump(mode="json")
-        serialized = yaml.safe_dump(current if command.get("preserve_fields") else mapping, sort_keys=False)
+        path = Path(command["path"]) if command.get("path") else None
         if action == "save":
-            path = Path(command["path"])
             path.parent.mkdir(parents=True, exist_ok=True)
+        with settings_lock(path) if action == "save" else contextlib.nullcontext():
+            expected = command.get("revision")
+            if action == "save" and expected is not None and settings_revision(path) != expected:
+                raise SettingsRevisionConflict(f"{path.name} changed after it was loaded. Reload the project settings, then try again.")
+            edited = command["config"]
+            merging = "preserved" in command or "revision" in command
+            current = merge_settings(edited, command.get("preserved"), saved_settings(path)) if merging else edited
+            config = PipelineConfig.model_validate(current)
+            mapping = config.model_dump(mode="json")
+            serialized = yaml.safe_dump(current if command.get("preserve_fields") else mapping, sort_keys=False)
+            if action == "validate":
+                return {"config": mapping, "yaml": serialized}
+            if merging:
+                placed = edited.get("preprocessing") or {}
+                record_placements(config.resolved(path.resolve().parent), {side for side in SIDES if placed.get(placement_key(side)) is not None})
             from .Outputs import replace_text
             replace_text(path, serialized)
-            return {"path": str(path)}
-        return {"config": mapping, "yaml": serialized}
+            return {"path": str(path), "revision": settings_revision(path)}
     if action == "duplicate":
         return duplicate(command)
     if action == "validate_outputs":

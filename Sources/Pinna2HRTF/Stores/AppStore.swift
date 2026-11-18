@@ -435,6 +435,42 @@ final class AppStore: ObservableObject {
         presentProjectAlert(alert) { _ in }
     }
 
+    func offerSettingsReload(for projectID: UUID) {
+        guard let project = projects.first(where: { $0.id == projectID }) else { return }
+        let alert = NSAlert()
+        alert.messageText = "The settings for “\(project.name)” changed on disk."
+        alert.informativeText = "Reload them to continue. Changes made here since they were loaded are replaced."
+        alert.addButton(withTitle: "Reload")
+        alert.addButton(withTitle: "Cancel")
+        presentProjectAlert(alert) { [self] response in
+            if response == .alertFirstButtonReturn { reloadProjectSettings(projectID) }
+        }
+    }
+
+    func reloadProjectSettings(_ projectID: UUID) {
+        guard let project = projects.first(where: { $0.id == projectID }), !runner.isBusy(projectID) else {
+            appendLog("Wait for the running task to finish, then reload the project settings.", for: projectID)
+            return
+        }
+        let folder = URL(fileURLWithPath: project.saveLocation, isDirectory: true)
+        let root = packageURL
+        Task { @MainActor in
+            do {
+                let reloaded = try await Task.detached(priority: .userInitiated) {
+                    let settings = try ProjectConfigDocument.read(folder.appendingPathComponent("Project Settings.yaml"))
+                    var reloaded = try ProjectConfigDocument.restore(settings, into: project, folder: folder, packageRoot: root)
+                    reloaded.settingsRevision = settings.revision
+                    return reloaded
+                }.value
+                guard !runner.isBusy(projectID) else { return }
+                mutateProject(projectID) { $0 = reloaded }
+                appendLog("Reloaded project settings.", for: projectID)
+            } catch {
+                appendLog("Could not reload project settings: \(error.localizedDescription)", for: projectID)
+            }
+        }
+    }
+
     private func presentProjectAlert(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         if let window = NSApp.mainWindow, window.attachedSheet == nil {
             alert.beginSheetModal(for: window, completionHandler: completion)

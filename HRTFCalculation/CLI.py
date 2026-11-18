@@ -19,16 +19,19 @@ MACHINE_COMMANDS = ("project", "mesh", "pressure", "fit-worker", "outputs", "out
 def cli() -> None:
     arguments = sys.argv[1:]
     if not arguments or arguments[0] in {"-h", "--help"}:
-        print("usage: Pinna2HRTF {" + "|".join((*STEPS, *MACHINE_COMMANDS, "geometry", "ear-canal")) + "} [options]")
+        print("usage: Pinna2HRTF {" + "|".join((*STEPS, *MACHINE_COMMANDS, "geometry", "ear-canal", "migrate-settings")) + "} [options]")
         return
     step = arguments[0]
-    if step in MACHINE_COMMANDS or step in {"geometry", "ear-canal"}:
+    if step in MACHINE_COMMANDS or step in {"geometry", "ear-canal", "migrate-settings"}:
         sys.argv = [f"Pinna2HRTF {step}", *arguments[1:]]
         if step == "ear-canal":
             from .Preprocessing.src.ear_canal_closer import main
             main()
         elif step == "geometry":
             from .Geometry import main
+            main()
+        elif step == "migrate-settings":
+            from .Compatibility import main
             main()
         else:
             from .Commands import machine_command

@@ -697,6 +697,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=str, help="Path to a pipeline YAML config file.")
     parser.add_argument("--stage", action="append", choices=["all", "scan-preparation", "inference", "preprocessing", "numcalc", "postprocessing"], help="Stage to run. Can be supplied multiple times.")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--numcalc-mode", choices=["local", "slurm"], help="Run NumCalc in this mode for this run only; the saved setting is unchanged.")
     parser.add_argument("--write-template", type=str, help="Write a default config template and exit.")
     return parser.parse_args()
 
@@ -762,7 +763,13 @@ def cli() -> None:
         return
     if not args.config:
         raise SystemExit("--config is required unless --write-template is used")
-    run_from_config(load_config(args.config), stages=args.stage, dry_run=args.dry_run)
+    from .MicrophonePlacement import ignore_stale_placements
+    config = load_config(args.config)
+    if args.numcalc_mode:
+        config.numcalc.mode = args.numcalc_mode
+    if not args.stage or {"all", "preprocessing"} & set(args.stage):
+        ignore_stale_placements(config, log_default)
+    run_from_config(config, stages=args.stage, dry_run=args.dry_run)
 
 
 def scan_preparation_cli():

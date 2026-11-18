@@ -18,6 +18,7 @@ from .src.cut_eararea import cut_eararea, cut_eararea_projected_footprint
 from HRTFCalculation.Config import BUNDLED_EVALUATION_GRID_PATH, DEFAULT_EVALUATION_GRID, PreprocessingConfig
 from HRTFCalculation.Geometry import resolve_geometry, boundary_y, needs_distance_warning
 from HRTFCalculation.LiveEvents import emit_live_event
+from HRTFCalculation.MicrophonePlacement import is_stale, read_placements, stale_message
 
 
 
@@ -442,11 +443,15 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
         stitched = {side: side_dirs[side] / "stitched_head.stl" for side, ear in ears.items() if ear is not None}
         graded = {side: side_dirs[side] / "graded_head.ply" for side, ear in ears.items() if ear is not None}
         landmarks = {}
+        placements = read_placements(output_dir) if output_dir is not None else {}
         for side, ear in ears.items():
             if ear is None:
                 continue
             source_position = settings.source_position_left if side == "left" else settings.source_position_right
             source_position_input = settings.source_position_input_left if side == "left" else settings.source_position_input_right
+            if is_stale(placements, side, source_position_input, left_path if side == "left" else right_path):
+                logger(stale_message(side))
+                source_position_input = None
             if source_position is None and source_position_input is not None:
                 source_position = tuple(coordinate + translation for coordinate, translation in zip(source_position_input, translations[side]))
             landmarks[side] = {"position": list(source_position), "method": "configured", "confidence": 1.0} if source_position is not None else estimate_ear_canal_position(ear, side=side)

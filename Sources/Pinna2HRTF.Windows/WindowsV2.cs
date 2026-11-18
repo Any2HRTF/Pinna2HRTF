@@ -31,11 +31,29 @@ public partial class MainWindow
             _ => 60
         });
         var result = await ToolProcess.RunAsync(info, payload, timeout, linked.Token).ConfigureAwait(false);
-        if (result.ExitCode != 0) throw new IOException(string.IsNullOrWhiteSpace(result.Error) ? "The Python operation failed." : result.Error.Trim());
+        if (result.ExitCode != 0)
+        {
+            var detail = string.IsNullOrWhiteSpace(result.Error) ? "The Python operation failed." : result.Error.Trim();
+            var (name, message) = CommandError(detail);
+            if (name == "SettingsRevisionConflict") throw new SettingsRevisionConflictException(message ?? detail);
+            throw new IOException(detail);
+        }
         using var document = JsonDocument.Parse(result.Output);
         return document.RootElement.Clone();
     }
 
+
+    static (string? Name, string? Message) CommandError(string detail)
+    {
+        try
+        {
+            using var reply = JsonDocument.Parse(detail.Split('\n')[^1]);
+            var root = reply.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("error", out var name) || name.ValueKind != JsonValueKind.String) return (null, null);
+            return (name.GetString(), root.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String ? message.GetString() : null);
+        }
+        catch (JsonException) { return (null, null); }
+    }
 
     void AddV2TextSettings(Dictionary<string, TextSetting> settings)
     {
@@ -121,7 +139,6 @@ public partial class MainWindow
         var selected=new[]{"left","right"}.Where(side=>SourceEar(p,side)!=null).ToArray();
         return selected.Length>0&&selected.All(side=>new[]{Path.Combine(p.SaveLocation,"Projects",side=="left"?"Left":"Right","parameters.json"),Path.Combine(p.SaveLocation,"Intermediates",side=="left"?"Left":"Right","graded_head.ply")}.All(path=>File.Exists(path)&&new FileInfo(path).Length>0));
     }
-    const string WindowsPreprocessingReceipt = ".pinna2hrtf-preprocessing-windows-v3.json";
     string PreprocessingStamp(ProjectRecord p)
     {
         var config = ProjectDocument.Build(p, environment);
@@ -146,38 +163,10 @@ public partial class MainWindow
         }
         return new JsonObject { ["format"] = "pinna2hrtf-preprocessing-windows-v3", ["ears"] = ears }.ToJsonString();
     }
-    string LegacyPreprocessingStamp(ProjectRecord p)
-    {
-        var inputs=new[]{"left","right"}.Select(side=>PreprocessingMesh(p,side)).Select(path=>path==null?"":MeshIdentity(path)).ToArray();
-        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new{p.Settings.Preprocessing,p.Settings.Inference,p.Settings.ManualPPM,p.Settings.ScanPreparation,inputs}))));
-    }
     string InferenceStamp(ProjectRecord p)
     {
         var paths=new[]{SourceEar(p,"left"),SourceEar(p,"right"),p.Settings.Inference.ModelConfig,p.Settings.Inference.ModelCheckpoint};
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new{p.Settings.Inference,inputs=paths.Select(path=>File.Exists(path)?MeshIdentity(path!):"").ToArray()}))));
-    }
-    bool InferenceStampIsCurrent(ProjectRecord p)
-    {
-        var path=Path.Combine(p.SaveLocation,".pinna2hrtf-inference-signature");
-        return SharedStageCurrent("inference", p) ?? (File.Exists(path) && File.ReadAllText(path) == InferenceStamp(p));
-    }
-    bool PreprocessingStampIsCurrent(ProjectRecord p)
-    {
-        if (File.Exists(Path.Combine(p.SaveLocation, ".pinna2hrtf-preprocessing-inputs-v1.json")))
-            return StageReceiptIsCurrent("preprocessing", p);
-        var path = Path.Combine(p.SaveLocation, WindowsPreprocessingReceipt);
-        if (!File.Exists(path)) {
-            var legacy = Path.Combine(p.SaveLocation, ".pinna2hrtf-preprocessing-signature");
-            return File.Exists(legacy) && File.ReadAllText(legacy) == LegacyPreprocessingStamp(p);
-        }
-        try {
-            var recorded = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
-            var current = JsonNode.Parse(PreprocessingStamp(p))!.AsObject();
-            if (recorded["format"]?.GetValue<string>() != "pinna2hrtf-preprocessing-windows-v3") return false;
-            var oldEars = recorded["ears"]!.AsObject();
-            return current["ears"]!.AsObject().All(ear => oldEars.TryGetPropertyValue(ear.Key, out var saved) && ProjectDocument.SameJson(saved, ear.Value));
-        }
-        catch { return false; }
     }
     bool SofaFilesPresent(ProjectRecord p)
     {
@@ -248,3 +237,5 @@ public partial class MainWindow
         finally { outputOperations.Remove(original.Id); }
     }
 }
+
+sealed class SettingsRevisionConflictException(string message) : IOException(message);

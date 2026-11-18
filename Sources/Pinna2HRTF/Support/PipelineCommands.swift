@@ -7,6 +7,7 @@ struct PipelineCommandContext {
     var canShowProjectInFinder: Bool
     var folderSelected: Bool
     var canRunProject: Bool
+    var nextActionTitle: String
     var canRunStage: (Stage) -> Bool
     var canStopProject: Bool
     var canResetProject: Bool
@@ -108,7 +109,7 @@ struct PipelineCommands: Commands {
 
             Divider()
 
-            Button("Run Next Step") {
+            Button(commands?.nextActionTitle ?? "Run Next Step") {
                 commands?.runNextStage()
             }
             .keyboardShortcut("r", modifiers: [.command])

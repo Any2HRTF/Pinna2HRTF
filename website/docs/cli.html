@@ -77,21 +77,32 @@ bash Scripts/prepare_external_tools.sh</code></pre>
       <h2 id="configure-a-run">Configure a run</h2>
       <p>Create a complete configuration template:</p>
       <pre><code>uv run Pinna2HRTF run-config --write-template pinna2hrtf.yaml</code></pre>
-      <p>Edit input paths, output directory, external tool locations, evaluation grid, frequency range, and stage settings. Relative paths are resolved from the YAML file’s directory. Set an unused ear to <code>null</code>. Mesh2PPM inference is disabled in the template, and preprocessing uses original meshes unless <code>inference.use_predictions_for_preprocessing</code> is set to <code>true</code>.</p>
+      <p>Edit input paths, output directory, external tool locations, evaluation grid, frequency range, and stage settings. Relative paths are resolved from the YAML file’s directory. If <code>paths.output_dir</code> is omitted, outputs are written next to the YAML file. Set an unused ear to <code>null</code>. Mesh2PPM inference is disabled in the template, and preprocessing uses original meshes unless <code>inference.use_predictions_for_preprocessing</code> is set to <code>true</code>.</p>
       <p>Inspect the planned run first:</p>
       <pre><code>uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage all --dry-run</code></pre>
       <p>Then run all enabled stages, or run a single stage:</p>
       <pre><code>uv run Pinna2HRTF run-config --config pinna2hrtf.yaml --stage all
 uv run Pinna2HRTF preprocessing --config pinna2hrtf.yaml
 uv run Pinna2HRTF numcalc --config pinna2hrtf.yaml</code></pre>
-      <p>Run multiple selected stages by repeating <code>--stage</code>. An explicitly selected stage runs even when its YAML <code>enabled</code> value is false. Add <code>--dry-run</code> to inspect a config-based run without executing the stages. YAML runs write left and right simulation projects under <code>Projects/Left</code> and <code>Projects/Right</code> in the output folder.</p>
+      <p>Run multiple selected stages by repeating <code>--stage</code>. An explicitly selected stage runs even when its YAML <code>enabled</code> value is false. Add <code>--dry-run</code> to inspect a config-based run without executing the stages or changing any file. YAML runs write left and right simulation projects under <code>Projects/Left</code> and <code>Projects/Right</code> in the output folder.</p>
       <p>Config-based SOFA export checks the meshes, grid, and settings that preprocessing recorded, and stops if they no longer match. Older projects without this record still export, with a warning. Standalone <code>sofa</code> conversion uses the simulation project parameters and validates their HRIR frequency vector.</p>
+
+      <h3>Legacy settings</h3>
+      <p>Older settings files store the ear distance as <code>preprocessing.head_radius</code>. Loading and dry runs read it as <code>ear_distance</code> with a warning and leave the file unchanged. To update the file, save the project in the app or run:</p>
+      <pre><code>uv run Pinna2HRTF migrate-settings pinna2hrtf.yaml</code></pre>
+      <p>The command adds <code>ear_distance</code>, marks <code>head_radius</code> as deprecated, keeps comments, and stores the original as <code>pinna2hrtf.yaml.head-radius-compat.bak</code>.</p>
 
       <h3>Postprocessing defaults</h3>
       <p>By default, YAML postprocessing normalizes output with a −30 dB level offset and overwrites its output folder. Set <code>postprocessing.normalize: false</code> to skip normalization, <code>postprocessing.overwrite: false</code> to preserve an existing output folder, or <code>postprocessing.resample_hrirs: true</code> to resample HRIR files. Resampling defaults to 48,000 Hz. It changes HRIRs only; HRTF files are not resampled. Direct SOFA commands without a YAML config do not apply the level offset.</p>
 
       <h3>Slurm</h3>
       <p>Set <code>numcalc.mode: slurm</code> and configure the cluster partition, QoS, memory, time limit, and array concurrency in the YAML file. The Slurm worker verifies completion of each frequency step, skips complete steps, and reruns incomplete steps when resubmitted. Preserve the project folder and its generated-output records when resuming.</p>
+      <p>To run a Slurm project once on the local machine without changing its YAML file, add <code>--numcalc-mode local</code>:</p>
+      <pre><code>uv run Pinna2HRTF numcalc --config pinna2hrtf.yaml --numcalc-mode local</code></pre>
+      <p>The desktop apps always run NumCalc locally this way and keep the saved mode.</p>
+
+      <h3>Microphone positions</h3>
+      <p><code>preprocessing.source_position_input_left</code> and <code>source_position_input_right</code> set the microphone position in millimetres in the coordinates of the ear mesh used for preprocessing. When a desktop app saves a position, it records the SHA-256 of that mesh in <code>.pinna2hrtf/microphone-placements.json</code> in the output folder. Preprocessing ignores a recorded position whose mesh has changed, logs it, and estimates the position instead. The position stays in the YAML file. Positions without a record, such as hand-written ones, are used as written.</p>
 
       <h2 id="scan-preparation-from-yaml">Scan preparation from YAML</h2>
       <p>Enable <code>scan_preparation</code>, choose a scan and explicit crop rotation, and select the ears. The <a href="scan-preparation.html">scan guide</a> explains alignment, orientation checks, manual review, and provenance.</p>

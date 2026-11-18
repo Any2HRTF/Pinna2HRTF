@@ -7,12 +7,13 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sys
 import tempfile
-import warnings
 
 import yaml
 
 DEPRECATION = "Deprecated; use ear_distance. Will be removed in a future version."
+LEGACY_DISTANCE_IMPORTED = "Imported legacy preprocessing.head_radius as ear_distance. Save the project or run Pinna2HRTF migrate-settings to update the file."
 
 
 def import_legacy_distance(data):
@@ -55,13 +56,13 @@ def annotate_legacy_distance(path, text, encoding, raw):
     """
     tree = yaml.compose(text)
     if not isinstance(tree, yaml.MappingNode):
-        return
+        return False
     settings = next((v for k, v in tree.value if k.value == "preprocessing"), None)
     if not isinstance(settings, yaml.MappingNode):
-        return
+        return False
     legacy = next(((k, v) for k, v in settings.value if k.value == "head_radius"), None)
     if legacy is None:
-        return
+        return False
     has_distance = any(k.value == "ear_distance" for k, _ in settings.value)
     key, value = legacy
     newline = "\r\n" if "\r\n" in text else "\r" if "\r" in text else "\n"
@@ -95,7 +96,7 @@ def annotate_legacy_distance(path, text, encoding, raw):
             lines.insert(index + 1, " " * key.start_mark.column + "ear_distance: " + scalar + newline)
         updated = "".join(lines)
     if updated == text:
-        return
+        return False
     if import_legacy_distance(yaml.safe_load(updated)) != import_legacy_distance(yaml.safe_load(text)):
         raise ValueError("Compatibility annotation changed settings unexpectedly.")
     path = Path(path)
@@ -119,20 +120,24 @@ def annotate_legacy_distance(path, text, encoding, raw):
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
+    return True
 
 
 def main():
-    """Native apps use this loader so compatibility edits share one implementation."""
     import argparse
-    from .Config import load_config
-    parser = argparse.ArgumentParser(description=__doc__)
+    from .Config import PipelineConfig
+    parser = argparse.ArgumentParser(description="Rewrite a legacy preprocessing.head_radius setting as ear_distance. The original file is kept as <name>.head-radius-compat.bak.")
     parser.add_argument("path")
     args = parser.parse_args()
-    with warnings.catch_warnings(record=True) as notices:
-        warnings.simplefilter("always")
-        config = load_config(args.path)
-    print(json.dumps({"ear_distance": config.preprocessing.ear_distance,
-                      "warnings": [str(item.message) for item in notices]}))
+    path = Path(args.path).expanduser().resolve()
+    try:
+        raw, text, encoding = read_settings(path)
+        config = PipelineConfig.model_validate(import_legacy_distance(yaml.safe_load(text) or {}))
+        migrated = annotate_legacy_distance(path, text, encoding, raw)
+    except (OSError, ValueError, yaml.YAMLError) as error:
+        print(json.dumps({"error": type(error).__name__, "message": str(error)}), file=sys.stderr)
+        raise SystemExit(1) from None
+    print(json.dumps({"path": str(path), "migrated": migrated, "ear_distance": config.preprocessing.ear_distance}))
 
 
 if __name__ == "__main__":

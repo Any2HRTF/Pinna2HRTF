@@ -196,32 +196,43 @@ struct PathField: View {
     let helpID: String
     @Binding var text: String
     let mode: PathFieldMode
+    let defaultName: String?
+    let defaultPath: String?
 
-    init(_ title: String, helpID: String, text: Binding<String>, mode: PathFieldMode) {
+    init(_ title: String, helpID: String, text: Binding<String>, mode: PathFieldMode, defaultName: String? = nil, defaultPath: String? = nil) {
         self.title = title
         self.helpID = helpID
         self._text = text
         self.mode = mode
+        self.defaultName = defaultName
+        self.defaultPath = defaultPath
+    }
+
+    private var effectivePath: String { text.isEmpty ? defaultPath ?? "" : text }
+
+    private var displayName: String {
+        if !text.isEmpty { return URL(fileURLWithPath: text, isDirectory: mode == .directory).lastPathComponent }
+        return defaultName.map { "\($0) (Default)" } ?? "None"
     }
 
     var body: some View {
         LabeledContent {
             HStack(spacing: 6) {
-                Text(text.isEmpty ? "None" : URL(fileURLWithPath: text, isDirectory: mode == .directory).lastPathComponent)
+                Text(displayName)
                     .foregroundStyle(text.isEmpty ? .secondary : .primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .help(text)
+                    .help(effectivePath)
                     .contextMenu {
                         Button("Copy Path") {
                             NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(text, forType: .string)
+                            NSPasteboard.general.setString(effectivePath, forType: .string)
                         }
-                        .disabled(text.isEmpty)
+                        .disabled(effectivePath.isEmpty)
                         Button("Reveal in Finder") {
-                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: text)])
+                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: effectivePath)])
                         }
-                        .disabled(text.isEmpty)
+                        .disabled(effectivePath.isEmpty || !FileManager.default.fileExists(atPath: effectivePath))
                     }
                 Button("Choose…", action: choose)
                     .fixedSize()

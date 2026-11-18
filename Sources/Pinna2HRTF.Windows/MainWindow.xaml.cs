@@ -1809,7 +1809,10 @@ public partial class MainWindow : Window
             foreach (var notice in notices.EnumerateArray()) AppendLog(notice.GetString(), project.Id);
         var root = System.Text.Json.Nodes.JsonNode.Parse(result.GetProperty("config").GetRawText())!.AsObject();
         ProjectDocument.Restore(project, root);
+        project.SettingsRevision = result.TryGetProperty("revision", out var revision) ? revision.GetString() : null;
         NormalizeInferenceModelPaths(project);
+        project.Settings.Preprocessing.SourcePositionInputLeft = null;
+        project.Settings.Preprocessing.SourcePositionInputRight = null;
         foreach (var side in new[] { "left", "right" })
         {
             if (root["preprocessing"]?["source_position_input_" + side] is not System.Text.Json.Nodes.JsonArray a || a.Count != 3) continue;
@@ -2764,7 +2767,9 @@ public partial class MainWindow : Window
             if (shutdownCleanupDone) { outputStore.ReleaseForRecovery(); return; }
             if (!SequenceIsCurrent()) return;
             var executable = BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe");
-            var info = GeometryProcess("-m", "HRTFCalculation", stage.Value, "--config", config);
+            var info = stage == Stage.Numcalc
+                ? GeometryProcess("-m", "HRTFCalculation", stage.Value, "--config", config, "--numcalc-mode", "local")
+                : GeometryProcess("-m", "HRTFCalculation", stage.Value, "--config", config);
             info.Environment["PINNA2HRTF_OUTPUT_TOKEN"] = outputStore.Token;
             info.Environment["PINNA2HRTF_PROTECTED_INPUTS"] = JsonSerializer.Serialize(projects.SelectMany(p => ProtectedInputs(p, project.Id)));
             ApplyProcessEnvironment(info);
@@ -2802,6 +2807,7 @@ public partial class MainWindow : Window
             FailedStages(project.Id).Add(stage);
             AppendLog("Could not start " + stage.Title + ": " + error, project.Id);
             RefreshPipelineStatus();
+            if (error is SettingsRevisionConflictException) _ = OfferSettingsReloadAsync(project);
         }
         finally
         {
@@ -2832,7 +2838,6 @@ public partial class MainWindow : Window
                 if (stage == Stage.Postprocessing)
                 {
                     await RequestPythonAsync("project", new { action = "validate_outputs", paths = Directory.GetFiles(SofaDirectory(project), "*.sofa", SearchOption.AllDirectories) });
-                    if (!SpatialOutputsCurrent(project)) throw new IOException("Spatial upsampling outputs are incomplete or stale.");
                 }
                 await RefreshStatusSnapshotAsync(project, true);
                 if (!StageIsComplete(stage, project, new ArtifactInspection())) throw new IOException("Expected stage outputs are missing, stale or incomplete.");
@@ -2983,8 +2988,46 @@ public partial class MainWindow : Window
             RebaseManualPosition(prepared.Settings.Preprocessing.SourcePositionInputRight, project.RightEar, prepared.RightEar);
         }
         var config = Path.Combine(project.SaveLocation, "Project Settings.yaml");
-        await RequestPythonAsync("project", new { action = "save", path = config, config = ProjectDocument.Build(prepared, environment) });
+        var preserved = project.PreservedConfigJSON == null ? null : System.Text.Json.Nodes.JsonNode.Parse(project.PreservedConfigJSON);
+        var document = ProjectDocument.Build(prepared, environment);
+        var preprocessing = document["preprocessing"]!.AsObject();
+        foreach (var side in new[] { "left", "right" })
+            if (preprocessing["source_position_input_" + side] is null) preprocessing.Remove("source_position_input_" + side);
+        var saved = await RequestPythonAsync("project", new { action = "save", path = config, config = document, preserved, revision = project.SettingsRevision });
+        project.SettingsRevision = saved.GetProperty("revision").GetString();
+        Persist();
         return config;
+    }
+
+    async Task OfferSettingsReloadAsync(ProjectRecord project)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = "Project settings changed",
+            Content = "Project Settings.yaml changed after it was loaded. Reload it to continue.",
+            PrimaryButtonText = "Reload",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = Root.XamlRoot
+        };
+        if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary) return;
+        if (!projects.Contains(project) || ProjectBusy(project.Id))
+        {
+            AppendLog("Wait for the project operation to finish, then reload the project settings.", project.Id);
+            return;
+        }
+        try
+        {
+            await TryReadProjectSettingsAsync(project);
+            Persist();
+            if (selectedProject == project) LoadSelectedProject();
+            RefreshArtifacts();
+            AppendLog("Reloaded project settings.", project.Id);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            AppendLog("Could not reload project settings: " + error.Message, project.Id);
+        }
     }
 
     void RebaseManualPosition(ManualMicrophonePosition? position, string source, string path)
@@ -3414,7 +3457,7 @@ public partial class MainWindow : Window
             if (project.Settings.ScanPreparation.Enabled && !ScanReviewStageReceiptCurrent(project, "inference", inspection)) return false;
             var leftDone = SourceEar(project,"left",inspection) == null || PredictionMesh(project, "left") != null;
             var rightDone = SourceEar(project,"right",inspection) == null || PredictionMesh(project, "right") != null;
-            return leftDone && rightDone && InferenceStampIsCurrent(project);
+            return leftDone && rightDone && StageReceiptIsCurrent("inference", project);
         }
         if (stage == Stage.ScanPreparation)
         {
@@ -3428,7 +3471,7 @@ public partial class MainWindow : Window
         if (stage == Stage.Preprocessing)
         {
             if(project.Settings.ScanPreparation.Enabled&&!ScanReviewStageReceiptCurrent(project,"preprocessing",inspection))return false;
-            return PreprocessingFilesPresent(project) && PreprocessingStampIsCurrent(project);
+            return PreprocessingFilesPresent(project) && StageReceiptIsCurrent("preprocessing", project);
 
         }
         if (stage == Stage.Numcalc) return StageIsComplete(Stage.Preprocessing, project, inspection) && NumCalcIsComplete(project, inspection);

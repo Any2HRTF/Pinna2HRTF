@@ -83,17 +83,19 @@ final class PipelineRunner: NSObject, ObservableObject, UNUserNotificationCenter
             do {
                 _ = try outputsFor(project)
                 try prepareRuntimeProject()
-                let configURL = try await Task.detached(priority: .userInitiated) {
+                let settings = try await Task.detached(priority: .userInitiated) {
                     try PipelineConfigWriter.prepare(project: project, environment: environment, stage: stage)
                 }.value
                 endOutputOperation(project.id)
                 guard store?.projects.contains(where: { $0.id == project.id }) == true else { return }
-                startProcess(stage: stage, project: project, configURL: configURL, environment: environment)
+                store?.mutateProject(project.id) { $0.settingsRevision = settings.revision }
+                startProcess(stage: stage, project: project, configURL: settings.url, environment: environment)
             } catch {
                 endOutputOperation(project.id)
                 store?.setStageOutcome(stage, for: project.id, to: .failed)
                 store?.refreshArtifacts()
                 log("Could not prepare project: \(error.localizedDescription)", for: project.id)
+                if error is ProjectConfigDocument.SettingsRevisionConflict { store?.offerSettingsReload(for: project.id) }
             }
         }
     }

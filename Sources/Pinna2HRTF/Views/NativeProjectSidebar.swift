@@ -143,7 +143,7 @@ struct NativeProjectSidebar: NSViewRepresentable {
                 view = AnyView(Label(folder.name, systemImage: "folder").lineLimit(1).frame(maxWidth: .infinity, alignment: .leading))
             case let .project(id):
                 guard let project = parent.store.projects.first(where: { $0.id == id }) else { return nil }
-                let summary = parent.store.projectSummaries[id] ?? URL(fileURLWithPath: project.saveLocation, isDirectory: true).lastPathComponent
+                let summary = parent.store.projectSummaries[id] ?? ""
                 view = AnyView(ProjectRow(project: project, runningStage: parent.store.runningStages[id], summary: summary))
             }
             return SidebarRowHostingView(rootView: view)

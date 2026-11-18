@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 namespace Pinna2HRTF.Windows;
-class ProjectRecord { public string FolderProvenance { get; set; } = "Unknown"; public string? OwnedFolderIdentity { get; set; } public Guid Id { get; set; } = Guid.NewGuid(); public string Name { get; set; } = ""; public string LeftEar { get; set; } = ""; public string RightEar { get; set; } = ""; public string SaveLocation { get; set; } = ""; public Guid? FolderId { get; set; } public string? PreservedConfigJSON { get; set; } public InputHandling InputHandling { get; set; } = InputHandling.Copy; public ProjectSettings Settings { get; set; } = new(); [JsonIgnore] public string StatusText { get; set; } = ""; [JsonIgnore] public bool IsRunning { get; set; } }
+class ProjectRecord { public string FolderProvenance { get; set; } = "Unknown"; public string? OwnedFolderIdentity { get; set; } public Guid Id { get; set; } = Guid.NewGuid(); public string Name { get; set; } = ""; public string LeftEar { get; set; } = ""; public string RightEar { get; set; } = ""; public string SaveLocation { get; set; } = ""; public Guid? FolderId { get; set; } public string? PreservedConfigJSON { get; set; } public string? SettingsRevision { get; set; } public InputHandling InputHandling { get; set; } = InputHandling.Copy; public ProjectSettings Settings { get; set; } = new(); [JsonIgnore] public string StatusText { get; set; } = ""; [JsonIgnore] public bool IsRunning { get; set; } }
 class ProjectSettings {
     public string? EarModelMethod { get; set; }
     public void SelectEarModel(string method) {

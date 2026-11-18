@@ -1,6 +1,16 @@
 import Foundation
 
 enum ProjectConfigDocument {
+    struct SettingsRevisionConflict: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    struct Settings {
+        let config: [String: Any]
+        let revision: String
+        let microphonePlacements: [String: String]
+    }
     static var pythonURL: URL? {
         let bundled = Defaults.pipelineRoot.appendingPathComponent(".venv/bin/python")
         if Defaults.isPackagedApp { return FileManager.default.isExecutableFile(atPath: bundled.path) ? bundled : nil }
@@ -46,6 +56,10 @@ enum ProjectConfigDocument {
         }
         guard process.terminationStatus == 0 else {
             let detail = (try? String(contentsOf: errorURL, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Unknown error"
+            let reply = detail.split(separator: "\n").last.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+            if reply?["error"] as? String == "SettingsRevisionConflict" {
+                throw SettingsRevisionConflict(message: reply?["message"] as? String ?? detail)
+            }
             throw ProjectValidation.Failure(message: "\(operation) failed: \(detail)")
         }
         return try Data(contentsOf: outputURL)
@@ -56,7 +70,17 @@ enum ProjectConfigDocument {
                 timeout: timeout, operation: action)
     }
 
-    static func restore(_ config: [String: Any], into original: ProjectRecord, folder: URL, packageRoot: URL) throws -> ProjectRecord {
+    static func read(_ url: URL) throws -> Settings {
+        let data = try request("read", ["path": url.path, "with_revision": true])
+        guard let reply = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let config = reply["config"] as? [String: Any], let revision = reply["revision"] as? String else {
+            throw ProjectValidation.Failure(message: "Project settings must contain a mapping.")
+        }
+        return Settings(config: config, revision: revision, microphonePlacements: reply["microphone_placements"] as? [String: String] ?? [:])
+    }
+
+    static func restore(_ settings: Settings, into original: ProjectRecord, folder: URL, packageRoot: URL) throws -> ProjectRecord {
+        let config = settings.config
         var project = original
         let paths = config["paths"] as? [String: Any] ?? [:]
         let inference = config["inference"] as? [String: Any] ?? [:]
@@ -165,12 +189,15 @@ enum ProjectConfigDocument {
         project.settings.preprocessing.earDistance = text(pre, "ear_distance") ?? text(pre, "head_radius")
         project.settings.preprocessing.sourceAssignmentFaceCount = text(pre, "source_assignment_face_count") ?? "6"
         for side in EarSide.allCases {
-            if let coordinates = pre["source_position_input_\(side.rawValue)"] as? [NSNumber], coordinates.count == 3,
+            var position: ManualMicrophonePosition?
+            if settings.microphonePlacements[side.rawValue] != "stale",
+               let coordinates = pre["source_position_input_\(side.rawValue)"] as? [NSNumber], coordinates.count == 3,
                let mesh = ArtifactScanner.preprocessingMesh(for: project, side: side), let identity = ArtifactScanner.meshIdentity(mesh) {
-                let position = ManualMicrophonePosition(x: coordinates[0].doubleValue, y: coordinates[1].doubleValue, z: coordinates[2].doubleValue, meshPath: mesh.standardizedFileURL.path, meshIdentity: identity)
-                if side == .left { project.settings.preprocessing.sourcePositionInputLeft = position } else { project.settings.preprocessing.sourcePositionInputRight = position }
+                position = ManualMicrophonePosition(x: coordinates[0].doubleValue, y: coordinates[1].doubleValue, z: coordinates[2].doubleValue, meshPath: mesh.standardizedFileURL.path, meshIdentity: identity)
             }
+            if side == .left { project.settings.preprocessing.sourcePositionInputLeft = position } else { project.settings.preprocessing.sourcePositionInputRight = position }
         }
+        project.automaticMicrophoneSides = nil
         project.settings.numcalc.maxInstances = text(num, "max_instances") ?? "1"
         project.settings.numcalc.maxCPULoad = text(num, "max_cpu_load") ?? "90"
         project.settings.numcalc.adaptiveFmmLength = bool(num, "adaptive_fmm_length") ?? true

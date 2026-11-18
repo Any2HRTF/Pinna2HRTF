@@ -214,11 +214,9 @@ final class ProjectLibrary: ObservableObject {
         let configURL = ["Project Settings.yaml", ".pinna2hrtf_native_run.yaml", "pipeline.yaml"]
             .map { folder.appendingPathComponent($0) }.first { FileManager.default.fileExists(atPath: $0.path) }
         if let configURL {
-            let data = try ProjectConfigDocument.request("read", ["path": configURL.path])
-            guard let document = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                throw ProjectValidation.Failure(message: "Project settings must contain a mapping.")
-            }
-            project = try ProjectConfigDocument.restore(document, into: project, folder: folder, packageRoot: root)
+            let settings = try ProjectConfigDocument.read(configURL)
+            project = try ProjectConfigDocument.restore(settings, into: project, folder: folder, packageRoot: root)
+            project.settingsRevision = configURL.lastPathComponent == "Project Settings.yaml" ? settings.revision : nil
         }
         var note: String?
         let entries = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []

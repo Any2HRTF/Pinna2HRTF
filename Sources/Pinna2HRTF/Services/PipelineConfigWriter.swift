@@ -1,7 +1,12 @@
 import Foundation
 
 enum PipelineConfigWriter {
-    static func prepare(project: ProjectRecord, environment: EnvironmentConfig, stage: Stage? = nil) throws -> URL {
+    struct PreparedSettings: Sendable {
+        let url: URL
+        let revision: String
+    }
+
+    static func prepare(project: ProjectRecord, environment: EnvironmentConfig, stage: Stage? = nil) throws -> PreparedSettings {
         try HeadGeometrySettings.validate(project.settings.preprocessing)
         if let issue = ProjectValidation.issues(for: project, stage: stage).first { throw ProjectValidation.Failure(message: issue.message) }
 
@@ -25,12 +30,14 @@ enum PipelineConfigWriter {
         }
         let configURL = output.appendingPathComponent("Project Settings.yaml")
         let generated = mapping(project: prepared, environment: environment, manualPositions: manualPositions)
-        var request: [String: Any] = ["config": generated, "path": configURL.path, "preserve_fields": true]
+        var request: [String: Any] = ["config": generated, "path": configURL.path, "preserve_fields": true,
+                                      "revision": project.settingsRevision.map { $0 as Any } ?? NSNull()]
         if let preserved = project.preservedConfigJSON {
             request["preserved"] = try JSONSerialization.jsonObject(with: Data(preserved.utf8))
         }
-        _ = try ProjectConfigDocument.request("save", request)
-        return configURL
+        struct Reply: Decodable { let revision: String }
+        let reply = try JSONDecoder().decode(Reply.self, from: ProjectConfigDocument.request("save", request))
+        return PreparedSettings(url: configURL, revision: reply.revision)
     }
 
     static func copyInput(_ path: String, to folder: URL) throws -> String {
@@ -63,11 +70,14 @@ enum PipelineConfigWriter {
             "mesh_gamma_opposite": number(pre.meshGammaOpposite),
             "skip_mesh_grading": false
         ]
-        if let distance = pre.earDistance {
-            preprocessing["ear_distance"] = number(distance)
-        }
-        for (side, position) in positions {
-            preprocessing["source_position_input_\(side.rawValue)"] = [position.x, position.y, position.z]
+        preprocessing["ear_distance"] = pre.earDistance.map { number($0) } ?? NSNull()
+        for side in EarSide.allCases {
+            if let position = positions[side] {
+                preprocessing["source_position_input_\(side.rawValue)"] = [position.x, position.y, position.z]
+            } else if ArtifactScanner.manualMicrophonePosition(for: project, side: side) == nil,
+                      project.automaticMicrophoneSides?.contains(side) == true {
+                preprocessing["source_position_input_\(side.rawValue)"] = NSNull()
+            }
         }
         return [
             "paths": [
@@ -108,7 +118,7 @@ enum PipelineConfigWriter {
             ],
             "preprocessing": preprocessing,
             "numcalc": [
-                "enabled": false, "mode": "local", "max_instances": number(numcalc.maxInstances),
+                "enabled": false, "max_instances": number(numcalc.maxInstances),
                 "max_cpu_load": number(numcalc.maxCPULoad), "adaptive_fmm_length": numcalc.adaptiveFmmLength
             ],
             "postprocessing": [

@@ -185,6 +185,26 @@ extension AppStore {
         if state == .stopped { return "Stopped" }
         if step.rawValue >= WorkflowStep.simulation.rawValue && preprocessingNeedsRerun(for: project) { return "Needs rerun" }
         if selectedProjectStatus?.completed.contains(stage) ?? false { return "Complete" }
-        return canRun(stage: stage) ? "Ready" : "Needs input"
+        if canRun(stage: stage) { return "Ready" }
+        if let awaited = awaitedStep(before: stage) { return "Awaiting \(awaited.title.prefix(1).lowercased() + awaited.title.dropFirst())" }
+        return "Needs input"
+    }
+
+    func awaitedStep(before stage: Stage) -> WorkflowStep? {
+        guard let project = selectedProject else { return nil }
+        let completed = selectedProjectStatus?.completed ?? []
+        switch stage {
+        case .postprocessing:
+            return completed.contains(.numcalc) ? nil : .calculate
+        case .numcalc:
+            return completed.contains(.preprocessing) ? nil : .simulation
+        case .preprocessing:
+            if project.scanPreparation.enabled && !completed.contains(.scanPreparation) { return .prepare }
+            if earModelMethod == .mesh2ppm && !completed.contains(.inference) { return .prepare }
+            if earModelMethod == .manual && !workflowSides.allSatisfy({ selectedProjectStatus?.validFitSides.contains($0) ?? false }) { return .prepare }
+            return nil
+        case .scanPreparation, .inference:
+            return nil
+        }
     }
 }

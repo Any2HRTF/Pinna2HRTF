@@ -317,6 +317,8 @@ struct ProjectRecord: Identifiable, Codable, Equatable {
     var inputHandling: InputHandling = .copy
     var folderID: UUID?
     var preservedConfigJSON: String?
+    var settingsRevision: String?
+    var automaticMicrophoneSides: [EarSide]?
     var stageOutcomes: [String: StageState]?
     var settings: ProjectSettings
 }

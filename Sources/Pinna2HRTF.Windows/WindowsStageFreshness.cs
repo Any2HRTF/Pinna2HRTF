@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Microsoft.UI.Xaml.Controls;
 namespace Pinna2HRTF.Windows;
@@ -7,16 +5,7 @@ namespace Pinna2HRTF.Windows;
 public partial class MainWindow
 {
     Task<JsonElement> StageReceiptAsync(string action, string stage, ProjectRecord project) =>
-        RequestPythonAsync("project", new { action, stage, config = ProjectDocument.Build(project, environment) });
-
-    bool? SharedStageCurrent(string stage, ProjectRecord project)
-    {
-        var receipt = Path.Combine(project.SaveLocation, $".pinna2hrtf-{stage}-receipt.json");
-        if (!File.Exists(receipt)) return null;
-        using var stream = File.OpenRead(receipt);
-        if (stream.ReadByte() != '{') return null;
-        return StageReceiptIsCurrent(stage, project);
-    }
+        RequestPythonAsync("project", new { action, stage, config = ProjectDocument.Build(project, environment), app = "windows", project });
 
     bool StageReceiptIsCurrent(string stage, ProjectRecord project)
     {
@@ -24,64 +13,10 @@ public partial class MainWindow
         catch (Exception error) when (error is IOException or InvalidOperationException or JsonException or KeyNotFoundException or System.ComponentModel.Win32Exception) { return false; }
     }
 
-    string PostprocessingInputStamp(ProjectRecord project) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-        JsonSerializer.Serialize(new { project.Settings.Postprocessing, preprocessing = PreprocessingStamp(project) }))));
-    string PostprocessingStamp(ProjectRecord project)
-    {
-        var paths = new List<string>();
-        var destination = SofaDirectory(project);
-        if (Directory.Exists(destination))
-        {
-            paths.AddRange(Directory.EnumerateFiles(destination, "*.sofa"));
-            var upsampled = Path.Combine(destination, "Upsampled");
-            if (Directory.Exists(upsampled) && (File.GetAttributes(upsampled) & FileAttributes.ReparsePoint) == 0)
-                foreach (var folder in Directory.EnumerateDirectories(upsampled, "HRIR_*"))
-                    if ((File.GetAttributes(folder) & FileAttributes.ReparsePoint) == 0)
-                        paths.AddRange(Directory.EnumerateFiles(folder).Where(p => Path.GetExtension(p) == ".sofa" || Path.GetFileName(p) == "upsampling.json"));
-            if (paths.Any(p => (File.GetAttributes(p) & FileAttributes.ReparsePoint) != 0)) throw new IOException("Linked SOFA outputs require review.");
-        }
-        foreach (var side in new[] { "Left", "Right" })
-        {
-            var folder = Path.Combine(project.SaveLocation, "Projects", side, "Output2HRTF");
-            if (Directory.Exists(folder)) paths.AddRange(Directory.EnumerateFiles(folder, "*.sofa"));
-        }
-        var value = PostprocessingInputStamp(project) + string.Join("\n", paths.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).Select(x => x + ":" + FileDigest(x)));
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
-    }
-    static string PostprocessingReceipt(ProjectRecord p) => Path.Combine(p.SaveLocation, ".pinna2hrtf-postprocessing-receipt.json");
     bool PostprocessingIsCurrent(ProjectRecord p)
     {
-        try
-        {
-            return SofaFilesPresent(p) && File.Exists(PostprocessingReceipt(p)) &&
-                (SharedStageCurrent("postprocessing", p) ?? (File.ReadAllText(PostprocessingReceipt(p)) == PostprocessingStamp(p))) && SpatialOutputsCurrent(p);
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException or FormatException) { return false; }
-    }
-    bool SpatialOutputsCurrent(ProjectRecord p)
-    {
-        var settings = p.Settings.Postprocessing;
-        if (settings?.SpatialUpsampling != true) return true;
-        var root = SofaDirectory(p); var sources = Directory.GetFiles(root, "HRIR_*.sofa");
-        if (sources.Length == 0 || !int.TryParse(settings.SpatialSubdivisions, out var divisions)) return false;
-        foreach (var source in sources)
-        {
-            var folder = Path.Combine(root, "Upsampled", Path.GetFileNameWithoutExtension(source));
-            var dense = Path.Combine(folder, $"hrtf_Nd={divisions}{(divisions == 0 ? "_dense" : "")}.sofa");
-            if (!File.Exists(dense) || !File.Exists(Path.Combine(folder, "upsampling.json"))) return false;
-            using var receipt = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "upsampling.json")));
-            var value = receipt.RootElement;
-            bool IdentityMatches(JsonElement identity, string path)
-            {
-                var info = new FileInfo(path);
-                return info.Length == identity.GetProperty("size").GetInt64() &&
-                    Math.Abs((info.LastWriteTimeUtc - DateTime.UnixEpoch).TotalSeconds - identity.GetProperty("mtime").GetDouble()) < 0.000002;
-            }
-            if (value.GetProperty("method").GetString() != "LocaDyn-1948" || value.GetProperty("subdivisions").GetInt32() != divisions ||
-                value.GetProperty("normalize").GetBoolean() != settings.SpatialNormalize ||
-                !IdentityMatches(value.GetProperty("input"), source) || !IdentityMatches(value.GetProperty("output"), dense)) return false;
-        }
-        return true;
+        try { return SofaFilesPresent(p) && StageReceiptIsCurrent("postprocessing", p); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return false; }
     }
     IEnumerable<string> StaleReviewSides(ProjectRecord p) => p.Settings.ScanPreparation.Enabled
         ? new[] { "left", "right" }.Where(side => !string.IsNullOrWhiteSpace(side == "left" ? p.Settings.ScanPreparation.ReviewedLeft : p.Settings.ScanPreparation.ReviewedRight) && !EarReviewIsCurrent(p, side))

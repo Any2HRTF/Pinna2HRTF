@@ -298,6 +298,7 @@ final class ViewerModel: ObservableObject {
             } else {
                 project.settings.preprocessing.sourcePositionInputRight = placement
             }
+            project.automaticMicrophoneSides?.removeAll { $0 == side }
         }
         log("\(side.title) microphone saved.")
     }
@@ -326,6 +327,9 @@ final class ViewerModel: ObservableObject {
                     project.settings.preprocessing.sourcePositionInputLeft = nil
                 } else {
                     project.settings.preprocessing.sourcePositionInputRight = nil
+                }
+                if project.automaticMicrophoneSides?.contains(side) != true {
+                    project.automaticMicrophoneSides = (project.automaticMicrophoneSides ?? []) + [side]
                 }
             }
             clearMicrophonePlacementSession()

@@ -49,7 +49,7 @@ struct ProjectStatusSnapshot {
     static func savedSummary(for project: ProjectRecord) -> String {
         if project.stageOutcomes?.values.contains(.failed) == true { return "Latest run failed · previous results may remain" }
         if project.stageOutcomes?.values.contains(.stopped) == true { return "Task stopped · previous results may remain" }
-        return URL(fileURLWithPath: project.saveLocation, isDirectory: true).lastPathComponent
+        return ""
     }
 
     static func load(project: ProjectRecord, environment: EnvironmentConfig, projects: [ProjectRecord],
@@ -58,20 +58,7 @@ struct ProjectStatusSnapshot {
         let completed = Set(Stage.allCases.filter { (includeSolverResults || $0 != .numcalc) && !isCancelled() && ArtifactScanner.stageIsComplete($0, project: project, inspection: inspection) })
         let states = ArtifactScanner.stageStates(for: project, runningStage: nil, failedStages: [], inspection: inspection, completedStages: completed)
         let issues = ProjectValidation.issues(for: project, inspection: inspection)
-        let signatureURL = URL(fileURLWithPath: project.saveLocation, isDirectory: true).appendingPathComponent(".pinna2hrtf-preprocessing-mac-v2.json", isDirectory: false)
-        let legacySignatureURL = URL(fileURLWithPath: project.saveLocation, isDirectory: true).appendingPathComponent(".pinna2hrtf-preprocessing-signature", isDirectory: false)
-        let existingSignatureURL = FileManager.default.fileExists(atPath: signatureURL.path) ? signatureURL : legacySignatureURL
-        var needsRerun = false
-        if completed.contains(.preprocessing), !project.saveLocation.isEmpty {
-            let shared = URL(fileURLWithPath: project.saveLocation).appendingPathComponent(".pinna2hrtf-preprocessing-inputs-v1.json")
-            if FileManager.default.fileExists(atPath: shared.path) {
-                needsRerun = !StageReceipt.current(.preprocessing, project)
-            } else if let saved = try? String(contentsOf: existingSignatureURL, encoding: .utf8) {
-                needsRerun = !PreprocessingSignature.matches(saved, project: project, current: ArtifactScanner.preprocessingSignature(for: project, inspection: inspection), inspection: inspection)
-            } else if !FileManager.default.fileExists(atPath: existingSignatureURL.path) {
-                needsRerun = true
-            }
-        }
+        let needsRerun = completed.contains(.preprocessing) && !project.saveLocation.isEmpty && !StageReceipt.current(.preprocessing, project)
         var reasons: [Stage: String] = [:]
         for stage in Stage.allCases {
             reasons[stage] = unavailableReason(stage, project: project, environment: environment, projects: projects,
@@ -97,7 +84,7 @@ struct ProjectStatusSnapshot {
         }
         return Self(project: project, environment: environment, artifacts: artifacts, states: states, completed: completed,
                     unavailableReasons: reasons, issues: issues,
-                    numcalcStatus: includeSolverResults ? ArtifactScanner.numcalcStatus(for: project, inspection: inspection) : "NumCalc: checking results…",
+                    numcalcStatus: includeSolverResults ? ArtifactScanner.numcalcStatus(for: project, inspection: inspection) : "NumCalc: Checking results…",
                     preprocessingNeedsRerun: needsRerun, fittableSides: fittable, validFitSides: validFits, currentEarEdits: currentEdits, pipelineSides: pipelineSides, checkingSolverResults: !includeSolverResults)
     }
 
