@@ -39,7 +39,7 @@ struct PressureFieldView: View {
                     .background(.regularMaterial)
                 }
             }
-            .overlay(alignment: .topTrailing) {
+            .overlay(alignment: .bottomTrailing) {
                 ViewerOverlayControls(resetView: model.resetCamera)
             }
         }

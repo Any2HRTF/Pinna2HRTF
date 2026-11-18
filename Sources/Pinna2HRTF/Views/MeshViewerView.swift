@@ -75,56 +75,61 @@ struct MeshViewerView: View {
             }
         }
         .frame(maxHeight: .infinity)
-        .overlay(alignment: .topTrailing) {
-            if store.selectedMesh != nil && store.selectedImage == nil && store.selectedPressure == nil {
-                ViewerOverlayControls(resetView: store.resetSelectedMeshView)
-            }
-        }
         .overlay(alignment: .bottom) {
-            if let side = store.microphonePlacementSide {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Label("Place \(side.title) Microphone", systemImage: "scope")
-                            .font(.callout.weight(.semibold))
-                        Spacer()
-                        Text("Click the mesh")
-                            .foregroundStyle(.secondary)
-                    }
-                    Text(microphoneCoordinates)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 10) {
-                        Button("Use Automatic Position") {
-                            store.useAutomaticMicrophonePosition(side)
-                        }.disabled(store.isCalculatingAutomaticMicrophone)
-                        if store.isCalculatingAutomaticMicrophone {
-                            HStack(spacing: 6) {
-                                ProgressView()
-                                    .controlSize(.small)
-                                Text("Finding position…")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .accessibilityElement(children: .combine)
-                        }
-                        Spacer()
-                        Button("Cancel") {
-                            store.cancelMicrophonePlacement()
-                        }
-                        .keyboardShortcut(.cancelAction)
-                        Button("Done") {
-                            store.completeMicrophonePlacement()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(store.pendingMicrophonePosition == nil)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
+            VStack(alignment: .trailing, spacing: 0) {
+                if store.selectedMesh != nil && store.selectedImage == nil && store.selectedPressure == nil {
+                    ViewerOverlayControls(resetView: store.resetSelectedMeshView)
                 }
-                .padding(16)
-                .modifier(MicrophonePlacementSurface())
-                .padding(16)
+                microphonePlacementPanel
             }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    @ViewBuilder private var microphonePlacementPanel: some View {
+        if let side = store.microphonePlacementSide {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("Place \(side.title) Microphone", systemImage: "scope")
+                        .font(.callout.weight(.semibold))
+                    Spacer()
+                    Text("Click the mesh")
+                        .foregroundStyle(.secondary)
+                }
+                Text(microphoneCoordinates)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Button("Use Automatic Position") {
+                        store.useAutomaticMicrophonePosition(side)
+                    }.disabled(store.isCalculatingAutomaticMicrophone)
+                    if store.isCalculatingAutomaticMicrophone {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Finding position…")
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                    Spacer()
+                    Button("Cancel") {
+                        store.cancelMicrophonePlacement()
+                    }
+                    .keyboardShortcut(.cancelAction)
+                    Button("Done") {
+                        store.completeMicrophonePlacement()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(store.pendingMicrophonePosition == nil)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+            }
+            .padding(16)
+            .modifier(MicrophonePlacementSurface())
+            .padding(16)
         }
     }
 
