@@ -340,9 +340,7 @@ def template_config() -> dict[str, Any]:
         "left_ear": "/path/to/left.stl",
         "right_ear": "/path/to/right.stl",
         "output_dir": "runs/example",
-        "external_deps_dir": "External",
         "evaluation_grid": DEFAULT_EVALUATION_GRID,
     }
-    template["inference"]["model_config_file"] = "HRTFCalculation/Inference/resources/Local 3 Views.yaml"
-    template["inference"]["model_checkpoint"] = "HRTFCalculation/Inference/resources/Local 3 Views.pth"
+    del template["inference"]["model_config_file"], template["inference"]["model_checkpoint"]
     return template

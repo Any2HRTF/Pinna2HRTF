@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tempfile
 import uuid
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
@@ -236,16 +236,21 @@ def preprocessing_input_signature(config: PipelineConfig) -> dict:
 
 
 def validate_preprocessing_inputs(config: PipelineConfig, logger: Logger, allow_legacy: bool = False) -> None:
+    from .StageReceipt import StageNotCurrent, preprocessing_outputs_match
     path = config.paths.output_dir / PREPROCESSING_INPUT_RECEIPT
     if not path.exists():
         if allow_legacy:
+            if not preprocessing_outputs_match(config):
+                raise StageNotCurrent("The generated solver inputs changed. Run preprocessing again.")
             logger("Legacy preprocessing has no shared input receipt; proceeding with the existing simulation records. Current desktop preprocessing checks still apply.")
             return
         raise ValueError("This legacy project has no shared preprocessing input receipt. Validate and rerun preprocessing with the current inputs before config-based SOFA export. Existing results are preserved.")
     recorded = json.loads(path.read_text(encoding="utf-8"))
     current = preprocessing_input_signature(config)
-    if recorded.get("format") != current["format"] or any(recorded.get("ears", {}).get(side) != value for side, value in current["ears"].items()):
-        raise ValueError("Preprocessing inputs or settings changed. Run preprocessing with the current inputs before NumCalc or SOFA export.")
+    if recorded.get("format") != current["format"] or recorded.get("ears") != current["ears"]:
+        raise StageNotCurrent("Preprocessing inputs or settings changed. Run preprocessing with the current inputs before NumCalc or SOFA export.")
+    if not preprocessing_outputs_match(config, recorded.get("outputs")):
+        raise StageNotCurrent("The generated solver inputs changed. Run preprocessing again.")
 
 
 def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
@@ -295,6 +300,7 @@ def preprocessing_input_paths(config: PipelineConfig, logger: Logger) -> tuple[P
             continue
         selected = source
         if config.manual_ppm.enabled:
+            from .StageReceipt import mac_mesh_identity_matches, windows_mesh_identity
             if manual_path is None:
                 raise ValueError(f'Fit the {side} ear before running manual PPM preprocessing.')
             parameters = getattr(config.manual_ppm, f"{side}_parameters")
@@ -302,6 +308,13 @@ def preprocessing_input_paths(config: PipelineConfig, logger: Logger) -> tuple[P
                 raise ValueError(f"Refit the {side} ear: the saved fit parameters are missing.")
             if not manual_path.is_file():
                 raise FileNotFoundError(f"Saved manual {side} PPM fit is missing: {manual_path}")
+            fit_source = getattr(config.manual_ppm, f"{side}_source")
+            identity = getattr(config.manual_ppm, f"{side}_source_identity") or ""
+            if (fit_source is None or fit_source.resolve() != source.resolve()
+                    or not identity
+                    or not (identity == windows_mesh_identity(fit_source)
+                            or mac_mesh_identity_matches(identity, str(fit_source)))):
+                raise ValueError(f"Refit the {side} ear: the saved fit does not match the current source mesh.")
             selected = manual_path
             logger(f"Using manually fitted {side} PPM for preprocessing: {manual_path}")
         elif config.inference.use_predictions_for_preprocessing:
@@ -378,6 +391,7 @@ SLURM_CANCEL_HINT = "cancel them with Pinna2HRTF numcalc --config <settings> --c
 
 
 def run_numcalc_slurm(config: PipelineConfig, dry_run: bool, logger: Logger) -> None:
+    from .NumCalc import solver_inputs
     from .Outputs import write_json
     root = config.paths.output_dir
     jobs = slurm_jobs(root) if dry_run else release_finished_slurm_jobs(root)
@@ -395,10 +409,9 @@ def run_numcalc_slurm(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
         raise RuntimeError(slurm_busy_message(jobs))
     recorded = [slurm_record_entry(job) for job in jobs]
     submitted = []
-    for project_dir in missing:
+    plans = [(project, solver_inputs(project)[1]) for project in missing]
+    for project_dir, steps in plans:
         side = project_dir.name
-        with (project_dir / "parameters.json").open("r", encoding="utf-8") as file:
-            steps = json.load(file)["numFrequencies"]
         worker_relative = SLURM_WORKERS / f"numcalc-{side.lower()}-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.sh"
         worker = root / worker_relative
         command = [
@@ -590,12 +603,22 @@ def collect_sofa_files(projects: list[Path], output_dir: Path) -> None:
         raise ValueError("No projects were provided for SOFA export")
     if len(projects) == 2:
         from mesh2hrtf.Output2HRTF.merge_sofa_files import _merge_sofa_files
+        import numpy as np
+        import sofar
         ears = [{source.name: source for source in (project / "Output2HRTF").glob("*.sofa")} for project in projects]
         if not ears[0] or set(ears[0]) != set(ears[1]):
             raise ValueError("Left and right projects must contain matching, non-empty SOFA file sets")
         for name in sorted(ears[0]):
+            left_path, right_path = (ear[name] for ear in ears)
+            left, right = (sofar.read_sofa(str(path)) for path in (left_path, right_path))
+            left_positions, right_positions = (np.asarray(sofa.SourcePosition) for sofa in (left, right))
+            if (left.SourcePosition_Type != right.SourcePosition_Type
+                    or left.SourcePosition_Units != right.SourcePosition_Units
+                    or left_positions.shape != right_positions.shape
+                    or not np.allclose(left_positions, right_positions, atol=1e-8, rtol=0)):
+                raise ValueError(f"Left and right SOFA source positions or their order differ for {name}. Use the same evaluation grid for both ears.")
             target = output_dir / (Path(name).stem + "_merged.sofa")
-            _merge_sofa_files((str(ears[0][name]), str(ears[1][name])), str(target))
+            _merge_sofa_files((str(left_path), str(right_path)), str(target))
             if not target.is_file():
                 raise ValueError(f"SOFA merge did not produce {target}")
     elif len(projects) == 1:
@@ -760,6 +783,7 @@ def _publish_export(staging, destination, overwrite, project_root=None) -> list[
     backups.mkdir()
     installed = []
     from .Outputs import classify, write_json
+    from .Project import publish_copy
     external = project_root is not None and not destination.is_relative_to(project_root)
     ledger = project_root / ".pinna2hrtf/external-sofa-outputs.json" if external else None
     if ledger and ledger.resolve() != ledger:
@@ -778,9 +802,10 @@ def _publish_export(staging, destination, overwrite, project_root=None) -> list[
                 raise ValueError("Linked export paths are not supported.")
             target.parent.mkdir(parents=True, exist_ok=True)
             backup = backups / relative
-            if target.exists():
-                if not overwrite:
-                    raise FileExistsError(target)
+            if not overwrite:
+                publish_copy(source, target)
+                installed.append((target, backup))
+            elif target.exists():
                 if external:
                     if sha256(target).upper() != external_files.get(str(target), "").upper():
                         raise ValueError(f"Keeping modified or untracked output: {target}")
@@ -791,8 +816,9 @@ def _publish_export(staging, destination, overwrite, project_root=None) -> list[
                         raise ValueError(f"Keeping modified or untracked output: {target}. Move it away, then export again.")
                 backup.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(target, backup)
-            installed.append((target, backup))
-            source.replace(target)
+            if overwrite:
+                installed.append((target, backup))
+                source.replace(target)
             if external:
                 external_files[str(target)] = sha256(target)
         if ledger:
@@ -912,17 +938,47 @@ def parse_sofa_args() -> argparse.Namespace:
 
 def sofa_cli() -> None:
     args = parse_sofa_args()
+    from .SofaIO import install_windows_paths
+    install_windows_paths()
     import mesh2hrtf as m2h
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    projects = [Path(project) for project in (args.left_project, args.right_project) if project]
+    output_dir = Path(args.output_dir).expanduser().resolve()
+    projects = [Path(project).expanduser().resolve() for project in (args.left_project, args.right_project) if project]
     if not projects:
         raise SystemExit("At least one project is required")
-    for project in projects:
-        validate_hrir_frequencies(project)
-        m2h.output2hrtf(str(project))
-    collect_sofa_files(projects, output_dir)
-    inspect_sofa_files(output_dir)
+    if len(set(projects)) != len(projects):
+        raise ValueError("Choose different simulation projects for the left and right ears.")
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    with ExitStack() as locks:
+        for project in projects:
+            validate_hrir_frequencies(project)
+        roots = {project.parent.parent if project.parent.name == "Projects" else project for project in projects}
+        for root in sorted(roots):
+            if not locks.enter_context(_output_manifest_lock(root)):
+                raise RuntimeError(f"Project outputs are busy: {root}")
+            require_no_slurm_jobs(root)
+        with tempfile.TemporaryDirectory(prefix=".pinna-export-", dir=output_dir.parent) as temporary:
+            staging = Path(temporary)
+            results = []
+            for index, project in enumerate(projects):
+                staged_project = staging / str(index)
+                staged_project.mkdir()
+                shutil.copy2(project / "parameters.json", staged_project / "parameters.json")
+                for folder in ("ObjectMeshes", "EvaluationGrids", "NumCalc"):
+                    shutil.copytree(project / folder, staged_project / folder, copy_function=link_solver_file)
+                m2h.output2hrtf(str(staged_project))
+                results.append(staged_project)
+            export = staging / "export"
+            export.mkdir()
+            collect_sofa_files(results, export)
+            inspect_sofa_files(export)
+            _publish_export(export, output_dir, overwrite=False)
+
+
+def link_solver_file(source, destination):
+    try:
+        os.link(source, destination)
+    except OSError:
+        shutil.copy2(source, destination)
 
 
 def cli() -> None:

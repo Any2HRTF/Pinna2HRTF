@@ -40,11 +40,11 @@ def relocate(value, source, destination: Path):
         return [relocate(item, source, destination) for item in value]
     if isinstance(value, str):
         spelling = value.replace("\\", "/")
+        identity = os.path.normcase(spelling).replace("\\", "/")
         for root in source:
             prefix = str(root).replace("\\", "/").rstrip("/")
-            identity = os.path.normcase(spelling)
-            base = os.path.normcase(prefix)
-            if identity == base or identity.startswith(base + os.sep):
+            base = os.path.normcase(prefix).replace("\\", "/")
+            if identity == base or identity.startswith(base + "/"):
                 return str(destination) + spelling[len(prefix):].replace("/", os.sep)
     return value
 
@@ -143,9 +143,6 @@ def _duplicate_locked(command: dict, source: Path | None) -> dict:
                 if not isinstance(data.get("preprocessing"), dict):
                     data["preprocessing"] = {}
                 data["preprocessing"]["title"] = name
-            if isinstance(data, dict) and isinstance(data.get("preprocessing"), dict) and "project" in command:
-                data["preprocessing"].pop("source_position_input_left", None)
-                data["preprocessing"].pop("source_position_input_right", None)
             if data == original_data:
                 continue
             path.write_text(json.dumps(data, indent=2, allow_nan=False) if path.suffix == ".json" else yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
@@ -180,8 +177,22 @@ def _duplicate_locked(command: dict, source: Path | None) -> dict:
             return {"path": str(destination)}
         project = relocate(command["project"], roots, destination)
         project.update(Id=str(uuid.uuid4()), Name=name, SaveLocation=str(destination), SettingsRevision=revision)
-        project["Settings"]["Preprocessing"]["SourcePositionInputLeft"] = None
-        project["Settings"]["Preprocessing"]["SourcePositionInputRight"] = None
+        from .StageReceipt import windows_mesh_identity
+        original_settings = command["project"]["Settings"]["Preprocessing"]
+        settings = project["Settings"]["Preprocessing"]
+        for key in ("SourcePositionInputLeft", "SourcePositionInputRight"):
+            original = original_settings.get(key) or {}
+            position = settings.get(key)
+            mesh = original.get("MeshPath")
+            identity = windows_mesh_identity(mesh) if mesh else ""
+            if position and identity and original.get("MeshIdentity") == identity:
+                target = Path(position["MeshPath"])
+                local_mesh = staging / target.relative_to(destination) if target.is_relative_to(destination) else target
+                suffix = windows_mesh_identity(local_mesh)
+                if suffix:
+                    position["MeshIdentity"] = ":".join([str(target.absolute()).lower(), *suffix.rsplit(":", 3)[1:]])
+                    continue
+            settings[key] = None
         preserved = project.get("PreservedConfigJSON")
         if preserved:
             project["PreservedConfigJSON"] = json.dumps(relocate(json.loads(preserved), roots, destination))

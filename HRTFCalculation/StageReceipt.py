@@ -117,7 +117,7 @@ def preprocessing_outputs_match(config, recorded=None):
         project = config.paths.output_dir / "Projects" / side.title()
         current = preprocessing_outputs(project)
         expected = recorded.get(side) if isinstance(recorded, dict) else recorded_preprocessing_outputs(project)
-        if expected is not None and expected != current:
+        if (isinstance(recorded, dict) or expected is not None) and expected != current:
             return False
     return True
 
@@ -193,7 +193,7 @@ def preprocessing_status(config, app, record, command_config):
     if shared.exists():
         def shared_matches():
             validate_preprocessing_inputs(config, lambda _: None)
-            return preprocessing_outputs_match(config, json.loads(shared.read_text(encoding="utf-8")).get("outputs"))
+            return True
         return checked(shared_matches, False)
     legacy = root / LEGACY_PREPROCESSING_RECEIPT
     if app == "windows":
@@ -731,13 +731,12 @@ def mac_scan_selection_matches(saved, current, record):
     if not isinstance(old_scan, dict) or not isinstance(new_scan, dict):
         return False
     _, _, _, scan = mac_settings(record)
-    covered = True
     for side in ("left", "right"):
         key = "prepareLeft" if side == "left" else "prepareRight"
         enabled = scan[key]
         flag = old_scan.get(key)
-        if enabled and not (flag is True or (is_number(flag) and flag == 1)):
-            covered = False
+        if enabled != (flag is True or (is_number(flag) and flag == 1)):
+            return False
         old_scan.pop(key, None)
         new_scan.pop(key, None)
         if not enabled:
@@ -751,7 +750,7 @@ def mac_scan_selection_matches(saved, current, record):
                     new_values.pop(key, None)
                 previous[name], selected[name] = old_values, new_values
     previous["scanPreparation"], selected["scanPreparation"] = old_scan, new_scan
-    return covered and darwin_json(previous) == darwin_json(selected)
+    return darwin_json(previous) == darwin_json(selected)
 
 
 def mac_line_receipt_matches(saved, record, config):
@@ -1096,8 +1095,7 @@ def windows_preprocessing_receipt_matches(path, record, command_config):
     recorded = json.loads(path.read_bytes().decode("utf-8-sig"))
     if recorded.get("format") != "pinna2hrtf-preprocessing-windows-v3":
         return False
-    saved = recorded["ears"]
-    return all(side in saved and same_json(saved[side], ear) for side, ear in windows_preprocessing_stamp(record, command_config)["ears"].items())
+    return same_json(recorded["ears"], windows_preprocessing_stamp(record, command_config)["ears"])
 
 
 def windows_legacy_preprocessing_stamp(record, command_config):

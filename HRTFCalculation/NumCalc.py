@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import signal
@@ -60,6 +61,18 @@ def resolve_numcalc_executable(numcalc_path: Path) -> Path:
     return path
 
 
+def solver_inputs(project: Path) -> tuple[list[Path], int]:
+    parameters = json.loads((project / "parameters.json").read_text(encoding="utf-8"))
+    sources, frequencies = parameters.get("numSources"), parameters.get("numFrequencies")
+    if type(sources) is not int or sources < 1 or type(frequencies) is not int or frequencies < 1:
+        raise ValueError(f"Invalid source or frequency count in {project / 'parameters.json'}")
+    source_dirs = [project / "NumCalc" / f"source_{index}" for index in range(1, sources + 1)]
+    for source_dir in source_dirs:
+        if not (source_dir / "NC.inp").is_file():
+            raise FileNotFoundError(f"Missing NumCalc solver input: {source_dir / 'NC.inp'}")
+    return source_dirs, frequencies
+
+
 def _estimate_ram(executable: Path, adaptive_arguments: list[str], source_dir: Path) -> None:
     with tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace", prefix="pinna2hrtf-estimate-ram-") as log:
         return_code = subprocess.run([str(executable), *adaptive_arguments, "-estimate_ram"], cwd=source_dir, stdout=log, stderr=subprocess.STDOUT).returncode
@@ -117,7 +130,6 @@ def run_local_numcalc(project_path: Path | list[Path], numcalc_path: Path, max_r
             raise FileNotFoundError(f"No Mesh2HRTF projects found at {project_path}")
         from .FileIdentity import sha256
         from .Preprocessing import _project_files, _is_solver_output, EXPORT_RECORD
-        import json
         ownership = {}
         for project in projects:
             record_path = project / EXPORT_RECORD
@@ -131,13 +143,16 @@ def run_local_numcalc(project_path: Path | list[Path], numcalc_path: Path, max_r
                 continue
         pending = []
         for project in projects:
-            source_dirs = sorted(project.glob("NumCalc/source_*"))
+            source_dirs, frequency_count = solver_inputs(project)
+            steps = set(range(1, frequency_count + 1))
             for source_dir in source_dirs:
                 memory_file = source_dir / "Memory.txt"
                 estimates = list(m2h.read_ram_estimates(str(source_dir))) if memory_file.exists() else []
-                if not estimates or (adaptive_fmm_length and not all(frequency_step_complete(source_dir, int(step)) for step, _, _ in estimates)):
+                if len(estimates) != frequency_count or {row[0] for row in estimates} != steps or (adaptive_fmm_length and not all(frequency_step_complete(source_dir, step) for step in steps)):
                     _estimate_ram(executable, adaptive_arguments, source_dir)
                     estimates = list(m2h.read_ram_estimates(str(source_dir)))
+                if len(estimates) != frequency_count or {row[0] for row in estimates} != steps:
+                    raise ValueError(f"NumCalc RAM estimates do not cover all frequency steps in {source_dir}")
                 for step, frequency, ram in estimates:
                     if not frequency_step_complete(source_dir, int(step)):
                         pending.append((float(ram), project, source_dir, int(step), frequency))
