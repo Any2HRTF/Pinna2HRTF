@@ -83,7 +83,7 @@ final class EditorSCNView: NavigableSCNView {
         if model.tool == .selection {
             guard selecting else { return }
             if points.count >= 3 {
-                model.selectPolygon(points, in: self)
+                model.selectPolygon(points, in: self, extending: event.modifierFlags.contains(.shift))
             } else {
                 let hits = hitTest(point, options: [.categoryBitMask: 1, .searchMode: SCNHitTestSearchMode.closest.rawValue, .backFaceCulling: false])
                 if let face = hits.first?.faceIndex {

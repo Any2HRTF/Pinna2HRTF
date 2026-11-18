@@ -108,8 +108,8 @@ struct MeshEditorView: View {
             LabeledContent("Selected faces") {
                 Text(model.selectedFaces.count.formatted()).monospacedDigit()
             }
+            .help("Drag to select faces. Shift-drag to add to the selection. Click a face to select or deselect it.")
             Toggle("Select through mesh", isOn: $model.throughSelection)
-            Toggle("Add to selection", isOn: $model.addToSelection)
             HStack {
                 Button("Invert Selection") { model.invertSelection() }
                     .disabled(model.faces.isEmpty)

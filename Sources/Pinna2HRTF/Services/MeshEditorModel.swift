@@ -20,7 +20,6 @@ final class MeshEditorModel: EditorDocument {
     @Published var error: String?
     @Published var selectedFaces = Set<Int>()
     @Published var throughSelection = false
-    @Published var addToSelection = false
     @Published var landmarks: [SCNVector3] = []
     @Published var landmarkSlot = 0
     @Published var showCoordinateSystem = true { didSet { coordinateNode?.isHidden = !showCoordinateSystem } }
@@ -324,7 +323,7 @@ final class MeshEditorModel: EditorDocument {
         }
     }
 
-    func selectPolygon(_ points: [CGPoint], in view: SCNView) {
+    func selectPolygon(_ points: [CGPoint], in view: SCNView, extending: Bool) {
         guard !busy, tool == .selection, points.count >= 3 else { return }
         let path = CGMutablePath(); path.addLines(between: points); path.closeSubpath()
         let rectangle = path.boundingBox
@@ -340,7 +339,7 @@ final class MeshEditorModel: EditorDocument {
             }
             chosen.insert(face)
         }
-        if addToSelection { selectedFaces.formUnion(chosen) } else { selectedFaces = chosen }
+        if extending { selectedFaces.formUnion(chosen) } else { selectedFaces = chosen }
         refreshOverlays()
     }
 
