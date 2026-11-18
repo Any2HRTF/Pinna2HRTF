@@ -13,6 +13,7 @@ public partial class MainWindow
 {
     async Task OpenPressureViewerAsync(Artifact artifact)
     {
+        var tools = EffectiveTools();
         var editor = new NativeEditor(artifact.Title, Root, compactInspector: true);
         editorWindows.Add(editor.Window);
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(editorLifetime.Token);
@@ -75,6 +76,7 @@ public partial class MainWindow
         }
         async Task Load()
         {
+            using var snapshot = CaptureTools(tools);
             if (changing || steps.SelectedIndex < 0 || surfaces.SelectedItem is not string surface) return;
             var requested = ++revision; editor.Status.Text = "Loading pressure…";
             try
@@ -100,6 +102,7 @@ public partial class MainWindow
         }
         async Task Inspect()
         {
+            using var snapshot = CaptureTools(tools);
             var requested = ++revision; editor.Status.Text = "Finding calculated frequencies…";
             try
             {

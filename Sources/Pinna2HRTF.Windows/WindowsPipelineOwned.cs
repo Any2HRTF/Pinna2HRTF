@@ -6,6 +6,7 @@ public partial class MainWindow
 {
     async Task ObservePipelineAsync(OwnedProcess owned, PipelineLogCapture? capture, ProjectRecord project, Stage stage)
     {
+        var tools = EffectiveTools();
         async Task Pump(StreamReader reader, string channel)
         {
             try
@@ -46,6 +47,7 @@ public partial class MainWindow
         var result = code;
         if (!DispatcherQueue.TryEnqueue(async () =>
         {
+            using var snapshot = CaptureTools(tools);
             try { await ProcessFinishedAsync(owned.Process, project, stage, result); }
             catch (Exception failure)
             {

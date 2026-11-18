@@ -415,6 +415,25 @@ def copy_input(source: Path, folder: Path) -> Path:
 
 def execute(command: dict) -> dict:
     action = command["action"]
+    if action == "validate-grid":
+        grid = Path(command["path"]).expanduser().resolve()
+        if not all((grid / name).is_file() for name in ("Nodes.txt", "Elements.txt")):
+            raise ValueError("Choose a folder with Nodes.txt and Elements.txt.")
+        return {"path": str(grid)}
+    if action == "new-defaults":
+        values = command["defaults"]
+        fields = ("minimum_frequency", "maximum_frequency", "frequency_steps", "max_instances", "max_cpu_load")
+        if any(type(values[field]) is not int for field in fields):
+            raise ValueError("New-project defaults must be whole numbers.")
+        minimum, maximum, steps, instances, cpu = (values[field] for field in fields)
+        if not (0 <= minimum < maximum <= 96000 and 2 <= steps <= 8193 and 1 <= instances <= 1024 and 1 <= cpu <= 100):
+            raise ValueError("Invalid new-project defaults.")
+        grid = values.get("evaluation_grid", "")
+        if grid:
+            execute({"action": "validate-grid", "path": grid})
+        return {"save_location": str(Path(command["parent"]).expanduser().resolve() / ("Project " + str(command["index"]) + "-" + str(uuid.uuid4()))),
+                "preprocessing": {"min_frequency": minimum, "max_frequency": maximum, "frequency_step_count": steps, "evaluation_grid": grid},
+                "numcalc": {"max_instances": instances, "max_cpu_load": cpu}}
     if action in {"recycle-plan", "recycle"}:
         from .ProjectTrash import execute as trash
         return trash(command)

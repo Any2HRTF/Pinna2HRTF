@@ -36,7 +36,7 @@ public partial class MainWindow
             var detail = string.IsNullOrWhiteSpace(result.Error) ? "The Python operation failed." : result.Error.Trim();
             var (name, message) = CommandError(detail);
             if (name == "SettingsRevisionConflict") throw new SettingsRevisionConflictException(message ?? detail);
-            throw new IOException(detail);
+            throw new IOException(message ?? detail);
         }
         using var document = JsonDocument.Parse(result.Output);
         return document.RootElement.Clone();

@@ -2,18 +2,20 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Windowing;
 using System;
 using System.Runtime.InteropServices;
-using System.Threading;
+using Microsoft.Windows.AppLifecycle;
+using Microsoft.Windows.AppNotifications;
 
 namespace Pinna2HRTF.Windows;
 
 public partial class App : Application
 {
     Window? window;
-    private Mutex? instanceMutex;
+    private AppInstance? keyInstance;
+    private string instanceKey = "";
     #if PINNA_MAC_LAYOUT
-    private const string InstanceMutexName = @"Local\Pinna2HRTF.MacImitation.Instance";
+    private const string InstanceKeyBase = "Pinna2HRTF.MacImitation.Instance";
 #else
-    private const string InstanceMutexName = @"Local\Pinna2HRTF.Instance";
+    private const string InstanceKeyBase = "Pinna2HRTF.Instance";
 #endif
     private bool closedCleanupCompleted;
 
@@ -32,18 +34,10 @@ public partial class App : Application
             System.Globalization.CultureInfo.DefaultThreadCurrentCulture = culture;
             System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = culture;
         }
-        bool createdNew;
-        var instanceName = InstanceMutexName;
+        var instanceName = InstanceKeyBase;
         var reviewProfile = Environment.GetEnvironmentVariable("PINNA2HRTF_APP_DATA");
         if (!string.IsNullOrWhiteSpace(reviewProfile)) instanceName += ".Review." + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(reviewProfile).ToLowerInvariant())))[..16];
-        instanceMutex = new Mutex(initiallyOwned: true, name: instanceName, createdNew: out createdNew);
-        if (!createdNew)
-        {
-            try { instanceMutex.Dispose(); } catch { }
-            instanceMutex = null;
-            Environment.Exit(0);
-            return;
-        }
+        instanceKey = instanceName;
         _ = SetProcessDpiAwarenessContext(PerMonitorV2);
         UnhandledException += (_, error) =>
         {
@@ -58,9 +52,39 @@ public partial class App : Application
         InitializeComponent();
     }
 
-    protected override void OnLaunched(LaunchActivatedEventArgs args)
+    protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
-        window = new MainWindow();
+        keyInstance = AppInstance.FindOrRegisterForKey(instanceKey);
+        if (!keyInstance.IsCurrent)
+        {
+            try
+            {
+                await Task.Run(async () => {
+                    AppNotificationManager.Default.Register();
+                    try { await keyInstance.RedirectActivationToAsync(AppInstance.GetCurrent().GetActivatedEventArgs()); }
+                    finally { AppNotificationManager.Default.Unregister(); }
+                });
+            }
+            catch { }
+            Exit();
+            return;
+        }
+        keyInstance.Activated += (_, activation) => {
+            if (window is MainWindow main)
+            {
+                if (activation.Data is AppNotificationActivatedEventArgs notification) main.ActivateFromNotification(notification);
+                else main.DispatcherQueue.TryEnqueue(() => main.Activate());
+            }
+        };
+        try { window = new MainWindow(); }
+        catch (Exception error)
+        {
+            var profile = Environment.GetEnvironmentVariable("PINNA2HRTF_APP_DATA") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Pinna2HRTF");
+            Directory.CreateDirectory(profile);
+            File.WriteAllText(Path.Combine(profile, "startup-error.log"), error.ToString());
+            Exit();
+            return;
+        }
         window.Closed += (_, _) =>
         {
             if (closedCleanupCompleted) return;
@@ -76,9 +100,8 @@ public partial class App : Application
             finally
             {
                 window = null;
-                try { instanceMutex?.ReleaseMutex(); } catch (ApplicationException) { }
-                try { instanceMutex?.Dispose(); } catch { }
-                instanceMutex = null;
+                try { keyInstance?.UnregisterKey(); } catch { }
+                keyInstance = null;
 
                 try { Exit(); } finally { Environment.Exit(0); }
             }

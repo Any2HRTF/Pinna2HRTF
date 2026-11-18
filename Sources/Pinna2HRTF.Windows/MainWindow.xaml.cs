@@ -78,7 +78,8 @@ public partial class MainWindow : Window
     readonly List<Element3D> sceneLights = [];
     readonly List<MeshGeometryModel3D> meshVisuals = [];
     ProjectRegistry registry = new();
-    EnvironmentConfig environment = new();
+    EnvironmentConfig currentEnvironment = new();
+    EnvironmentConfig environment => operationTools.Value?.Environment ?? currentEnvironment;
     ProjectRecord? selectedProject;
     MeshGeometryModel3D? meshVisual;
     MeshGeometryModel3D? microphoneVisual;
@@ -236,6 +237,7 @@ public partial class MainWindow : Window
             ? ApplyScanAlignmentAsync() : Task.CompletedTask, () => scanAlignmentMode);
         foreach (var (shortcut, action) in new (string, RoutedEventHandler)[]
         {
+            ("Ctrl+,", (_, _) => ShowAppSettings()),
             ("Ctrl+R", RunNextClicked),
             ("Ctrl+Shift+R", RunAllClicked)
         })
@@ -296,14 +298,17 @@ public partial class MainWindow : Window
         EnsureStateDirectory(Path.Combine(appData, "Blender", "scripts"));
         EnsureStateDirectory(Path.Combine(appData, "Blender", "datafiles"));
         LoadSettingHelp();
+        LoadAppPreferences();
         LoadRegistry();
         LoadProjectLogs();
+        if (preferencesLoadError != null) AppendLog(preferencesLoadError);
+        InitializeNotifications();
         LoadViewerStates();
         LoadUiState();
         SetProjectsCollapsed(projectsCollapsed, false);
         SetLogCollapsed(logCollapsed, false);
         if (settingsColumn != null) settingsColumn.Width = new GridLength(Math.Clamp(settingsExpandedWidth, 320, 560));
-        environment = DefaultEnvironment();
+        ApplyAppEnvironment();
         foreach (var project in projects)
         {
             if (int.TryParse(project.Settings.Preprocessing.FrequencyStepCount, out var steps))
@@ -324,6 +329,7 @@ public partial class MainWindow : Window
         UpdateViewerAppearance();
         statusTimer.Start();
         RefreshPipelineStatus();
+        if (initialProject != null) _ = ObserveUiTaskAsync(InitializeInitialProjectAsync(initialProject), "New project defaults", initialProject);
     }
 
     void BuildInterface()
@@ -543,6 +549,9 @@ public partial class MainWindow : Window
         SyncPaneMenu();
         bar.Items.Add(view);
         bar.Items.Add(help);
+        var more = new MenuBarItem { Title = "…" };
+        more.Items.Add(MenuItem("App settings…", (_, _) => ShowAppSettings(), "Ctrl+,"));
+        bar.Items.Add(more);
         return bar;
     }
 
@@ -565,6 +574,7 @@ public partial class MainWindow : Window
             "O" => VirtualKey.O,
             "D" => VirtualKey.D,
             "R" => VirtualKey.R,
+            "," => (VirtualKey)188,
             "DELETE" => VirtualKey.Delete,
             "F1" => VirtualKey.F1,
             "ESC" or "ESCAPE" => VirtualKey.Escape,
@@ -1293,10 +1303,11 @@ public partial class MainWindow : Window
             throw new IOException("Choose a separate output folder for this project before resetting or running it.");
         var inputs = projects.SelectMany(p => ProtectedInputs(p, project.Id))
             .Where(p => !string.IsNullOrWhiteSpace(p)).OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToArray();
-        var key = root + "\n" + SofaDirectory(project) + "\n" + string.Join("\n", inputs);
+        var tools = EffectiveTools();
+        var key = root + "\n" + SofaDirectory(project) + "\n" + string.Join("\n", inputs) + "\n" + JsonSerializer.Serialize(tools);
         if (!outputStores.TryGetValue(key, out var store)) outputStores[key] = store = new GeneratedOutputManifest(root, inputs, SofaDirectory(project),
-            request => RequestPythonAsync("outputs", request),
-            () => new CLIWorker(GeometryProcess("-B", "-u", "-m", "HRTFCalculation", "output-worker"), project.Id, TimeSpan.FromHours(1)));
+            request => { using var snapshot = CaptureTools(tools); return RequestPythonAsync("outputs", request); },
+            () => { using var snapshot = CaptureTools(tools); return new CLIWorker(GeometryProcess("-B", "-u", "-m", "HRTFCalculation", "output-worker"), project.Id, TimeSpan.FromHours(1)); });
         return store;
     }
 
@@ -1705,6 +1716,7 @@ public partial class MainWindow : Window
         ResetScanAlignmentPicks();
         alignmentSessionSource = source;
         alignmentSessionProject = project.Id;
+        alignmentTools = EffectiveTools();
         if (placementSide != null) EndPlacement();
         scanAlignmentMode = true;
         artifactPicker.IsEnabled = false;
@@ -1721,6 +1733,7 @@ public partial class MainWindow : Window
         if (alignmentSaving) return;
         alignmentSessionProject = null;
         alignmentSessionSource = null;
+        alignmentTools = null;
         scanAlignmentMode = false;
         artifactPicker.IsEnabled = true;
         ClearAlignmentPreview();
@@ -1838,9 +1851,11 @@ public partial class MainWindow : Window
         return "";
     }
 
-    void CreateProject()
+    async void CreateProject()
     {
         var project = NewProject(projects.Count + 1);
+        try { await ApplyNewProjectDefaultsAsync(project); }
+        catch (Exception error) { AppendLog("Could not create project: " + error.Message); return; }
         projects.Add(project);
         failedStages[project.Id] = [];
         selectedProject = project;
@@ -2707,6 +2722,7 @@ public partial class MainWindow : Window
 
     async Task RunStageAsync(Stage stage, ProjectRecord project, Queue<Stage> sequence)
     {
+        using var tools = CaptureTools();
         bool SequenceIsCurrent() => queuedStages.TryGetValue(project.Id, out var pending) && ReferenceEquals(pending, sequence);
         void ClearSequence()
         {
@@ -2772,7 +2788,6 @@ public partial class MainWindow : Window
                 : GeometryProcess("-m", "HRTFCalculation", stage.Value, "--config", config);
             info.Environment["PINNA2HRTF_OUTPUT_TOKEN"] = outputStore.Token;
             info.Environment["PINNA2HRTF_PROTECTED_INPUTS"] = JsonSerializer.Serialize(projects.SelectMany(p => ProtectedInputs(p, project.Id)));
-            ApplyProcessEnvironment(info);
             var runId = Guid.NewGuid();
             var startedAt = DateTime.Now;
             var logPath = TechnicalLogPath(project, stage, runId, startedAt);
@@ -2806,6 +2821,7 @@ public partial class MainWindow : Window
             }
             FailedStages(project.Id).Add(stage);
             AppendLog("Could not start " + stage.Title + ": " + error, project.Id);
+            if (error is not OperationCanceledException) SendStageNotification(project, stage, false);
             RefreshPipelineStatus();
             if (error is SettingsRevisionConflictException) _ = OfferSettingsReloadAsync(project);
         }
@@ -2862,6 +2878,7 @@ public partial class MainWindow : Window
         outputOperations.Remove(project.Id);
         var technicalOutput = technicalLogPaths.TryGetValue(project.Id, out var logPath) ? $" Technical output: {Path.GetFileName(logPath)}." : "";
         AppendLog(run.StopRequested ? stage.Title + " stopped. Completed work is kept for resuming." : code == 0 ? stage.Title + " finished." : stage.Title + " failed (status " + code + ")." + technicalOutput, project.Id);
+        if (!run.StopRequested) SendStageNotification(project, stage, code == 0);
         process.Dispose();
         RefreshTechnicalLogButton();
         RefreshArtifacts();
@@ -2892,7 +2909,9 @@ public partial class MainWindow : Window
 
     bool ValidateExternalRuntime(ProjectRecord project)
     {
-        var bin = Path.Combine(environment.ExternalDir, "bin");
+        if (!SamePath(environment.MeshGradingExecutable, DefaultEnvironment().MeshGradingExecutable))
+            return File.Exists(environment.MeshGradingExecutable);
+        var bin = Path.GetDirectoryName(environment.MeshGradingExecutable)!;
         var required = new[] { "hrtf_mesh_grading.exe", "libpmp.dll", "libpmp_vis.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll" };
         var missing = required.Where(name => !File.Exists(Path.Combine(bin, name))).ToList();
         if (missing.Count > 0)
@@ -2955,6 +2974,12 @@ public partial class MainWindow : Window
 
     string? BundledPythonExecutable()
     {
+        if (PythonOverride != null) return PythonOverride;
+        return DefaultPythonExecutable();
+    }
+
+    string? DefaultPythonExecutable()
+    {
         var pythonRoot = Path.Combine(packageRoot, "Python");
         if (Directory.Exists(pythonRoot))
         {
@@ -2971,6 +2996,7 @@ public partial class MainWindow : Window
 
     string? PythonSitePackagesPath()
     {
+        if (PythonOverride != null) return null;
         var candidate = Path.Combine(packageRoot, ".venv", "Lib", "site-packages");
         return Directory.Exists(candidate) ? candidate : null;
     }
@@ -3425,13 +3451,14 @@ public partial class MainWindow : Window
         if (stage == Stage.Preprocessing)
         {
             if (PreprocessingBlocked(project, inspection)) return "Run Ear preparation & modelling first.";
-            if (!File.Exists(environment.MeshGradingExecutable)) return "The Windows mesh-grading tool is missing. Rebuild the app with its external tools.";
-            var bin = Path.Combine(environment.ExternalDir, "bin");
-            if (new[] { "libpmp.dll", "libpmp_vis.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll" }.Any(name => !File.Exists(Path.Combine(bin, name))))
-                return "The Windows mesh-grading runtime is incomplete. Rebuild the app with its external tools.";
-            return File.Exists(Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf", "Mesh2Input", "mesh2input.py")) ? null : "The Mesh2HRTF export tools are missing.";
+            if (!File.Exists(environment.MeshGradingExecutable)) return "The mesh-grading executable is unavailable. Check Tools in App settings.";
+            var bin = Path.GetDirectoryName(environment.MeshGradingExecutable)!;
+            if (SamePath(environment.MeshGradingExecutable, DefaultEnvironment().MeshGradingExecutable) &&
+                new[] { "libpmp.dll", "libpmp_vis.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll" }.Any(name => !File.Exists(Path.Combine(bin, name))))
+                return "The mesh-grading runtime is incomplete. Check Tools in App settings.";
+            return File.Exists(Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf", "Mesh2Input", "mesh2input.py")) ? null : "The Mesh2HRTF export tools are unavailable. Check Tools in App settings.";
         }
-        if (stage == Stage.Numcalc) return !StageIsComplete(Stage.Preprocessing, project, inspection) ? "Run Simulation setup first." : File.Exists(environment.NumCalcExecutable) ? null : "The NumCalc executable is missing.";
+        if (stage == Stage.Numcalc) return !StageIsComplete(Stage.Preprocessing, project, inspection) ? "Run Simulation setup first." : File.Exists(environment.NumCalcExecutable) ? null : "The NumCalc executable is unavailable. Check Tools in App settings.";
         if (stage == Stage.Postprocessing && !StageIsComplete(Stage.Preprocessing, project, inspection)) return "Run Simulation setup first.";
         return stage == Stage.Postprocessing && StageIsComplete(Stage.Numcalc, project, inspection) ? null : "Run Calculation first.";
     }
@@ -3720,6 +3747,7 @@ public partial class MainWindow : Window
 
     public void ShutdownForAppClose()
     {
+        try { CloseNotifications(); } catch { }
         try { FinishFolderNameForClose(); } catch { }
         windowChrome?.Dispose();
         meshNavigation?.Dispose();
@@ -3809,7 +3837,7 @@ public partial class MainWindow : Window
         var folderIds = registry.Folders.Select(folder => folder.Id).ToHashSet();
         foreach (var project in projects)
             if (project.FolderId is Guid id && !folderIds.Contains(id)) project.FolderId = null;
-        if (projects.Count == 0) { var project = NewProject(1); projects.Add(project); }
+        if (projects.Count == 0) { initialProject = NewProject(1); projects.Add(initialProject); }
         registryNeedsPersist = false;
         foreach (var project in projects) registryNeedsPersist |= NormalizeInferenceModelPaths(project);
         selectedProject = projects.FirstOrDefault(x => x.Id == registry.SelectedProjectID) ?? projects.FirstOrDefault();

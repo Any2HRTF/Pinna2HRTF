@@ -26,6 +26,8 @@ public partial class MainWindow
 
     async Task OpenPPMFittingAsync(string side)
     {
+        var toolEnvironment = EffectiveTools();
+        using var tools = CaptureTools(toolEnvironment);
         var project = selectedProject;
         if (project == null) return;
         var fittingKey = (project.Id, side);
@@ -342,6 +344,7 @@ public partial class MainWindow
         AddEditorSaveShortcut((UIElement)editor.Window.Content, SaveOnceAsync);
         async Task SaveFitAsync()
         {
+            using var tools = CaptureTools(toolEnvironment);
             if (busy || previewRunning || lifetime.IsCancellationRequested) return;
             busy=true; save.IsEnabled=false; HistoryState();
             try

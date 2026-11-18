@@ -18,6 +18,7 @@ public partial class MainWindow
     Guid? alignmentProjectId;
     Guid? alignmentSessionProject;
     string? alignmentSessionSource;
+    ToolEnvironment? alignmentTools;
     int alignmentGeneration;
     bool alignmentSaving;
     bool alignmentPreviewing;
@@ -113,6 +114,7 @@ public partial class MainWindow
 
     async Task PreviewOrSaveAlignmentAsync(bool previewOnly = false)
     {
+        using var tools = CaptureTools(alignmentTools);
         var project=selectedProject;
         if(!scanAlignmentMode||project==null||alignmentSessionProject!=project.Id||alignmentDiscardPromptOpen||runs.ContainsKey(project.Id)||outputOperations.Contains(project.Id))return;
         if (alignmentPreviewing || alignmentSaving || (previewOnly ? pendingAlignment != null : pendingAlignment == null)) return;

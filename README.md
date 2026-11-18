@@ -22,3 +22,9 @@ If you find our work valuable, please cite:
 ```
 
 [European Union Public Licence 1.2](LICENSE). Bundled dependencies retain their own licences.
+
+## Desktop default operations
+
+The public machine command `Pinna2HRTF project new-defaults` accepts JSON on stdin with `parent`, `index`, and a `defaults` object containing integer `minimum_frequency`, `maximum_frequency`, `frequency_steps`, `max_instances`, `max_cpu_load`, and optional `evaluation_grid`. It returns a unique `save_location` and validated `preprocessing` and `numcalc` defaults without creating a project folder.
+
+`Pinna2HRTF project validate-grid` accepts `{"path":"..."}` and returns the resolved folder when it contains Nodes.txt and Elements.txt. Both commands return JSON errors and nonzero status on failure.

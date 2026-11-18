@@ -40,13 +40,14 @@ public partial class MainWindow
 
     async void RefreshGeometry()
     {
+        var toolRevision = toolEnvironmentRevision;
         try
         {
             var project = selectedProject;
             if (project == null || geometryEditing) return;
             var left = PreprocessingMesh(project, "left") ?? (File.Exists(project.LeftEar) ? project.LeftEar : null);
             var right = PreprocessingMesh(project, "right") ?? (File.Exists(project.RightEar) ? project.RightEar : null);
-            var key = project.Id + "|" + left + "|" + (left == null ? "" : MeshIdentity(left)) + "|" + right + "|" + (right == null ? "" : MeshIdentity(right));
+            var key = toolRevision + "|" + project.Id + "|" + left + "|" + (left == null ? "" : MeshIdentity(left)) + "|" + right + "|" + (right == null ? "" : MeshIdentity(right));
             if (left == null && right == null)
             {
                 displayedGeometry = null;
@@ -64,10 +65,10 @@ public partial class MainWindow
                 try { measured = await request; geometryCache[key] = measured; }
                 finally { geometryRequests.Remove(key); }
             }
-            if (selectedProject != project || geometryEditing) return;
+            if (selectedProject != project || geometryEditing || toolEnvironmentRevision != toolRevision) return;
             var nowLeft = PreprocessingMesh(project, "left") ?? (File.Exists(project.LeftEar) ? project.LeftEar : null);
             var nowRight = PreprocessingMesh(project, "right") ?? (File.Exists(project.RightEar) ? project.RightEar : null);
-            var currentKey = project.Id + "|" + nowLeft + "|" + (nowLeft == null ? "" : MeshIdentity(nowLeft)) + "|" + nowRight + "|" + (nowRight == null ? "" : MeshIdentity(nowRight));
+            var currentKey = toolRevision + "|" + project.Id + "|" + nowLeft + "|" + (nowLeft == null ? "" : MeshIdentity(nowLeft)) + "|" + nowRight + "|" + (nowRight == null ? "" : MeshIdentity(nowRight));
             if (currentKey != key) { RefreshGeometry(); return; }
             try { displayedGeometry = ApplyGeometrySettings(measured, project.Settings.Preprocessing); }
             catch (Exception error)
@@ -87,12 +88,9 @@ public partial class MainWindow
 
     async Task<GeometryValues> InspectGeometry(string? left, string? right)
     {
-        var info = new ProcessStartInfo(BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe"))
-        { WorkingDirectory = packageRoot, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        foreach (var argument in new[] { "-X", "utf8", "-m", "HRTFCalculation", "geometry" }) info.ArgumentList.Add(argument);
+        var info = GeometryProcess("-m", "HRTFCalculation", "geometry");
         if (left != null) { info.ArgumentList.Add("--left"); info.ArgumentList.Add(left); }
         if (right != null) { info.ArgumentList.Add("--right"); info.ArgumentList.Add(right); }
-        ApplyProcessEnvironment(info);
         var result = await ToolProcess.RunAsync(info, null, TimeSpan.FromSeconds(180), editorLifetime.Token);
         if (result.ExitCode != 0) throw new IOException(result.Error.Trim());
         return JsonSerializer.Deserialize<GeometryValues>(result.Output) ?? throw new IOException("No geometry measurements returned.");
@@ -143,8 +141,15 @@ public partial class MainWindow
 
     ProcessStartInfo GeometryProcess(params string[] arguments)
     {
-        var info = new ProcessStartInfo(BundledPythonExecutable() ?? Path.Combine(packageRoot, ".venv", "Scripts", "python.exe"))
+        var python = BundledPythonExecutable();
+        if (python != null && !File.Exists(python)) throw new IOException("The Python executable is unavailable. Check Tools in App settings.");
+        if (python == null && !File.Exists(environment.UvExecutable)) throw new IOException("The Python runtime and uv executable are unavailable. Check Tools in App settings.");
+        var info = new ProcessStartInfo(python ?? environment.UvExecutable)
         { WorkingDirectory = packageRoot, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        if (python == null)
+        {
+            info.ArgumentList.Add("run"); info.ArgumentList.Add("--offline"); info.ArgumentList.Add("--no-sync"); info.ArgumentList.Add("--project"); info.ArgumentList.Add(packageRoot); info.ArgumentList.Add("python");
+        }
         info.ArgumentList.Add("-X"); info.ArgumentList.Add("utf8");
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
         ApplyProcessEnvironment(info);

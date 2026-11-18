@@ -17,6 +17,8 @@ public partial class MainWindow
     }
     async Task RefreshStatusSnapshotAsync(ProjectRecord project, bool decisive)
     {
+        using var tools = CaptureTools();
+        var toolRevision = toolEnvironmentRevision;
         if (!decisive && !pendingStatus.Add(project.Id)) return;
         var snapshot = Clone(project); var revision = StatusRevision(snapshot);
         try
@@ -37,7 +39,7 @@ public partial class MainWindow
                 if (!stages[Stage.Numcalc] && outdated.Contains(Stage.Preprocessing) && outdated.Contains(Stage.Postprocessing)) outdated.Add(Stage.Numcalc);
                 return (stages, reasons, progress, outdated);
             });
-            if (!shutdownCleanupDone && projects.Contains(project) && StatusRevision(project) == revision)
+            if (!shutdownCleanupDone && toolEnvironmentRevision == toolRevision && projects.Contains(project) && StatusRevision(project) == revision)
             {
                 var inputAvailabilityChanged = !statusSnapshots.TryGetValue(project.Id, out var previous) || previous.Revision != revision ||
                     new[] { Stage.ScanPreparation, Stage.Inference, Stage.Preprocessing }.Any(stage => previous.Stages.GetValueOrDefault(stage) != result.stages.GetValueOrDefault(stage));

@@ -26,6 +26,7 @@ public partial class MainWindow
 
     async Task EditPreparedEarAsync(string side)
     {
+        using var tools = CaptureTools();
         var project = selectedProject;
         if (project != null && earEditorWindows.TryGetValue((project.Id, side), out var existing))
         {
@@ -82,10 +83,11 @@ public partial class MainWindow
 
     async Task<string?> ShowWindowsEarEditorAsync(string source, string preparedSource, string destination, string report, string generation, string side, ProjectRecord project)
     {
+        var tools = EffectiveTools();
         using var session = CancellationTokenSource.CreateLinkedTokenSource(editorLifetime.Token);
         Task<JsonElement>? pendingBackend = null;
         async Task<JsonElement> SessionBackendAsync(Dictionary<string, object> request)
-        { pendingBackend = RunMeshEditorPythonAsync(request, session.Token); return await pendingBackend; }
+        { using var snapshot = CaptureTools(tools); pendingBackend = RunMeshEditorPythonAsync(request, session.Token); return await pendingBackend; }
         var workspace = Path.Combine(Path.GetTempPath(), "pinna-ear-edit-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(workspace);
         var versions = new List<string>();
@@ -544,6 +546,7 @@ public partial class MainWindow
         AddEditorSaveShortcut(windowRoot, SaveOnceAsync);
         async Task SaveEarAsync()
         {
+            using var snapshot = CaptureTools(tools);
             if (isBusy || selectedFaces.Count != 0 || planePanel.Visibility == Visibility.Visible || versions.Count == 0) return;
             var stagedDestination = Path.Combine(workspace, "saved-ear.stl");
             var request = new Dictionary<string, object>

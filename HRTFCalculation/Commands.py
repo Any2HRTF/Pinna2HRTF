@@ -11,7 +11,7 @@ def project():
     duplicate = commands.add_parser("duplicate")
     for option in ("source", "parent", "name"):
         duplicate.add_argument("--" + option)
-    for action in ("load", "save", "validate", "validate_outputs", "validate-prepared", "read", "copy-input", "publish-editor", "stage-status", "record-stage", "prepare-folder", "recycle-plan", "recycle"):
+    for action in ("new-defaults", "validate-grid", "load", "save", "validate", "validate_outputs", "validate-prepared", "read", "copy-input", "publish-editor", "stage-status", "record-stage", "prepare-folder", "recycle-plan", "recycle"):
         commands.add_parser(action)
     args = vars(parser.parse_args())
     action = args.pop("action")
