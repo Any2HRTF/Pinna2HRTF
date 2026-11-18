@@ -77,7 +77,7 @@ struct MeshViewerView: View {
         .frame(maxHeight: .infinity)
         .overlay(alignment: .topTrailing) {
             if store.selectedMesh != nil && store.selectedImage == nil && store.selectedPressure == nil {
-                ViewerOverlayControls(resetView: store.resetSelectedMeshView) { EmptyView() }
+                ViewerOverlayControls(resetView: store.resetSelectedMeshView)
             }
         }
         .overlay(alignment: .bottom) {
@@ -235,13 +235,11 @@ struct ViewerGlassButtonStyle: ViewModifier {
     }
 }
 
-struct ViewerOverlayControls<Leading: View>: View {
+struct ViewerOverlayControls: View {
     let resetView: () -> Void
-    @ViewBuilder let leading: () -> Leading
 
     var body: some View {
         HStack(spacing: 8) {
-            leading()
             Button(action: resetView) {
                 Label("Reset View", systemImage: "arrow.counterclockwise")
             }

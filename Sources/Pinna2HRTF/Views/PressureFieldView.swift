@@ -2,7 +2,7 @@ import SwiftUI
 import SceneKit
 
 struct PressureFieldView: View {
-    static let minimumViewerWidth: CGFloat = 680
+    static let minimumViewerWidth: CGFloat = 420
     @StateObject private var model: PressureFieldModel
     @Environment(\.colorScheme) private var colorScheme
 
@@ -10,7 +10,11 @@ struct PressureFieldView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) { selectors; Spacer(minLength: 0) }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { selectors; Spacer(minLength: 0) }
+                VStack(alignment: .leading, spacing: 8) { selectors }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             .padding(12)
             Divider()
             ZStack(alignment: .bottomLeading) {
@@ -36,15 +40,7 @@ struct PressureFieldView: View {
                 }
             }
             .overlay(alignment: .topTrailing) {
-                ViewerOverlayControls(resetView: model.resetCamera) {
-                    Button {
-                        Task { await model.open(); await model.load() }
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-                    .help("Refresh")
-                    .disabled(model.loading)
-                }
+                ViewerOverlayControls(resetView: model.resetCamera)
             }
         }
         .task { await model.open() }
