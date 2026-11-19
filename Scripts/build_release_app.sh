@@ -423,12 +423,20 @@ fi
 codesign --verify --deep --strict --verbose=2 "$CLEAN_APP_DIR"
 if [[ "$MODE" == "distribution" ]]; then
   APP_ARCHIVE="$STAGE_ROOT/Pinna2HRTF.zip"
-  DMG_PATH="$DIST_DIR/Pinna2HRTF-$APP_ARTIFACT_VERSION-macOS-arm64.dmg"
   ditto -c -k --sequesterRsrc --keepParent "$CLEAN_APP_DIR" "$APP_ARCHIVE"
   xcrun notarytool submit "$APP_ARCHIVE" --keychain-profile "$NOTARY_PROFILE" --wait
   xcrun stapler staple "$CLEAN_APP_DIR"
   xcrun stapler validate "$CLEAN_APP_DIR"
   spctl --assess --type execute --verbose=2 "$CLEAN_APP_DIR"
+fi
+PACKAGED_ROOT="$STAGE_ROOT/packaged"
+PACKAGED_APP_DIR="$PACKAGED_ROOT/Pinna2HRTF.app"
+mkdir -p "$PACKAGED_ROOT"
+/usr/bin/aa archive -d "$CLEAN_ROOT" -include-path Pinna2HRTF.app -a raw |
+  /usr/bin/aa extract -d "$PACKAGED_ROOT" -afsc-all -afsc lzfse
+codesign --verify --deep --strict --verbose=2 "$PACKAGED_APP_DIR"
+if [[ "$MODE" == "distribution" ]]; then
+  DMG_PATH="$DIST_DIR/Pinna2HRTF-$APP_ARTIFACT_VERSION-macOS-arm64.dmg"
   rm -f "$DMG_PATH" "$DMG_PATH.sha256"
   "$ROOT/Scripts/dmg/make_dmg.sh" "$CLEAN_APP_DIR" "$DMG_PATH" "Pinna2HRTF $APP_DISPLAY_VERSION" "$APP_DISPLAY_VERSION"
   codesign --force --sign "$SIGNING_IDENTITY" --timestamp "$DMG_PATH"
@@ -439,13 +447,13 @@ if [[ "$MODE" == "distribution" ]]; then
   shasum -a 256 "$DMG_PATH" > "$DMG_PATH.sha256"
   rm -rf "$FINAL_APP_DIR"
   mkdir -p "$(dirname "$FINAL_APP_DIR")"
-  ditto --norsrc --noextattr --noqtn "$CLEAN_APP_DIR" "$FINAL_APP_DIR"
+  ditto --norsrc --noextattr --noqtn "$PACKAGED_APP_DIR" "$FINAL_APP_DIR"
   codesign --verify --deep --verbose=2 "$FINAL_APP_DIR"
   echo "$DMG_PATH"
 else
   rm -rf "$FINAL_APP_DIR"
   mkdir -p "$(dirname "$FINAL_APP_DIR")"
-  ditto --norsrc --noextattr --noqtn "$CLEAN_APP_DIR" "$FINAL_APP_DIR"
+  ditto --norsrc --noextattr --noqtn "$PACKAGED_APP_DIR" "$FINAL_APP_DIR"
   codesign --verify --deep --verbose=2 "$FINAL_APP_DIR"
   if [[ "$MODE" == "installer" ]]; then
     DMG_NAME="Pinna2HRTF-$APP_ARTIFACT_VERSION-macOS-arm64.dmg"

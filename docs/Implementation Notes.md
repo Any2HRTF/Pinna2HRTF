@@ -185,7 +185,8 @@ Owners: `Scripts/build_release_app.sh`, `Scripts/prepare_external_tools.sh`, `Sc
 - `trim_macos_runtime.py` validates the whole removal set first, including files that other kept distributions also own, and never follows links out of staging. It removes only `site-packages/tests`, `torch/include` and the `tests` trees of an explicit package list, which hold unit tests and example meshes. It keeps `torch.testing`, `scipy._lib._testutils`, Blender scripts, native plugins, licences and dist-info metadata, because runtime imports can depend on them.
 - Blender can start Python with its own cache settings. Its bundled startup and add-on scripts are precompiled, so the first launch cannot add files to the sealed resources.
 - Wheels flatten Qt's versioned framework symlinks. The canonical framework layout is restored before signing, because duplicate `Resources/Info.plist` copies make `codesign` treat a framework as an ambiguous application bundle.
-- The website documentation is bundled for offline help.
+- The Mac Help menu opens the online documentation. The Windows build bundles the website for offline help.
+- The packaged Mac app uses macOS filesystem compression. The build verifies the signature again after compression. The app keeps all runtime files and models locally. Disk usage depends on the destination filesystem, and the logical file sizes are unchanged.
 - DMG layout: the window geometry and icon centres (Finder coordinates, top-left origin) must match between `make_dmg.sh` and `render_background.swift`. Finder needs the disk by its POSIX path for layout, and it removes a volume icon during layout, so the icon is added afterwards.
 
 ### Windows
