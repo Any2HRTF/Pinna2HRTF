@@ -12,6 +12,9 @@ final class ProjectStatusController: ObservableObject {
     private var refreshProgress: Progress?
     private let refreshQueue = DispatchQueue(label: "Pinna2HRTF.ProjectStatusRefresh", qos: .userInitiated, attributes: .concurrent)
     private let solverRefreshQueue = DispatchQueue(label: "Pinna2HRTF.SolverStatusRefresh", qos: .utility)
+    private let summaryQueue = DispatchQueue(label: "Pinna2HRTF.ProjectSummaries", qos: .utility)
+    private var summaryProgress: Progress?
+    private var summarizedProjects: [UUID: ProjectRecord] = [:]
 
     weak var store: AppStore?
 
@@ -23,7 +26,35 @@ final class ProjectStatusController: ObservableObject {
     }
 
     func refreshSummaries(for projects: [ProjectRecord]) {
-        projectSummaries = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, ProjectStatusSnapshot.savedSummary(for: $0)) })
+        summaryProgress?.cancel()
+        let currentProjects = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, $0) })
+        summarizedProjects = summarizedProjects.filter { currentProjects[$0.key] == $0.value }
+        let summaries = Dictionary(uniqueKeysWithValues: projects.map { project in
+            (project.id, summarizedProjects[project.id] == project
+                ? projectSummaries[project.id, default: ""]
+                : ProjectStatusSnapshot.savedSummary(for: project))
+        })
+        if projectSummaries != summaries { projectSummaries = summaries }
+
+        let pending = projects.filter { summarizedProjects[$0.id] != $0 }
+        guard !pending.isEmpty else { return }
+        let selectedID = store?.selectedProjectID
+        let ordered = pending.filter { $0.id != selectedID } + pending.filter { $0.id == selectedID }
+        let progress = Progress(totalUnitCount: Int64(ordered.count))
+        summaryProgress = progress
+        summaryQueue.asyncAfter(deadline: .now() + .milliseconds(400)) { [weak self] in
+            for project in ordered {
+                guard !progress.isCancelled else { return }
+                let inspection = ArtifactScanner.Inspection(isCancelled: { progress.isCancelled })
+                let summary = ProjectStatusSnapshot.loadSummary(for: project, inspection: inspection)
+                Task { @MainActor [weak self] in
+                    guard let self, !progress.isCancelled,
+                          self.store?.projects.first(where: { $0.id == project.id }) == project,
+                          self.summarizedProjects[project.id] != project else { return }
+                    self.applySummary(summary, for: project)
+                }
+            }
+        }
     }
 
     func refresh(restoringViewer: Bool = false) {
@@ -98,7 +129,7 @@ final class ProjectStatusController: ObservableObject {
         guard let store else { return }
         projectStatus = status
         artifacts = status.artifacts
-        projectSummaries[status.project.id] = status.summary
+        if !status.checkingSolverResults { applySummary(status.summary, for: status.project) }
         var states = status.states
         for stage in Stage.allCases {
             if store.runner.failedStagesByProject[status.project.id]?.contains(stage) == true { states[stage] = .failed }
@@ -106,5 +137,10 @@ final class ProjectStatusController: ObservableObject {
         }
         if status.preprocessingNeedsRerun, states[.preprocessing] == .done { states[.preprocessing] = .ready }
         stageStates = states
+    }
+
+    private func applySummary(_ summary: String, for project: ProjectRecord) {
+        summarizedProjects[project.id] = project
+        if projectSummaries[project.id] != summary { projectSummaries[project.id] = summary }
     }
 }

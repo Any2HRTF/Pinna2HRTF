@@ -36,14 +36,18 @@ struct ProjectStatusSnapshot {
     }
 
     var summary: String {
-        if project.stageOutcomes?.values.contains(.failed) == true { return "Latest run failed · previous results may remain" }
-        if project.stageOutcomes?.values.contains(.stopped) == true { return "Task stopped · previous results may remain" }
+        Self.summary(for: project, completed: completed, preprocessingNeedsRerun: preprocessingNeedsRerun)
+    }
+
+    private static func summary(for project: ProjectRecord, completed: Set<Stage>, preprocessingNeedsRerun: Bool) -> String {
+        let saved = savedSummary(for: project)
+        if !saved.isEmpty { return saved }
         if preprocessingNeedsRerun { return "Simulation needs preprocessing" }
         if completed.contains(.postprocessing) { return "HRTFs ready" }
         if completed.contains(.numcalc) { return "Simulation complete" }
         if completed.contains(.preprocessing) { return "Simulation ready" }
         if project.settings.inference.usePredictionsForPreprocessing && completed.contains(.inference) { return "Mesh2PPM Inference ready" }
-        return Self.savedSummary(for: project)
+        return ""
     }
 
     static func savedSummary(for project: ProjectRecord) -> String {
@@ -52,13 +56,34 @@ struct ProjectStatusSnapshot {
         return ""
     }
 
+    static func loadSummary(for project: ProjectRecord, inspection: ArtifactScanner.Inspection) -> String {
+        let saved = savedSummary(for: project)
+        guard saved.isEmpty, !project.saveLocation.isEmpty else { return saved }
+        let completed = completedStages(for: project, inspection: inspection, includeSolverResults: true)
+        return summary(for: project, completed: completed,
+                       preprocessingNeedsRerun: preprocessingNeedsRerun(for: project, completed: completed, inspection: inspection))
+    }
+
+    private static func completedStages(for project: ProjectRecord, inspection: ArtifactScanner.Inspection,
+                                        includeSolverResults: Bool) -> Set<Stage> {
+        Set(Stage.allCases.filter {
+            (includeSolverResults || $0 != .numcalc) && !inspection.isCancelled()
+                && ArtifactScanner.stageIsComplete($0, project: project, inspection: inspection)
+        })
+    }
+
+    private static func preprocessingNeedsRerun(for project: ProjectRecord, completed: Set<Stage>,
+                                                inspection: ArtifactScanner.Inspection) -> Bool {
+        completed.contains(.preprocessing) && !project.saveLocation.isEmpty && !inspection.receiptIsCurrent(.preprocessing, project: project)
+    }
+
     static func load(project: ProjectRecord, environment: EnvironmentConfig, projects: [ProjectRecord],
                      inspection: ArtifactScanner.Inspection, includeSolverResults: Bool = true) -> Self {
         let isCancelled = inspection.isCancelled
-        let completed = Set(Stage.allCases.filter { (includeSolverResults || $0 != .numcalc) && !isCancelled() && ArtifactScanner.stageIsComplete($0, project: project, inspection: inspection) })
+        let completed = completedStages(for: project, inspection: inspection, includeSolverResults: includeSolverResults)
         let states = ArtifactScanner.stageStates(for: project, runningStage: nil, failedStages: [], inspection: inspection, completedStages: completed)
         let issues = ProjectValidation.issues(for: project, inspection: inspection)
-        let needsRerun = completed.contains(.preprocessing) && !project.saveLocation.isEmpty && !inspection.receiptIsCurrent(.preprocessing, project: project)
+        let needsRerun = preprocessingNeedsRerun(for: project, completed: completed, inspection: inspection)
         var reasons: [Stage: String] = [:]
         for stage in Stage.allCases {
             reasons[stage] = unavailableReason(stage, project: project, environment: environment, projects: projects,
