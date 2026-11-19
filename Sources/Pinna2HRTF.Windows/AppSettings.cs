@@ -34,6 +34,7 @@ public partial class MainWindow
 {
     AppPreferences appPreferences = new();
     Grid? appSettingsPage;
+    Control? settingsReturnFocus;
     Action? refreshToolSettings;
     string? preferencesLoadError;
     ProjectRecord? initialProject;
@@ -147,6 +148,7 @@ public partial class MainWindow
     void ShowAppSettings()
     {
         if (appSettingsPage != null) return;
+        settingsReturnFocus = Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(Root.XamlRoot) as Control;
         var page = new Grid { Background = appBackgroundBrush };
         page.RowDefinitions.Add(new() { Height = GridLength.Auto });
         page.RowDefinitions.Add(new());
@@ -247,6 +249,8 @@ public partial class MainWindow
         appSettingsPage = null;
         refreshToolSettings = null;
         if (contentGrid != null) contentGrid.Visibility = Visibility.Visible;
+        if (settingsReturnFocus?.Focus(FocusState.Programmatic) != true) projectList.Focus(FocusState.Programmatic);
+        settingsReturnFocus = null;
     }
 
     void IntegerRow(StackPanel parent, string title, Func<int> read, Action<int> write, Func<int> minimum, Func<int> maximum)

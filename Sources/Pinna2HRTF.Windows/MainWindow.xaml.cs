@@ -330,6 +330,9 @@ public partial class MainWindow : Window
         statusTimer.Start();
         RefreshPipelineStatus();
         if (initialProject != null) _ = ObserveUiTaskAsync(InitializeInitialProjectAsync(initialProject), "New project defaults", initialProject);
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => {
+            if (appSettingsPage == null) projectList.Focus(FocusState.Programmatic);
+        });
     }
 
     void BuildInterface()
