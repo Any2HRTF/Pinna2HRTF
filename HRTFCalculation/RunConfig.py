@@ -853,7 +853,7 @@ def validate_hrir_frequencies(project: Path) -> None:
 
 def _export_postprocessing(config, output_dir, logger):
     import mesh2hrtf as m2h
-    from .Preprocessing import snapshot_generated_outputs, claim_generated_outputs
+    from .SolverProjectFiles import snapshot_generated_outputs, claim_generated_outputs
     projects = project_dirs(config)
     snapshots = {project: snapshot_generated_outputs(project) for project in projects}
     for project in projects:

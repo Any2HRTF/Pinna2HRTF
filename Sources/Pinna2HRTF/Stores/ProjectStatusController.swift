@@ -59,8 +59,9 @@ final class ProjectStatusController: ObservableObject {
             if project.saveLocation.hasPrefix(Defaults.appDataURL.appendingPathComponent("Projects", isDirectory: true).path + "/") {
                 ProjectLibrary.migrateProjectDirectory(for: project)
             }
+            let inspection = ArtifactScanner.Inspection(isCancelled: { progress.isCancelled })
             let status = ProjectStatusSnapshot.load(project: project, environment: currentEnvironment, projects: currentProjects,
-                                                    includeSolverResults: false, isCancelled: { progress.isCancelled })
+                                                    inspection: inspection, includeSolverResults: false)
             guard !progress.isCancelled else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.isCurrent(refreshID, project: project, environment: currentEnvironment) else { return }
@@ -74,7 +75,7 @@ final class ProjectStatusController: ObservableObject {
                 solverQueue.async { [weak self] in
                     guard !progress.isCancelled else { return }
                     let detailed = ProjectStatusSnapshot.load(project: project, environment: currentEnvironment, projects: currentProjects,
-                                                              isCancelled: { progress.isCancelled })
+                                                              inspection: inspection)
                     Task { @MainActor [weak self] in
                         guard let self, !progress.isCancelled, self.isCurrent(refreshID, project: project, environment: currentEnvironment) else { return }
                         self.apply(detailed)

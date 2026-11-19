@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 from .Config import BUNDLED_EVALUATION_GRID_PATH, DEFAULT_EVALUATION_GRID, PipelineConfig
 from .FileIdentity import cached_sha256 as sha256
 from .Outputs import write_json
+from .SolverProjectFiles import preprocessing_outputs, recorded_preprocessing_outputs
 from .RunConfig import PREPROCESSING_INPUT_RECEIPT, input_paths, predicted_stl, preprocessing_input_signature, validate_preprocessing_inputs
 
 STAGES = ("inference", "preprocessing", "postprocessing")
@@ -110,7 +111,6 @@ def signature(config, stage):
 
 
 def preprocessing_outputs_match(config, recorded=None):
-    from .Preprocessing import preprocessing_outputs, recorded_preprocessing_outputs
     for side, ear in zip(("left", "right"), input_paths(config)):
         if ear is None:
             continue
@@ -123,7 +123,6 @@ def preprocessing_outputs_match(config, recorded=None):
 
 
 def record_preprocessing(config, inputs=None):
-    from .Preprocessing import preprocessing_outputs
     inputs = inputs or preprocessing_input_signature(config)
     outputs = {side: preprocessing_outputs(config.paths.output_dir / "Projects" / side.title()) for side in inputs["ears"]}
     path = config.paths.output_dir / PREPROCESSING_INPUT_RECEIPT

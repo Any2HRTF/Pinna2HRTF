@@ -4,11 +4,20 @@ enum ArtifactScanner {
     final class Inspection {
         private var documents: [URL: [String: Any]?] = [:]
         private var metadata: [URL: [FileAttributeKey: Any]?] = [:]
+        private var receiptVerdicts: [Stage: Bool] = [:]
         fileprivate var completedSteps: [URL: Bool] = [:]
         fileprivate var directRunSteps: [URL: Set<Int>] = [:]
         let isCancelled: () -> Bool
 
         init(isCancelled: @escaping () -> Bool = { false }) { self.isCancelled = isCancelled }
+
+        func receiptIsCurrent(_ stage: Stage, project: ProjectRecord) -> Bool {
+            guard !isCancelled() else { return false }
+            if let verdict = receiptVerdicts[stage] { return verdict }
+            let verdict = StageReceipt.current(stage, project)
+            receiptVerdicts[stage] = verdict
+            return verdict
+        }
 
         func document(_ url: URL) -> [String: Any]? {
             if let cached = documents[url] { return cached }
@@ -214,7 +223,7 @@ enum ArtifactScanner {
         case .scanPreparation:
             return !project.scanPreparation.enabled || scanPreparationIsCurrent(project, inspection: inspection)
         case .inference:
-            if validateReceipt && !StageReceipt.current(stage, project) { return false }
+            if validateReceipt && !inspection.receiptIsCurrent(stage, project: project) { return false }
             return !sides.isEmpty && sides.allSatisfy { side in
                 guard let prediction = preprocessingMesh(for: project, side: side, inspection: inspection) else { return false }
                 return fileHasData(prediction, inspection: inspection)
@@ -233,7 +242,7 @@ enum ArtifactScanner {
                     || numcalcIsComplete(folder, inspection: inspection)
             }
         case .postprocessing:
-            return containsSOFA(postprocessingDirectory(for: project), inspection: inspection) && StageReceipt.current(stage, project)
+            return containsSOFA(postprocessingDirectory(for: project), inspection: inspection) && inspection.receiptIsCurrent(stage, project: project)
         }
     }
 

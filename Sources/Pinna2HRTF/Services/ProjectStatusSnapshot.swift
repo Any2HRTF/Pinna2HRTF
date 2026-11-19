@@ -53,12 +53,12 @@ struct ProjectStatusSnapshot {
     }
 
     static func load(project: ProjectRecord, environment: EnvironmentConfig, projects: [ProjectRecord],
-                     includeSolverResults: Bool = true, isCancelled: @escaping () -> Bool = { false }) -> Self {
-        let inspection = ArtifactScanner.Inspection(isCancelled: isCancelled)
+                     inspection: ArtifactScanner.Inspection, includeSolverResults: Bool = true) -> Self {
+        let isCancelled = inspection.isCancelled
         let completed = Set(Stage.allCases.filter { (includeSolverResults || $0 != .numcalc) && !isCancelled() && ArtifactScanner.stageIsComplete($0, project: project, inspection: inspection) })
         let states = ArtifactScanner.stageStates(for: project, runningStage: nil, failedStages: [], inspection: inspection, completedStages: completed)
         let issues = ProjectValidation.issues(for: project, inspection: inspection)
-        let needsRerun = completed.contains(.preprocessing) && !project.saveLocation.isEmpty && !StageReceipt.current(.preprocessing, project)
+        let needsRerun = completed.contains(.preprocessing) && !project.saveLocation.isEmpty && !inspection.receiptIsCurrent(.preprocessing, project: project)
         var reasons: [Stage: String] = [:]
         for stage in Stage.allCases {
             reasons[stage] = unavailableReason(stage, project: project, environment: environment, projects: projects,

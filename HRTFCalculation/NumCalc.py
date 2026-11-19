@@ -129,7 +129,7 @@ def run_local_numcalc(project_path: Path | list[Path], numcalc_path: Path, max_r
         if not projects:
             raise FileNotFoundError(f"No Mesh2HRTF projects found at {project_path}")
         from .FileIdentity import sha256
-        from .Preprocessing import _project_files, _is_solver_output, EXPORT_RECORD
+        from .SolverProjectFiles import project_files, is_solver_output, EXPORT_RECORD
         ownership = {}
         for project in projects:
             record_path = project / EXPORT_RECORD
@@ -137,7 +137,7 @@ def run_local_numcalc(project_path: Path | list[Path], numcalc_path: Path, max_r
                 continue
             try:
                 record = json.loads(record_path.read_text(encoding="utf-8"))
-                existing, _ = _project_files(project)
+                existing, _ = project_files(project)
                 ownership[project] = (record, set(existing))
             except (OSError, ValueError, KeyError, TypeError):
                 continue
@@ -240,9 +240,9 @@ def run_local_numcalc(project_path: Path | list[Path], numcalc_path: Path, max_r
         for project, (record, existing) in ownership.items():
             recorded = record.get("files", {})
             grids = {name.split("/")[1] for name in recorded if name.startswith("EvaluationGrids/") and name.count("/") >= 2}
-            files, _ = _project_files(project)
+            files, _ = project_files(project)
             for name in files:
-                if name not in existing and _is_solver_output(name, grids):
+                if name not in existing and is_solver_output(name, grids):
                     recorded[name] = sha256(project / name)
             temporary = project / (EXPORT_RECORD + ".tmp")
             temporary.write_text(json.dumps(record, indent=1), encoding="utf-8")

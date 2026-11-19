@@ -1,10 +1,10 @@
 import argparse
 import glob
-from ..FileIdentity import cached_sha256, sha256
+from ..FileIdentity import sha256
+from ..SolverProjectFiles import EXPORT_RECORD, is_solver_output, project_files, write_export_record
 import hashlib
 import json
 import os
-import re
 import sys
 import trimesh
 import tempfile
@@ -35,124 +35,14 @@ def _is_generated_project(path, protected_paths):
     return path.is_dir() and (path / "parameters.json").is_file()
 
 
-EXPORT_RECORD = ".pinna2hrtf-export.json"
-_NUMCALC_OUTPUT = re.compile(
-    r"^NumCalc/source_\d+/("
-    r"be\.out/be\.\d+/(pBoundary|pBoundaryVTK\.vtk|pEvalGrid|vBoundary|vEvalGrid)"
-    r"|NC\d+-\d+\.out|NCfrom\d+\.out|NCuntil\d+\.out|NC\.out|Memory\.txt|NC\d+-\d+_log\.txt"
-    r")$"
-)
-_OUTPUT2HRTF_FIXED = re.compile(r"^Output2HRTF/(report_source_\d+\.csv|report_issues\.txt|vtk/[^/]+/frequency_step_\d+\.vtk)$")
-
-
-def _is_solver_output(name, grids):
-    """True only for the exact file names the solver tools write; grids are the project's recorded evaluation grids."""
-    if _NUMCALC_OUTPUT.match(name) or _OUTPUT2HRTF_FIXED.match(name):
-        return True
-    for grid in grids:
-        for kind in ("HRTF", "HRIR"):
-            stem = re.escape(f"{kind}_{grid}")
-            if re.match(rf"^Output2HRTF/{stem}(\.sofa|_2D\.pdf|_3D_(horizontal|median|frontal)_plane\.jpeg)$", name):
-                return True
-    return False
-
-
 def _backup_fingerprint(backup):
     """Identity of a backup's contents: every file's path, size and modification time."""
     digest = hashlib.sha256()
-    files, other = _project_files(backup)
+    files, other = project_files(backup)
     for name in sorted(files + other):
         info = (Path(backup) / name).lstat()
         digest.update(f"{name}\0{info.st_size}\0{info.st_mtime_ns}\0{info.st_mode}\n".encode())
     return digest.hexdigest()
-
-
-def _project_files(root):
-    """Relative POSIX paths of everything below root; links and special files are reported as such."""
-    files, other = [], []
-    for dirpath, dirnames, filenames in os.walk(root):
-        for name in dirnames + filenames:
-            path = Path(dirpath) / name
-            relative = path.relative_to(root).as_posix()
-            if path.is_symlink():
-                other.append(relative)
-            elif name in filenames:
-                (files if path.is_file() else other).append(relative)
-        dirnames[:] = [name for name in dirnames if not (Path(dirpath) / name).is_symlink()]
-    return files, other
-
-
-def _write_export_record(project):
-    """Record every file of a freshly generated project so a later backup can be checked for changes."""
-    files, _ = _project_files(project)
-    record = {"version": 1, "files": {name: sha256(project / name) for name in sorted(files) if name != EXPORT_RECORD}}
-    temporary = project / (EXPORT_RECORD + ".tmp")
-    temporary.write_text(json.dumps(record, indent=1), encoding="utf-8")
-    os.replace(temporary, project / EXPORT_RECORD)
-
-
-_PREPROCESSING_OUTPUT = re.compile(r"^(parameters\.json|NumCalc/source_\d+/NC\.inp|ObjectMeshes/.+|EvaluationGrids/.+)$")
-_REQUIRED_PREPROCESSING_OUTPUTS = (
-    ("parameters.json", re.compile(r"^parameters\.json$")),
-    ("solver input", re.compile(r"^NumCalc/source_\d+/NC\.inp$")),
-    ("object mesh", re.compile(r"^ObjectMeshes/")),
-    ("evaluation grid", re.compile(r"^EvaluationGrids/")),
-)
-
-
-def preprocessing_outputs(project):
-    project = Path(project)
-    files, _ = _project_files(project)
-    names = sorted(name for name in files if _PREPROCESSING_OUTPUT.match(name))
-    missing = [label for label, pattern in _REQUIRED_PREPROCESSING_OUTPUTS if not any(pattern.match(name) for name in names)]
-    if missing:
-        raise FileNotFoundError(f"The Mesh2HRTF project {project} is missing its {', '.join(missing)}. Run preprocessing again.")
-    return {name: cached_sha256(project / name) for name in names}
-
-
-def recorded_preprocessing_outputs(project):
-    try:
-        files = json.loads((Path(project) / EXPORT_RECORD).read_text(encoding="utf-8"))["files"]
-        return {name: digest for name, digest in files.items() if _PREPROCESSING_OUTPUT.match(name)}
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
-        return None
-
-
-def snapshot_generated_outputs(project):
-    """State before Output2HRTF writes into a recorded project, or None if it has no record.
-
-    Returns (record, existing names, recorded Output2HRTF files still unchanged).
-    """
-    project = Path(project)
-    try:
-        record = json.loads((project / EXPORT_RECORD).read_text(encoding="utf-8"))
-        recorded = record["files"]
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-    files, _ = _project_files(project)
-    unchanged = {name for name in files if name.startswith("Output2HRTF/") and name in recorded and sha256(project / name) == recorded[name]}
-    return record, set(files), unchanged
-
-
-def claim_generated_outputs(project, snapshot):
-    """Record Output2HRTF files this run wrote, so an unchanged backup can later be replaced.
-
-    Only new files, or files that were recorded and unchanged before the run, are
-    claimed; pre-existing unrecorded or edited files stay unrecorded and keep the backup.
-    """
-    if snapshot is None:
-        return
-    project = Path(project)
-    record, existing, unchanged = snapshot
-    recorded = record["files"]
-    grids = {name.split("/")[1] for name in recorded if name.startswith("EvaluationGrids/") and name.count("/") >= 2}
-    files, _ = _project_files(project)
-    for name in files:
-        if _is_solver_output(name, grids) and (name not in existing or name in unchanged):
-            recorded[name] = sha256(project / name)
-    temporary = project / (EXPORT_RECORD + ".tmp")
-    temporary.write_text(json.dumps(record, indent=1), encoding="utf-8")
-    os.replace(temporary, project / EXPORT_RECORD)
 
 
 PREVIOUS_RECORD = ".pinna2hrtf-previous.json"
@@ -211,7 +101,7 @@ def inspect_previous_backup(backup, protected_paths=()):
         recorded = json.loads((backup / EXPORT_RECORD).read_text(encoding="utf-8"))["files"]
     except (OSError, ValueError, KeyError, TypeError):
         return False, "it has no Pinna2HRTF export record"
-    files, other = _project_files(backup)
+    files, other = project_files(backup)
     if other:
         return False, f"it contains links or special files ({other[0]})"
     present = set(files) - {EXPORT_RECORD}
@@ -574,7 +464,7 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             protected = [path.resolve() for path in (left_path, right_path) if path is not None]
             for side, ear in ears.items():
                 if ear is not None:
-                    _write_export_record(projects[side])
+                    write_export_record(projects[side])
             _publish_export_projects({side: projects[side] for side, ear in ears.items() if ear is not None}, export_destinations, protected, logger, approved_backups)
             projects = export_destinations
         emit_live_event("Mesh2HRTF projects are ready")

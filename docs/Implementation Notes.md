@@ -56,6 +56,8 @@ Owner: `HRTFCalculation/Postprocessing/locadyn.py`, called from `spatial_upsampl
 
 Owner: `HRTFCalculation/StageReceipt.py`. Both apps ask `project stage-status` for a final verdict and keep no receipt logic of their own (`Services/StageReceipt.swift`, `WindowsStageFreshness.cs`).
 
+Preprocessing verification uses `HRTFCalculation/SolverProjectFiles.py` to fingerprint the solver decks, object meshes, evaluation grids and project parameters. Solver results are outside this fingerprint. The Mac sidebar reuses receipt verdicts in the initial and detailed passes of one refresh. A new refresh reads new verdicts.
+
 - Current receipts: `.pinna2hrtf-{inference,postprocessing}-receipt.json` with `version: 2` (`signature`) and `.pinna2hrtf-preprocessing-inputs-v1.json` (`RunConfig.preprocessing_input_signature`). They need only the pipeline `config`.
 - Older receipts hash the app's own project record, so the request must carry `app` and that app's saved `project`. Without it the verdict is `legacy-unsupported`. A shared receipt always wins over an older one.
 - Postprocessing is current only when its receipt matches and, with spatial upsampling enabled, every `Upsampled/HRIR_*/upsampling.json` records `LocaDyn-1948`, the current subdivisions and normalisation, the input and dense output identities (`size`, `mtime` within 1 ms) and the dense file is an HDF5 or netCDF container (`spatial_upsampling_current`).
