@@ -238,6 +238,7 @@ public partial class MainWindow : Window
         foreach (var (shortcut, action) in new (string, RoutedEventHandler)[]
         {
             ("Ctrl+,", (_, _) => ShowAppSettings()),
+            ("F1", OpenDocumentationClicked),
             ("Ctrl+R", RunNextClicked),
             ("Ctrl+Shift+R", RunAllClicked)
         })
@@ -256,7 +257,7 @@ public partial class MainWindow : Window
         statusTimer.Interval = TimeSpan.FromSeconds(2);
         statusTimer.Tick += (_, _) => RefreshPipelineStatus();
         ExtendsContentIntoTitleBar = true;
-        Activated += (_, _) => UpdateViewerAppearance();
+        Activated += (_, _) => { UpdateViewerAppearance(); refreshAppSettingsStatus?.Invoke(); };
         var hwnd = WindowNative.GetWindowHandle(this);
         var id = Win32Interop.GetWindowIdFromWindow(hwnd);
         var appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(id);
@@ -533,8 +534,9 @@ public partial class MainWindow : Window
         workflowResetItems.Add(reset);
         workflow.Items.Add(reset);
         var help = new MenuBarItem { Title = "Help", VerticalAlignment = VerticalAlignment.Center };
-        help.Items.Add(MenuItem("Pinna2HRTF Help", OpenDocumentationClicked, "F1"));
-        help.Items.Add(MenuItem("Online Documentation", (_, _) => OpenExternal("https://any2hrtf.github.io/Pinna2HRTF/docs/")));
+        help.Items.Add(MenuItem("Online Documentation", OpenDocumentationClicked, "F1"));
+        help.Items.Add(new MenuFlyoutSeparator());
+        help.Items.Add(MenuItem("App settings…", (_, _) => ShowAppSettings(), "Ctrl+,"));
         help.Items.Add(new MenuFlyoutSeparator());
         help.Items.Add(MenuItem("About Pinna2HRTF", ShowAboutClicked));
         bar.Items.Add(project);
@@ -552,9 +554,6 @@ public partial class MainWindow : Window
         SyncPaneMenu();
         bar.Items.Add(view);
         bar.Items.Add(help);
-        var more = new MenuBarItem { Title = "…" };
-        more.Items.Add(MenuItem("App settings…", (_, _) => ShowAppSettings(), "Ctrl+,"));
-        bar.Items.Add(more);
         return bar;
     }
 
@@ -3660,8 +3659,7 @@ public partial class MainWindow : Window
     }
 
     void PublicationClicked(object sender, RoutedEventArgs e) { if (sender is Button button && button.Tag is string url) OpenExternal(url); }
-    async void OpenDocumentationClicked(object sender, RoutedEventArgs e)
-    { try { await OpenOfflineDocumentationAsync(); } catch (Exception error) { AppendLog("Could not open Help: " + error.Message); } }
+    void OpenDocumentationClicked(object sender, RoutedEventArgs e) => OpenExternal("https://any2hrtf.github.io/Pinna2HRTF/docs/");
     void OpenExternal(string url) { try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { } }
 
     void ShowAboutClicked(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(ShowAboutAsync(), "ShowAbout", selectedProject);
@@ -3672,7 +3670,7 @@ public partial class MainWindow : Window
         var build = assembly.GetName().Version;
         var revision = ReadBuildDetail(Path.Combine(packageRoot, "build-revision.txt")) ?? "Unknown";
         var meshVersion = ReadBuildDetail(Path.Combine(packageRoot, "External", "src", "Mesh2HRTF", "VERSION"));
-        var details = new List<string> { $"Version {version} ({build})", $"Revision {revision}", $"Windows {Environment.OSVersion.Version}" };
+        var details = new List<string> { $"Version {version} ({build})", $"Revision {revision}" };
         if (meshVersion != null) details.Add($"Mesh2HRTF {meshVersion}");
         var content = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
         var logoPath = Path.Combine(AppContext.BaseDirectory, "app_icon.png");
@@ -3754,7 +3752,6 @@ public partial class MainWindow : Window
         try { FinishFolderNameForClose(); } catch { }
         windowChrome?.Dispose();
         meshNavigation?.Dispose();
-        try { documentationWindow?.Close(); } catch { }
         editorLifetime.Cancel();
         OwnedProcess.StopAll();
         foreach (var editor in editorWindows.ToArray()) { try { editor.Close(); } catch { } }

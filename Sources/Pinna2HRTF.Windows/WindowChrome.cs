@@ -14,6 +14,7 @@ internal sealed class WindowChrome : IDisposable
     readonly FrameworkElement root;
     readonly Grid header;
     readonly Thickness padding;
+    internal UIElement DragRegion { get; }
     readonly int minimumWidth, minimumHeight;
     bool updating, disposed;
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
@@ -28,6 +29,7 @@ internal sealed class WindowChrome : IDisposable
     public WindowChrome(Window window, FrameworkElement root, Grid header, UIElement dragRegion, int minimumWidth = 0, int minimumHeight = 0)
     {
         this.window = window; this.root = root; this.header = header; padding = header.Padding;
+        DragRegion = dragRegion;
         this.minimumWidth = minimumWidth; this.minimumHeight = minimumHeight;
         window.ExtendsContentIntoTitleBar = true;
         window.SetTitleBar(dragRegion);

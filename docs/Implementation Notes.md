@@ -185,12 +185,13 @@ Owners: `Scripts/build_release_app.sh`, `Scripts/prepare_external_tools.sh`, `Sc
 - `trim_macos_runtime.py` validates the whole removal set first, including files that other kept distributions also own, and never follows links out of staging. It removes only `site-packages/tests`, `torch/include` and the `tests` trees of an explicit package list, which hold unit tests and example meshes. It keeps `torch.testing`, `scipy._lib._testutils`, Blender scripts, native plugins, licences and dist-info metadata, because runtime imports can depend on them.
 - Blender can start Python with its own cache settings. Its bundled startup and add-on scripts are precompiled, so the first launch cannot add files to the sealed resources.
 - Wheels flatten Qt's versioned framework symlinks. The canonical framework layout is restored before signing, because duplicate `Resources/Info.plist` copies make `codesign` treat a framework as an ambiguous application bundle.
-- The Mac Help menu opens the online documentation. The Windows build bundles the website for offline help.
+- The Help menu opens the online documentation on both platforms. Windows also provides F1; its portable package does not include an offline website copy.
 - The packaged Mac app uses macOS filesystem compression. The build verifies the signature again after compression. The app keeps all runtime files and models locally. Disk usage depends on the destination filesystem, and the logical file sizes are unchanged.
 - DMG layout: the window geometry and icon centres (Finder coordinates, top-left origin) must match between `make_dmg.sh` and `render_background.swift`. Finder needs the disk by its POSIX path for layout, and it removes a volume icon during layout, so the icon is added afterwards.
 
 ### Windows
 
+- **App settings** (`AppSettings.cs`). Available under Help > App settings or Ctrl+,. Settings replaces the workspace header with native Back and navigation buttons; Back restores the existing project workspace. Settings cards group paths and their actions, numeric defaults, tool overrides, and notification preferences.
 - **Time zone warm-up** (`Sources/Pinna2HRTF.Windows/App.xaml.cs`). `FileInfo` timestamps can lazily initialise `TimeZoneInfo` under a lock. It is initialised before XAML loading and background inspection, because an STA lock wait inside `Loaded` pumps native callbacks into the half-built window.
 - **Single instance** (`App.xaml.cs`). A named mutex (`Local\Pinna2HRTF.Instance`) is held for the whole process lifetime. The Inno Setup installer, whose script is not in this repository, uses the same name to detect a running app before install or uninstall. A second launch exits without showing a window.
 - **DPI** (`App.xaml.cs`). The process opts into Per-Monitor-V2 DPI awareness, so the unpackaged app renders at the monitor's DPI and Windows does not bitmap-scale it at 125/150/200 %.

@@ -218,7 +218,6 @@ if (-not (Test-Path $mesh2input)) {
 }
 
 Copy-Item (Join-Path $root "README.md") (Join-Path $dist "README.md") -Force
-Copy-Item -LiteralPath (Join-Path $root "website") -Destination (Join-Path $dist "Website") -Recurse
 if ($SkipPythonEnvironment -or $AllowMissingExternalTools) {
     Set-Content -LiteralPath (Join-Path $dist "INCOMPLETE-DEVELOPMENT-BUILD.txt") -Value 'This build skipped complete runtime/tool verification and is not a portable release.'
 } else {

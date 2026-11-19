@@ -18,6 +18,7 @@ public partial class MainWindow
                 return Microsoft.Windows.AppLifecycle.AppInstance.GetCurrent().GetActivatedEventArgs();
             });
             notificationsRegistered = true;
+            refreshAppSettingsStatus?.Invoke();
             if (shutdownCleanupDone) { CloseNotifications(); return; }
             if (activation.Data is AppNotificationActivatedEventArgs notification) ActivateFromNotification(notification);
         }

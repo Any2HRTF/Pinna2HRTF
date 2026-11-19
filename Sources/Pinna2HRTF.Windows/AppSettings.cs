@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using CommunityToolkit.WinUI.Controls;
 using Windows.System;
 
 namespace Pinna2HRTF.Windows;
@@ -35,6 +36,12 @@ public partial class MainWindow
     AppPreferences appPreferences = new();
     Grid? appSettingsPage;
     Control? settingsReturnFocus;
+    FrameworkElement? settingsWorkspaceHeader;
+    UIElement? settingsWorkspaceDragRegion;
+    GridLength settingsWorkspaceTitleHeight;
+    string? settingsWorkspaceTitle;
+    TitleBar? settingsTitleBar;
+    Action? refreshAppSettingsStatus;
     Action? refreshToolSettings;
     string? preferencesLoadError;
     ProjectRecord? initialProject;
@@ -148,106 +155,191 @@ public partial class MainWindow
     void ShowAppSettings()
     {
         if (appSettingsPage != null) return;
-        settingsReturnFocus = Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(Root.XamlRoot) as Control;
+        settingsReturnFocus = FocusManager.GetFocusedElement(Root.XamlRoot) as Control;
+        settingsWorkspaceHeader = Root.Children.OfType<FrameworkElement>().FirstOrDefault(child => Grid.GetRow(child) == 0);
+        settingsWorkspaceDragRegion = windowChrome?.DragRegion;
+        settingsWorkspaceTitleHeight = Root.RowDefinitions[0].Height;
+        settingsWorkspaceTitle = Title;
+        if (settingsWorkspaceHeader != null) settingsWorkspaceHeader.Visibility = Visibility.Collapsed;
+        if (contentGrid != null) contentGrid.Visibility = Visibility.Collapsed;
+
+        var navigation = new NavigationView {
+            IsSettingsVisible = false, IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed,
+            IsPaneToggleButtonVisible = false, PaneDisplayMode = NavigationViewPaneDisplayMode.Auto,
+            OpenPaneLength = 220, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch
+        };
+        var header = new TitleBar {
+            Title = "App settings", IsBackButtonVisible = true, IsBackButtonEnabled = true,
+            IsPaneToggleButtonVisible = true, Background = secondarySurfaceBrush
+        };
+        header.BackRequested += (_, _) => CloseAppSettings();
+        header.PaneToggleRequested += (_, _) => navigation.IsPaneOpen = !navigation.IsPaneOpen;
+        settingsTitleBar = header;
+        Root.RowDefinitions[0].Height = GridLength.Auto;
+        Root.Children.Add(header);
+        SetTitleBar(header);
+
         var page = new Grid { Background = appBackgroundBrush };
-        page.RowDefinitions.Add(new() { Height = GridLength.Auto });
-        page.RowDefinitions.Add(new());
-        var back = new Button { Content = "Back", Margin = new Thickness(16) };
-        back.Click += (_, _) => CloseAppSettings();
-        page.Children.Add(back);
-        var navigation = new NavigationView { IsSettingsVisible = false, IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed,
-            PaneDisplayMode = NavigationViewPaneDisplayMode.Auto, OpenPaneLength = 200,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
-        var names = new[] { "New projects", "Computing", "Notifications", "Tools" };
-        var icons = new[] { "\uE8B7", "\uE950", "\uEA8F", "\uE90F" };
-        for (var i = 0; i < names.Length; i++) navigation.MenuItems.Add(new NavigationViewItem { Content = names[i], Tag = names[i], Icon = new FontIcon { Glyph = icons[i] } });
-        Grid.SetRow(navigation, 1); page.Children.Add(navigation);
-        navigation.SelectionChanged += (_, args) => ShowCategory((args.SelectedItem as NavigationViewItem)?.Tag as string ?? names[0]);
+        page.Children.Add(navigation);
         Grid.SetRow(page, 1);
         Root.Children.Add(page);
         appSettingsPage = page;
-        if (contentGrid != null) contentGrid.Visibility = Visibility.Collapsed;
+        var names = new[] { "New projects", "Computing", "Notifications", "Tools" };
+        var icons = new[] { "\uE8B7", "\uE950", "\uEA8F", "\uE90F" };
+        for (var i = 0; i < names.Length; i++)
+            navigation.MenuItems.Add(new NavigationViewItem { Content = names[i], Tag = names[i], Icon = new FontIcon { Glyph = icons[i] } });
+        string? category = null;
+        navigation.SelectionChanged += (_, args) => ShowCategory((args.SelectedItem as NavigationViewItem)?.Tag as string ?? names[0]);
         navigation.SelectedItem = navigation.MenuItems[0];
 
         void ShowCategory(string name)
         {
+            var offset = category == name && navigation.Content is ScrollViewer previous ? previous.VerticalOffset : 0;
+            category = name;
             refreshToolSettings = name == "Tools" ? () => ShowCategory(name) : null;
-            var panel = new StackPanel { Spacing = 16, MaxWidth = 1000, HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(24) };
+            refreshAppSettingsStatus = null;
+            var panel = new StackPanel { Spacing = 24, Margin = new Thickness(24), HorizontalAlignment = HorizontalAlignment.Left };
             panel.Children.Add(new TextBlock { Text = name, FontSize = 28, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-            if (preferencesLoadError != null) panel.Children.Add(new InfoBar { IsOpen = true, IsClosable = false, Severity = InfoBarSeverity.Warning, Message = preferencesLoadError });
-            var scroller = new ScrollViewer { Content = panel, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Top };
-            panel.HorizontalAlignment = HorizontalAlignment.Left;
+            if (preferencesLoadError != null)
+                panel.Children.Add(new InfoBar { IsOpen = true, IsClosable = false, Severity = InfoBarSeverity.Warning, Message = preferencesLoadError });
+            var scroller = new ScrollViewer {
+                Content = panel, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Top
+            };
             scroller.SizeChanged += (_, _) => panel.Width = Math.Max(0, Math.Min(1000, scroller.ActualWidth - 48));
+            scroller.Loaded += (_, _) => scroller.ChangeView(null, offset, null, true);
             navigation.Content = scroller;
             if (name == names[0])
             {
-                PathRow(panel, "Project location", () => appPreferences.ProjectDirectory, value => appPreferences.ProjectDirectory = value, Path.Combine(appData, "Projects"), true);
-                var handling = new ComboBox { Header = "Input files", ItemsSource = new[] { "Copy into project", "Reference original files" }, SelectedIndex = (int)appPreferences.InputHandling, HorizontalAlignment = HorizontalAlignment.Stretch };
-                handling.SelectionChanged += (_, _) => { appPreferences.InputHandling = (InputHandling)handling.SelectedIndex; SaveAppPreferences(); };
-                panel.Children.Add(handling);
-                PathRow(panel, "Evaluation grid", () => appPreferences.EvaluationGrid, value => appPreferences.EvaluationGrid = value, "Default · ARI grid (91 directions)", true, grid: true);
-                IntegerRow(panel, "Lowest frequency (Hz)", () => appPreferences.MinimumFrequency, v => appPreferences.MinimumFrequency = v, () => 0, () => appPreferences.MaximumFrequency - 1);
-                IntegerRow(panel, "Highest frequency (Hz)", () => appPreferences.MaximumFrequency, v => appPreferences.MaximumFrequency = v, () => appPreferences.MinimumFrequency + 1, () => 96000);
-                IntegerRow(panel, "Frequency steps", () => appPreferences.FrequencySteps, v => appPreferences.FrequencySteps = v, () => 2, () => 8193);
+                var files = SettingsSection(panel, "Files");
+                PathRow(files, "Project location", () => appPreferences.ProjectDirectory, v => appPreferences.ProjectDirectory = v,
+                    Path.Combine(appData, "Projects"), true);
+                var handling = new RadioButtons { ItemsSource = new[] { "Copy into project", "Reference original files" },
+                    SelectedIndex = (int)appPreferences.InputHandling, MaxColumns = 1 };
+                handling.SelectionChanged += (_, _) => {
+                    if (handling.SelectedIndex < 0) return;
+                    appPreferences.InputHandling = (InputHandling)handling.SelectedIndex;
+                    SaveAppPreferences();
+                };
+                files.Children.Add(new SettingsCard { Header = "Input files", Content = handling });
+                PathRow(files, "Evaluation grid", () => appPreferences.EvaluationGrid, v => appPreferences.EvaluationGrid = v,
+                    Path.Combine(packageRoot, "HRTFCalculation", "EvaluationGrids", ProjectDocument.DefaultEvaluationGrid), true, grid: true);
+                var frequencies = SettingsSection(panel, "Frequencies");
+                IntegerRow(frequencies, "Lowest frequency (Hz)", () => appPreferences.MinimumFrequency, v => appPreferences.MinimumFrequency = v,
+                    () => 0, () => appPreferences.MaximumFrequency - 1);
+                IntegerRow(frequencies, "Highest frequency (Hz)", () => appPreferences.MaximumFrequency, v => appPreferences.MaximumFrequency = v,
+                    () => appPreferences.MinimumFrequency + 1, () => 96000);
+                IntegerRow(frequencies, "Frequency steps", () => appPreferences.FrequencySteps, v => appPreferences.FrequencySteps = v, () => 2, () => 8193);
             }
             else if (name == names[1])
             {
-                panel.Children.Add(new TextBlock { Text = "Defaults for new projects", Foreground = mutedTextBrush });
-                IntegerRow(panel, "Parallel NumCalc instances", () => appPreferences.MaxInstances, v => appPreferences.MaxInstances = v, () => 1, () => 1024);
-                IntegerRow(panel, "CPU load limit (%)", () => appPreferences.MaxCpuLoad, v => appPreferences.MaxCpuLoad = v, () => 1, () => 100);
+                var computing = SettingsSection(panel, "Defaults for new projects");
+                IntegerRow(computing, "Parallel NumCalc instances", () => appPreferences.MaxInstances, v => appPreferences.MaxInstances = v, () => 1, () => 1024);
+                IntegerRow(computing, "CPU load limit (%)", () => appPreferences.MaxCpuLoad, v => appPreferences.MaxCpuLoad = v, () => 1, () => 100);
             }
             else if (name == names[2])
             {
-                if (!notificationsRegistered) panel.Children.Add(new InfoBar { IsOpen = true, IsClosable = false, Severity = InfoBarSeverity.Informational, Message = "Windows notifications are unavailable for this session. Processing is unaffected." });
-                SwitchRow(panel, "Allow notifications", appPreferences.NotifyAll, v => { appPreferences.NotifyAll = v; ShowCategory(name); });
-                var events = new StackPanel { Spacing = 16 };
-                SwitchRow(events, "A stage completes", appPreferences.NotifyCompletion, v => appPreferences.NotifyCompletion = v);
-                SwitchRow(events, "A stage fails", appPreferences.NotifyFailure, v => appPreferences.NotifyFailure = v);
-                foreach (var toggle in events.Children.OfType<ToggleSwitch>()) toggle.IsEnabled = appPreferences.NotifyAll;
-                panel.Children.Add(events);
-                var systemSettings = new HyperlinkButton { Content = "Windows notification settings" };
-                systemSettings.Click += async (_, _) => await Launcher.LaunchUriAsync(new Uri("ms-settings:notifications"));
-                panel.Children.Add(systemSettings);
+                var status = new InfoBar { IsClosable = false, Severity = InfoBarSeverity.Informational };
+                void RefreshNotificationStatus()
+                {
+                    var available = notificationsRegistered;
+                    try { available &= Microsoft.Windows.AppNotifications.AppNotificationManager.Default.Setting == Microsoft.Windows.AppNotifications.AppNotificationSetting.Enabled; }
+                    catch { available = false; }
+                    status.IsOpen = !available;
+                    status.Message = notificationsRegistered
+                        ? "Notifications are turned off or unavailable in Windows."
+                        : "Windows notifications are unavailable for this app session.";
+                }
+                refreshAppSettingsStatus = RefreshNotificationStatus;
+                RefreshNotificationStatus();
+                panel.Children.Add(status);
+                var notifications = new SettingsExpander {
+                    Header = "Notifications", Description = "Choose which workflow updates to receive.", IsExpanded = true
+                };
+                var master = new ToggleSwitch { IsOn = appPreferences.NotifyAll };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(master, "Notifications");
+                var completion = new CheckBox { Content = "When a workflow step completes", IsChecked = appPreferences.NotifyCompletion,
+                    IsEnabled = appPreferences.NotifyAll, Margin = new Thickness(16, 8, 16, 4) };
+                var failure = new CheckBox { Content = "When a workflow step fails", IsChecked = appPreferences.NotifyFailure,
+                    IsEnabled = appPreferences.NotifyAll, Margin = new Thickness(16, 4, 16, 12) };
+                master.Toggled += (_, _) => {
+                    appPreferences.NotifyAll = master.IsOn;
+                    completion.IsEnabled = failure.IsEnabled = master.IsOn;
+                    SaveAppPreferences();
+                };
+                completion.Click += (_, _) => { appPreferences.NotifyCompletion = completion.IsChecked == true; SaveAppPreferences(); };
+                failure.Click += (_, _) => { appPreferences.NotifyFailure = failure.IsChecked == true; SaveAppPreferences(); };
+                notifications.Content = master;
+                notifications.Items.Add(new SettingsCard { Content = completion, ContentAlignment = CommunityToolkit.WinUI.Controls.ContentAlignment.Left });
+                notifications.Items.Add(new SettingsCard { Content = failure, ContentAlignment = CommunityToolkit.WinUI.Controls.ContentAlignment.Left });
+                panel.Children.Add(notifications);
+                var windows = new SettingsCard {
+                    Header = "Windows notification settings", Description = "Manage banners, sound and Do not disturb in Windows.",
+                    IsClickEnabled = true, ActionIcon = new FontIcon { Glyph = "\uE8A7" }
+                };
+                windows.Click += async (_, _) => await Launcher.LaunchUriAsync(new Uri("ms-settings:notifications"));
+                panel.Children.Add(windows);
             }
             else
             {
-                foreach (var (title, path, folder) in new[] {
-                    ("NumCalc", environment.NumCalcExecutable, false), ("Mesh grading", environment.MeshGradingExecutable, false),
-                    ("Python", PythonOverride ?? BundledPythonExecutable() ?? "", false),
-                    ("Mesh2HRTF", Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf"), true) })
-                    ComponentRow(panel, title, path, folder);
-                SwitchRow(panel, "Developer mode", appPreferences.DeveloperMode, v => { appPreferences.DeveloperMode = v; ApplyAppEnvironment(); ShowCategory(name); });
-                panel.Children.Add(new TextBlock { Text = "Changes apply to newly started operations. Open editors keep their current tools.", TextWrapping = TextWrapping.Wrap, Foreground = mutedTextBrush });
-                if (appPreferences.DeveloperMode || BundledPythonExecutable() == null)
-                {
-                    ComponentRow(panel, "uv", environment.UvExecutable, false);
-                }
+                var developer = new StackPanel { Spacing = 4 };
+                SwitchRow(developer, "Developer mode", appPreferences.DeveloperMode, v => {
+                    appPreferences.DeveloperMode = v; ApplyAppEnvironment(); ShowCategory(name);
+                }, "Override bundled tool paths. Changes apply to newly started operations.");
+                panel.Children.Add(developer);
+                var tools = SettingsSection(panel, "Tools");
+                ComponentRow(tools, "NumCalc", environment.NumCalcExecutable, false,
+                    () => appPreferences.NumCalc, v => appPreferences.NumCalc = v);
+                ComponentRow(tools, "Mesh grading", environment.MeshGradingExecutable, false,
+                    () => appPreferences.MeshGrading, v => appPreferences.MeshGrading = v);
+                ComponentRow(tools, "Python", BundledPythonExecutable() ?? "", false,
+                    () => appPreferences.Python, v => appPreferences.Python = v);
+                if (appPreferences.DeveloperMode || DefaultPythonExecutable() == null)
+                    ComponentRow(tools, "uv", environment.UvExecutable, false,
+                        () => appPreferences.Uv, v => appPreferences.Uv = v);
+                ComponentRow(tools, "Mesh2HRTF", Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf"), true);
                 if (appPreferences.DeveloperMode)
-                {
-                    PathRow(panel, "NumCalc override", () => appPreferences.NumCalc, v => appPreferences.NumCalc = v, DefaultEnvironment().NumCalcExecutable, false);
-                    PathRow(panel, "Mesh grading override", () => appPreferences.MeshGrading, v => appPreferences.MeshGrading = v, DefaultEnvironment().MeshGradingExecutable, false);
-                    PathRow(panel, "Python override", () => appPreferences.Python, v => appPreferences.Python = v, DefaultPythonExecutable() ?? "", false);
-                    PathRow(panel, "uv override", () => appPreferences.Uv, v => appPreferences.Uv = v, DefaultEnvironment().UvExecutable, false);
-                    PathRow(panel, "External dependencies", () => appPreferences.ExternalDirectory, v => appPreferences.ExternalDirectory = v, DefaultEnvironment().ExternalDir, true);
-                }
+                    PathRow(tools, "External dependencies", () => appPreferences.ExternalDirectory, v => appPreferences.ExternalDirectory = v,
+                        DefaultEnvironment().ExternalDir, true, tool: true);
             }
         }
     }
 
-    void SwitchRow(StackPanel parent, string title, bool value, Action<bool> write)
+    static StackPanel SettingsSection(StackPanel parent, string title)
     {
-        var toggle = new ToggleSwitch { Header = title, IsOn = value };
+        var section = new StackPanel { Spacing = 8 };
+        section.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        var cards = new StackPanel { Spacing = 4 };
+        section.Children.Add(cards);
+        parent.Children.Add(section);
+        return cards;
+    }
+
+    void SwitchRow(StackPanel parent, string title, bool value, Action<bool> write, string? description = null)
+    {
+        var toggle = new ToggleSwitch { IsOn = value };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toggle, title);
         toggle.Toggled += (_, _) => { write(toggle.IsOn); SaveAppPreferences(); };
-        parent.Children.Add(toggle);
+        parent.Children.Add(new SettingsCard { Header = title, Description = description ?? "", Content = toggle });
     }
 
     void CloseAppSettings()
     {
         if (appSettingsPage == null) return;
         Root.Children.Remove(appSettingsPage);
+        if (settingsTitleBar != null) Root.Children.Remove(settingsTitleBar);
+        settingsTitleBar = null;
+        Title = settingsWorkspaceTitle ?? Title;
+        settingsWorkspaceTitle = null;
         appSettingsPage = null;
         refreshToolSettings = null;
+        refreshAppSettingsStatus = null;
+        Root.RowDefinitions[0].Height = settingsWorkspaceTitleHeight;
+        if (settingsWorkspaceHeader != null) settingsWorkspaceHeader.Visibility = Visibility.Visible;
+        if (settingsWorkspaceDragRegion != null) SetTitleBar(settingsWorkspaceDragRegion);
+        settingsWorkspaceHeader = null;
+        settingsWorkspaceDragRegion = null;
         if (contentGrid != null) contentGrid.Visibility = Visibility.Visible;
         if (settingsReturnFocus?.Focus(FocusState.Programmatic) != true) projectList.Focus(FocusState.Programmatic);
         settingsReturnFocus = null;
@@ -255,12 +347,13 @@ public partial class MainWindow
 
     void IntegerRow(StackPanel parent, string title, Func<int> read, Action<int> write, Func<int> minimum, Func<int> maximum)
     {
-        var box = new TextBox { Header = title, Text = read().ToString(CultureInfo.CurrentCulture) };
+        var box = new TextBox { Text = read().ToString(CultureInfo.CurrentCulture), Width = 144 };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, title);
         void Commit()
         {
-            var currentMinimum = minimum();
-            if (!int.TryParse(box.Text, NumberStyles.Integer, CultureInfo.CurrentCulture, out var value) || value < currentMinimum || value > maximum())
-            { box.Description = $"Enter a whole number from {currentMinimum} to {maximum()}."; return; }
+            var lower = minimum();
+            if (!int.TryParse(box.Text, NumberStyles.Integer, CultureInfo.CurrentCulture, out var value) || value < lower || value > maximum())
+            { box.Description = $"Enter a whole number from {lower} to {maximum()}."; return; }
             write(value); SaveAppPreferences(); box.Description = null;
         }
         box.LostFocus += (_, _) => Commit();
@@ -268,63 +361,89 @@ public partial class MainWindow
             if (args.Key == VirtualKey.Enter) { Commit(); args.Handled = true; }
             if (args.Key == VirtualKey.Escape) { box.Text = read().ToString(CultureInfo.CurrentCulture); box.Description = null; args.Handled = true; }
         };
-        parent.Children.Add(box);
+        parent.Children.Add(new SettingsCard { Header = title, Content = box });
     }
 
-    void PathRow(StackPanel parent, string title, Func<string> read, Action<string> write, string fallback, bool directory, bool grid = false)
+    void PathRow(StackPanel parent, string title, Func<string> read, Action<string> write, string fallback, bool directory,
+        bool grid = false, bool tool = false)
     {
-        var row = new StackPanel { Spacing = 6 };
-        row.Children.Add(new TextBlock { Text = title, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        var label = new TextBlock { TextWrapping = TextWrapping.Wrap };
-        var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Microsoft.UI.Colors.OrangeRed) };
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        PathCard(parent, title, () => read().Length > 0 ? read() : fallback, directory, read, write, grid, tool);
+    }
+
+    void ComponentRow(StackPanel parent, string title, string path, bool directory, Func<string>? read = null, Action<string>? write = null)
+    {
+        PathCard(parent, title, () => path, directory, appPreferences.DeveloperMode ? read : null,
+            appPreferences.DeveloperMode ? write : null, component: true);
+    }
+
+    void PathCard(StackPanel parent, string title, Func<string> effective, bool directory, Func<string>? read = null,
+        Action<string>? write = null, bool grid = false, bool tool = true, bool component = false)
+    {
+        var row = new StackPanel { Spacing = 8 };
+        var description = new TextBlock { TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis };
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var reveal = new HyperlinkButton { Content = "Show path", Padding = new Thickness(4, 0, 4, 0) };
+        var fullPath = new TextBox { IsReadOnly = true, Visibility = Visibility.Collapsed };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(fullPath, title + " full path");
+        var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed,
+            Foreground = new SolidColorBrush(Microsoft.UI.Colors.OrangeRed) };
         var choose = new Button { Content = "Choose…" };
         var reset = new Button { Content = "Use default" };
-        var reveal = new HyperlinkButton { Content = "Show path", Padding = new Thickness(0) };
-        var pathBox = new TextBox { IsReadOnly = true, Visibility = Visibility.Collapsed };
+        var open = new Button { Content = "Open" };
+        ToolTipService.SetToolTip(open, "Show in File Explorer");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(open, "Show " + title + " in File Explorer");
+        var card = new SettingsCard { Header = title, Description = description, Content = actions };
+        actions.Children.Add(reveal);
+        if (component) actions.Children.Add(open);
+        if (write != null) { actions.Children.Add(choose); actions.Children.Add(reset); }
+        row.Children.Add(card); row.Children.Add(fullPath); row.Children.Add(error);
         void Update()
         {
-            var path = read();
-            var effective = path.Length > 0 ? path : grid ? Path.Combine(packageRoot, "HRTFCalculation", "EvaluationGrids", ProjectDocument.DefaultEvaluationGrid) : fallback;
-            label.Text = path.Length == 0 && grid ? fallback : (path.Length == 0 ? "Default · " : "") + (directory ? @"\" : "") + Path.GetFileName(Path.TrimEndingDirectorySeparator(effective));
-            pathBox.Text = effective;
-            reset.IsEnabled = path.Length > 0;
+            var path = effective();
+            var available = directory ? Directory.Exists(path) : File.Exists(path);
+            var shortPath = path.Length == 0 ? "Not configured" : (directory ? @"\" : "") + Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
+            var useDefault = read != null && read().Length == 0;
+            description.Text = component ? (available ? "Available · " : "Missing · ") + shortPath
+                : useDefault && grid ? "Default · ARI grid (91 directions)" : (useDefault ? "Default · " : "") + shortPath;
+            fullPath.Text = path;
+            reveal.IsEnabled = path.Length > 0;
+            open.IsEnabled = available;
+            reset.Visibility = read?.Invoke().Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        void Apply(string path)
+        {
+            write!(path);
+            SaveAppPreferences();
+            if (tool) ApplyAppEnvironment();
+            Update();
+            error.Visibility = Visibility.Collapsed;
+            refreshToolSettings?.Invoke();
         }
         choose.Click += async (_, _) => {
-            var path = directory ? await PickFolderAsync(pathBox.Text) : await PickFileAsync(pathBox.Text);
+            var path = directory ? await PickFolderAsync(effective()) : await PickFileAsync(effective());
             if (path == null) return;
             try
             {
                 if (grid) await RequestPythonAsync("project", new { action = "validate-grid", path });
                 if (!(directory ? Directory.Exists(path) : File.Exists(path))) throw new IOException("The selected path is unavailable.");
-                write(path); SaveAppPreferences(); ApplyAppEnvironment(); Update(); error.Text = "";
-                refreshToolSettings?.Invoke();
+                Apply(path);
             }
-            catch (Exception failure) { error.Text = failure.Message; }
+            catch (Exception failure) { error.Text = failure.Message; error.Visibility = Visibility.Visible; }
         };
-        reset.Click += (_, _) => { write(""); SaveAppPreferences(); ApplyAppEnvironment(); Update(); error.Text = ""; refreshToolSettings?.Invoke(); };
-        reveal.Click += (_, _) => pathBox.Visibility = pathBox.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
-        buttons.Children.Add(choose); buttons.Children.Add(reset);
-        row.Children.Add(label); row.Children.Add(buttons); row.Children.Add(reveal); row.Children.Add(pathBox); row.Children.Add(error);
-        Update(); parent.Children.Add(row);
-    }
-
-    void ComponentRow(StackPanel parent, string title, string path, bool directory)
-    {
-        var available = directory ? Directory.Exists(path) : File.Exists(path);
-        var row = new StackPanel { Spacing = 6 };
-        row.Children.Add(new TextBlock { Text = title + " · " + (available ? "Available" : "Missing") });
-        var show = new Button { Content = "Show in File Explorer", IsEnabled = available };
-        ToolTipService.SetToolTip(show, path);
-        show.Click += (_, _) => {
-            var info = new System.Diagnostics.ProcessStartInfo("explorer.exe") { UseShellExecute = true };
-            info.ArgumentList.Add("/select,"); info.ArgumentList.Add(path);
-            System.Diagnostics.Process.Start(info);
+        reset.Click += (_, _) => Apply("");
+        reveal.Click += (_, _) => {
+            fullPath.Visibility = fullPath.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+            reveal.Content = fullPath.Visibility == Visibility.Visible ? "Hide path" : "Show path";
         };
-        row.Children.Add(show); parent.Children.Add(row);
-        var reveal = new HyperlinkButton { Content = "Show path", Padding = new Thickness(0) };
-        var fullPath = new TextBox { IsReadOnly = true, Text = path, Visibility = Visibility.Collapsed };
-        reveal.Click += (_, _) => fullPath.Visibility = fullPath.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
-        row.Children.Add(reveal); row.Children.Add(fullPath);
+        open.Click += (_, _) => {
+            try {
+                var info = new System.Diagnostics.ProcessStartInfo("explorer.exe") { UseShellExecute = true };
+                info.ArgumentList.Add("/select,"); info.ArgumentList.Add(effective());
+                System.Diagnostics.Process.Start(info);
+            }
+            catch (Exception failure) { error.Text = failure.Message; error.Visibility = Visibility.Visible; }
+        };
+        Update();
+        parent.Children.Add(row);
     }
 }
