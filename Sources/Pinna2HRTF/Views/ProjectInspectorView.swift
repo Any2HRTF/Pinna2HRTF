@@ -127,14 +127,17 @@ struct ProjectInspectorView: View {
             }
         }
         Section {
-            Picker(selection: Binding<EarModelMethod?>(get: { store.earModelMethod }, set: { if let value = $0 { store.selectEarModelMethod(value) } })) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Ear model")
                 ForEach(EarModelMethod.allCases) { method in
-                    Text(method.title).tag(Optional(method))
+                    HStack(spacing: 4) {
+                        EarModelRadioButton(title: method.title, isSelected: store.earModelMethod == method) {
+                            store.selectEarModelMethod(method)
+                        }
+                        SettingHelpButton(helpID: "ear_model.\(method.rawValue)")
+                    }
                 }
-            } label: {
-                SettingLabel(title: "Ear model", helpID: "ear_model.\((store.earModelMethod ?? .mesh2ppm).rawValue)")
             }
-            .pickerStyle(.radioGroup)
             if store.earModelMethod == nil {
                 FieldWarning("Choose one method")
             }
@@ -431,6 +434,35 @@ struct NoProjectSelectedView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+}
+
+private struct EarModelRadioButton: NSViewRepresentable {
+    @Environment(\.isEnabled) private var isEnabled
+    let title: String
+    let isSelected: Bool
+    let select: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSButton {
+        NSButton(radioButtonWithTitle: title, target: context.coordinator, action: #selector(Coordinator.selectModel))
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        button.state = isSelected ? .on : .off
+        button.isEnabled = isEnabled
+        context.coordinator.select = isSelected ? nil : select
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSButton, context: Context) -> CGSize? {
+        nsView.fittingSize
+    }
+
+    final class Coordinator: NSObject {
+        var select: (() -> Void)?
+
+        @objc func selectModel() { select?() }
     }
 }
 
