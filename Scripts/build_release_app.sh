@@ -197,7 +197,6 @@ CLI
 chmod +x "$RESOURCES/bin/Pinna2HRTF"
 cp "$ROOT/pyproject.toml" "$RESOURCES/pyproject.toml"
 cp "$ROOT/uv.lock" "$RESOURCES/uv.lock"
-cp -R "$ROOT/website" "$RESOURCES/Website"
 if [[ -d "$EXTERNAL_ROOT/bin" ]]; then
   mkdir -p "$RESOURCES/External/bin"
   for bundled_file in NumCalc NumCalc.source-commit hrtf_mesh_grading hrtf_mesh_grading.source-commit libpmp.1.2.1.dylib libpmp.dylib; do
