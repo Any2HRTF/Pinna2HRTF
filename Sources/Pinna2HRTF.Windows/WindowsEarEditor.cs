@@ -160,16 +160,14 @@ public partial class MainWindow
         Grid.SetRow(viewerGrid, 0);
         root.Children.Add(viewerGrid);
         var panel = new StackPanel { Spacing = 10, Margin = new Thickness(16), Width = 300 };
-        var toolRow = new Grid { ColumnSpacing = 6 };
-        toolRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        toolRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var selectToolButton = new Button { Content = "Select Faces", IsEnabled = false };
-        var planeToolButton = new Button { Content = "Cutting Plane" };
-        Grid.SetColumn(planeToolButton, 1);
-        toolRow.Children.Add(selectToolButton); toolRow.Children.Add(planeToolButton);
+        var toolTabs = new SelectorBar { HorizontalAlignment = HorizontalAlignment.Center };
+        var selectTool = new SelectorBarItem { Text = "Select Faces" };
+        var planeTool = new SelectorBarItem { Text = "Cutting Plane" };
+        toolTabs.Items.Add(selectTool); toolTabs.Items.Add(planeTool);
+        toolTabs.SelectedItem = selectTool;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toolTabs, "Mesh editing tool");
         panel.Children.Add(new TextBlock { Text = Path.GetFileName(source), FontSize = 12, Foreground = mutedTextBrush, TextWrapping = TextWrapping.Wrap });
-        panel.Children.Add(WorkflowGroupHeading("Tool"));
-        panel.Children.Add(toolRow);
+        panel.Children.Add(toolTabs);
         var selectionPanel = new StackPanel { Spacing = 10 };
         selectionPanel.Children.Add(WorkflowGroupHeading("Selection"));
         selectionPanel.Children.Add(new TextBlock { Text = "Select faces to remove", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
@@ -190,7 +188,7 @@ public partial class MainWindow
         selectionPanel.Children.Add(selectionActions); selectionPanel.Children.Add(deleteButton);
         var planePanel = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
         planePanel.Children.Add(WorkflowGroupHeading("Plane settings"));
-        ToolTipService.SetToolTip(planeToolButton, "The red side is removed.");
+        ToolTipService.SetToolTip(planeTool, "The red side is removed.");
         var normalBoxes = new[] { new TextBox { Text = "0", PlaceholderText = "X", Header = "Normal X" }, new TextBox { Text = "1", PlaceholderText = "Y", Header = "Normal Y" }, new TextBox { Text = "0", PlaceholderText = "Z", Header = "Normal Z" } };
         var axisPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         var axisButtons = new List<Button>();
@@ -231,7 +229,8 @@ public partial class MainWindow
         var redoButton = NavigationHelp.Command("Redo"); redoButton.IsEnabled = false;
         historyRow.Children.Add(undoButton); historyRow.Children.Add(redoButton);
         var largestButton = new Button { Content = "Keep Largest Component", HorizontalAlignment = HorizontalAlignment.Stretch, Height = editActionHeight };
-        panel.Children.Add(WorkflowGroupHeading("Mesh cleanup"));
+        panel.Children.Add(WorkflowGroupHeading("Cleanup"));
+        ToolTipService.SetToolTip(largestButton, "Remove loose fragments. Applies to the whole mesh.");
         panel.Children.Add(largestButton);
         var message = new TextBlock { Text = "Loading mesh…", TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = mutedTextBrush };
         panel.Children.Add(message);
@@ -276,8 +275,7 @@ public partial class MainWindow
         void UpdateControls()
         {
             var planeMode = planePanel.Visibility == Visibility.Visible;
-            selectToolButton.IsEnabled = !isBusy;
-            planeToolButton.IsEnabled = !isBusy;
+            toolTabs.IsEnabled = !isBusy;
             selectionPanel.Visibility = planeMode ? Visibility.Collapsed : Visibility.Visible;
             planePanel.Visibility = planeMode ? Visibility.Visible : Visibility.Collapsed;
             sizePanel.Visibility = planeMode && !fitPlane ? Visibility.Visible : Visibility.Collapsed;
@@ -285,8 +283,6 @@ public partial class MainWindow
             viewport.IsRotationEnabled = !isBusy;
             viewport.IsPanEnabled = !isBusy;
             viewport.IsZoomEnabled = true;
-            selectToolButton.Background = planeMode ? new SolidColorBrush(Colors.Transparent) : new SolidColorBrush(ColorHelper.FromArgb(35, 48, 112, 110));
-            planeToolButton.Background = planeMode ? new SolidColorBrush(ColorHelper.FromArgb(35, 48, 112, 110)) : new SolidColorBrush(Colors.Transparent);
             selectionStatus.Text = $"{selectedFaces.Count} faces selected";
             deleteButton.IsEnabled = !isBusy && selectedFaces.Count > 0;
             clearButton.IsEnabled = !isBusy && selectedFaces.Count > 0;
@@ -469,8 +465,7 @@ public partial class MainWindow
             finally { isBusy = false; UpdateControls(); }
         }
 
-        selectToolButton.Click += (_, _) => SetTool(false);
-        planeToolButton.Click += (_, _) => SetTool(true);
+        toolTabs.SelectionChanged += (_, _) => SetTool(ReferenceEquals(toolTabs.SelectedItem, planeTool));
         resetButton.Click += (_, _) => { if (mesh != null) { var max = (float)Math.Max(mesh.MaximumDimension * 1.7, 120); var camera = new PerspectiveCamera { FieldOfView = 38, Position = new Vector3(0, (side == "right" ? -1 : 1)*max, max * 0.12f), LookDirection = new Vector3(0, (side == "right" ? 1 : -1)*max, -max * 0.12f), UpDirection = Vector3.UnitZ }; viewport.Camera = camera;  } };
         throughToggle.Checked += (_, _) => throughMesh = true; throughToggle.Unchecked += (_, _) => throughMesh = false;
         fitToggle.Checked += (_, _) => { fitPlane = true; UpdateControls(); RefreshPlane(); }; fitToggle.Unchecked += (_, _) => { fitPlane = false; UpdateControls(); RefreshPlane(); };

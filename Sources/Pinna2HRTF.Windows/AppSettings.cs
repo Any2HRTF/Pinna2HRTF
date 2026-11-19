@@ -169,8 +169,15 @@ public partial class MainWindow
             OpenPaneLength = 220, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalContentAlignment = VerticalAlignment.Stretch
         };
+        var menu = settingsWorkspaceHeader == null ? null : FindDescendant<MenuBar>(settingsWorkspaceHeader);
         var header = new TitleBar {
-            Title = "App settings", IsBackButtonVisible = true, IsBackButtonEnabled = true,
+            Height = settingsWorkspaceHeader?.ActualHeight is > 0 ? settingsWorkspaceHeader.ActualHeight : 54,
+            LeftHeader = new TextBlock {
+                Text = "App Settings", FontFamily = menu?.FontFamily ?? new FontFamily("Segoe UI"),
+                FontSize = menu?.FontSize ?? 14, FontWeight = menu?.FontWeight ?? Microsoft.UI.Text.FontWeights.Normal,
+                Foreground = menu?.Foreground ?? primaryTextBrush, VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(8, 0, 0, 0)
+            }, IsBackButtonVisible = true, IsBackButtonEnabled = true,
             IsPaneToggleButtonVisible = true, Background = secondarySurfaceBrush
         };
         header.BackRequested += (_, _) => CloseAppSettings();
@@ -179,14 +186,15 @@ public partial class MainWindow
         Root.RowDefinitions[0].Height = GridLength.Auto;
         Root.Children.Add(header);
         SetTitleBar(header);
+        Title = "App Settings";
 
         var page = new Grid { Background = appBackgroundBrush };
         page.Children.Add(navigation);
         Grid.SetRow(page, 1);
         Root.Children.Add(page);
         appSettingsPage = page;
-        var names = new[] { "New projects", "Computing", "Notifications", "Tools" };
-        var icons = new[] { "\uE8B7", "\uE950", "\uEA8F", "\uE90F" };
+        var names = new[] { "Project Defaults", "Notifications", "Tools" };
+        var icons = new[] { "\uE8B7", "\uEA8F", "\uE90F" };
         for (var i = 0; i < names.Length; i++)
             navigation.MenuItems.Add(new NavigationViewItem { Content = names[i], Tag = names[i], Icon = new FontIcon { Glyph = icons[i] } });
         string? category = null;
@@ -200,7 +208,12 @@ public partial class MainWindow
             refreshToolSettings = name == "Tools" ? () => ShowCategory(name) : null;
             refreshAppSettingsStatus = null;
             var panel = new StackPanel { Spacing = 24, Margin = new Thickness(24), HorizontalAlignment = HorizontalAlignment.Left };
-            panel.Children.Add(new TextBlock { Text = name, FontSize = 28, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+            var heading = new StackPanel { Spacing = 8 };
+            heading.Children.Add(new TextBlock { Text = name, FontSize = 28, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+            if (name == names[0]) heading.Children.Add(new TextBlock {
+                Text = "These settings are used for newly created projects.", Foreground = mutedTextBrush, TextWrapping = TextWrapping.Wrap
+            });
+            panel.Children.Add(heading);
             if (preferencesLoadError != null)
                 panel.Children.Add(new InfoBar { IsOpen = true, IsClosable = false, Severity = InfoBarSeverity.Warning, Message = preferencesLoadError });
             var scroller = new ScrollViewer {
@@ -212,7 +225,7 @@ public partial class MainWindow
             navigation.Content = scroller;
             if (name == names[0])
             {
-                var files = SettingsSection(panel, "Files");
+                var files = SettingsSection(panel, "Project Setup");
                 PathRow(files, "Project location", () => appPreferences.ProjectDirectory, v => appPreferences.ProjectDirectory = v,
                     Path.Combine(appData, "Projects"), true);
                 var handling = new RadioButtons { ItemsSource = new[] { "Copy into project", "Reference original files" },
@@ -223,22 +236,19 @@ public partial class MainWindow
                     SaveAppPreferences();
                 };
                 files.Children.Add(new SettingsCard { Header = "Input files", Content = handling });
-                PathRow(files, "Evaluation grid", () => appPreferences.EvaluationGrid, v => appPreferences.EvaluationGrid = v,
+                var simulation = SettingsSection(panel, "Simulation setup");
+                PathRow(simulation, "Evaluation grid", () => appPreferences.EvaluationGrid, v => appPreferences.EvaluationGrid = v,
                     Path.Combine(packageRoot, "HRTFCalculation", "EvaluationGrids", ProjectDocument.DefaultEvaluationGrid), true, grid: true);
-                var frequencies = SettingsSection(panel, "Frequencies");
-                IntegerRow(frequencies, "Lowest frequency (Hz)", () => appPreferences.MinimumFrequency, v => appPreferences.MinimumFrequency = v,
+                IntegerRow(simulation, "Lowest frequency (Hz)", () => appPreferences.MinimumFrequency, v => appPreferences.MinimumFrequency = v,
                     () => 0, () => appPreferences.MaximumFrequency - 1);
-                IntegerRow(frequencies, "Highest frequency (Hz)", () => appPreferences.MaximumFrequency, v => appPreferences.MaximumFrequency = v,
+                IntegerRow(simulation, "Highest frequency (Hz)", () => appPreferences.MaximumFrequency, v => appPreferences.MaximumFrequency = v,
                     () => appPreferences.MinimumFrequency + 1, () => 96000);
-                IntegerRow(frequencies, "Frequency steps", () => appPreferences.FrequencySteps, v => appPreferences.FrequencySteps = v, () => 2, () => 8193);
-            }
-            else if (name == names[1])
-            {
-                var computing = SettingsSection(panel, "Defaults for new projects");
+                IntegerRow(simulation, "Frequency steps", () => appPreferences.FrequencySteps, v => appPreferences.FrequencySteps = v, () => 2, () => 8193);
+                var computing = SettingsSection(panel, "Calculation");
                 IntegerRow(computing, "Parallel NumCalc instances", () => appPreferences.MaxInstances, v => appPreferences.MaxInstances = v, () => 1, () => 1024);
                 IntegerRow(computing, "CPU load limit (%)", () => appPreferences.MaxCpuLoad, v => appPreferences.MaxCpuLoad = v, () => 1, () => 100);
             }
-            else if (name == names[2])
+            else if (name == names[1])
             {
                 var status = new InfoBar { IsClosable = false, Severity = InfoBarSeverity.Informational };
                 void RefreshNotificationStatus()
