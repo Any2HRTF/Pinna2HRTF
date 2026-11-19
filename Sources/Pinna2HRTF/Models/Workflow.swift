@@ -20,7 +20,7 @@ enum EarModelMethod: String, Codable, CaseIterable, Identifiable {
     case mesh2ppm, manual, none
     var id: String { rawValue }
     var title: String {
-        switch self { case .mesh2ppm: "Mesh2PPM"; case .manual: "Manual PPM fitting"; case .none: "No PPM" }
+        switch self { case .mesh2ppm: "Mesh2PPM"; case .manual: "Manual PPM fitting"; case .none: "No ear model" }
     }
 }
 

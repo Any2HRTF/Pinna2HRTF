@@ -285,7 +285,7 @@ def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
 
 def preprocessing_input_paths(config: PipelineConfig, logger: Logger) -> tuple[Path | None, Path | None]:
     if config.manual_ppm.enabled and config.inference.use_predictions_for_preprocessing:
-        raise ValueError('Choose one ear modelling method: Mesh2PPM, manual PPM, or no PPM.')
+        raise ValueError('Choose one ear modelling method: Mesh2PPM, manual PPM fitting, or no ear model.')
     left, right = input_paths(config, validate=True)
     if config.scan_preparation.enabled and config.inference.use_predictions_for_preprocessing and not config.manual_ppm.enabled:
         from .ScanPreparation import validate_stage

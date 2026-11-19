@@ -158,7 +158,7 @@ public partial class MainWindow
         }
         prepare.Children.Add(WorkflowDivider());
         var model = prepare;
-        foreach (var (title, id) in new[] { ("Mesh2PPM", "ear_model.mesh2ppm"), ("Manual PPM fitting", "ear_model.manual"), ("No PPM", "ear_model.none") })
+        foreach (var (title, id) in new[] { ("Mesh2PPM", "ear_model.mesh2ppm"), ("Manual PPM fitting", "ear_model.manual"), ("No ear model", "ear_model.none") })
         {
             var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
             label.Children.Add(new TextBlock { Text = title, VerticalAlignment = VerticalAlignment.Center });

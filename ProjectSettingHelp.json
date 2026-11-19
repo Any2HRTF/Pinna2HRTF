@@ -360,7 +360,7 @@
   },
   {
     "id": "ear_model.none",
-    "title": "No PPM",
+    "title": "No ear model",
     "description": "Use the ear meshes as they are, without a parametric model.",
     "publications": [
       {
