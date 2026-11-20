@@ -4,12 +4,11 @@ import UserNotifications
 
 struct AppSettingsView: View {
     enum Pane: Hashable, CaseIterable {
-        case projects, computing, notifications, tools
+        case projects, notifications, tools
 
         var title: String {
             switch self {
-            case .projects: "New Projects"
-            case .computing: "Computing"
+            case .projects: "Project Defaults"
             case .notifications: "Notifications"
             case .tools: "Tools"
             }
@@ -18,7 +17,6 @@ struct AppSettingsView: View {
         var symbol: String {
             switch self {
             case .projects: "folder.badge.plus"
-            case .computing: "cpu"
             case .notifications: "bell.badge"
             case .tools: "wrench.and.screwdriver"
             }
@@ -68,7 +66,6 @@ struct SettingsPaneView: View {
         Form {
             switch pane {
             case .projects: projects
-            case .computing: computing
             case .notifications: notifications
             case .tools: tools
             }
@@ -123,11 +120,8 @@ struct SettingsPaneView: View {
                 NumberStepperField(title: "Frequency steps", value: $frequencySteps, range: 2...8193)
             }
         } header: {
-            Text("Simulation Defaults")
+            Text("Simulation")
         }
-    }
-
-    @ViewBuilder private var computing: some View {
         Section {
             LabeledContent("Parallel NumCalc instances") {
                 NumberStepperField(title: "Parallel NumCalc instances", value: $maxInstances, range: 1...1024)
@@ -135,6 +129,8 @@ struct SettingsPaneView: View {
             LabeledContent("CPU load limit") {
                 NumberStepperField(title: "CPU load limit", value: $maxCPULoad, range: 1...100, unit: "%")
             }
+        } header: {
+            Text("Calculation")
         }
     }
 
