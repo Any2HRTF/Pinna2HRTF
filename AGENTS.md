@@ -8,6 +8,10 @@ Pinna2HRTF is a headless application with two native clients. A user with the in
 - Use one native CLI client per platform for launching the packaged runtime, sending requests, receiving results, and surfacing errors. Keep platform-specific process and rendering details local. Keep Python snippets, private-module invocations, and project-format serializers out of UI code.
 - Document commands and machine-readable payloads alongside the CLI usage. Keep stdout parseable in machine mode, route diagnostics to stderr, and expose failures through stable error information and a nonzero exit status for failed commands. Preserve existing scripts and saved projects when evolving the interface.
 
+# Documentation
+
+Never add anything to `README.md`. Put agent and contributor guidance in `AGENTS.md`, and document commands, payloads and user-facing behaviour in the website documentation under `website/docs`.
+
 # Code style
 
 - Use descriptive domain names, explicit units where relevant, and straightforward control flow. Remove dead branches, commented-out implementations, pass-through wrappers, and repeated conversions after checking their callers.

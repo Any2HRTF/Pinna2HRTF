@@ -133,6 +133,10 @@ uv run Pinna2HRTF numcalc --help</code></pre>
       <p>Keep a separate output folder for each experiment and inspect the geometry and source placement after preprocessing before starting a long simulation.</p>
       <p>Standalone preprocessing with <code>--export-path</code> keeps one previous export per ear: a replaced project moves to <code>&lt;name&gt;-Left.previous</code> (or <code>-Right</code>). An older backup is deleted only after you confirm, and only when it holds unchanged generated files and solver output. Backups with your own or changed files are kept as <code>.previous-&lt;date&gt;</code>. Pass <code>--replace-previous-backup</code> to confirm in scripts.</p>
 
+      <h2 id="project-defaults">Project defaults</h2>
+      <p><code>Pinna2HRTF project new-defaults</code> accepts JSON on stdin with <code>parent</code>, <code>index</code>, and a <code>defaults</code> object containing integer <code>minimum_frequency</code>, <code>maximum_frequency</code>, <code>frequency_steps</code>, <code>max_instances</code>, <code>max_cpu_load</code>, and optional <code>evaluation_grid</code>. It returns a unique <code>save_location</code> and validated <code>preprocessing</code> and <code>numcalc</code> defaults without creating a project folder.</p>
+      <p><code>Pinna2HRTF project validate-grid</code> accepts <code>{"path":"..."}</code> and returns the resolved folder when it contains <code>Nodes.txt</code> and <code>Elements.txt</code>. Both commands return JSON errors and a nonzero exit status on failure.</p>
+
       <nav class="pager" aria-label="More documentation"><a class="prev" href="results.html"><small>Previous</small>Simulation &amp; results</a><a class="next" href="building.html"><small>Next</small>Build from source</a></nav>
     </main>
 
@@ -144,6 +148,7 @@ uv run Pinna2HRTF numcalc --help</code></pre>
         <a href="#configure-a-run">Configure a run</a>
         <a href="#scan-preparation-from-yaml">Scan preparation from YAML</a>
         <a href="#run-individual-stages-without-yaml">Run individual stages without YAML</a>
+        <a href="#project-defaults">Project defaults</a>
       </nav>
     </aside>
   </div>
