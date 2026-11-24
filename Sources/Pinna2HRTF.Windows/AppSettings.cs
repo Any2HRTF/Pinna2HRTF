@@ -95,6 +95,9 @@ internal sealed class WorkflowPreferences
             ["mesh_grading.max_error"] = Number(MeshMaxError), ["mesh_grading.gamma"] = Number(MeshGamma), ["mesh_grading.gamma_opposite"] = Number(MeshGammaOpposite),
             ["postprocessing.level_offset"] = Number(LevelOffsetDb), ["postprocessing.sampling_rate"] = Whole(SamplingRate),
             ["postprocessing.spatial_subdivisions"] = Whole(SpatialSubdivisions),
+            ["postprocessing.normalize"] = Normalize ? "true" : "false",
+            ["postprocessing.resample_hrirs"] = ResampleHrirs ? "true" : "false",
+            ["postprocessing.spatial_upsampling"] = SpatialUpsampling ? "true" : "false",
             ["head.radius_scale"] = Number(HeadRadiusScale),
             ["head.width_scale"] = Number(HeadWidthScale),
             ["head.height_scale"] = Number(HeadHeightScale),
@@ -211,7 +214,7 @@ public partial class MainWindow
         });
         project.SaveLocation = reply.GetProperty("save_location").GetString()!;
         project.InputHandling = preferences.InputHandling;
-        ProjectDocument.Restore(project, JsonNode.Parse(reply.GetProperty("settings").GetRawText())!.AsObject());
+        ProjectDocument.Restore(project, JsonNode.Parse(reply.GetProperty("config").GetRawText())!.AsObject());
     }
 
     async Task InitializeInitialProjectAsync(ProjectRecord project)
@@ -223,6 +226,7 @@ public partial class MainWindow
         project.SaveLocation = prepared.SaveLocation;
         project.InputHandling = prepared.InputHandling;
         project.Settings = prepared.Settings;
+        project.PreservedConfigJSON = prepared.PreservedConfigJSON;
         Persist();
         if (selectedProject == project) LoadSelectedProject();
         RefreshPipelineStatus();
@@ -285,7 +289,23 @@ public partial class MainWindow
             refreshAppSettingsStatus = null;
             var panel = new StackPanel { Spacing = 24, Margin = new Thickness(24), HorizontalAlignment = HorizontalAlignment.Left };
             var heading = new StackPanel { Spacing = 8 };
-            heading.Children.Add(new TextBlock { Text = name, FontSize = 28, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+            var titleRow = new Grid { ColumnSpacing = 16, RowSpacing = 8 };
+            titleRow.ColumnDefinitions.Add(new()); titleRow.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+            titleRow.RowDefinitions.Add(new() { Height = GridLength.Auto }); titleRow.RowDefinitions.Add(new() { Height = GridLength.Auto });
+            titleRow.Children.Add(new TextBlock { Text = name, FontSize = 28, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+            heading.Children.Add(titleRow);
+            if (name == names[0])
+            {
+                var resetDefaults = new Button { Content = "Reset to defaults…", HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+                ToolTipService.SetToolTip(resetDefaults, "Reset Project Defaults. Existing projects keep their settings.");
+                Grid.SetColumn(resetDefaults, 1); titleRow.Children.Add(resetDefaults);
+                titleRow.SizeChanged += (_, args) => {
+                    var narrow = args.NewSize.Width < 480;
+                    Grid.SetRow(resetDefaults, narrow ? 1 : 0); Grid.SetColumn(resetDefaults, narrow ? 0 : 1);
+                    resetDefaults.HorizontalAlignment = narrow ? HorizontalAlignment.Left : HorizontalAlignment.Right;
+                };
+                resetDefaults.Click += async (_, _) => { if (await ResetProjectDefaultsAsync()) ShowCategory(names[0]); };
+            }
             if (name == names[0]) heading.Children.Add(new TextBlock {
                 Text = "Default settings used for newly created projects.", Foreground = mutedTextBrush, TextWrapping = TextWrapping.Wrap
             });
@@ -359,15 +379,13 @@ public partial class MainWindow
                 var computing = SettingsSection(panel, "Calculation");
                 IntegerRow(computing, "Parallel NumCalc instances", "numcalc.parallel_instances", () => appPreferences.MaxInstances, v => appPreferences.MaxInstances = v);
                 IntegerRow(computing, "CPU load limit (%)", "numcalc.cpu_limit", () => appPreferences.MaxCpuLoad, v => appPreferences.MaxCpuLoad = v);
-                SettingsAdvanced(computing, "Advanced calculation settings", controls =>
-                    SwitchRow(controls, "Adaptive FMM expansion length", defaults.AdaptiveFmmLength, v => defaults.AdaptiveFmmLength = v));
+                SwitchRow(computing, "Adaptive FMM expansion length", defaults.AdaptiveFmmLength, v => defaults.AdaptiveFmmLength = v);
                 var sofa = SettingsSection(panel, "SOFA export");
-                SwitchRow(sofa, "Apply level offset", defaults.Normalize, v => defaults.Normalize = v);
-                NumberRow(sofa, "Level offset (dB)", "postprocessing.level_offset", () => defaults.LevelOffsetDb, v => defaults.LevelOffsetDb = v);
-                SwitchRow(sofa, "Resample HRIRs", defaults.ResampleHrirs, v => defaults.ResampleHrirs = v);
-                IntegerRow(sofa, "Sampling rate (Hz)", "postprocessing.sampling_rate", () => defaults.SamplingRate, v => defaults.SamplingRate = v);
-                SwitchRow(sofa, "Spatially upsample HRTFs", defaults.SpatialUpsampling, v => defaults.SpatialUpsampling = v);
-                SettingsAdvanced(sofa, "Advanced spatial upsampling", controls => {
+                SettingsOption(sofa, "Apply level offset", defaults.Normalize, v => defaults.Normalize = v, controls =>
+                    NumberRow(controls, "Level offset (dB)", "postprocessing.level_offset", () => defaults.LevelOffsetDb, v => defaults.LevelOffsetDb = v));
+                SettingsOption(sofa, "Resample HRIRs", defaults.ResampleHrirs, v => defaults.ResampleHrirs = v, controls =>
+                    IntegerRow(controls, "Sampling rate (Hz)", "postprocessing.sampling_rate", () => defaults.SamplingRate, v => defaults.SamplingRate = v));
+                SettingsOption(sofa, "Spatially upsample HRTFs", defaults.SpatialUpsampling, v => defaults.SpatialUpsampling = v, controls => {
                     IntegerRow(controls, "Subdivision level (0–5)", "postprocessing.spatial_subdivisions", () => defaults.SpatialSubdivisions, v => defaults.SpatialSubdivisions = v);
                     SwitchRow(controls, "Normalize to frontal reference", defaults.SpatialNormalize, v => defaults.SpatialNormalize = v);
                 });
@@ -454,7 +472,45 @@ public partial class MainWindow
         return cards;
     }
 
-    static void SettingsAdvanced(StackPanel parent, string title, Action<StackPanel> build)
+    async Task<bool> ResetProjectDefaultsAsync()
+    {
+        var confirmation = new ContentDialog {
+            Title = "Reset Project Defaults?",
+            Content = "Restore the default location, input handling and workflow settings for new projects? Existing projects, notifications and tool settings will stay unchanged.",
+            PrimaryButtonText = "Reset", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close, XamlRoot = Root.XamlRoot
+        };
+        if (await ShowDialogAsync(confirmation) != ContentDialogResult.Primary) return false;
+        var defaults = new AppPreferences();
+        appPreferences.ProjectDirectory = defaults.ProjectDirectory;
+        appPreferences.InputHandling = defaults.InputHandling;
+        appPreferences.EvaluationGrid = defaults.EvaluationGrid;
+        appPreferences.MinimumFrequency = defaults.MinimumFrequency;
+        appPreferences.MaximumFrequency = defaults.MaximumFrequency;
+        appPreferences.FrequencySteps = defaults.FrequencySteps;
+        appPreferences.MaxInstances = defaults.MaxInstances;
+        appPreferences.MaxCpuLoad = defaults.MaxCpuLoad;
+        appPreferences.Workflow = defaults.Workflow;
+        SaveAppPreferences();
+        return true;
+    }
+
+    void SettingsOption(StackPanel parent, string title, bool value, Action<bool> write, Action<StackPanel> build)
+    {
+        var expander = SettingsAdvanced(parent, title, build);
+        var toggle = new ToggleSwitch { IsOn = value };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toggle, title);
+        expander.Content = toggle;
+        expander.IsExpanded = value;
+        foreach (var item in expander.Items.OfType<Control>()) item.IsEnabled = value;
+        toggle.Toggled += (_, _) => {
+            write(toggle.IsOn);
+            expander.IsExpanded = toggle.IsOn;
+            foreach (var item in expander.Items.OfType<Control>()) item.IsEnabled = toggle.IsOn;
+            SaveAppPreferences();
+        };
+    }
+
+    static SettingsExpander SettingsAdvanced(StackPanel parent, string title, Action<StackPanel> build)
     {
         var controls = new StackPanel();
         build(controls);
@@ -465,6 +521,7 @@ public partial class MainWindow
             expander.Items.Add(control);
         }
         parent.Children.Add(expander);
+        return expander;
     }
 
     void ChoiceRow(StackPanel parent, string title, string[] choices, int selected, Action<int> write)

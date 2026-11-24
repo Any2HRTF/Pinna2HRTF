@@ -59,6 +59,11 @@
       <p><strong>Projects and app settings live in different places.</strong> Outputs go to your project folder. App preferences, cached resources, and the project registry are stored elsewhere.</p></aside>
       <p>For detailed illustrated workflows, see <a href="manual-fitting.html">manual PPM fitting</a> and <a href="results.html">simulation and results</a>.</p>
 
+      <h3 id="windows-project-defaults">Windows Project Defaults</h3>
+      <p>Open <strong>Help → App settings → Project Defaults</strong> to choose settings for newly created projects. Defaults are grouped by workflow step. Adaptive FMM expansion length is shown directly under Calculation.</p>
+      <p>In SOFA export, each option is an expander with its switch in the header. Turning on <strong>Apply level offset</strong>, <strong>Resample HRIRs</strong> or <strong>Spatially upsample HRTFs</strong> reveals its related settings. Turning it off collapses those settings and keeps their values for later use.</p>
+      <p><strong>Reset to defaults…</strong> beside the page heading restores the CLI-provided factory defaults, including the default project parent, input handling and evaluation grid. A confirmation is shown first. Existing projects, notification preferences and tool overrides stay unchanged.</p>
+
       <h2 id="3-check-the-inputs">3. Check the inputs</h2>
       <p>Mesh2PPM inference is optional and off by default. When enabled, it predicts a refined ear surface from the input mesh. Preprocessing uses the original mesh unless <strong>Use predictions for preprocessing</strong> is enabled. You can inspect the mesh in the viewer before continuing.</p>
       <p>Project settings include the evaluation grid, ear distance and mesh parameters, frequency range, source setup, and optional scan-preparation controls. The run panel controls available stages and local NumCalc resource limits.</p>

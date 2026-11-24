@@ -6,27 +6,22 @@ namespace Pinna2HRTF.Windows;
 
 internal static class SettingsCatalog
 {
-    internal static Func<string, JsonElement>? Request { get; set; }
     static JsonObject? rules, defaults;
 
-    static JsonObject Load(ref JsonObject? cache, string action, string? property)
+    internal static async Task InitializeAsync(Func<string, Task<JsonElement>> request)
     {
-        if (cache != null) return cache;
-        if (Request == null) return new JsonObject();
-        try
-        {
-            var reply = JsonNode.Parse(Request(action).GetRawText())!.AsObject();
-            cache = property == null ? reply : reply[property]!.AsObject();
-            return cache;
-        }
-        catch (Exception error) when (error is IOException or JsonException or InvalidOperationException or NullReferenceException)
-        {
-            return new JsonObject();
-        }
+        var defaultReply = await request("defaults");
+        var ruleReply = await request("rules");
+        var config = JsonNode.Parse(defaultReply.GetProperty("config").GetRawText())!.AsObject();
+        var schema = JsonNode.Parse(ruleReply.GetRawText())!.AsObject();
+        if (config["preprocessing"] is not JsonObject || config["numcalc"] is not JsonObject || schema["fields"] is not JsonArray { Count: > 0 })
+            throw new InvalidDataException("The CLI did not return its settings defaults and validation rules.");
+        defaults = config;
+        rules = schema;
     }
 
-    static JsonObject Rules => Load(ref rules, "rules", null);
-    static JsonObject Defaults => Load(ref defaults, "defaults", "config");
+    static JsonObject Rules => rules ?? new JsonObject();
+    static JsonObject Defaults => defaults ?? new JsonObject();
 
     internal static string RuleId(string id) => id == "scan_preparation.scan_path" ? "scan.path"
         : id.StartsWith("scan_preparation.", StringComparison.Ordinal) ? "scan." + id["scan_preparation.".Length..] : id;

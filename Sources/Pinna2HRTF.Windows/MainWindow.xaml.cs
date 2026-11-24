@@ -73,7 +73,8 @@ public partial class MainWindow : Window
     readonly JsonSerializerOptions jsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true, Converters = { new JsonStringEnumConverter() } };
     readonly Microsoft.UI.Dispatching.DispatcherQueueTimer statusTimer;
     readonly Dictionary<string, Control> settingControls = [];
-    readonly Dictionary<string, TextSetting> textSettings;
+    readonly Dictionary<string, TextSetting> textSettings = [];
+    bool workspaceReady;
     readonly List<Expander> settingSections = [];
     readonly List<Element3D> sceneLights = [];
     readonly List<MeshGeometryModel3D> meshVisuals = [];
@@ -222,9 +223,6 @@ public partial class MainWindow : Window
         FileFingerprints.UiThread = Environment.CurrentManagedThreadId;
         FileFingerprints.Ready = () => DispatcherQueue.TryEnqueue(() => { if (!shutdownCleanupDone) RefreshPipelineStatus(); });
         InitializeComponent();
-        textSettings = CreateTextSettings();
-        AddV2TextSettings(textSettings);
-        AddHeadShapeTextSettings(textSettings);
         Root.KeyDown += (_, args) =>
         {
             if (args.Key != VirtualKey.Escape) return;
@@ -247,7 +245,7 @@ public partial class MainWindow : Window
             var accelerator = TryCreateKeyboardAccelerator(shortcut)!;
             accelerator.Invoked += (_, args) =>
             {
-                action(this, new RoutedEventArgs());
+                if (workspaceReady) action(this, new RoutedEventArgs());
                 args.Handled = true;
             };
             Root.KeyboardAccelerators.Add(accelerator);
@@ -279,10 +277,11 @@ public partial class MainWindow : Window
         try { return process.ProcessName; } catch { return "pipeline process"; }
     }
 
-    void WindowLoaded(object sender, RoutedEventArgs e)
+    async void WindowLoaded(object sender, RoutedEventArgs e)
     {
         if (MacLayout) { projectsExpandedWidth = 240; settingsExpandedWidth = 360; }
-        BuildInterface();
+        var loading = new ProgressRing { IsActive = true, Width = 32, Height = 32, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        Root.Children.Add(loading);
         packageRoot = FindPackageRoot();
         appData = Environment.GetEnvironmentVariable("PINNA2HRTF_APP_DATA") is string overrideData && Path.IsPathFullyQualified(overrideData) ? overrideData : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), MacReviewStorage ? "Pinna2HRTF-v2-review-macimitation" : "Pinna2HRTF-v2-review");
 #if PINNA2HRTF_REVIEW
@@ -299,7 +298,24 @@ public partial class MainWindow : Window
         EnsureStateDirectory(Path.Combine(appData, "Blender", "config"));
         EnsureStateDirectory(Path.Combine(appData, "Blender", "scripts"));
         EnsureStateDirectory(Path.Combine(appData, "Blender", "datafiles"));
-        SettingsCatalog.Request = action => Task.Run(() => RequestPythonAsync("project", new { action })).GetAwaiter().GetResult();
+        try { await SettingsCatalog.InitializeAsync(action => RequestPythonAsync("project", new { action })); }
+        catch (Exception error) when (error is IOException or JsonException or InvalidOperationException or KeyNotFoundException or OperationCanceledException)
+        {
+            if (shutdownCleanupDone) return;
+            loading.IsActive = false;
+            await ShowDialogAsync(new ContentDialog {
+                Title = "Unable to load CLI settings", Content = error.Message,
+                CloseButtonText = "Close", XamlRoot = Root.XamlRoot
+            });
+            Close();
+            return;
+        }
+        if (shutdownCleanupDone) return;
+        appPreferences = new AppPreferences();
+        foreach (var pair in CreateTextSettings()) textSettings.Add(pair.Key, pair.Value);
+        AddV2TextSettings(textSettings);
+        AddHeadShapeTextSettings(textSettings);
+        BuildInterface();
         LoadSettingHelp();
         LoadAppPreferences();
         LoadRegistry();
@@ -333,6 +349,7 @@ public partial class MainWindow : Window
         statusTimer.Start();
         RefreshPipelineStatus();
         if (initialProject != null) _ = ObserveUiTaskAsync(InitializeInitialProjectAsync(initialProject), "New project defaults", initialProject);
+        workspaceReady = true;
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => {
             if (appSettingsPage == null) projectList.Focus(FocusState.Programmatic);
         });
