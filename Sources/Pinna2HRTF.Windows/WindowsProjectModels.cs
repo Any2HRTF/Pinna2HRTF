@@ -42,6 +42,6 @@ class ManualFit
     public string SourceIdentity { get; set; } = "";
 }
 
-class EnvironmentConfig { public string UvExecutable { get; set; } = ""; public string NumCalcExecutable { get; set; } = ""; public string MeshGradingExecutable { get; set; } = ""; public string ExternalDir { get; set; } = ""; [JsonIgnore] public bool IsEmpty => string.IsNullOrWhiteSpace(NumCalcExecutable) && string.IsNullOrWhiteSpace(MeshGradingExecutable) && string.IsNullOrWhiteSpace(ExternalDir); }
+class EnvironmentConfig { public string UvExecutable { get; set; } = ""; public string NumCalcExecutable { get; set; } = ""; public string MeshGradingExecutable { get; set; } = ""; public string ExternalDir { get; set; } = ""; public string? Mesh2HrtfPath { get; set; } [JsonIgnore] public string EffectiveMesh2HrtfPath => Mesh2HrtfPath ?? Path.Combine(ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf"); [JsonIgnore] public bool IsEmpty => string.IsNullOrWhiteSpace(NumCalcExecutable) && string.IsNullOrWhiteSpace(MeshGradingExecutable) && string.IsNullOrWhiteSpace(ExternalDir); }
 
 enum InputHandling { Copy, Reference }

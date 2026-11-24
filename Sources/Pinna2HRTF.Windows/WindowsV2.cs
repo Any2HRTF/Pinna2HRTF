@@ -147,7 +147,7 @@ public partial class MainWindow
         var grid = p.Settings.Preprocessing.EvaluationGrid;
         if (string.IsNullOrWhiteSpace(grid)) grid = ProjectDocument.DefaultEvaluationGrid;
         if (grid == ProjectDocument.DefaultEvaluationGrid) grid = Path.Combine(packageRoot, "HRTFCalculation", "EvaluationGrids", grid);
-        else if (!Path.IsPathFullyQualified(grid)) grid = Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf", "Mesh2Input", "EvaluationGrids", "Data", grid);
+        else if (!Path.IsPathFullyQualified(grid)) grid = Path.Combine(environment.EffectiveMesh2HrtfPath, "Mesh2Input", "EvaluationGrids", "Data", grid);
         var ears = new JsonObject();
         foreach (var side in WorkflowSides(p))
         {
