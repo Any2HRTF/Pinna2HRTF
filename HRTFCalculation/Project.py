@@ -17,7 +17,7 @@ import uuid
 
 import yaml
 
-from .Config import PipelineConfig, config_from_text, load_config
+from .Config import DEFAULT_EVALUATION_GRID, PipelineConfig, config_from_text, load_config
 from .Compatibility import decode_settings, read_settings
 from .MicrophonePlacement import ignore_stale_placements, placements_path, read_placements, statuses, updated_placements
 
@@ -243,6 +243,9 @@ EDITABLE_SETTINGS = {
 }
 
 
+DEPRECATED_SETTINGS = {"matlab_executable", "amt_path"}
+
+
 def settings_revision(path: Path | None) -> str | None:
     try:
         return sha256(path) if path is not None else None
@@ -316,6 +319,11 @@ def settings_document(command: dict, saved: dict | None) -> tuple[PipelineConfig
 
 
 def save_settings(command: dict, path: Path) -> dict:
+    if command.get("stage"):
+        from .SettingsRules import check
+        found = check(command["config"], command["stage"])
+        if found:
+            raise ValueError(found[0]["message"])
     path.parent.mkdir(parents=True, exist_ok=True)
     with settings_lock(path):
         try:
@@ -413,6 +421,14 @@ def copy_input(source: Path, folder: Path) -> Path:
     return target
 
 
+def default_settings() -> dict:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        mapping = PipelineConfig().model_dump(mode="json")
+    return {section: {key: mapping[section][key] for key in keys if key in mapping[section] and key not in DEPRECATED_SETTINGS}
+            for section, keys in EDITABLE_SETTINGS.items()}
+
+
 def execute(command: dict) -> dict:
     action = command["action"]
     if action == "validate-grid":
@@ -431,9 +447,22 @@ def execute(command: dict) -> dict:
         grid = values.get("evaluation_grid", "")
         if grid:
             execute({"action": "validate-grid", "path": grid})
-        return {"save_location": str(Path(command["parent"]).expanduser().resolve() / ("Project " + str(command["index"]) + "-" + str(uuid.uuid4()))),
+        save_location = Path(command["parent"]).expanduser().resolve() / ("Project " + str(command["index"]) + "-" + str(uuid.uuid4()))
+        config = default_settings()
+        config["paths"].update(output_dir=str(save_location), evaluation_grid=grid or DEFAULT_EVALUATION_GRID)
+        config["preprocessing"].update(title="Project " + str(command["index"]), min_frequency=minimum, max_frequency=maximum, frequency_step_count=steps)
+        config["numcalc"].update(max_instances=instances, max_cpu_load=cpu)
+        return {"save_location": str(save_location), "config": config,
                 "preprocessing": {"min_frequency": minimum, "max_frequency": maximum, "frequency_step_count": steps, "evaluation_grid": grid},
                 "numcalc": {"max_instances": instances, "max_cpu_load": cpu}}
+    if action == "defaults":
+        return {"config": default_settings()}
+    if action == "rules":
+        from .SettingsRules import rules
+        return rules()
+    if action == "check":
+        from .SettingsRules import check
+        return {"issues": check(command["config"], command.get("stage"))}
     if action in {"recycle-plan", "recycle"}:
         from .ProjectTrash import execute as trash
         return trash(command)

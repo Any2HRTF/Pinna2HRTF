@@ -6,7 +6,7 @@ namespace Pinna2HRTF.Windows;
 
 internal static class ProjectDocument
 {
-    internal const string DefaultEvaluationGrid = "ARI_Grid";
+    internal static string DefaultEvaluationGrid => SettingsCatalog.Text("paths.evaluation_grid");
     internal static double Number(string value) => HeadGeometry.Parse(value);
     internal static bool SameJson(JsonNode? left,JsonNode? right)
     {
@@ -24,33 +24,43 @@ internal static class ProjectDocument
         }
         return Same(a.RootElement,b.RootElement);
     }
-    internal static string? ValidationError(ProjectRecord p)
+    internal static Dictionary<string, string> FormValues(ProjectRecord p)
     {
-        try
+        var pre = p.Settings.Preprocessing; var scan = p.Settings.ScanPreparation; var post = p.Settings.Postprocessing ?? new();
+        static string Flag(bool value) => value ? "true" : "false";
+        return new()
         {
-            var pre=p.Settings.Preprocessing;var scan=p.Settings.ScanPreparation;var post=p.Settings.Postprocessing??new();
-            int Integer(string value,string name,int minimum){if(!int.TryParse(value,NumberStyles.Integer,CultureInfo.InvariantCulture,out var n)||n<minimum)throw new InvalidDataException($"{name}: enter a whole number of at least {minimum}.");return n;}
-            double Positive(string value,string name,bool zero=false){var n=Number(value);if(zero?n<0:n<=0)throw new InvalidDataException($"{name}: enter a {(zero?"nonnegative":"positive")} number.");return n;}
-            var min=Integer(pre.MinFrequency,"Minimum frequency",0);var max=Integer(pre.MaxFrequency,"Maximum frequency",1);
-            if(max<=min)return "Maximum frequency must be greater than minimum frequency.";
-            Integer(pre.FrequencyStepCount,"Frequency steps",2);Integer(pre.SourceAssignmentFaceCount,"Microphone faces",1);
-            var small=Positive(pre.MeshMinEdgeLength,"Minimum edge length");var large=Positive(pre.MeshMaxEdgeLength,"Maximum edge length");
-            if(large<small)return "Maximum edge length must be at least the minimum edge length.";
-            Positive(pre.MeshMaxError,"Mesh error",true);Positive(pre.MeshGamma,"Gamma");Positive(pre.MeshGammaOpposite,"Gamma opposite");
-            if(pre.EarDistance!=null)Positive(pre.EarDistance,"Ear distance");
-            Integer(p.Settings.NumCalc.MaxInstances,"Parallel instances",1);var cpu=Integer(p.Settings.NumCalc.MaxCpuLoad,"CPU limit",1);if(cpu>100)return "CPU limit must be from 1 to 100%.";
-            if(post.Normalize)Number(post.LevelOffsetDB);
-            if (Integer(post.SpatialSubdivisions, "Spatial subdivisions", 0) > 5) return "Spatial subdivisions must be from 0 to 5.";
-            if(Integer(post.SamplingRate,"Sampling rate",1)%10!=0)return "Sampling rate must be divisible by 10 Hz.";
-            if(scan.Enabled)
-            {
-                Number(scan.RotationDegrees);Positive(scan.TargetEdgeMM,"Target edge length");Positive(scan.LeftMarginMM,"Left crop margin",true);Positive(scan.RightMarginMM,"Right crop margin",true);
-                var inner=Positive(scan.SideMinMM,"Inner crop limit",true);var outer=Positive(scan.SideMaxMM,"Outer crop limit");if(outer<=inner)return "Outer crop limit must exceed the inner limit.";
-            }
-            return null;
-        }
-        catch(Exception error) when(error is FormatException or InvalidDataException or OverflowException){return error.Message;}
+            ["mesh2hrtf.min_frequency"] = pre.MinFrequency, ["mesh2hrtf.max_frequency"] = pre.MaxFrequency,
+            ["mesh2hrtf.frequency_steps"] = pre.FrequencyStepCount, ["mesh2hrtf.microphone_faces"] = pre.SourceAssignmentFaceCount,
+            ["mesh2hrtf.ear_distance"] = pre.EarDistance ?? "",
+            ["mesh_grading.min_edge_length"] = pre.MeshMinEdgeLength, ["mesh_grading.max_edge_length"] = pre.MeshMaxEdgeLength,
+            ["mesh_grading.max_error"] = pre.MeshMaxError, ["mesh_grading.gamma"] = pre.MeshGamma, ["mesh_grading.gamma_opposite"] = pre.MeshGammaOpposite,
+            ["numcalc.parallel_instances"] = p.Settings.NumCalc.MaxInstances, ["numcalc.cpu_limit"] = p.Settings.NumCalc.MaxCpuLoad,
+            ["postprocessing.normalize"] = Flag(post.Normalize), ["postprocessing.level_offset"] = post.LevelOffsetDB,
+            ["postprocessing.resample_hrirs"] = Flag(post.ResampleHrirs), ["postprocessing.sampling_rate"] = post.SamplingRate,
+            ["postprocessing.spatial_upsampling"] = Flag(post.SpatialUpsampling), ["postprocessing.spatial_subdivisions"] = post.SpatialSubdivisions,
+            ["scan.enabled"] = Flag(scan.Enabled), ["scan.path"] = scan.ScanPath, ["scan.rotation"] = scan.RotationDegrees,
+            ["scan.prepare_left"] = Flag(scan.PrepareLeft), ["scan.prepare_right"] = Flag(scan.PrepareRight),
+            ["scan.target_edge"] = scan.TargetEdgeMM, ["scan.left_margin"] = scan.LeftMarginMM, ["scan.right_margin"] = scan.RightMarginMM,
+            ["scan.side_min"] = scan.SideMinMM, ["scan.side_max"] = scan.SideMaxMM,
+        };
     }
+
+    internal static string? ValidationError(ProjectRecord p, string? stage = null, string? earModel = null)
+    {
+        var values = FormValues(p);
+        if (earModel != null) values["ear_model.method"] = earModel;
+        return SettingsCatalog.Issues(values, stage).Select(issue => issue.Message).FirstOrDefault();
+    }
+
+    static object? Numeric(string id, string text, string key)
+    {
+        var value = SettingsCatalog.FieldMessage(id, text) == null ? text : SettingsCatalog.Text(key);
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        if (int.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var whole)) return whole;
+        return double.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && double.IsFinite(number) ? number : null;
+    }
+
     static JsonNode? Value(object? value) => JsonSerializer.SerializeToNode(value);
 
     internal static string? ReadAlignmentOriginal(string path)
@@ -93,9 +103,10 @@ internal static class ProjectDocument
         Set("scan_preparation", "enabled", scan.Enabled); Set("scan_preparation", "scan_path", PathValue(scan.ScanPath));
         Set("scan_preparation", "original_scan_path", PathValue(scan.OriginalScanPath));
         Set("scan_preparation", "prepare_left", scan.PrepareLeft); Set("scan_preparation", "prepare_right", scan.PrepareRight);
-        foreach (var pair in new[] { ("rotation_degrees", scan.RotationDegrees), ("target_edge_mm", scan.TargetEdgeMM),
-            ("left_margin_mm", scan.LeftMarginMM), ("right_margin_mm", scan.RightMarginMM),
-            ("side_min_mm", scan.SideMinMM), ("side_max_mm", scan.SideMaxMM) }) Set("scan_preparation", pair.Item1, Number(pair.Item2));
+        foreach (var (key, id, text) in new[] { ("rotation_degrees", "scan.rotation", scan.RotationDegrees), ("target_edge_mm", "scan.target_edge", scan.TargetEdgeMM),
+            ("left_margin_mm", "scan.left_margin", scan.LeftMarginMM), ("right_margin_mm", "scan.right_margin", scan.RightMarginMM),
+            ("side_min_mm", "scan.side_min", scan.SideMinMM), ("side_max_mm", "scan.side_max", scan.SideMaxMM) })
+            Set("scan_preparation", key, Numeric(id, text, "scan_preparation." + key));
         Set("scan_preparation", "require_manual_review", scan.RequireManualReview);
         Set("paths", "edited_left_ear", PathValue(scan.IndividualLeftEdit)); Set("paths", "edited_right_ear", PathValue(scan.IndividualRightEdit));
         Set("scan_preparation", "reviewed_left", PathValue(scan.ReviewedLeft)); Set("scan_preparation", "reviewed_right", PathValue(scan.ReviewedRight));
@@ -117,22 +128,21 @@ internal static class ProjectDocument
         }
         Section("preprocessing").Remove("head_radius");
         Set("preprocessing", "title", p.Name); Set("preprocessing", "ear_distance", pre.EarDistance == null ? null : Number(pre.EarDistance));
-        foreach (var pair in new[] { ("min_frequency", pre.MinFrequency), ("max_frequency", pre.MaxFrequency),
-            ("mesh_min_edge_length", pre.MeshMinEdgeLength), ("mesh_max_edge_length", pre.MeshMaxEdgeLength),
-            ("mesh_max_error", pre.MeshMaxError), ("mesh_gamma", pre.MeshGamma), ("mesh_gamma_opposite", pre.MeshGammaOpposite) })
-            Set("preprocessing", pair.Item1, Number(pair.Item2));
-        Set("preprocessing", "frequency_step_count", int.Parse(pre.FrequencyStepCount, CultureInfo.InvariantCulture));
-        Set("preprocessing", "source_assignment_face_count", int.Parse(pre.SourceAssignmentFaceCount, CultureInfo.InvariantCulture));
+        foreach (var (key, id, text) in new[] { ("min_frequency", "mesh2hrtf.min_frequency", pre.MinFrequency), ("max_frequency", "mesh2hrtf.max_frequency", pre.MaxFrequency),
+            ("frequency_step_count", "mesh2hrtf.frequency_steps", pre.FrequencyStepCount), ("source_assignment_face_count", "mesh2hrtf.microphone_faces", pre.SourceAssignmentFaceCount),
+            ("mesh_min_edge_length", "mesh_grading.min_edge_length", pre.MeshMinEdgeLength), ("mesh_max_edge_length", "mesh_grading.max_edge_length", pre.MeshMaxEdgeLength),
+            ("mesh_max_error", "mesh_grading.max_error", pre.MeshMaxError), ("mesh_gamma", "mesh_grading.gamma", pre.MeshGamma), ("mesh_gamma_opposite", "mesh_grading.gamma_opposite", pre.MeshGammaOpposite) })
+            Set("preprocessing", key, Numeric(id, text, "preprocessing." + key));
         Set("preprocessing", "skip_mesh_grading", false);
         Set("numcalc", "enabled", false);
-        Set("numcalc", "max_instances", int.Parse(num.MaxInstances, CultureInfo.InvariantCulture));
-        Set("numcalc", "max_cpu_load", Number(num.MaxCpuLoad)); Set("numcalc", "adaptive_fmm_length", num.AdaptiveFmmLength);
+        Set("numcalc", "max_instances", Numeric("numcalc.parallel_instances", num.MaxInstances, "numcalc.max_instances"));
+        Set("numcalc", "max_cpu_load", Numeric("numcalc.cpu_limit", num.MaxCpuLoad, "numcalc.max_cpu_load")); Set("numcalc", "adaptive_fmm_length", num.AdaptiveFmmLength);
         Set("postprocessing", "enabled", false); Set("postprocessing", "overwrite", true);
         Set("postprocessing", "output_sofa_dir", string.IsNullOrWhiteSpace(post.OutputFolder) ? Path.Combine(p.SaveLocation, "HRTF") : post.OutputFolder);
-        Set("postprocessing", "normalize", post.Normalize); Set("postprocessing", "level_offset_db", Number(post.LevelOffsetDB));
-        Set("postprocessing", "resample_hrirs", post.ResampleHrirs); Set("postprocessing", "sampling_rate", int.Parse(post.SamplingRate, CultureInfo.InvariantCulture));
+        Set("postprocessing", "normalize", post.Normalize); Set("postprocessing", "level_offset_db", Numeric("postprocessing.level_offset", post.LevelOffsetDB, "postprocessing.level_offset_db"));
+        Set("postprocessing", "resample_hrirs", post.ResampleHrirs); Set("postprocessing", "sampling_rate", Numeric("postprocessing.sampling_rate", post.SamplingRate, "postprocessing.sampling_rate"));
         Set("postprocessing", "spatial_upsampling", post.SpatialUpsampling);
-        Set("postprocessing", "spatial_subdivisions", int.Parse(post.SpatialSubdivisions, CultureInfo.InvariantCulture));
+        Set("postprocessing", "spatial_subdivisions", Numeric("postprocessing.spatial_subdivisions", post.SpatialSubdivisions, "postprocessing.spatial_subdivisions"));
         Set("postprocessing", "spatial_normalize", post.SpatialNormalize);
         return root;
     }
@@ -143,24 +153,26 @@ internal static class ProjectDocument
         string? Text(string section, string key) => root[section]?[key]?.ToString();
         bool Flag(string section, string key, bool fallback = false) => bool.TryParse(Text(section, key), out var b) ? b : fallback;
         string S(string section, string key, string fallback) => Text(section, key) ?? fallback;
+        string D(string section, string key) => Text(section, key) ?? SettingsCatalog.Text(section + "." + key);
+        bool B(string section, string key) => Flag(section, key, SettingsCatalog.Flag(section + "." + key));
         p.LeftEar = S("paths", "left_ear", ""); p.RightEar = S("paths", "right_ear", "");
         var pre = p.Settings.Preprocessing; var scan = p.Settings.ScanPreparation; var inf = p.Settings.Inference;
         pre.EarDistance = Text("preprocessing", "ear_distance"); pre.EvaluationGrid = Text("paths", "evaluation_grid");
-        pre.MinFrequency = S("preprocessing", "min_frequency", "0"); pre.MaxFrequency = S("preprocessing", "max_frequency", "24000");
-        pre.FrequencyStepCount = S("preprocessing", "frequency_step_count", "129"); pre.SourceAssignmentFaceCount = S("preprocessing", "source_assignment_face_count", "6");
-        pre.MeshMinEdgeLength = S("preprocessing", "mesh_min_edge_length", "0.5"); pre.MeshMaxEdgeLength = S("preprocessing", "mesh_max_edge_length", "10");
-        pre.MeshMaxError = S("preprocessing", "mesh_max_error", "0.5"); pre.MeshGamma = S("preprocessing", "mesh_gamma", "0.2");
-        pre.MeshGammaOpposite = S("preprocessing", "mesh_gamma_opposite", "0.1");
+        pre.MinFrequency = D("preprocessing", "min_frequency"); pre.MaxFrequency = D("preprocessing", "max_frequency");
+        pre.FrequencyStepCount = D("preprocessing", "frequency_step_count"); pre.SourceAssignmentFaceCount = D("preprocessing", "source_assignment_face_count");
+        pre.MeshMinEdgeLength = D("preprocessing", "mesh_min_edge_length"); pre.MeshMaxEdgeLength = D("preprocessing", "mesh_max_edge_length");
+        pre.MeshMaxError = D("preprocessing", "mesh_max_error"); pre.MeshGamma = D("preprocessing", "mesh_gamma");
+        pre.MeshGammaOpposite = D("preprocessing", "mesh_gamma_opposite");
         scan.Enabled = Flag("scan_preparation", "enabled"); scan.ScanPath = S("scan_preparation", "scan_path", "");
         scan.OriginalScanPath = S("scan_preparation", "original_scan_path", scan.ScanPath);
         if (ReadAlignmentOriginal(scan.ScanPath) is string original && File.Exists(original))
             scan.OriginalScanPath = original;
 
-        scan.PrepareLeft = Flag("scan_preparation", "prepare_left", true); scan.PrepareRight = Flag("scan_preparation", "prepare_right", true);
-        scan.RotationDegrees = S("scan_preparation", "rotation_degrees", "0"); scan.TargetEdgeMM = S("scan_preparation", "target_edge_mm", "0.75");
-        scan.LeftMarginMM = S("scan_preparation", "left_margin_mm", "20"); scan.RightMarginMM = S("scan_preparation", "right_margin_mm", "10");
-        scan.SideMinMM = S("scan_preparation", "side_min_mm", "30"); scan.SideMaxMM = S("scan_preparation", "side_max_mm", "110");
-        scan.RequireManualReview = Flag("scan_preparation", "require_manual_review");
+        scan.PrepareLeft = B("scan_preparation", "prepare_left"); scan.PrepareRight = B("scan_preparation", "prepare_right");
+        scan.RotationDegrees = D("scan_preparation", "rotation_degrees"); scan.TargetEdgeMM = D("scan_preparation", "target_edge_mm");
+        scan.LeftMarginMM = D("scan_preparation", "left_margin_mm"); scan.RightMarginMM = D("scan_preparation", "right_margin_mm");
+        scan.SideMinMM = D("scan_preparation", "side_min_mm"); scan.SideMaxMM = D("scan_preparation", "side_max_mm");
+        scan.RequireManualReview = B("scan_preparation", "require_manual_review");
         scan.IndividualLeftEdit = Text("paths", "edited_left_ear"); scan.IndividualRightEdit = Text("paths", "edited_right_ear");
         scan.ReviewedLeft = Text("scan_preparation", "reviewed_left"); scan.ReviewedRight = Text("scan_preparation", "reviewed_right");
         inf.UsePredictionsForPreprocessing = Flag("inference", "use_predictions_for_preprocessing");
@@ -180,13 +192,13 @@ internal static class ProjectDocument
             }
         }
         var post = p.Settings.Postprocessing = new PostprocessingSettings();
-        post.OutputFolder = Text("postprocessing", "output_sofa_dir"); post.Normalize = Flag("postprocessing", "normalize", true);
-        post.LevelOffsetDB = S("postprocessing", "level_offset_db", "-30"); post.ResampleHrirs = Flag("postprocessing", "resample_hrirs");
-        post.SamplingRate = S("postprocessing", "sampling_rate", "48000");
-        post.SpatialUpsampling = Flag("postprocessing", "spatial_upsampling");
-        post.SpatialSubdivisions = S("postprocessing", "spatial_subdivisions", "3");
-        post.SpatialNormalize = Flag("postprocessing", "spatial_normalize");
-        p.Settings.NumCalc.MaxInstances = S("numcalc", "max_instances", "1"); p.Settings.NumCalc.MaxCpuLoad = S("numcalc", "max_cpu_load", "90");
-        p.Settings.NumCalc.AdaptiveFmmLength = Flag("numcalc", "adaptive_fmm_length", true);
+        post.OutputFolder = Text("postprocessing", "output_sofa_dir"); post.Normalize = B("postprocessing", "normalize");
+        post.LevelOffsetDB = D("postprocessing", "level_offset_db"); post.ResampleHrirs = B("postprocessing", "resample_hrirs");
+        post.SamplingRate = D("postprocessing", "sampling_rate");
+        post.SpatialUpsampling = B("postprocessing", "spatial_upsampling");
+        post.SpatialSubdivisions = D("postprocessing", "spatial_subdivisions");
+        post.SpatialNormalize = B("postprocessing", "spatial_normalize");
+        p.Settings.NumCalc.MaxInstances = D("numcalc", "max_instances"); p.Settings.NumCalc.MaxCpuLoad = D("numcalc", "max_cpu_load");
+        p.Settings.NumCalc.AdaptiveFmmLength = B("numcalc", "adaptive_fmm_length");
     }
 }

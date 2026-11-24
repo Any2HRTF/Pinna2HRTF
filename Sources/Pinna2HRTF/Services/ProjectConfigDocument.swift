@@ -114,14 +114,14 @@ enum ProjectConfigDocument {
         restoredScan.enabled = bool(scan, "enabled") ?? false
         restoredScan.scanPath = text(scan, "scan_path").map(relocated) ?? ""
         restoredScan.originalScanPath = text(scan, "original_scan_path").map(relocated)
-        restoredScan.rotationDegrees = text(scan, "rotation_degrees") ?? "0"
-        restoredScan.requireManualReview = bool(scan, "require_manual_review") ?? false
+        restoredScan.rotationDegrees = text(scan, "rotation_degrees") ?? SettingsCatalog.text("scan_preparation.rotation_degrees")
+        restoredScan.requireManualReview = bool(scan, "require_manual_review") ?? SettingsCatalog.flag("scan_preparation.require_manual_review")
         restoredScan.individualLeftEdit = text(paths, "edited_left_ear").map(relocated)
         restoredScan.individualRightEdit = text(paths, "edited_right_ear").map(relocated)
         restoredScan.reviewedLeftPath = text(scan, "reviewed_left").map(relocated)
         restoredScan.reviewedRightPath = text(scan, "reviewed_right").map(relocated)
-        restoredScan.prepareLeft = bool(scan, "prepare_left") ?? true
-        restoredScan.prepareRight = bool(scan, "prepare_right") ?? true
+        restoredScan.prepareLeft = bool(scan, "prepare_left") ?? SettingsCatalog.flag("scan_preparation.prepare_left")
+        restoredScan.prepareRight = bool(scan, "prepare_right") ?? SettingsCatalog.flag("scan_preparation.prepare_right")
         let scanKeys: [(String, WritableKeyPath<ScanPreparationSettings, String>)] = [
             ("target_edge_mm", \.targetEdgeMM), ("left_margin_mm", \.leftMarginMM),
             ("right_margin_mm", \.rightMarginMM), ("side_min_mm", \.sideMinMM), ("side_max_mm", \.sideMaxMM)]
@@ -187,7 +187,7 @@ enum ProjectConfigDocument {
             $0 == Defaults.evaluationGrid ? $0 : relocated($0)
         }
         project.settings.preprocessing.earDistance = text(pre, "ear_distance") ?? text(pre, "head_radius")
-        project.settings.preprocessing.sourceAssignmentFaceCount = text(pre, "source_assignment_face_count") ?? "6"
+        project.settings.preprocessing.sourceAssignmentFaceCount = text(pre, "source_assignment_face_count") ?? SettingsCatalog.text("preprocessing.source_assignment_face_count")
         for side in EarSide.allCases {
             var position: ManualMicrophonePosition?
             if settings.microphonePlacements[side.rawValue] != "stale",
@@ -198,17 +198,17 @@ enum ProjectConfigDocument {
             if side == .left { project.settings.preprocessing.sourcePositionInputLeft = position } else { project.settings.preprocessing.sourcePositionInputRight = position }
         }
         project.automaticMicrophoneSides = nil
-        project.settings.numcalc.maxInstances = text(num, "max_instances") ?? "1"
-        project.settings.numcalc.maxCPULoad = text(num, "max_cpu_load") ?? "90"
-        project.settings.numcalc.adaptiveFmmLength = bool(num, "adaptive_fmm_length") ?? true
+        project.settings.numcalc.maxInstances = text(num, "max_instances") ?? SettingsCatalog.text("numcalc.max_instances")
+        project.settings.numcalc.maxCPULoad = text(num, "max_cpu_load") ?? SettingsCatalog.text("numcalc.max_cpu_load")
+        project.settings.numcalc.adaptiveFmmLength = bool(num, "adaptive_fmm_length") ?? SettingsCatalog.flag("numcalc.adaptive_fmm_length")
         var restoredPost = PostprocessingSettings()
-        restoredPost.normalize = bool(post, "normalize") ?? true
-        restoredPost.levelOffsetDB = text(post, "level_offset_db") ?? "-30"
-        restoredPost.resampleHrirs = bool(post, "resample_hrirs") ?? false
-        restoredPost.samplingRate = text(post, "sampling_rate") ?? "48000"
-        restoredPost.spatialUpsampling = bool(post, "spatial_upsampling") ?? false
-        restoredPost.spatialSubdivisions = Int(text(post, "spatial_subdivisions") ?? "3") ?? 3
-        restoredPost.spatialNormalize = bool(post, "spatial_normalize") ?? false
+        if let value = bool(post, "normalize") { restoredPost.normalize = value }
+        if let value = text(post, "level_offset_db") { restoredPost.levelOffsetDB = value }
+        if let value = bool(post, "resample_hrirs") { restoredPost.resampleHrirs = value }
+        if let value = text(post, "sampling_rate") { restoredPost.samplingRate = value }
+        if let value = bool(post, "spatial_upsampling") { restoredPost.spatialUpsampling = value }
+        if let value = text(post, "spatial_subdivisions").flatMap({ Int($0) }) { restoredPost.spatialSubdivisions = value }
+        if let value = bool(post, "spatial_normalize") { restoredPost.spatialNormalize = value }
         restoredPost.matlabExecutable = text(post, "matlab_executable").map(relocated)
         restoredPost.amtPath = text(post, "amt_path").map(relocated)
         restoredPost.outputFolder = text(post, "output_sofa_dir").map(relocated)

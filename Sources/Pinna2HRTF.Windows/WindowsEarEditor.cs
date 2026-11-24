@@ -177,7 +177,11 @@ public partial class MainWindow
         var selectionStatus = new TextBlock { Text = "0 faces selected", FontFamily = new FontFamily("Consolas"), FontSize = 12 };
         selectionPanel.Children.Add(selectionStatus);
         const double editActionHeight = 32;
-        var deleteButton = new Button { Content = "Remove selected faces", IsEnabled = false, HorizontalAlignment = HorizontalAlignment.Stretch, Height = editActionHeight };
+        var deleteContent = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        deleteContent.Children.Add(new FontIcon { Glyph = "\uE74D", FontSize = 14 });
+        deleteContent.Children.Add(new TextBlock { Text = "Delete selected faces" });
+        var deleteButton = new Button { Content = deleteContent, IsEnabled = false, HorizontalAlignment = HorizontalAlignment.Stretch, Height = editActionHeight,
+            Foreground = (Brush)Application.Current.Resources["SystemFillColorCriticalBrush"] };
         var clearButton = new Button { Content = "Clear", IsEnabled = false, HorizontalAlignment = HorizontalAlignment.Stretch };
         var invertButton = new Button { Content = "Invert", HorizontalAlignment = HorizontalAlignment.Stretch };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(clearButton, "Clear selection");

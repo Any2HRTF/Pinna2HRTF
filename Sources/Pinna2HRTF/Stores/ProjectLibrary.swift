@@ -144,26 +144,48 @@ final class ProjectLibrary: ObservableObject {
     }
 
     func newProject() -> ProjectRecord {
-        var project = Defaults.newProject(packageRoot: packageURL, index: projects.count + 1)
+        let index = projects.count + 1
+        var project = Defaults.newProject(packageRoot: packageURL, index: index)
         let defaults = UserDefaults.standard
-        if let path = defaults.string(forKey: AppPreferences.projectDirectory), !path.isEmpty {
-            project.saveLocation = URL(fileURLWithPath: path, isDirectory: true)
-                .appendingPathComponent("Project \(projects.count + 1)-\(project.id.uuidString)").path
-        }
         if let value = defaults.string(forKey: AppPreferences.inputHandling),
            let handling = InputHandling(rawValue: value) {
             project.inputHandling = handling
         }
-        if let grid = defaults.string(forKey: AppPreferences.evaluationGrid), !grid.isEmpty {
-            project.settings.preprocessing.evaluationGrid = grid
+        func preference(_ key: String, field: String, config: String) -> Int {
+            AppPreferences.int(key, fallback: Int(SettingsCatalog.text(config)) ?? 0, range: SettingsCatalog.range(field))
         }
-        let minimum = AppPreferences.int(AppPreferences.minimumFrequency, fallback: 0, range: 0...95999)
-        let maximum = AppPreferences.int(AppPreferences.maximumFrequency, fallback: 24000, range: 1...96000)
-        project.settings.preprocessing.minFrequency = String(min(minimum, maximum - 1))
-        project.settings.preprocessing.maxFrequency = String(maximum)
-        project.settings.preprocessing.frequencyStepCount = String(AppPreferences.int(AppPreferences.frequencySteps, fallback: 129, range: 2...8193))
-        project.settings.numcalc.maxInstances = String(AppPreferences.int(AppPreferences.maxInstances, fallback: 1, range: 1...1024))
-        project.settings.numcalc.maxCPULoad = String(AppPreferences.int(AppPreferences.maxCPULoad, fallback: 90, range: 1...100))
+        let directory = defaults.string(forKey: AppPreferences.projectDirectory).flatMap { $0.isEmpty ? nil : $0 }
+        let grid = defaults.string(forKey: AppPreferences.evaluationGrid) ?? ""
+        let request: [String: Any] = [
+            "parent": directory ?? Defaults.appDataURL.appendingPathComponent("Projects", isDirectory: true).path,
+            "index": index,
+            "defaults": [
+                "minimum_frequency": preference(AppPreferences.minimumFrequency, field: "mesh2hrtf.min_frequency", config: "preprocessing.min_frequency"),
+                "maximum_frequency": preference(AppPreferences.maximumFrequency, field: "mesh2hrtf.max_frequency", config: "preprocessing.max_frequency"),
+                "frequency_steps": preference(AppPreferences.frequencySteps, field: "mesh2hrtf.frequency_steps", config: "preprocessing.frequency_step_count"),
+                "max_instances": preference(AppPreferences.maxInstances, field: "numcalc.parallel_instances", config: "numcalc.max_instances"),
+                "max_cpu_load": preference(AppPreferences.maxCPULoad, field: "numcalc.cpu_limit", config: "numcalc.max_cpu_load"),
+                "evaluation_grid": grid
+            ]
+        ]
+        guard let data = try? ProjectConfigDocument.request("new-defaults", request),
+              let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let location = reply["save_location"] as? String,
+              let config = reply["config"] as? [String: [String: Any]] else { return project }
+        func text(_ section: String, _ key: String) -> String? {
+            switch config[section]?[key] {
+            case let string as String: return string
+            case let number as NSNumber: return number.stringValue
+            default: return nil
+            }
+        }
+        project.saveLocation = location
+        if !grid.isEmpty { project.settings.preprocessing.evaluationGrid = text("paths", "evaluation_grid") }
+        project.settings.preprocessing.minFrequency = text("preprocessing", "min_frequency") ?? project.settings.preprocessing.minFrequency
+        project.settings.preprocessing.maxFrequency = text("preprocessing", "max_frequency") ?? project.settings.preprocessing.maxFrequency
+        project.settings.preprocessing.frequencyStepCount = text("preprocessing", "frequency_step_count") ?? project.settings.preprocessing.frequencyStepCount
+        project.settings.numcalc.maxInstances = text("numcalc", "max_instances") ?? project.settings.numcalc.maxInstances
+        project.settings.numcalc.maxCPULoad = text("numcalc", "max_cpu_load") ?? project.settings.numcalc.maxCPULoad
         return project
     }
 

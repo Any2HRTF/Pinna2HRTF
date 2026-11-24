@@ -107,7 +107,7 @@ struct EnvironmentConfig: Codable, Equatable {
 struct ScanPreparationSettings: Codable, Equatable {
     var enabled = false
     var scanPath = ""
-    var rotationDegrees = "0"
+    var rotationDegrees = SettingsCatalog.text("scan_preparation.rotation_degrees")
     var originalScanPath: String?
     var requireManualReview: Bool?
     var individualLeftEdit: String?
@@ -122,22 +122,22 @@ struct ScanPreparationSettings: Codable, Equatable {
     }
     var reviewedLeftPath: String?
     var reviewedRightPath: String?
-    var prepareLeft = true
-    var prepareRight = true
-    var targetEdgeMM = "0.75"
-    var leftMarginMM = "20"
-    var rightMarginMM = "10"
-    var sideMinMM = "30"
-    var sideMaxMM = "110"
+    var prepareLeft = SettingsCatalog.flag("scan_preparation.prepare_left")
+    var prepareRight = SettingsCatalog.flag("scan_preparation.prepare_right")
+    var targetEdgeMM = SettingsCatalog.text("scan_preparation.target_edge_mm")
+    var leftMarginMM = SettingsCatalog.text("scan_preparation.left_margin_mm")
+    var rightMarginMM = SettingsCatalog.text("scan_preparation.right_margin_mm")
+    var sideMinMM = SettingsCatalog.text("scan_preparation.side_min_mm")
+    var sideMaxMM = SettingsCatalog.text("scan_preparation.side_max_mm")
 }
 
 struct InferenceSettings: Codable, Equatable {
     var modelConfig: String
     var modelCheckpoint: String
-    var targetLeftFolder = "Input/Left"
-    var targetRightFolder = "Input/Right"
-    var predictionLeftFolder = "Intermediates/Left"
-    var predictionRightFolder = "Intermediates/Right"
+    var targetLeftFolder = SettingsCatalog.text("inference.target_left_folder")
+    var targetRightFolder = SettingsCatalog.text("inference.target_right_folder")
+    var predictionLeftFolder = SettingsCatalog.text("inference.prediction_left_folder")
+    var predictionRightFolder = SettingsCatalog.text("inference.prediction_right_folder")
     var usePredictionsForPreprocessing = false
 }
 
@@ -198,26 +198,26 @@ struct ManualPPMFittingSettings: Codable, Equatable {
 }
 
 struct PreprocessingSettings: Codable, Equatable {
-    var minFrequency = "0"
-    var maxFrequency = "24000"
-    var frequencyStepCount = "129"
+    var minFrequency = SettingsCatalog.text("preprocessing.min_frequency")
+    var maxFrequency = SettingsCatalog.text("preprocessing.max_frequency")
+    var frequencyStepCount = SettingsCatalog.text("preprocessing.frequency_step_count")
     var evaluationGrid: String?
     var earDistance: String?
-    var meshMinEdgeLength = "0.5"
-    var meshMaxEdgeLength = "10.0"
-    var meshMaxError = "0.5"
-    var meshGamma = "0.2"
-    var meshGammaOpposite = "0.1"
+    var meshMinEdgeLength = SettingsCatalog.text("preprocessing.mesh_min_edge_length")
+    var meshMaxEdgeLength = SettingsCatalog.text("preprocessing.mesh_max_edge_length")
+    var meshMaxError = SettingsCatalog.text("preprocessing.mesh_max_error")
+    var meshGamma = SettingsCatalog.text("preprocessing.mesh_gamma")
+    var meshGammaOpposite = SettingsCatalog.text("preprocessing.mesh_gamma_opposite")
     var skipMeshGrading: Bool?
-    var sourceAssignmentFaceCount: String? = "6"
+    var sourceAssignmentFaceCount: String? = SettingsCatalog.text("preprocessing.source_assignment_face_count")
     var sourcePositionInputLeft: ManualMicrophonePosition?
     var sourcePositionInputRight: ManualMicrophonePosition?
 }
 
 struct NumCalcSettings: Codable, Equatable {
-    var maxInstances = "1"
-    var maxCPULoad = "90"
-    var adaptiveFmmLength = true
+    var maxInstances = SettingsCatalog.text("numcalc.max_instances")
+    var maxCPULoad = SettingsCatalog.text("numcalc.max_cpu_load")
+    var adaptiveFmmLength = SettingsCatalog.flag("numcalc.adaptive_fmm_length")
 
     enum CodingKeys: String, CodingKey {
         case maxInstances
@@ -229,21 +229,21 @@ struct NumCalcSettings: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        maxInstances = try container.decodeIfPresent(String.self, forKey: .maxInstances) ?? "1"
-        maxCPULoad = try container.decodeIfPresent(String.self, forKey: .maxCPULoad) ?? "90"
-        adaptiveFmmLength = try container.decodeIfPresent(Bool.self, forKey: .adaptiveFmmLength) ?? true
+        if let value = try container.decodeIfPresent(String.self, forKey: .maxInstances) { maxInstances = value }
+        if let value = try container.decodeIfPresent(String.self, forKey: .maxCPULoad) { maxCPULoad = value }
+        if let value = try container.decodeIfPresent(Bool.self, forKey: .adaptiveFmmLength) { adaptiveFmmLength = value }
     }
 }
 
 struct PostprocessingSettings: Codable, Equatable {
-    var normalize = true
-    var levelOffsetDB = "-30"
-    var resampleHrirs = false
-    var samplingRate = "48000"
+    var normalize = SettingsCatalog.flag("postprocessing.normalize")
+    var levelOffsetDB = SettingsCatalog.text("postprocessing.level_offset_db")
+    var resampleHrirs = SettingsCatalog.flag("postprocessing.resample_hrirs")
+    var samplingRate = SettingsCatalog.text("postprocessing.sampling_rate")
     var outputFolder: String?
-    var spatialUpsampling = false
-    var spatialSubdivisions = 3
-    var spatialNormalize = false
+    var spatialUpsampling = SettingsCatalog.flag("postprocessing.spatial_upsampling")
+    var spatialSubdivisions = Int(SettingsCatalog.text("postprocessing.spatial_subdivisions")) ?? 0
+    var spatialNormalize = SettingsCatalog.flag("postprocessing.spatial_normalize")
     var matlabExecutable: String?
     var amtPath: String?
 
@@ -256,21 +256,21 @@ struct PostprocessingSettings: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        normalize = try values.decodeIfPresent(Bool.self, forKey: .normalize) ?? true
-        levelOffsetDB = try values.decodeIfPresent(String.self, forKey: .levelOffsetDB) ?? "-30"
-        resampleHrirs = try values.decodeIfPresent(Bool.self, forKey: .resampleHrirs) ?? false
-        samplingRate = try values.decodeIfPresent(String.self, forKey: .samplingRate) ?? "48000"
+        if let value = try values.decodeIfPresent(Bool.self, forKey: .normalize) { normalize = value }
+        if let value = try values.decodeIfPresent(String.self, forKey: .levelOffsetDB) { levelOffsetDB = value }
+        if let value = try values.decodeIfPresent(Bool.self, forKey: .resampleHrirs) { resampleHrirs = value }
+        if let value = try values.decodeIfPresent(String.self, forKey: .samplingRate) { samplingRate = value }
         outputFolder = try values.decodeIfPresent(String.self, forKey: .outputFolder)
-        spatialUpsampling = try values.decodeIfPresent(Bool.self, forKey: .spatialUpsampling) ?? false
-        spatialSubdivisions = try values.decodeIfPresent(Int.self, forKey: .spatialSubdivisions) ?? 3
-        spatialNormalize = try values.decodeIfPresent(Bool.self, forKey: .spatialNormalize) ?? false
+        if let value = try values.decodeIfPresent(Bool.self, forKey: .spatialUpsampling) { spatialUpsampling = value }
+        if let value = try values.decodeIfPresent(Int.self, forKey: .spatialSubdivisions) { spatialSubdivisions = value }
+        if let value = try values.decodeIfPresent(Bool.self, forKey: .spatialNormalize) { spatialNormalize = value }
         matlabExecutable = try values.decodeIfPresent(String.self, forKey: .matlabExecutable)
         amtPath = try values.decodeIfPresent(String.self, forKey: .amtPath)
     }
 
     var normalizedSamplingRate: Int {
-        guard let rate = Int(samplingRate.trimmingCharacters(in: .whitespacesAndNewlines)), rate > 0, rate % 10 == 0 else { return 48000 }
-        return rate
+        if ProjectValidation.fieldMessage("postprocessing.sampling_rate", text: samplingRate) == nil, let rate = Int(samplingRate.trimmingCharacters(in: .whitespacesAndNewlines)) { return rate }
+        return Int(SettingsCatalog.text("postprocessing.sampling_rate")) ?? 0
     }
 }
 

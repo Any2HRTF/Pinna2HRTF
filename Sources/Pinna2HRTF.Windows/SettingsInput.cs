@@ -82,16 +82,16 @@ public partial class MainWindow
         try
         {
             var originalProject = selectedProject;
-            if (NumericInput.IsNumeric(id))
+            if (SettingsCatalog.IsNumeric(id))
             {
                 try
                 {
-                    var canonical = NumericInput.Canonical(box.Text, NumericInput.IsInteger(id));
+                    var canonical = NumericInput.Canonical(box.Text, SettingsCatalog.IsInteger(id));
                     if (textSettings.TryGetValue(id, out var binding))
                     {
                         var candidate = System.Text.Json.JsonSerializer.Deserialize<ProjectRecord>(System.Text.Json.JsonSerializer.Serialize(originalProject))!;
                         binding.Write(candidate, canonical);
-                        if (ProjectDocument.ValidationError(candidate) is string validation) throw new InvalidDataException(validation);
+                        if ((SettingsCatalog.FieldMessage(id, canonical) ?? ProjectDocument.ValidationError(candidate)) is string validation) throw new InvalidDataException(validation);
                     }
                     box.Text = canonical;
                     DraftError(box, originalProject, id, null);

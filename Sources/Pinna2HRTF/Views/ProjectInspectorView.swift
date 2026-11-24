@@ -216,14 +216,14 @@ struct ProjectInspectorView: View {
                 }
                 .fixedSize()
             }
-            numberRow("Microphone faces", helpID: "mesh2hrtf.microphone_faces", value: sourceAssignmentFaceCountBinding, range: 1...100)
+            numberRow("Microphone faces", helpID: "mesh2hrtf.microphone_faces", value: sourceAssignmentFaceCountBinding, range: SettingsCatalog.range("mesh2hrtf.microphone_faces"))
         }
         Section("Frequencies") {
             PathField("Evaluation grid", helpID: "mesh2hrtf.evaluation_grid", text: optionalPreprocessingBinding(\.evaluationGrid), mode: .directory,
                       defaultName: Defaults.evaluationGrid)
             LabeledTextField("Min frequency (Hz)", helpID: "mesh2hrtf.min_frequency", text: preprocessingBinding(\.minFrequency))
             LabeledTextField("Max frequency (Hz)", helpID: "mesh2hrtf.max_frequency", text: preprocessingBinding(\.maxFrequency), validationError: validationMessage("mesh2hrtf.max_frequency"))
-            numberRow("Frequency steps", helpID: "mesh2hrtf.frequency_steps", value: frequencyStepCountBinding, range: 2...10000)
+            numberRow("Frequency steps", helpID: "mesh2hrtf.frequency_steps", value: frequencyStepCountBinding, range: SettingsCatalog.range("mesh2hrtf.frequency_steps"))
         }
         Section {
             DisclosureGroup("Mesh Grading") {
@@ -375,12 +375,14 @@ struct ProjectInspectorView: View {
     var sourceAssignmentFaceCountBinding: Binding<Int> {
         Binding(
             get: {
-                let value = Int(store.selectedProject?.settings.preprocessing.sourceAssignmentFaceCount ?? "") ?? 6
-                return min(max(value, 1), 100)
+                let range = SettingsCatalog.range("mesh2hrtf.microphone_faces")
+                let value = Int(store.selectedProject?.settings.preprocessing.sourceAssignmentFaceCount ?? "") ?? Int(SettingsCatalog.text("preprocessing.source_assignment_face_count")) ?? range.lowerBound
+                return min(max(value, range.lowerBound), range.upperBound)
             },
             set: { value in
+                let range = SettingsCatalog.range("mesh2hrtf.microphone_faces")
                 store.updateSelectedProject {
-                    $0.settings.preprocessing.sourceAssignmentFaceCount = "\(min(max(value, 1), 100))"
+                    $0.settings.preprocessing.sourceAssignmentFaceCount = "\(min(max(value, range.lowerBound), range.upperBound))"
                 }
             }
         )
@@ -389,12 +391,14 @@ struct ProjectInspectorView: View {
     var frequencyStepCountBinding: Binding<Int> {
         Binding(
             get: {
-                let value = Int(store.selectedProject?.settings.preprocessing.frequencyStepCount ?? "") ?? 129
-                return min(max(value, 2), 10000)
+                let range = SettingsCatalog.range("mesh2hrtf.frequency_steps")
+                let value = Int(store.selectedProject?.settings.preprocessing.frequencyStepCount ?? "") ?? Int(SettingsCatalog.text("preprocessing.frequency_step_count")) ?? range.lowerBound
+                return min(max(value, range.lowerBound), range.upperBound)
             },
             set: { value in
+                let range = SettingsCatalog.range("mesh2hrtf.frequency_steps")
                 store.updateSelectedProject {
-                    $0.settings.preprocessing.frequencyStepCount = "\(min(max(value, 2), 10000))"
+                    $0.settings.preprocessing.frequencyStepCount = "\(min(max(value, range.lowerBound), range.upperBound))"
                 }
             }
         )

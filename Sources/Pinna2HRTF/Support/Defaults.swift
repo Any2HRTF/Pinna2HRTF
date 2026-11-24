@@ -1,7 +1,7 @@
 import Foundation
 
 enum Defaults {
-    static let evaluationGrid = "ARI_Grid"
+    static var evaluationGrid: String { SettingsCatalog.text("paths.evaluation_grid") }
     static func packageRoot(from filePath: String = #filePath) -> URL {
         if filePath == #filePath,
            let path = Bundle.main.object(forInfoDictionaryKey: "Pinna2HRTFSourceRoot") as? String,
@@ -114,8 +114,8 @@ enum Defaults {
     static func settings(packageRoot: URL) -> ProjectSettings {
         ProjectSettings(
             inference: InferenceSettings(
-                modelConfig: packageRoot.appendingPathComponent("HRTFCalculation/Inference/resources/Local 3 Views.yaml").path,
-                modelCheckpoint: modelCheckpointURL(resources: packageRoot.appendingPathComponent("HRTFCalculation/Inference/resources"), stem: "Local 3 Views").path
+                modelConfig: SettingsCatalog.text("inference.model_config_file"),
+                modelCheckpoint: SettingsCatalog.text("inference.model_checkpoint")
             )
         )
     }

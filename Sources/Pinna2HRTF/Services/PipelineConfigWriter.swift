@@ -31,6 +31,7 @@ enum PipelineConfigWriter {
         let configURL = output.appendingPathComponent("Project Settings.yaml")
         let generated = mapping(project: prepared, environment: environment, manualPositions: manualPositions)
         var request: [String: Any] = ["config": generated, "path": configURL.path, "preserve_fields": true, "merge": true]
+        if let stage { request["stage"] = stage.rawValue }
         if let revision = project.settingsRevision {
             request["revision"] = revision
         } else if !FileManager.default.fileExists(atPath: configURL.path) {
@@ -65,8 +66,8 @@ enum PipelineConfigWriter {
             "title": project.name,
             "min_frequency": number(pre.minFrequency),
             "max_frequency": number(pre.maxFrequency),
-            "frequency_step_count": max(Int(pre.frequencyStepCount) ?? 129, 2),
-            "source_assignment_face_count": max(Int(pre.sourceAssignmentFaceCount ?? "") ?? 6, 1),
+            "frequency_step_count": number(pre.frequencyStepCount),
+            "source_assignment_face_count": number(pre.sourceAssignmentFaceCount),
             "mesh_min_edge_length": number(pre.meshMinEdgeLength),
             "mesh_max_edge_length": number(pre.meshMaxEdgeLength),
             "mesh_max_error": number(pre.meshMaxError),
@@ -97,11 +98,11 @@ enum PipelineConfigWriter {
                 "rotation_degrees": number(scan.rotationDegrees), "require_manual_review": scan.requireManualReview ?? false,
                 "reviewed_left": nullable(scan.reviewedLeftPath), "reviewed_right": nullable(scan.reviewedRightPath),
                 "prepare_left": scan.prepareLeft, "prepare_right": scan.prepareRight,
-                "target_edge_mm": number(scan.targetEdgeMM, fallback: 0.75),
-                "left_margin_mm": number(scan.leftMarginMM, fallback: 20),
-                "right_margin_mm": number(scan.rightMarginMM, fallback: 10),
-                "side_min_mm": number(scan.sideMinMM, fallback: 30),
-                "side_max_mm": number(scan.sideMaxMM, fallback: 110)
+                "target_edge_mm": number(scan.targetEdgeMM),
+                "left_margin_mm": number(scan.leftMarginMM),
+                "right_margin_mm": number(scan.rightMarginMM),
+                "side_min_mm": number(scan.sideMinMM),
+                "side_max_mm": number(scan.sideMaxMM)
             ],
             "inference": [
                 "enabled": inference.usePredictionsForPreprocessing,
@@ -128,7 +129,7 @@ enum PipelineConfigWriter {
             "postprocessing": [
                 "enabled": false, "overwrite": true,
                 "output_sofa_dir": post.outputFolder ?? URL(fileURLWithPath: project.saveLocation).appendingPathComponent("HRTF").path,
-                "normalize": post.normalize, "level_offset_db": number(post.levelOffsetDB, fallback: -30),
+                "normalize": post.normalize, "level_offset_db": number(post.levelOffsetDB),
                 "resample_hrirs": post.resampleHrirs, "sampling_rate": post.normalizedSamplingRate,
                 "spatial_upsampling": post.spatialUpsampling, "spatial_subdivisions": post.spatialSubdivisions,
                 "spatial_normalize": post.spatialNormalize
@@ -138,11 +139,10 @@ enum PipelineConfigWriter {
 
     private static func nullable(_ value: String?) -> Any { value.map { $0 as Any } ?? NSNull() }
     private static func path(_ value: String) -> Any { value.isEmpty ? NSNull() : value as Any }
-    private static func number(_ value: String?, fallback: Double? = nil) -> Any {
+    private static func number(_ value: String?) -> Any {
         let text = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if let integer = Int(text) { return integer }
         if let number = Double(text), number.isFinite { return number }
-        return fallback.map { $0 as Any } ?? NSNull()
-
+        return NSNull()
     }
 }

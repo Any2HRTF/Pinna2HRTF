@@ -3,12 +3,6 @@ namespace Pinna2HRTF.Windows;
 
 internal static class NumericInput
 {
-    public static bool IsNumeric(string id) => id.StartsWith("mesh_grading.") || id.StartsWith("numcalc.") && id != "numcalc.adaptive_fmm" ||
-        id.StartsWith("mesh2hrtf.") && id != "mesh2hrtf.evaluation_grid" || id.StartsWith("scan_preparation.") && id is not "scan_preparation.scan_path" ||
-        id is "postprocessing.level_offset" or "postprocessing.sampling_rate" or "postprocessing.spatial_subdivisions";
-    public static bool IsInteger(string id) => id is "mesh2hrtf.min_frequency" or "mesh2hrtf.max_frequency" or "mesh2hrtf.frequency_steps" or
-        "mesh2hrtf.microphone_faces" or "numcalc.parallel_instances" or "numcalc.cpu_limit" or "postprocessing.sampling_rate" or "postprocessing.spatial_subdivisions";
-
     public static string Canonical(string draft, bool integer, CultureInfo? culture = null)
     {
         culture ??= CultureInfo.CurrentCulture;

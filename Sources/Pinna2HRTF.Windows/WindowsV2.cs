@@ -10,7 +10,7 @@ public partial class MainWindow
 {
     bool meshPointerIsPrimary;
     readonly TextBox scanRotationBox = new(), targetEdgeBox = new(), leftMarginBox = new(), rightMarginBox = new(), sideMinBox = new(), sideMaxBox = new(), sofaFolderBox = new();
-    readonly CheckBox requireReviewBox = new() { Content = "Require ear review before continuing" };
+    readonly CheckBox requireReviewBox = new() { Content = "Review ears before continuing" };
     readonly HashSet<Window> editorWindows = [];
     readonly Dictionary<Guid,string> runInputStamps = [];
     readonly CancellationTokenSource editorLifetime = new();
@@ -57,13 +57,13 @@ public partial class MainWindow
 
     void AddV2TextSettings(Dictionary<string, TextSetting> settings)
     {
-        settings["postprocessing.spatial_subdivisions"] = new(spatialSubdivisionsBox, p => p.Settings.Postprocessing?.SpatialSubdivisions, (p,v) => (p.Settings.Postprocessing ??= new()).SpatialSubdivisions = v, "3");
-        settings["scan_preparation.rotation"] = new(scanRotationBox, p => p.Settings.ScanPreparation.RotationDegrees, (p,v) => p.Settings.ScanPreparation.RotationDegrees = v, "0");
-        settings["scan_preparation.target_edge"] = new(targetEdgeBox, p => p.Settings.ScanPreparation.TargetEdgeMM, (p,v) => p.Settings.ScanPreparation.TargetEdgeMM = v, "0.75");
-        settings["scan_preparation.left_margin"] = new(leftMarginBox, p => p.Settings.ScanPreparation.LeftMarginMM, (p,v) => p.Settings.ScanPreparation.LeftMarginMM = v, "20");
-        settings["scan_preparation.right_margin"] = new(rightMarginBox, p => p.Settings.ScanPreparation.RightMarginMM, (p,v) => p.Settings.ScanPreparation.RightMarginMM = v, "10");
-        settings["scan_preparation.side_min"] = new(sideMinBox, p => p.Settings.ScanPreparation.SideMinMM, (p,v) => p.Settings.ScanPreparation.SideMinMM = v, "30");
-        settings["scan_preparation.side_max"] = new(sideMaxBox, p => p.Settings.ScanPreparation.SideMaxMM, (p,v) => p.Settings.ScanPreparation.SideMaxMM = v, "110");
+        settings["postprocessing.spatial_subdivisions"] = new(spatialSubdivisionsBox, p => p.Settings.Postprocessing?.SpatialSubdivisions, (p,v) => (p.Settings.Postprocessing ??= new()).SpatialSubdivisions = v, SettingsCatalog.Text("postprocessing.spatial_subdivisions"));
+        settings["scan_preparation.rotation"] = new(scanRotationBox, p => p.Settings.ScanPreparation.RotationDegrees, (p,v) => p.Settings.ScanPreparation.RotationDegrees = v, SettingsCatalog.Text("scan_preparation.rotation_degrees"));
+        settings["scan_preparation.target_edge"] = new(targetEdgeBox, p => p.Settings.ScanPreparation.TargetEdgeMM, (p,v) => p.Settings.ScanPreparation.TargetEdgeMM = v, SettingsCatalog.Text("scan_preparation.target_edge_mm"));
+        settings["scan_preparation.left_margin"] = new(leftMarginBox, p => p.Settings.ScanPreparation.LeftMarginMM, (p,v) => p.Settings.ScanPreparation.LeftMarginMM = v, SettingsCatalog.Text("scan_preparation.left_margin_mm"));
+        settings["scan_preparation.right_margin"] = new(rightMarginBox, p => p.Settings.ScanPreparation.RightMarginMM, (p,v) => p.Settings.ScanPreparation.RightMarginMM = v, SettingsCatalog.Text("scan_preparation.right_margin_mm"));
+        settings["scan_preparation.side_min"] = new(sideMinBox, p => p.Settings.ScanPreparation.SideMinMM, (p,v) => p.Settings.ScanPreparation.SideMinMM = v, SettingsCatalog.Text("scan_preparation.side_min_mm"));
+        settings["scan_preparation.side_max"] = new(sideMaxBox, p => p.Settings.ScanPreparation.SideMaxMM, (p,v) => p.Settings.ScanPreparation.SideMaxMM = v, SettingsCatalog.Text("scan_preparation.side_max_mm"));
         settings["postprocessing.output_folder"] = new(sofaFolderBox, p => p.Settings.Postprocessing?.OutputFolder, (p,v) => (p.Settings.Postprocessing ??= new()).OutputFolder = v.Trim(), "");
     }
 

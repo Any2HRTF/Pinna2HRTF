@@ -135,6 +135,7 @@ public partial class MainWindow
             ? Orientation.Horizontal : Orientation.Vertical;
         workflowPreparation.Children.Add(scanActions);
         workflowPreparation.Children.Add(WorkflowText("Use an aligned scan, or align it here before preparing ears."));
+        workflowPreparation.Children.Add(requireReviewBox);
         AddExpander(workflowPreparation, "Advanced scan settings", [
             AddSettingPanel("Target edge length (mm)", "scan_preparation.target_edge", targetEdgeBox),
             AddSettingPanel("Left crop margin (mm)", "scan_preparation.left_margin", leftMarginBox),

@@ -298,6 +298,7 @@ public partial class MainWindow : Window
         EnsureStateDirectory(Path.Combine(appData, "Blender", "config"));
         EnsureStateDirectory(Path.Combine(appData, "Blender", "scripts"));
         EnsureStateDirectory(Path.Combine(appData, "Blender", "datafiles"));
+        SettingsCatalog.Request = action => Task.Run(() => RequestPythonAsync("project", new { action })).GetAwaiter().GetResult();
         LoadSettingHelp();
         LoadAppPreferences();
         LoadRegistry();
@@ -1234,31 +1235,31 @@ public partial class MainWindow : Window
             (p, value) => p.Settings.Preprocessing.EvaluationGrid = value.Trim(), ""),
 
         ["mesh2hrtf.min_frequency"] = new(minFrequencyBox, p => p.Settings.Preprocessing.MinFrequency,
-            (p, value) => p.Settings.Preprocessing.MinFrequency = value.Trim(), "0"),
+            (p, value) => p.Settings.Preprocessing.MinFrequency = value.Trim(), SettingsCatalog.Text("preprocessing.min_frequency")),
         ["mesh2hrtf.max_frequency"] = new(maxFrequencyBox, p => p.Settings.Preprocessing.MaxFrequency,
-            (p, value) => p.Settings.Preprocessing.MaxFrequency = value.Trim(), "24000"),
+            (p, value) => p.Settings.Preprocessing.MaxFrequency = value.Trim(), SettingsCatalog.Text("preprocessing.max_frequency")),
         ["mesh2hrtf.frequency_steps"] = new(frequencyStepsBox, p => p.Settings.Preprocessing.FrequencyStepCount,
-            (p, value) => p.Settings.Preprocessing.FrequencyStepCount = value.Trim(), "129"),
+            (p, value) => p.Settings.Preprocessing.FrequencyStepCount = value.Trim(), SettingsCatalog.Text("preprocessing.frequency_step_count")),
         ["mesh2hrtf.microphone_faces"] = new(microphoneFacesBox, p => p.Settings.Preprocessing.SourceAssignmentFaceCount,
-            (p, value) => p.Settings.Preprocessing.SourceAssignmentFaceCount = value.Trim(), "6"),
+            (p, value) => p.Settings.Preprocessing.SourceAssignmentFaceCount = value.Trim(), SettingsCatalog.Text("preprocessing.source_assignment_face_count")),
         ["mesh_grading.min_edge_length"] = new(meshMinEdgeBox, p => p.Settings.Preprocessing.MeshMinEdgeLength,
-            (p, value) => p.Settings.Preprocessing.MeshMinEdgeLength = value.Trim(), "0.5"),
+            (p, value) => p.Settings.Preprocessing.MeshMinEdgeLength = value.Trim(), SettingsCatalog.Text("preprocessing.mesh_min_edge_length")),
         ["mesh_grading.max_edge_length"] = new(meshMaxEdgeBox, p => p.Settings.Preprocessing.MeshMaxEdgeLength,
-            (p, value) => p.Settings.Preprocessing.MeshMaxEdgeLength = value.Trim(), "10.0"),
+            (p, value) => p.Settings.Preprocessing.MeshMaxEdgeLength = value.Trim(), SettingsCatalog.Text("preprocessing.mesh_max_edge_length")),
         ["mesh_grading.max_error"] = new(meshMaxErrorBox, p => p.Settings.Preprocessing.MeshMaxError,
-            (p, value) => p.Settings.Preprocessing.MeshMaxError = value.Trim(), "0.5"),
+            (p, value) => p.Settings.Preprocessing.MeshMaxError = value.Trim(), SettingsCatalog.Text("preprocessing.mesh_max_error")),
         ["mesh_grading.gamma"] = new(meshGammaBox, p => p.Settings.Preprocessing.MeshGamma,
-            (p, value) => p.Settings.Preprocessing.MeshGamma = value.Trim(), "0.2"),
+            (p, value) => p.Settings.Preprocessing.MeshGamma = value.Trim(), SettingsCatalog.Text("preprocessing.mesh_gamma")),
         ["mesh_grading.gamma_opposite"] = new(meshGammaOppositeBox, p => p.Settings.Preprocessing.MeshGammaOpposite,
-            (p, value) => p.Settings.Preprocessing.MeshGammaOpposite = value.Trim(), "0.1"),
+            (p, value) => p.Settings.Preprocessing.MeshGammaOpposite = value.Trim(), SettingsCatalog.Text("preprocessing.mesh_gamma_opposite")),
         ["numcalc.parallel_instances"] = new(maxInstancesBox, p => p.Settings.NumCalc.MaxInstances,
-            (p, value) => p.Settings.NumCalc.MaxInstances = value.Trim(), "1"),
+            (p, value) => p.Settings.NumCalc.MaxInstances = value.Trim(), SettingsCatalog.Text("numcalc.max_instances")),
         ["numcalc.cpu_limit"] = new(maxCpuLoadBox, p => p.Settings.NumCalc.MaxCpuLoad,
-            (p, value) => p.Settings.NumCalc.MaxCpuLoad = value.Trim(), "90"),
+            (p, value) => p.Settings.NumCalc.MaxCpuLoad = value.Trim(), SettingsCatalog.Text("numcalc.max_cpu_load")),
         ["postprocessing.level_offset"] = new(levelOffsetBox, p => p.Settings.Postprocessing?.LevelOffsetDB,
-            (p, value) => p.Settings.Postprocessing!.LevelOffsetDB = value.Trim(), "-30"),
-        ["postprocessing.sampling_rate"] = new(samplingRateBox, p => p.Settings.Postprocessing?.SamplingRate ?? "48000",
-            (p, value) => p.Settings.Postprocessing!.SamplingRate = NormalizeSamplingRate(value), "48000"),
+            (p, value) => p.Settings.Postprocessing!.LevelOffsetDB = value.Trim(), SettingsCatalog.Text("postprocessing.level_offset_db")),
+        ["postprocessing.sampling_rate"] = new(samplingRateBox, p => p.Settings.Postprocessing?.SamplingRate ?? SettingsCatalog.Text("postprocessing.sampling_rate"),
+            (p, value) => p.Settings.Postprocessing!.SamplingRate = value.Trim(), SettingsCatalog.Text("postprocessing.sampling_rate")),
     };
 
     string CurrentSettingValue(string id) => textSettings.TryGetValue(id, out var binding) ? binding.Control.Text : id switch
@@ -1459,11 +1460,6 @@ public partial class MainWindow : Window
         RefreshPipelineStatus();
     }
 
-    static string NormalizeSamplingRate(string value)
-    {
-        return value.Trim();
-    }
-
     void UpdatePostprocessingControls() => samplingRateBox.IsEnabled = resampleHrirsBox.IsChecked == true;
 
     void BezierPPMSettingChanged(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(HandleSettingChangeAsync("project.use_bezierppm"), "Change Mesh2PPM", selectedProject);
@@ -1638,7 +1634,11 @@ public partial class MainWindow : Window
     void CreateProjectFolderClicked(object sender, RoutedEventArgs e) => BeginFolderNameEdit();
     void ImportProjectClicked(object sender, RoutedEventArgs e) => _ = ObserveUiTaskAsync(ImportProjectAsync(), "Import project", selectedProject);
     void DuplicateProjectClicked(object sender, RoutedEventArgs e) => DuplicateProject();
-    void RemoveProjectClicked(object sender, RoutedEventArgs e) => RemoveProject();
+    void RemoveProjectClicked(object sender, RoutedEventArgs e)
+    {
+        if (FocusManager.GetFocusedElement(Root.XamlRoot) is TextBox { IsReadOnly: false }) return;
+        RemoveProject();
+    }
 
     void RemoveProjectFolder(ProjectFolder folder)
     {
@@ -3408,8 +3408,7 @@ public partial class MainWindow : Window
         if (project == null) return "Select a project first.";
         if (scanAlignmentMode && alignmentSessionProject == project.Id) return "Save or cancel scan alignment before running a stage.";
         if (SettingDraftError(project) is string draftError) return draftError;
-        if (ProjectDocument.ValidationError(project) is string validation) return validation;
-        if (stage != Stage.ScanPreparation && CurrentEarModel(project) == null) return "Choose an ear modelling method in Ear preparation & modelling.";
+        if (ProjectDocument.ValidationError(project, stage.Value, CurrentEarModel(project) ?? "") is string validation) return validation;
         if (projectOperations.Contains(project.Id) || OwnedProcess.HasProjectActivity(project.Id)) return "Wait for the project operation or editor to finish.";
         if (outputOperations.Contains(project.Id)) return "Wait for project outputs to finish updating.";
         if (runs.ContainsKey(project.Id)) return "Wait for the running stage to finish.";
