@@ -102,6 +102,11 @@ struct EnvironmentConfig: Codable, Equatable {
     var externalDir: String
     var pythonExecutable: String?
     var uvIsExplicit: Bool?
+    var mesh2hrtfPath: String?
+
+    var effectiveMesh2HRTFPath: String {
+        mesh2hrtfPath ?? URL(fileURLWithPath: externalDir).appendingPathComponent("src/Mesh2HRTF/mesh2hrtf").path
+    }
 }
 
 struct ScanPreparationSettings: Codable, Equatable {

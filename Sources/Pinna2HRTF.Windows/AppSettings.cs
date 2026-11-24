@@ -16,11 +16,11 @@ internal sealed class AppPreferences
     public string ProjectDirectory { get; set; } = "";
     public InputHandling InputHandling { get; set; } = InputHandling.Copy;
     public string EvaluationGrid { get; set; } = "";
-    public int MinimumFrequency { get; set; }
-    public int MaximumFrequency { get; set; } = 24000;
-    public int FrequencySteps { get; set; } = 129;
-    public int MaxInstances { get; set; } = 1;
-    public int MaxCpuLoad { get; set; } = 90;
+    public int MinimumFrequency { get; set; } = SettingsCatalog.Whole("preprocessing.min_frequency");
+    public int MaximumFrequency { get; set; } = SettingsCatalog.Whole("preprocessing.max_frequency");
+    public int FrequencySteps { get; set; } = SettingsCatalog.Whole("preprocessing.frequency_step_count");
+    public int MaxInstances { get; set; } = SettingsCatalog.Whole("numcalc.max_instances");
+    public int MaxCpuLoad { get; set; } = SettingsCatalog.Whole("numcalc.max_cpu_load");
     public bool NotifyAll { get; set; } = true;
     public bool NotifyCompletion { get; set; } = true;
     public bool NotifyFailure { get; set; } = true;
@@ -32,46 +32,66 @@ internal sealed class AppPreferences
     public string ExternalDirectory { get; set; } = "";
     public string Mesh2Hrtf { get; set; } = "";
     public WorkflowPreferences Workflow { get; set; } = new();
+
+    public Dictionary<string, string> FormValues()
+    {
+        var values = Workflow.FormValues();
+        values["mesh2hrtf.min_frequency"] = MinimumFrequency.ToString(CultureInfo.InvariantCulture);
+        values["mesh2hrtf.max_frequency"] = MaximumFrequency.ToString(CultureInfo.InvariantCulture);
+        values["mesh2hrtf.frequency_steps"] = FrequencySteps.ToString(CultureInfo.InvariantCulture);
+        values["numcalc.parallel_instances"] = MaxInstances.ToString(CultureInfo.InvariantCulture);
+        values["numcalc.cpu_limit"] = MaxCpuLoad.ToString(CultureInfo.InvariantCulture);
+        return values;
+    }
 }
 
 internal sealed class WorkflowPreferences
 {
-    public bool FullHeadScan { get; set; }
-    public bool PrepareLeft { get; set; } = true;
-    public bool PrepareRight { get; set; } = true;
-    public bool RequireManualReview { get; set; }
+    public bool FullHeadScan { get; set; } = SettingsCatalog.Flag("scan_preparation.enabled");
+    public bool PrepareLeft { get; set; } = SettingsCatalog.Flag("scan_preparation.prepare_left");
+    public bool PrepareRight { get; set; } = SettingsCatalog.Flag("scan_preparation.prepare_right");
+    public bool RequireManualReview { get; set; } = SettingsCatalog.Flag("scan_preparation.require_manual_review");
     public string EarModelMethod { get; set; } = "none";
-    public string InferenceModel { get; set; } = "Local 3 Views";
-    public double TargetEdgeMm { get; set; } = .75;
-    public double LeftMarginMm { get; set; } = 20;
-    public double RightMarginMm { get; set; } = 10;
-    public double SideMinMm { get; set; } = 30;
-    public double SideMaxMm { get; set; } = 110;
-    public int SourceAssignmentFaceCount { get; set; } = 6;
-    public double MeshMinEdgeLength { get; set; } = .5;
-    public double MeshMaxEdgeLength { get; set; } = 10;
-    public double MeshMaxError { get; set; } = .5;
-    public double MeshGamma { get; set; } = .2;
-    public double MeshGammaOpposite { get; set; } = .1;
-    public bool AdaptiveFmmLength { get; set; } = true;
-    public bool Normalize { get; set; } = true;
-    public double LevelOffsetDb { get; set; } = -30;
-    public bool ResampleHrirs { get; set; }
-    public int SamplingRate { get; set; } = 48000;
-    public bool SpatialUpsampling { get; set; }
-    public int SpatialSubdivisions { get; set; } = 3;
-    public bool SpatialNormalize { get; set; }
+    public string InferenceModel { get; set; } = Path.GetFileNameWithoutExtension(SettingsCatalog.Text("inference.model_config_file"));
+    public double TargetEdgeMm { get; set; } = SettingsCatalog.Decimal("scan_preparation.target_edge_mm");
+    public double LeftMarginMm { get; set; } = SettingsCatalog.Decimal("scan_preparation.left_margin_mm");
+    public double RightMarginMm { get; set; } = SettingsCatalog.Decimal("scan_preparation.right_margin_mm");
+    public double SideMinMm { get; set; } = SettingsCatalog.Decimal("scan_preparation.side_min_mm");
+    public double SideMaxMm { get; set; } = SettingsCatalog.Decimal("scan_preparation.side_max_mm");
+    public int SourceAssignmentFaceCount { get; set; } = SettingsCatalog.Whole("preprocessing.source_assignment_face_count");
+    public double MeshMinEdgeLength { get; set; } = SettingsCatalog.Decimal("preprocessing.mesh_min_edge_length");
+    public double MeshMaxEdgeLength { get; set; } = SettingsCatalog.Decimal("preprocessing.mesh_max_edge_length");
+    public double MeshMaxError { get; set; } = SettingsCatalog.Decimal("preprocessing.mesh_max_error");
+    public double MeshGamma { get; set; } = SettingsCatalog.Decimal("preprocessing.mesh_gamma");
+    public double MeshGammaOpposite { get; set; } = SettingsCatalog.Decimal("preprocessing.mesh_gamma_opposite");
+    public bool AdaptiveFmmLength { get; set; } = SettingsCatalog.Flag("numcalc.adaptive_fmm_length");
+    public bool Normalize { get; set; } = SettingsCatalog.Flag("postprocessing.normalize");
+    public double LevelOffsetDb { get; set; } = SettingsCatalog.Decimal("postprocessing.level_offset_db");
+    public bool ResampleHrirs { get; set; } = SettingsCatalog.Flag("postprocessing.resample_hrirs");
+    public int SamplingRate { get; set; } = SettingsCatalog.Whole("postprocessing.sampling_rate");
+    public bool SpatialUpsampling { get; set; } = SettingsCatalog.Flag("postprocessing.spatial_upsampling");
+    public int SpatialSubdivisions { get; set; } = SettingsCatalog.Whole("postprocessing.spatial_subdivisions");
+    public bool SpatialNormalize { get; set; } = SettingsCatalog.Flag("postprocessing.spatial_normalize");
 
-    public bool Valid()
+    public Dictionary<string, string> FormValues()
     {
-        var positive = new[] { TargetEdgeMm, MeshMinEdgeLength, MeshMaxEdgeLength, MeshMaxError, MeshGamma, MeshGammaOpposite };
-        return positive.All(v => double.IsFinite(v) && v is >= .000001 and <= 1000)
-            && new[] { LeftMarginMm, RightMarginMm, SideMinMm, SideMaxMm }.All(v => double.IsFinite(v) && v is >= 0 and <= 1000)
-            && SideMaxMm > SideMinMm && MeshMaxEdgeLength >= MeshMinEdgeLength && (PrepareLeft || PrepareRight)
-            && SourceAssignmentFaceCount is >= 1 and <= 1000000 && SamplingRate is >= 10 and <= 384000 && SamplingRate % 10 == 0
-            && SpatialSubdivisions is >= 0 and <= 5 && double.IsFinite(LevelOffsetDb) && LevelOffsetDb is >= -1000 and <= 1000
-            && EarModelMethod is "none" or "manual" or "mesh2ppm" && !string.IsNullOrEmpty(InferenceModel);
+        static string Number(double value) => value.ToString("R", CultureInfo.InvariantCulture);
+        static string Whole(int value) => value.ToString(CultureInfo.InvariantCulture);
+        return new()
+        {
+            ["scan.enabled"] = "true", ["scan.prepare_left"] = PrepareLeft ? "true" : "false", ["scan.prepare_right"] = PrepareRight ? "true" : "false",
+            ["scan.target_edge"] = Number(TargetEdgeMm), ["scan.left_margin"] = Number(LeftMarginMm), ["scan.right_margin"] = Number(RightMarginMm),
+            ["scan.side_min"] = Number(SideMinMm), ["scan.side_max"] = Number(SideMaxMm),
+            ["mesh2hrtf.microphone_faces"] = Whole(SourceAssignmentFaceCount),
+            ["mesh_grading.min_edge_length"] = Number(MeshMinEdgeLength), ["mesh_grading.max_edge_length"] = Number(MeshMaxEdgeLength),
+            ["mesh_grading.max_error"] = Number(MeshMaxError), ["mesh_grading.gamma"] = Number(MeshGamma), ["mesh_grading.gamma_opposite"] = Number(MeshGammaOpposite),
+            ["postprocessing.level_offset"] = Number(LevelOffsetDb), ["postprocessing.sampling_rate"] = Whole(SamplingRate),
+            ["postprocessing.spatial_subdivisions"] = Whole(SpatialSubdivisions),
+        };
     }
+
+    public bool Valid() => SettingsCatalog.Issues(FormValues(), null).Count == 0
+        && EarModelMethod is "none" or "manual" or "mesh2ppm" && !string.IsNullOrEmpty(InferenceModel);
 }
 
 public partial class MainWindow
@@ -111,9 +131,7 @@ public partial class MainWindow
         try
         {
             var value = JsonSerializer.Deserialize<AppPreferences>(File.ReadAllText(AppPreferencesPath)) ?? throw new IOException("Empty settings.");
-            if (value.Version != 1 || value.MinimumFrequency < 0 || value.MaximumFrequency > 96000 ||
-                value.MinimumFrequency >= value.MaximumFrequency || value.FrequencySteps is < 2 or > 8193 ||
-                value.MaxInstances is < 1 or > 1024 || value.MaxCpuLoad is < 1 or > 100 ||
+            if (value.Version != 1 || value.Workflow == null || SettingsCatalog.Issues(value.FormValues(), null).Count > 0 ||
                 !Enum.IsDefined(value.InputHandling) || value.ProjectDirectory == null || value.EvaluationGrid == null ||
                 value.NumCalc == null || value.MeshGrading == null || value.Python == null || value.Uv == null || value.ExternalDirectory == null ||
                 value.Mesh2Hrtf == null || value.Workflow == null || !value.Workflow.Valid() ||
@@ -291,42 +309,40 @@ public partial class MainWindow
                     defaults.PrepareLeft && defaults.PrepareRight ? 0 : defaults.PrepareLeft ? 1 : 2,
                     i => { defaults.PrepareLeft = i != 2; defaults.PrepareRight = i != 1; });
                 SettingsAdvanced(ears, "Advanced scan settings", controls => {
-                    NumberRow(controls, "Target edge length (mm)", () => defaults.TargetEdgeMm, v => defaults.TargetEdgeMm = v, () => .000001, () => 1000);
-                    NumberRow(controls, "Left crop margin (mm)", () => defaults.LeftMarginMm, v => defaults.LeftMarginMm = v, () => 0, () => 1000);
-                    NumberRow(controls, "Right crop margin (mm)", () => defaults.RightMarginMm, v => defaults.RightMarginMm = v, () => 0, () => 1000);
-                    NumberRow(controls, "Inner crop limit (mm)", () => defaults.SideMinMm, v => defaults.SideMinMm = v, () => 0, () => defaults.SideMaxMm - .000001);
-                    NumberRow(controls, "Outer crop limit (mm)", () => defaults.SideMaxMm, v => defaults.SideMaxMm = v, () => defaults.SideMinMm + .000001, () => 1000);
+                    NumberRow(controls, "Target edge length (mm)", "scan.target_edge", () => defaults.TargetEdgeMm, v => defaults.TargetEdgeMm = v);
+                    NumberRow(controls, "Left crop margin (mm)", "scan.left_margin", () => defaults.LeftMarginMm, v => defaults.LeftMarginMm = v);
+                    NumberRow(controls, "Right crop margin (mm)", "scan.right_margin", () => defaults.RightMarginMm, v => defaults.RightMarginMm = v);
+                    NumberRow(controls, "Inner crop limit (mm)", "scan.side_min", () => defaults.SideMinMm, v => defaults.SideMinMm = v);
+                    NumberRow(controls, "Outer crop limit (mm)", "scan.side_max", () => defaults.SideMaxMm, v => defaults.SideMaxMm = v);
                     SwitchRow(controls, "Require ear review", defaults.RequireManualReview, v => defaults.RequireManualReview = v);
                 });
                 var simulation = SettingsSection(panel, "Simulation setup");
-                IntegerRow(simulation, "Microphone faces", () => defaults.SourceAssignmentFaceCount, v => defaults.SourceAssignmentFaceCount = v, () => 1, () => 1000000);
+                IntegerRow(simulation, "Microphone faces", "mesh2hrtf.microphone_faces", () => defaults.SourceAssignmentFaceCount, v => defaults.SourceAssignmentFaceCount = v);
                 PathRow(simulation, "Evaluation grid", () => appPreferences.EvaluationGrid, v => appPreferences.EvaluationGrid = v,
                     Path.Combine(packageRoot, "HRTFCalculation", "EvaluationGrids", ProjectDocument.DefaultEvaluationGrid), true, grid: true);
-                IntegerRow(simulation, "Lowest frequency (Hz)", () => appPreferences.MinimumFrequency, v => appPreferences.MinimumFrequency = v,
-                    () => 0, () => appPreferences.MaximumFrequency - 1);
-                IntegerRow(simulation, "Highest frequency (Hz)", () => appPreferences.MaximumFrequency, v => appPreferences.MaximumFrequency = v,
-                    () => appPreferences.MinimumFrequency + 1, () => 96000);
-                IntegerRow(simulation, "Frequency steps", () => appPreferences.FrequencySteps, v => appPreferences.FrequencySteps = v, () => 2, () => 8193);
+                IntegerRow(simulation, "Lowest frequency (Hz)", "mesh2hrtf.min_frequency", () => appPreferences.MinimumFrequency, v => appPreferences.MinimumFrequency = v);
+                IntegerRow(simulation, "Highest frequency (Hz)", "mesh2hrtf.max_frequency", () => appPreferences.MaximumFrequency, v => appPreferences.MaximumFrequency = v);
+                IntegerRow(simulation, "Frequency steps", "mesh2hrtf.frequency_steps", () => appPreferences.FrequencySteps, v => appPreferences.FrequencySteps = v);
                 SettingsAdvanced(simulation, "Advanced mesh grading", controls => {
-                    NumberRow(controls, "Minimum edge length (mm)", () => defaults.MeshMinEdgeLength, v => defaults.MeshMinEdgeLength = v, () => .000001, () => defaults.MeshMaxEdgeLength);
-                    NumberRow(controls, "Maximum edge length (mm)", () => defaults.MeshMaxEdgeLength, v => defaults.MeshMaxEdgeLength = v, () => defaults.MeshMinEdgeLength, () => 1000);
-                    NumberRow(controls, "Maximum error (mm)", () => defaults.MeshMaxError, v => defaults.MeshMaxError = v, () => .000001, () => 1000);
-                    NumberRow(controls, "Gamma", () => defaults.MeshGamma, v => defaults.MeshGamma = v, () => .000001, () => 1000);
-                    NumberRow(controls, "Gamma opposite", () => defaults.MeshGammaOpposite, v => defaults.MeshGammaOpposite = v, () => .000001, () => 1000);
+                    NumberRow(controls, "Minimum edge length (mm)", "mesh_grading.min_edge_length", () => defaults.MeshMinEdgeLength, v => defaults.MeshMinEdgeLength = v);
+                    NumberRow(controls, "Maximum edge length (mm)", "mesh_grading.max_edge_length", () => defaults.MeshMaxEdgeLength, v => defaults.MeshMaxEdgeLength = v);
+                    NumberRow(controls, "Maximum error (mm)", "mesh_grading.max_error", () => defaults.MeshMaxError, v => defaults.MeshMaxError = v);
+                    NumberRow(controls, "Gamma", "mesh_grading.gamma", () => defaults.MeshGamma, v => defaults.MeshGamma = v);
+                    NumberRow(controls, "Gamma opposite", "mesh_grading.gamma_opposite", () => defaults.MeshGammaOpposite, v => defaults.MeshGammaOpposite = v);
                 });
                 var computing = SettingsSection(panel, "Calculation");
-                IntegerRow(computing, "Parallel NumCalc instances", () => appPreferences.MaxInstances, v => appPreferences.MaxInstances = v, () => 1, () => 1024);
-                IntegerRow(computing, "CPU load limit (%)", () => appPreferences.MaxCpuLoad, v => appPreferences.MaxCpuLoad = v, () => 1, () => 100);
+                IntegerRow(computing, "Parallel NumCalc instances", "numcalc.parallel_instances", () => appPreferences.MaxInstances, v => appPreferences.MaxInstances = v);
+                IntegerRow(computing, "CPU load limit (%)", "numcalc.cpu_limit", () => appPreferences.MaxCpuLoad, v => appPreferences.MaxCpuLoad = v);
                 SettingsAdvanced(computing, "Advanced calculation settings", controls =>
                     SwitchRow(controls, "Adaptive FMM expansion length", defaults.AdaptiveFmmLength, v => defaults.AdaptiveFmmLength = v));
                 var sofa = SettingsSection(panel, "SOFA export");
                 SwitchRow(sofa, "Apply level offset", defaults.Normalize, v => defaults.Normalize = v);
-                NumberRow(sofa, "Level offset (dB)", () => defaults.LevelOffsetDb, v => defaults.LevelOffsetDb = v, () => -1000, () => 1000);
+                NumberRow(sofa, "Level offset (dB)", "postprocessing.level_offset", () => defaults.LevelOffsetDb, v => defaults.LevelOffsetDb = v);
                 SwitchRow(sofa, "Resample HRIRs", defaults.ResampleHrirs, v => defaults.ResampleHrirs = v);
-                IntegerRow(sofa, "Sampling rate (Hz)", () => defaults.SamplingRate, v => defaults.SamplingRate = v, () => 10, () => 384000, multiple: 10);
+                IntegerRow(sofa, "Sampling rate (Hz)", "postprocessing.sampling_rate", () => defaults.SamplingRate, v => defaults.SamplingRate = v);
                 SwitchRow(sofa, "Spatially upsample HRTFs", defaults.SpatialUpsampling, v => defaults.SpatialUpsampling = v);
                 SettingsAdvanced(sofa, "Advanced spatial upsampling", controls => {
-                    IntegerRow(controls, "Subdivision level (0–5)", () => defaults.SpatialSubdivisions, v => defaults.SpatialSubdivisions = v, () => 0, () => 5);
+                    IntegerRow(controls, "Subdivision level (0–5)", "postprocessing.spatial_subdivisions", () => defaults.SpatialSubdivisions, v => defaults.SpatialSubdivisions = v);
                     SwitchRow(controls, "Normalize to frontal reference", defaults.SpatialNormalize, v => defaults.SpatialNormalize = v);
                 });
             }
@@ -436,14 +452,16 @@ public partial class MainWindow
         parent.Children.Add(new SettingsCard { Header = title, Content = choice });
     }
 
-    void NumberRow(StackPanel parent, string title, Func<double> read, Action<double> write, Func<double> minimum, Func<double> maximum)
+    void NumberRow(StackPanel parent, string title, string id, Func<double> read, Action<double> write)
     {
         var box = new TextBox { Text = read().ToString("G", CultureInfo.CurrentCulture), Width = 144 };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, title);
         void Commit()
         {
-            if (!double.TryParse(box.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out var value) || !double.IsFinite(value) || value < minimum() || value > maximum())
-            { box.Description = $"Enter a number from {minimum():G} to {maximum():G}."; return; }
+            var values = appPreferences.FormValues();
+            var valid = double.TryParse(box.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out var value) && double.IsFinite(value);
+            values[id] = valid ? value.ToString("R", CultureInfo.InvariantCulture) : box.Text;
+            if (SettingsCatalog.Check(values, id) is string message) { box.Description = message; return; }
             write(value); SaveAppPreferences(); box.Description = null;
         }
         box.LostFocus += (_, _) => Commit();
@@ -483,15 +501,16 @@ public partial class MainWindow
         settingsReturnFocus = null;
     }
 
-    void IntegerRow(StackPanel parent, string title, Func<int> read, Action<int> write, Func<int> minimum, Func<int> maximum, int multiple = 1)
+    void IntegerRow(StackPanel parent, string title, string id, Func<int> read, Action<int> write)
     {
         var box = new TextBox { Text = read().ToString(CultureInfo.CurrentCulture), Width = 144 };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, title);
         void Commit()
         {
-            var lower = minimum();
-            if (!int.TryParse(box.Text, NumberStyles.Integer, CultureInfo.CurrentCulture, out var value) || value < lower || value > maximum() || value % multiple != 0)
-            { box.Description = $"Enter a whole number from {lower} to {maximum()}." + (multiple > 1 ? $" Use multiples of {multiple}." : ""); return; }
+            var values = appPreferences.FormValues();
+            var valid = int.TryParse(box.Text, NumberStyles.Integer, CultureInfo.CurrentCulture, out var value);
+            values[id] = valid ? value.ToString(CultureInfo.InvariantCulture) : box.Text;
+            if (SettingsCatalog.Check(values, id) is string message) { box.Description = message; return; }
             write(value); SaveAppPreferences(); box.Description = null;
         }
         box.LostFocus += (_, _) => Commit();

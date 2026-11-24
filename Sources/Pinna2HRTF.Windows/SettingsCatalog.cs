@@ -48,6 +48,21 @@ internal static class SettingsCatalog
         return Defaults[parts[0]]?[parts[1]]?.GetValueKind() == JsonValueKind.True;
     }
 
+    internal static double Decimal(string key) =>
+        double.TryParse(Text(key), NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : 0;
+    internal static int Whole(string key) =>
+        int.TryParse(Text(key), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : 0;
+
+    internal static string? Check(IReadOnlyDictionary<string, string> values, string id)
+    {
+        id = RuleId(id);
+        if (values.TryGetValue(id, out var text) && FieldMessage(id, text) is string message) return message;
+        var related = Relations.Where(relation => (string?)relation["id"] == id || (string?)relation["other"] == id ||
+                (relation["fields"] as JsonArray)?.Any(field => (string?)field == id) == true)
+            .Select(relation => (string)relation["id"]!).ToHashSet();
+        return Issues(values, null).Where(issue => related.Contains(issue.Id)).Select(issue => issue.Message).FirstOrDefault();
+    }
+
     internal static bool IsNumeric(string id) => (string?)Field(id)?["kind"] is "integer" or "decimal";
     internal static bool IsInteger(string id) => (string?)Field(id)?["kind"] == "integer";
 

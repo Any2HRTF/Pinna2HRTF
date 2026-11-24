@@ -165,28 +165,21 @@ final class ProjectLibrary: ObservableObject {
                 "frequency_steps": preference(AppPreferences.frequencySteps, field: "mesh2hrtf.frequency_steps", config: "preprocessing.frequency_step_count"),
                 "max_instances": preference(AppPreferences.maxInstances, field: "numcalc.parallel_instances", config: "numcalc.max_instances"),
                 "max_cpu_load": preference(AppPreferences.maxCPULoad, field: "numcalc.cpu_limit", config: "numcalc.max_cpu_load"),
-                "evaluation_grid": grid
+                "evaluation_grid": grid,
+                "workflow": AppPreferences.workflowPayload()
             ]
         ]
         guard let data = try? ProjectConfigDocument.request("new-defaults", request),
               let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let location = reply["save_location"] as? String,
               let config = reply["config"] as? [String: [String: Any]] else { return project }
-        func text(_ section: String, _ key: String) -> String? {
-            switch config[section]?[key] {
-            case let string as String: return string
-            case let number as NSNumber: return number.stringValue
-            default: return nil
-            }
-        }
-        project.saveLocation = location
-        if !grid.isEmpty { project.settings.preprocessing.evaluationGrid = text("paths", "evaluation_grid") }
-        project.settings.preprocessing.minFrequency = text("preprocessing", "min_frequency") ?? project.settings.preprocessing.minFrequency
-        project.settings.preprocessing.maxFrequency = text("preprocessing", "max_frequency") ?? project.settings.preprocessing.maxFrequency
-        project.settings.preprocessing.frequencyStepCount = text("preprocessing", "frequency_step_count") ?? project.settings.preprocessing.frequencyStepCount
-        project.settings.numcalc.maxInstances = text("numcalc", "max_instances") ?? project.settings.numcalc.maxInstances
-        project.settings.numcalc.maxCPULoad = text("numcalc", "max_cpu_load") ?? project.settings.numcalc.maxCPULoad
-        return project
+        let folder = URL(fileURLWithPath: location, isDirectory: true)
+        let settings = ProjectConfigDocument.Settings(config: config, revision: "", microphonePlacements: [:])
+        guard var created = try? ProjectConfigDocument.restore(settings, into: project, folder: folder, packageRoot: packageURL) else { return project }
+        created.saveLocation = location
+        created.preservedConfigJSON = nil
+        if grid.isEmpty { created.settings.preprocessing.evaluationGrid = nil }
+        return created
     }
 
     func existingProject(at folder: URL) -> ProjectRecord? {

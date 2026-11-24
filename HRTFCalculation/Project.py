@@ -454,14 +454,16 @@ def new_project_workflow(values: dict) -> dict:
                              "enabled": method == "mesh2ppm", "use_predictions_for_preprocessing": method == "mesh2ppm"}
     settings["preprocessing"].update(min_frequency=values["minimum_frequency"], max_frequency=values["maximum_frequency"], frequency_step_count=values["frequency_steps"])
     settings["numcalc"].update(max_instances=values["max_instances"], max_cpu_load=values["max_cpu_load"])
-    settings["paths"] = {"evaluation_grid": values.get("evaluation_grid") or "ARI_Grid"}
+    settings["paths"] = {"evaluation_grid": values.get("evaluation_grid") or DEFAULT_EVALUATION_GRID}
+    from .SettingsRules import check
+    checked = default_settings()
+    for section, entries in settings.items():
+        checked[section].update(entries)
+    checked["scan_preparation"]["enabled"] = True
+    for issue in check(checked):
+        if issue["id"] not in {"scan.path", "ear_model.method"}:
+            raise ValueError("New-project defaults: " + issue["message"])
     config = PipelineConfig.model_validate(settings)
-    pre = config.preprocessing
-    numeric = (pre.mesh_min_edge_length, pre.mesh_max_edge_length, pre.mesh_max_error, pre.mesh_gamma, pre.mesh_gamma_opposite, config.postprocessing.level_offset_db)
-    if not all(math.isfinite(value) for value in numeric) or min(numeric[:5]) <= 0 or pre.mesh_max_edge_length < pre.mesh_min_edge_length:
-        raise ValueError("Mesh grading requires positive finite values and maximum edge length at least minimum edge length.")
-    if not config.scan_preparation.prepare_left and not config.scan_preparation.prepare_right:
-        raise ValueError("Include at least one ear in the scan defaults.")
     return config.model_dump(mode="json", exclude_unset=True)
 
 
@@ -478,8 +480,6 @@ def execute(command: dict) -> dict:
         if any(type(values[field]) is not int for field in fields):
             raise ValueError("New-project defaults must be whole numbers.")
         minimum, maximum, steps, instances, cpu = (values[field] for field in fields)
-        if not (0 <= minimum < maximum <= 96000 and 2 <= steps <= 8193 and 1 <= instances <= 1024 and 1 <= cpu <= 100):
-            raise ValueError("Invalid new-project defaults.")
         grid = values.get("evaluation_grid", "")
         if grid:
             execute({"action": "validate-grid", "path": grid})

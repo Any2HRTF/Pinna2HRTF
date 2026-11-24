@@ -93,6 +93,12 @@ enum SettingsCatalog {
         return number
     }
 
+    static func check(_ values: [String: String], id: String) -> String? {
+        if let text = values[id], let message = fieldMessage(id, text: text) { return message }
+        let related = Set(rules.relations.filter { $0.id == id || $0.other == id || ($0.fields ?? []).contains(id) }.map(\.id))
+        return issues(values, stage: nil).first { related.contains($0.id) }?.message
+    }
+
     static func issues(_ values: [String: String], stage: Stage?) -> [(id: String, message: String)] {
         func active(_ condition: String?) -> Bool { condition.map { values[$0]?.lowercased() == "true" } ?? true }
         var found: [(id: String, message: String, stages: [String])] = []

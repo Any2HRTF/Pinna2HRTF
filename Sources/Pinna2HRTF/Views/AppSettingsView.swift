@@ -24,6 +24,7 @@ struct AppSettingsView: View {
     }
 
     static let paneWidth: CGFloat = 540
+    static let projectsPaneHeight: CGFloat = 640
 
     @ObservedObject var store: AppStore
 
@@ -60,6 +61,7 @@ struct SettingsPaneView: View {
     @AppStorage(AppPreferences.developerExternalDir) private var developerExternalDir = ""
     @AppStorage(AppPreferences.developerModelConfig) private var developerModelConfig = ""
     @AppStorage(AppPreferences.developerModelCheckpoint) private var developerModelCheckpoint = ""
+    @AppStorage(AppPreferences.developerMesh2HRTF) private var developerMesh2HRTF = ""
     @State private var invalidGrid = false
 
     var body: some View {
@@ -71,9 +73,9 @@ struct SettingsPaneView: View {
             }
         }
         .formStyle(.grouped)
-        .scrollDisabled(true)
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(width: AppSettingsView.paneWidth)
+        .scrollDisabled(pane != .projects)
+        .fixedSize(horizontal: false, vertical: pane != .projects)
+        .frame(width: AppSettingsView.paneWidth, height: pane == .projects ? AppSettingsView.projectsPaneHeight : nil)
         .animation(.default, value: developerMode)
         .onChange(of: developerMode) { _ in store.environmentPreferencesDidChange() }
         .onChange(of: developerNumCalc) { _ in store.environmentPreferencesDidChange() }
@@ -83,6 +85,7 @@ struct SettingsPaneView: View {
         .onChange(of: developerExternalDir) { _ in store.environmentPreferencesDidChange() }
         .onChange(of: developerModelConfig) { _ in store.environmentPreferencesDidChange() }
         .onChange(of: developerModelCheckpoint) { _ in store.environmentPreferencesDidChange() }
+        .onChange(of: developerMesh2HRTF) { _ in store.environmentPreferencesDidChange() }
         .onChange(of: notifyAll) { enabled in
             if !enabled { UNUserNotificationCenter.current().removeAllPendingNotificationRequests() }
         }
@@ -105,6 +108,7 @@ struct SettingsPaneView: View {
         } header: {
             Text("Project Files")
         }
+        ProjectDefaultsSections(store: store)
         Section {
             locationPicker("Evaluation grid", path: $evaluationGrid,
                            defaultTitle: "ARI Grid (91 directions)", choose: chooseGrid)
@@ -117,21 +121,24 @@ struct SettingsPaneView: View {
                                    range: max(1, min(minimumFrequency + 1, 96000))...96000, step: 100, unit: "Hz")
             }
             LabeledContent("Frequency steps") {
-                NumberStepperField(title: "Frequency steps", value: $frequencySteps, range: 2...8193)
+                NumberStepperField(title: "Frequency steps", value: $frequencySteps, range: SettingsCatalog.range("mesh2hrtf.frequency_steps"))
             }
+            SimulationDefaultsRows()
         } header: {
             Text("Simulation")
         }
         Section {
             LabeledContent("Parallel NumCalc instances") {
-                NumberStepperField(title: "Parallel NumCalc instances", value: $maxInstances, range: 1...1024)
+                NumberStepperField(title: "Parallel NumCalc instances", value: $maxInstances, range: SettingsCatalog.range("numcalc.parallel_instances"))
             }
             LabeledContent("CPU load limit") {
-                NumberStepperField(title: "CPU load limit", value: $maxCPULoad, range: 1...100, unit: "%")
+                NumberStepperField(title: "CPU load limit", value: $maxCPULoad, range: SettingsCatalog.range("numcalc.cpu_limit"), unit: "%")
             }
+            AdaptiveFMMDefaultToggle()
         } header: {
             Text("Calculation")
         }
+        ExportDefaultsSections()
     }
 
     @ViewBuilder private var notifications: some View {
@@ -153,8 +160,7 @@ struct SettingsPaneView: View {
             if !Defaults.isPackagedApp || developerMode {
                 toolStatus("uv", path: store.environment.uvExecutable)
             }
-            toolStatus("Mesh2HRTF", path: URL(fileURLWithPath: store.environment.externalDir)
-                .appendingPathComponent("src/Mesh2HRTF/mesh2hrtf").path, directory: true)
+            toolStatus("Mesh2HRTF", path: store.environment.effectiveMesh2HRTFPath, directory: true)
         } header: {
             Text("Components")
         }
@@ -167,6 +173,8 @@ struct SettingsPaneView: View {
                 pathSetting("uv", path: $developerUV, defaultPath: store.library.environment.uvExecutable)
                 pathSetting("External dependencies", path: $developerExternalDir,
                             defaultPath: store.library.environment.externalDir, directory: true)
+                pathSetting("Mesh2HRTF", path: $developerMesh2HRTF,
+                            defaultPath: store.library.environment.effectiveMesh2HRTFPath, directory: true)
                 pathSetting("Model configuration", path: $developerModelConfig, defaultPath: "Bundled models (.yaml)")
                 pathSetting("Model checkpoint", path: $developerModelCheckpoint,
                             defaultPath: "Bundled models (.pth needs a Python with PyTorch)")
