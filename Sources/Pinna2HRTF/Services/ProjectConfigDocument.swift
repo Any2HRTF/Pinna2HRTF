@@ -187,6 +187,10 @@ enum ProjectConfigDocument {
             $0 == Defaults.evaluationGrid ? $0 : relocated($0)
         }
         project.settings.preprocessing.earDistance = text(pre, "ear_distance") ?? text(pre, "head_radius")
+        for field in PreprocessingSettings.headShapeFields {
+            project.settings.preprocessing[keyPath: field.keyPath] = text(pre, field.config)
+        }
+        project.settings.preprocessing.headAdaptiveOvalness = bool(pre, "head_adaptive_ovalness")
         project.settings.preprocessing.sourceAssignmentFaceCount = text(pre, "source_assignment_face_count") ?? SettingsCatalog.text("preprocessing.source_assignment_face_count")
         for side in EarSide.allCases {
             var position: ManualMicrophonePosition?

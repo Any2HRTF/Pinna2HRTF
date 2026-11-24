@@ -224,6 +224,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         textSettings = CreateTextSettings();
         AddV2TextSettings(textSettings);
+        AddHeadShapeTextSettings(textSettings);
         Root.KeyDown += (_, args) =>
         {
             if (args.Key != VirtualKey.Escape) return;
@@ -1200,6 +1201,7 @@ public partial class MainWindow : Window
         maxInstancesBox.Text = project?.Settings.NumCalc.MaxInstances ?? "1";
         maxCpuLoadBox.Text = project?.Settings.NumCalc.MaxCpuLoad ?? "90";
         adaptiveFmmLengthBox.IsChecked = project?.Settings.NumCalc.AdaptiveFmmLength ?? true;
+        headAdaptiveOvalnessBox.IsChecked = project?.Settings.Preprocessing.HeadAdaptiveOvalness ?? SettingsCatalog.Flag("preprocessing.head_adaptive_ovalness");
         normalizeHrtfsBox.IsChecked = project?.Settings.Postprocessing?.Normalize ?? true;
         resampleHrirsBox.IsChecked = project?.Settings.Postprocessing?.ResampleHrirs ?? false;
         spatialUpsamplingBox.IsChecked = project?.Settings.Postprocessing?.SpatialUpsampling ?? false;
@@ -1210,6 +1212,7 @@ public partial class MainWindow : Window
         LoadSelectedProjectLog();
         loading = false;
         UpdatePostprocessingControls();
+        UpdateHeadShapeControls();
         UpdatePlacementButtons();
         RebaseSettingInputs();
         RestoreSettingDrafts(project);
@@ -1221,7 +1224,8 @@ public partial class MainWindow : Window
     {
         if (id.StartsWith("scan_preparation.")) return Stage.ScanPreparation;
         if (id == "project.use_bezierppm" || id.StartsWith("inference.", StringComparison.OrdinalIgnoreCase)) return Stage.Inference;
-        if (id.StartsWith("mesh2hrtf.", StringComparison.OrdinalIgnoreCase) || id.StartsWith("mesh_grading.", StringComparison.OrdinalIgnoreCase)) return Stage.Preprocessing;
+        if (id.StartsWith("mesh2hrtf.", StringComparison.OrdinalIgnoreCase) || id.StartsWith("mesh_grading.", StringComparison.OrdinalIgnoreCase) ||
+            id.StartsWith("head.", StringComparison.OrdinalIgnoreCase)) return Stage.Preprocessing;
         if (id.StartsWith("postprocessing.", StringComparison.OrdinalIgnoreCase)) return Stage.Postprocessing;
         return null;
     }
@@ -1270,6 +1274,7 @@ public partial class MainWindow : Window
         "scan_preparation.prepare_right" => (prepareRightEarBox.IsChecked == true).ToString(),
         "inference.model" => modelPicker.SelectedItem?.ToString() ?? "",
         "numcalc.adaptive_fmm" => (adaptiveFmmLengthBox.IsChecked == true).ToString(),
+        "head.adaptive_ovalness" => (headAdaptiveOvalnessBox.IsChecked == true).ToString(),
         "postprocessing.normalize" => (normalizeHrtfsBox.IsChecked == true).ToString(),
         "postprocessing.spatial_upsampling" => (spatialUpsamplingBox.IsChecked == true).ToString(),
         "postprocessing.spatial_normalize" => (spatialNormalizeBox.IsChecked == true).ToString(),
@@ -1285,6 +1290,7 @@ public partial class MainWindow : Window
         "scan_preparation.prepare_right" => project.Settings.ScanPreparation.PrepareRight.ToString(),
         "inference.model" => ModelName(project.Settings.Inference.ModelConfig),
         "numcalc.adaptive_fmm" => project.Settings.NumCalc.AdaptiveFmmLength.ToString(),
+        "head.adaptive_ovalness" => project.Settings.Preprocessing.HeadAdaptiveOvalness.ToString(),
         "postprocessing.normalize" => (project.Settings.Postprocessing?.Normalize ?? true).ToString(),
         "postprocessing.spatial_upsampling" => (project.Settings.Postprocessing?.SpatialUpsampling ?? false).ToString(),
         "postprocessing.spatial_normalize" => (project.Settings.Postprocessing?.SpatialNormalize ?? false).ToString(),
@@ -1402,6 +1408,7 @@ public partial class MainWindow : Window
             case "scan_preparation.prepare_right": prepareRightEarBox.IsChecked = bool.TryParse(value, out var right) && right; break;
             case "inference.model": modelPicker.SelectedItem = value; break;
             case "numcalc.adaptive_fmm": adaptiveFmmLengthBox.IsChecked = bool.TryParse(value, out var adaptive) && adaptive; break;
+            case "head.adaptive_ovalness": headAdaptiveOvalnessBox.IsChecked = bool.TryParse(value, out var ovalness) && ovalness; UpdateHeadShapeControls(); break;
             case "postprocessing.normalize": normalizeHrtfsBox.IsChecked = bool.TryParse(value, out var normalize) && normalize; break;
             case "postprocessing.spatial_upsampling": spatialUpsamplingBox.IsChecked = bool.TryParse(value, out var spatial) && spatial; break;
             case "postprocessing.spatial_normalize": spatialNormalizeBox.IsChecked = bool.TryParse(value, out var spatialNormal) && spatialNormal; break;
@@ -1439,6 +1446,7 @@ public partial class MainWindow : Window
         }
         project.Settings.Preprocessing.EvaluationGrid = evaluationGridBox.Text.Trim();
         project.Settings.NumCalc.AdaptiveFmmLength = adaptiveFmmLengthBox.IsChecked == true;
+        project.Settings.Preprocessing.HeadAdaptiveOvalness = headAdaptiveOvalnessBox.IsChecked == true;
         project.Settings.Postprocessing ??= new PostprocessingSettings();
         project.Settings.Postprocessing.Normalize = normalizeHrtfsBox.IsChecked == true;
         project.Settings.Postprocessing.SpatialUpsampling = spatialUpsamplingBox.IsChecked == true;

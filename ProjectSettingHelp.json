@@ -72,6 +72,54 @@
     ]
   },
   {
+    "id": "head.radius_scale",
+    "title": "Ear-to-ear radius scale",
+    "description": "Multiplies the head radius measured from the ear meshes. Default: 1.01.",
+    "publications": []
+  },
+  {
+    "id": "head.width_scale",
+    "title": "Front-to-back scale",
+    "description": "Front-to-back head size relative to the ear-to-ear radius. Default: 1.5.",
+    "publications": []
+  },
+  {
+    "id": "head.height_scale",
+    "title": "Height scale",
+    "description": "Head height relative to the ear-to-ear radius. Default: 1.5.",
+    "publications": []
+  },
+  {
+    "id": "head.y_deformation",
+    "title": "Width change with height",
+    "description": "Widens the head above the ear axis and narrows it below for positive values, per millimetre of height. Default: 0.",
+    "publications": []
+  },
+  {
+    "id": "head.adaptive_ovalness",
+    "title": "Adapt shape to ears",
+    "description": "Adjusts the front-to-back and height scales from how far the ears flare out. Default: on.",
+    "publications": []
+  },
+  {
+    "id": "head.ovalness_strength",
+    "title": "Adaptation strength",
+    "description": "Largest change that ear flare can make to the front-to-back and height scales. Default: 0.08.",
+    "publications": []
+  },
+  {
+    "id": "head.min_width_scale",
+    "title": "Smallest front-to-back scale",
+    "description": "Lower limit for the adapted front-to-back scale. Default: 1.48.",
+    "publications": []
+  },
+  {
+    "id": "head.max_height_scale",
+    "title": "Largest height scale",
+    "description": "Upper limit for the adapted height scale. Default: 1.53.",
+    "publications": []
+  },
+  {
     "id": "mesh2hrtf.min_frequency",
     "title": "Min frequency",
     "description": "Lower limit of the simulated frequency range, in Hz.",

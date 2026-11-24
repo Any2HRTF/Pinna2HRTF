@@ -8,6 +8,32 @@ namespace Pinna2HRTF.Windows;
 public partial class MainWindow
 {
     readonly TextBox earDistanceBox = new();
+    readonly TextBox headRadiusScaleBox = new();
+    readonly TextBox headWidthScaleBox = new();
+    readonly TextBox headHeightScaleBox = new();
+    readonly TextBox headYDeformationBox = new();
+    readonly TextBox headOvalnessStrengthBox = new();
+    readonly TextBox headMinWidthScaleBox = new();
+    readonly TextBox headMaxHeightScaleBox = new();
+    readonly CheckBox headAdaptiveOvalnessBox = new();
+    readonly List<FrameworkElement> headOvalnessRows = [];
+
+    void AddHeadShapeTextSettings(Dictionary<string, TextSetting> settings)
+    {
+        settings["head.radius_scale"] = new(headRadiusScaleBox, p => p.Settings.Preprocessing.HeadRadiusScale, (p, v) => p.Settings.Preprocessing.HeadRadiusScale = v.Trim(), SettingsCatalog.Text("preprocessing.head_radius_scale"));
+        settings["head.width_scale"] = new(headWidthScaleBox, p => p.Settings.Preprocessing.HeadWidthScale, (p, v) => p.Settings.Preprocessing.HeadWidthScale = v.Trim(), SettingsCatalog.Text("preprocessing.head_width_scale"));
+        settings["head.height_scale"] = new(headHeightScaleBox, p => p.Settings.Preprocessing.HeadHeightScale, (p, v) => p.Settings.Preprocessing.HeadHeightScale = v.Trim(), SettingsCatalog.Text("preprocessing.head_height_scale"));
+        settings["head.y_deformation"] = new(headYDeformationBox, p => p.Settings.Preprocessing.HeadYDeformation, (p, v) => p.Settings.Preprocessing.HeadYDeformation = v.Trim(), SettingsCatalog.Text("preprocessing.head_y_deformation"));
+        settings["head.ovalness_strength"] = new(headOvalnessStrengthBox, p => p.Settings.Preprocessing.HeadOvalnessStrength, (p, v) => p.Settings.Preprocessing.HeadOvalnessStrength = v.Trim(), SettingsCatalog.Text("preprocessing.head_ovalness_strength"));
+        settings["head.min_width_scale"] = new(headMinWidthScaleBox, p => p.Settings.Preprocessing.HeadMinWidthScale, (p, v) => p.Settings.Preprocessing.HeadMinWidthScale = v.Trim(), SettingsCatalog.Text("preprocessing.head_min_width_scale"));
+        settings["head.max_height_scale"] = new(headMaxHeightScaleBox, p => p.Settings.Preprocessing.HeadMaxHeightScale, (p, v) => p.Settings.Preprocessing.HeadMaxHeightScale = v.Trim(), SettingsCatalog.Text("preprocessing.head_max_height_scale"));
+    }
+
+    void UpdateHeadShapeControls()
+    {
+        foreach (var row in headOvalnessRows)
+            row.Visibility = headAdaptiveOvalnessBox.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+    }
     readonly TextBlock geometryDescription = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
     readonly Dictionary<string, GeometryValues> geometryCache = [];
     readonly Dictionary<string, Task<GeometryValues>> geometryRequests = [];
@@ -30,6 +56,19 @@ public partial class MainWindow
         Grid.SetColumn(reset, 1);
         footer.Children.Add(reset);
         panel.Children.Add(footer);
+        var shape = new List<FrameworkElement>();
+        shape.Add(AddSettingPanel("Ear-to-ear radius scale", "head.radius_scale", headRadiusScaleBox));
+        shape.Add(AddSettingPanel("Front-to-back scale", "head.width_scale", headWidthScaleBox));
+        shape.Add(AddSettingPanel("Height scale", "head.height_scale", headHeightScaleBox));
+        shape.Add(AddSettingPanel("Width change with height (1/mm)", "head.y_deformation", headYDeformationBox));
+        shape.Add(AddSettingPanel("Adapt shape to ears", "head.adaptive_ovalness", headAdaptiveOvalnessBox));
+        headOvalnessRows.Add(AddSettingPanel("Adaptation strength", "head.ovalness_strength", headOvalnessStrengthBox));
+        headOvalnessRows.Add(AddSettingPanel("Smallest front-to-back scale", "head.min_width_scale", headMinWidthScaleBox));
+        headOvalnessRows.Add(AddSettingPanel("Largest height scale", "head.max_height_scale", headMaxHeightScaleBox));
+        shape.AddRange(headOvalnessRows);
+        headAdaptiveOvalnessBox.Checked += (_, _) => UpdateHeadShapeControls();
+        headAdaptiveOvalnessBox.Unchecked += (_, _) => UpdateHeadShapeControls();
+        AddExpander(panel, "Head shape", shape);
         var grid = new Grid();
         grid.Children.Add(panel);
         return grid;

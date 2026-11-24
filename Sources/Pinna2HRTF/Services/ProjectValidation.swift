@@ -9,7 +9,7 @@ enum ProjectValidation {
         let pre = project.settings.preprocessing
         let post = project.settings.postprocessing ?? PostprocessingSettings()
         let scan = project.scanPreparation
-        return [
+        var values = [
             "mesh2hrtf.min_frequency": pre.minFrequency, "mesh2hrtf.max_frequency": pre.maxFrequency,
             "mesh2hrtf.frequency_steps": pre.frequencyStepCount, "mesh2hrtf.microphone_faces": pre.sourceAssignmentFaceCount ?? "",
             "mesh2hrtf.ear_distance": pre.earDistance ?? "",
@@ -25,6 +25,11 @@ enum ProjectValidation {
             "scan.side_min": scan.sideMinMM, "scan.side_max": scan.sideMaxMM,
             "ear_model.method": project.workflowMethod?.rawValue ?? ""
         ]
+        for field in PreprocessingSettings.headShapeFields {
+            values[field.id] = pre[keyPath: field.keyPath] ?? SettingsCatalog.text("preprocessing." + field.config)
+        }
+        values["head.adaptive_ovalness"] = String(pre.headAdaptiveOvalness ?? SettingsCatalog.flag("preprocessing.head_adaptive_ovalness"))
+        return values
     }
 
     static func issues(for project: ProjectRecord, stage: Stage? = nil, inspection: ArtifactScanner.Inspection = .init()) -> [(id: String, message: String)] {

@@ -204,6 +204,18 @@ struct ProjectInspectorView: View {
     @ViewBuilder var simulationSections: some View {
         Section("Head") {
             HeadGeometryControls(store: store)
+            DisclosureGroup("Head Shape") {
+                headShapeField("Ear-to-ear radius scale", id: "head.radius_scale")
+                headShapeField("Front-to-back scale", id: "head.width_scale")
+                headShapeField("Height scale", id: "head.height_scale")
+                headShapeField("Width change with height (1/mm)", id: "head.y_deformation")
+                SettingToggle(title: "Adapt shape to ears", helpID: "head.adaptive_ovalness", isOn: headAdaptiveOvalnessBinding)
+                if headAdaptiveOvalnessBinding.wrappedValue {
+                    headShapeField("Adaptation strength", id: "head.ovalness_strength")
+                    headShapeField("Smallest front-to-back scale", id: "head.min_width_scale")
+                    headShapeField("Largest height scale", id: "head.max_height_scale")
+                }
+            }
         }
         Section("Microphones") {
             LabeledContent("Position") {
@@ -348,6 +360,22 @@ struct ProjectInspectorView: View {
         Binding(
             get: { store.selectedProject?.settings.preprocessing[keyPath: keyPath] ?? "" },
             set: { value in store.updateSelectedProject { $0.settings.preprocessing[keyPath: keyPath] = value } }
+        )
+    }
+
+    func headShapeField(_ title: String, id: String) -> some View {
+        let field = PreprocessingSettings.headShapeFields.first { $0.id == id }!
+        let binding = Binding<String>(
+            get: { store.selectedProject?.settings.preprocessing[keyPath: field.keyPath] ?? SettingsCatalog.text("preprocessing." + field.config) },
+            set: { value in store.updateSelectedProject { $0.settings.preprocessing[keyPath: field.keyPath] = value } }
+        )
+        return LabeledTextField(title, helpID: id, text: binding)
+    }
+
+    var headAdaptiveOvalnessBinding: Binding<Bool> {
+        Binding(
+            get: { store.selectedProject?.settings.preprocessing.headAdaptiveOvalness ?? SettingsCatalog.flag("preprocessing.head_adaptive_ovalness") },
+            set: { value in store.updateSelectedProject { $0.settings.preprocessing.headAdaptiveOvalness = value } }
         )
     }
 

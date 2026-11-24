@@ -231,7 +231,9 @@ EDITABLE_SETTINGS = {
         "title", "ear_distance", "head_radius", "min_frequency", "max_frequency",
         "frequency_step_count", "source_assignment_face_count", "source_position_input_left",
         "source_position_input_right", "mesh_min_edge_length", "mesh_max_edge_length",
-        "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite", "skip_mesh_grading",
+        "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite", "skip_mesh_grading", "head_radius_scale",
+        "head_width_scale", "head_height_scale", "head_y_deformation", "head_adaptive_ovalness",
+        "head_ovalness_strength", "head_min_width_scale", "head_max_height_scale",
     ),
     "numcalc": (
         "max_instances", "max_cpu_load", "adaptive_fmm_length",

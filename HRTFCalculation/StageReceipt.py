@@ -627,8 +627,12 @@ MAC_OWNED_PREPROCESSING_KEYS = (
     "source_assignment_face_count", "source_position_input_left", "source_position_input_right")
 
 
+MAC_HEAD_SHAPE_KEYS = ("headRadiusScale", "headWidthScale", "headHeightScale", "headYDeformation", "headAdaptiveOvalness",
+                       "headOvalnessStrength", "headMinWidthScale", "headMaxHeightScale")
+
+
 def mac_configuration(preprocessing, manual, predictions, preserved, scan):
-    settings = {key: value for key, value in preprocessing.items() if key != "evaluationGrid"}
+    settings = {key: value for key, value in preprocessing.items() if key != "evaluationGrid" and key not in MAC_HEAD_SHAPE_KEYS}
     settings["skipMeshGrading"] = preprocessing.get("skipMeshGrading", False)
     settings["sourceAssignmentFaceCount"] = preprocessing.get("sourceAssignmentFaceCount", "6")
     for name in ("sourcePositionInputLeft", "sourcePositionInputRight"):
