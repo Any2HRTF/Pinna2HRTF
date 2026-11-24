@@ -87,6 +87,7 @@ internal static class ProjectDocument
         Set("paths", "left_ear", PathValue(p.LeftEar)); Set("paths", "right_ear", PathValue(p.RightEar));
         Set("paths", "output_dir", p.SaveLocation);
         Set("paths", "external_deps_dir", environment.ExternalDir);
+        Set("paths", "mesh2hrtf_path", environment.EffectiveMesh2HrtfPath);
         Set("paths", "numcalc_executable", environment.NumCalcExecutable);
         Set("paths", "mesh_grading_executable", environment.MeshGradingExecutable);
         Set("paths", "evaluation_grid", string.IsNullOrWhiteSpace(pre.EvaluationGrid) ? DefaultEvaluationGrid : pre.EvaluationGrid);

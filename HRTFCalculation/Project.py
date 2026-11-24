@@ -4,6 +4,7 @@ import contextlib
 import copy
 import hashlib
 import json
+import math
 import os
 import stat as stat_module
 import tempfile
@@ -17,7 +18,7 @@ import uuid
 
 import yaml
 
-from .Config import PipelineConfig, config_from_text, load_config
+from .Config import PipelineConfig, config_from_text, default_resource, load_config
 from .Compatibility import decode_settings, read_settings
 from .MicrophonePlacement import ignore_stale_placements, placements_path, read_placements, statuses, updated_placements
 
@@ -211,7 +212,7 @@ EDITABLE_SETTINGS = {
     ),
     "paths": (
         "edited_left_ear", "edited_right_ear", "left_ear", "right_ear", "output_dir",
-        "external_deps_dir", "numcalc_executable", "mesh_grading_executable", "evaluation_grid",
+        "external_deps_dir", "mesh2hrtf_path", "numcalc_executable", "mesh_grading_executable", "evaluation_grid",
     ),
     "inference": (
         "enabled", "model_config_file", "model_checkpoint", "target_left_folder",
@@ -413,6 +414,41 @@ def copy_input(source: Path, folder: Path) -> Path:
     return target
 
 
+def new_project_workflow(values: dict) -> dict:
+    groups = {
+        "scan_preparation": ("prepare_left", "prepare_right", "target_edge_mm", "left_margin_mm", "right_margin_mm", "side_min_mm", "side_max_mm", "require_manual_review"),
+        "preprocessing": ("source_assignment_face_count", "mesh_min_edge_length", "mesh_max_edge_length", "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite"),
+        "numcalc": ("adaptive_fmm_length",),
+        "postprocessing": ("normalize", "level_offset_db", "resample_hrirs", "sampling_rate", "spatial_upsampling", "spatial_subdivisions", "spatial_normalize"),
+    }
+    workflow = values.get("workflow", {})
+    allowed = {key for keys in groups.values() for key in keys} | {"full_head_scan", "ear_model_method", "inference_model"}
+    if not isinstance(workflow, dict) or workflow.keys() - allowed:
+        raise ValueError("Unsupported new-project workflow defaults.")
+    settings = {section: {key: workflow[key] for key in keys if key in workflow} for section, keys in groups.items()}
+    settings["scan_preparation"]["enabled"] = workflow.get("full_head_scan", False)
+    method = workflow.get("ear_model_method", "none")
+    settings["ui"] = {"ear_model_method": method}
+    settings["manual_ppm"] = {"enabled": method == "manual"}
+    model = workflow.get("inference_model", "Local 3 Views")
+    available = {path.stem for path in default_resource("Local 3 Views.yaml").parent.glob("*.yaml")}
+    if model not in available:
+        raise ValueError("Choose a bundled Mesh2PPM model.")
+    settings["inference"] = {"model_config_file": str(default_resource(model + ".yaml")), "model_checkpoint": str(default_resource(model + ".pth")),
+                             "enabled": method == "mesh2ppm", "use_predictions_for_preprocessing": method == "mesh2ppm"}
+    settings["preprocessing"].update(min_frequency=values["minimum_frequency"], max_frequency=values["maximum_frequency"], frequency_step_count=values["frequency_steps"])
+    settings["numcalc"].update(max_instances=values["max_instances"], max_cpu_load=values["max_cpu_load"])
+    settings["paths"] = {"evaluation_grid": values.get("evaluation_grid") or "ARI_Grid"}
+    config = PipelineConfig.model_validate(settings)
+    pre = config.preprocessing
+    numeric = (pre.mesh_min_edge_length, pre.mesh_max_edge_length, pre.mesh_max_error, pre.mesh_gamma, pre.mesh_gamma_opposite, config.postprocessing.level_offset_db)
+    if not all(math.isfinite(value) for value in numeric) or min(numeric[:5]) <= 0 or pre.mesh_max_edge_length < pre.mesh_min_edge_length:
+        raise ValueError("Mesh grading requires positive finite values and maximum edge length at least minimum edge length.")
+    if not config.scan_preparation.prepare_left and not config.scan_preparation.prepare_right:
+        raise ValueError("Include at least one ear in the scan defaults.")
+    return config.model_dump(mode="json", exclude_unset=True)
+
+
 def execute(command: dict) -> dict:
     action = command["action"]
     if action == "validate-grid":
@@ -433,7 +469,7 @@ def execute(command: dict) -> dict:
             execute({"action": "validate-grid", "path": grid})
         return {"save_location": str(Path(command["parent"]).expanduser().resolve() / ("Project " + str(command["index"]) + "-" + str(uuid.uuid4()))),
                 "preprocessing": {"min_frequency": minimum, "max_frequency": maximum, "frequency_step_count": steps, "evaluation_grid": grid},
-                "numcalc": {"max_instances": instances, "max_cpu_load": cpu}}
+                "numcalc": {"max_instances": instances, "max_cpu_load": cpu}, "settings": new_project_workflow(values)}
     if action in {"recycle-plan", "recycle"}:
         from .ProjectTrash import execute as trash
         return trash(command)

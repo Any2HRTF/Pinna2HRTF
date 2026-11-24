@@ -88,6 +88,7 @@ enum PipelineConfigWriter {
                 "edited_left_ear": nullable(scan.individualLeftEdit), "edited_right_ear": nullable(scan.individualRightEdit),
                 "left_ear": path(project.leftEar), "right_ear": path(project.rightEar),
                 "output_dir": project.saveLocation, "external_deps_dir": environment.externalDir,
+                "mesh2hrtf_path": URL(fileURLWithPath: environment.externalDir).appendingPathComponent("src/Mesh2HRTF/mesh2hrtf").path,
                 "numcalc_executable": environment.numcalcExecutable,
                 "mesh_grading_executable": environment.meshGradingExecutable,
                 "evaluation_grid": grid.isEmpty ? Defaults.evaluationGrid : grid

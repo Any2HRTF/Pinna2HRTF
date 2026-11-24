@@ -3458,7 +3458,7 @@ public partial class MainWindow : Window
             if (SamePath(environment.MeshGradingExecutable, DefaultEnvironment().MeshGradingExecutable) &&
                 new[] { "libpmp.dll", "libpmp_vis.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll" }.Any(name => !File.Exists(Path.Combine(bin, name))))
                 return "The mesh-grading runtime is incomplete. Check Tools in App settings.";
-            return File.Exists(Path.Combine(environment.ExternalDir, "src", "Mesh2HRTF", "mesh2hrtf", "Mesh2Input", "mesh2input.py")) ? null : "The Mesh2HRTF export tools are unavailable. Check Tools in App settings.";
+            return File.Exists(Path.Combine(environment.EffectiveMesh2HrtfPath, "Mesh2Input", "mesh2input.py")) ? null : "The Mesh2HRTF export tools are unavailable. Check Tools in App settings.";
         }
         if (stage == Stage.Numcalc) return !StageIsComplete(Stage.Preprocessing, project, inspection) ? "Run Simulation setup first." : File.Exists(environment.NumCalcExecutable) ? null : "The NumCalc executable is unavailable. Check Tools in App settings.";
         if (stage == Stage.Postprocessing && !StageIsComplete(Stage.Preprocessing, project, inspection)) return "Run Simulation setup first.";
@@ -3669,7 +3669,7 @@ public partial class MainWindow : Window
         var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "Unknown";
         var build = assembly.GetName().Version;
         var revision = ReadBuildDetail(Path.Combine(packageRoot, "build-revision.txt")) ?? "Unknown";
-        var meshVersion = ReadBuildDetail(Path.Combine(packageRoot, "External", "src", "Mesh2HRTF", "VERSION"));
+        var meshVersion = ReadBuildDetail(Path.Combine(environment.EffectiveMesh2HrtfPath, "..", "VERSION"));
         var details = new List<string> { $"Version {version} ({build})", $"Revision {revision}" };
         if (meshVersion != null) details.Add($"Mesh2HRTF {meshVersion}");
         var content = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
