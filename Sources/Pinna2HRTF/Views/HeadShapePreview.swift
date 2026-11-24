@@ -43,8 +43,7 @@ struct HeadShapePreview: View {
     var body: some View {
         ZStack {
             if let scene {
-                SceneView(scene: scene, pointOfView: scene.rootNode.childNode(withName: "camera", recursively: false),
-                          options: [.allowsCameraControl])
+                HeadRotationView(scene: scene)
                     .opacity(updating ? 0.6 : 1)
             } else {
                 Text(message.isEmpty ? "Loading Preview…" : message)
@@ -100,22 +99,27 @@ struct HeadShapePreview: View {
     private nonisolated static func makeScene(head: URL, ears: [URL], darkMode: Bool) -> SCNScene {
         let scene = SCNScene()
         scene.background.contents = NSColor.viewportBackground(darkMode: darkMode)
+        let model = SCNNode()
+        model.name = "model"
+        scene.rootNode.addChildNode(model)
         func add(_ url: URL, color: NSColor) {
             let asset = MDLAsset(url: url)
             for index in 0..<asset.count {
                 let node = SCNNode(mdlObject: asset.object(at: index))
                 node.geometry?.firstMaterial?.diffuse.contents = color
                 node.geometry?.firstMaterial?.roughness.contents = 0.72
-                scene.rootNode.addChildNode(node)
+                model.addChildNode(node)
             }
         }
         add(head, color: NSColor(calibratedWhite: darkMode ? 0.62 : 0.78, alpha: 1))
         for ear in ears { add(ear, color: .systemOrange) }
-        let bounds = scene.rootNode.boundingBox
+        let bounds = model.boundingBox
         let size = max(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z)
         let target = SCNNode()
         target.position = SCNVector3((bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2, (bounds.min.z + bounds.max.z) / 2)
         scene.rootNode.addChildNode(target)
+        model.pivot = SCNMatrix4MakeTranslation(target.position.x, target.position.y, target.position.z)
+        model.position = target.position
         let camera = SCNCamera()
         camera.zFar = 10_000
         camera.fieldOfView = 34
@@ -131,4 +135,45 @@ struct HeadShapePreview: View {
         EvenMeshLighting.install(in: scene, camera: cameraNode)
         return scene
     }
+}
+
+private struct HeadRotationView: NSViewRepresentable {
+    let scene: SCNScene
+
+    func makeNSView(context: Context) -> HeadRotationSCNView {
+        let view = HeadRotationSCNView(frame: .zero)
+        view.allowsCameraControl = false
+        view.autoenablesDefaultLighting = false
+        view.antialiasingMode = .multisampling4X
+        view.show(scene)
+        return view
+    }
+
+    func updateNSView(_ view: HeadRotationSCNView, context: Context) {
+        if view.scene !== scene { view.show(scene) }
+    }
+}
+
+final class HeadRotationSCNView: SCNView {
+    private var yaw: Float = 0
+    private var tilt: Float = 0
+
+    func show(_ scene: SCNScene) {
+        self.scene = scene
+        pointOfView = scene.rootNode.childNode(withName: "camera", recursively: false)
+        applyRotation()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        yaw += Float(event.deltaX) * 0.01
+        tilt = min(max(tilt + Float(event.deltaY) * 0.01, -1.2), 1.2)
+        applyRotation()
+    }
+
+    private func applyRotation() {
+        scene?.rootNode.childNode(withName: "model", recursively: false)?.simdOrientation =
+            simd_quatf(angle: tilt, axis: [0, 1, 0]) * simd_quatf(angle: yaw, axis: [0, 0, 1])
+    }
+
+    override var acceptsFirstResponder: Bool { false }
 }
