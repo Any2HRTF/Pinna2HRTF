@@ -1349,6 +1349,7 @@ public partial class MainWindow : Window
     async Task HandleSettingChangeAsync(string id)
     {
         if (loading || selectedProject == null) return;
+        if (id.StartsWith("head.", StringComparison.Ordinal)) RequestHeadPreview();
         if (id == "mesh2hrtf.ear_distance") { await EditGeometryAsync("ear", earDistanceBox.Text); return; }
         var project = selectedProject;
         var desired = CurrentSettingValue(id);

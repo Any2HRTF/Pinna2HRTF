@@ -1,3 +1,8 @@
+using HelixToolkit;
+using HelixToolkit.Maths;
+using HelixToolkit.SharpDX;
+using HelixToolkit.WinUI.SharpDX;
+using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System.Diagnostics;
@@ -17,6 +22,12 @@ public partial class MainWindow
     readonly TextBox headMaxHeightScaleBox = new();
     readonly CheckBox headAdaptiveOvalnessBox = new();
     readonly List<FrameworkElement> headOvalnessRows = [];
+    Expander? headShapeExpander;
+    Viewport3DX? headPreviewViewport;
+    readonly TextBlock headPreviewMessage = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12) };
+    readonly List<Element3D> headPreviewModels = [];
+    DispatcherTimer? headPreviewTimer;
+    int headPreviewGeneration;
 
     void AddHeadShapeTextSettings(Dictionary<string, TextSetting> settings)
     {
@@ -29,10 +40,104 @@ public partial class MainWindow
         settings["head.max_height_scale"] = new(headMaxHeightScaleBox, p => p.Settings.Preprocessing.HeadMaxHeightScale, (p, v) => p.Settings.Preprocessing.HeadMaxHeightScale = v.Trim(), SettingsCatalog.Text("preprocessing.head_max_height_scale"));
     }
 
+    FrameworkElement HeadPreviewPanel()
+    {
+        headPreviewViewport = new Viewport3DX
+        {
+            IsRotationEnabled = true, IsPanEnabled = false, IsMoveEnabled = false, IsZoomEnabled = false,
+            IsInertiaEnabled = false, UseDefaultGestures = true, CameraRotationMode = CameraRotationMode.Turntable,
+            ShowCoordinateSystem = false, ShowViewCube = false, ModelUpDirection = new System.Numerics.Vector3(0, 0, 1),
+            EffectsManager = new DefaultEffectsManager(), BackgroundColor = ColorHelper.FromArgb(255, 237, 243, 242)
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(headPreviewViewport, "Head shape preview");
+        EvenMeshLighting.Install(headPreviewViewport);
+        var host = new Grid { Height = 240, Margin = new Thickness(0, 8, 0, 0), CornerRadius = new CornerRadius(6) };
+        host.Children.Add(headPreviewViewport);
+        host.Children.Add(headPreviewMessage);
+        return host;
+    }
+
+    void RequestHeadPreview()
+    {
+        if (headShapeExpander?.IsExpanded != true) return;
+        headPreviewTimer ??= CreateHeadPreviewTimer();
+        headPreviewTimer.Stop();
+        headPreviewTimer.Start();
+    }
+
+    DispatcherTimer CreateHeadPreviewTimer()
+    {
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        timer.Tick += async (_, _) => { timer.Stop(); await RefreshHeadPreviewAsync(); };
+        return timer;
+    }
+
+    async Task RefreshHeadPreviewAsync()
+    {
+        var generation = ++headPreviewGeneration;
+        if (selectedProject is not { } project || headPreviewViewport == null) return;
+        var left = PreprocessingMesh(project, "left") ?? (File.Exists(project.LeftEar) ? project.LeftEar : null);
+        var right = PreprocessingMesh(project, "right") ?? (File.Exists(project.RightEar) ? project.RightEar : null);
+        if (left == null && right == null) { ShowHeadPreviewMessage("Choose an ear mesh to preview the head."); return; }
+        var values = ProjectDocument.FormValues(project);
+        var invalid = values.Keys.Where(id => id.StartsWith("head.", StringComparison.Ordinal) || id == "mesh2hrtf.ear_distance").Order()
+            .Select(id => SettingsCatalog.Check(values, id)).FirstOrDefault(message => message != null);
+        if (invalid != null) { ShowHeadPreviewMessage(invalid); return; }
+        var folder = Path.Combine(appData, "Cache", "Head Preview", project.Id.ToString());
+        headPreviewMessage.Text = "Updating preview…";
+        try
+        {
+            var preprocessing = ProjectDocument.Build(project, currentEnvironment)["preprocessing"];
+            var reply = await RequestPythonAsync("project", new { action = "head-preview", left, right, preprocessing, folder });
+            if (generation != headPreviewGeneration) return;
+            var head = reply.GetProperty("head").GetString()!;
+            var ears = new[] { "left", "right" }.Where(side => reply.TryGetProperty(side, out _)).Select(side => reply.GetProperty(side).GetString()!).ToList();
+            ShowHeadPreview(head, ears);
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            if (generation == headPreviewGeneration) ShowHeadPreviewMessage(error.Message);
+        }
+    }
+
+    void ShowHeadPreviewMessage(string message)
+    {
+        foreach (var model in headPreviewModels) headPreviewViewport?.Items.Remove(model);
+        headPreviewModels.Clear();
+        headPreviewMessage.Text = message;
+    }
+
+    void ShowHeadPreview(string head, IEnumerable<string> ears)
+    {
+        if (headPreviewViewport == null) return;
+        ShowHeadPreviewMessage("");
+        MeshGeometryModel3D Add(string path, Color4 color)
+        {
+            var geometry = NativeEditor.RawMesh(path);
+            NativeEditor.Normals(geometry);
+            var model = NativeEditor.Model(geometry);
+            model.Material = new PhongMaterial { DiffuseColor = color, AmbientColor = new Color4(.5f, .5f, .5f, 1) };
+            headPreviewViewport.Items.Add(model);
+            headPreviewModels.Add(model);
+            return model;
+        }
+        var headModel = Add(head, new Color4(.78f, .78f, .78f, 1));
+        foreach (var ear in ears) Add(ear, new Color4(1f, .58f, .12f, 1));
+        var points = headModel.Geometry!.Positions!.ToArray();
+        var low = points.Aggregate(System.Numerics.Vector3.Min);
+        var high = points.Aggregate(System.Numerics.Vector3.Max);
+        var center = (low + high) / 2;
+        var size = System.Numerics.Vector3.Distance(low, high);
+        var offset = new System.Numerics.Vector3(size * 1.6f, -size * .25f, size * .33f);
+        headPreviewViewport.Camera = new PerspectiveCamera { Position = center + offset, LookDirection = -offset, UpDirection = System.Numerics.Vector3.UnitZ,
+            FieldOfView = 34, NearPlaneDistance = size / 1000, FarPlaneDistance = size * 100 };
+    }
+
     void UpdateHeadShapeControls()
     {
         foreach (var row in headOvalnessRows)
             row.Visibility = headAdaptiveOvalnessBox.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        RequestHeadPreview();
     }
     readonly TextBlock geometryDescription = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
     readonly Dictionary<string, GeometryValues> geometryCache = [];
@@ -66,9 +171,12 @@ public partial class MainWindow
         headOvalnessRows.Add(AddSettingPanel("Smallest front-to-back scale", "head.min_width_scale", headMinWidthScaleBox));
         headOvalnessRows.Add(AddSettingPanel("Largest height scale", "head.max_height_scale", headMaxHeightScaleBox));
         shape.AddRange(headOvalnessRows);
+        shape.Add(HeadPreviewPanel());
         headAdaptiveOvalnessBox.Checked += (_, _) => UpdateHeadShapeControls();
         headAdaptiveOvalnessBox.Unchecked += (_, _) => UpdateHeadShapeControls();
         AddExpander(panel, "Head shape", shape);
+        headShapeExpander = (Expander)panel.Children[^1];
+        headShapeExpander.Expanding += (_, _) => RequestHeadPreview();
         var grid = new Grid();
         grid.Children.Add(panel);
         return grid;
@@ -87,6 +195,7 @@ public partial class MainWindow
             var left = PreprocessingMesh(project, "left") ?? (File.Exists(project.LeftEar) ? project.LeftEar : null);
             var right = PreprocessingMesh(project, "right") ?? (File.Exists(project.RightEar) ? project.RightEar : null);
             var key = toolRevision + "|" + project.Id + "|" + left + "|" + (left == null ? "" : MeshIdentity(left)) + "|" + right + "|" + (right == null ? "" : MeshIdentity(right));
+            RequestHeadPreview();
             if (left == null && right == null)
             {
                 displayedGeometry = null;

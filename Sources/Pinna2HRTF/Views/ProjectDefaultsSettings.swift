@@ -106,6 +106,7 @@ struct ProjectDefaultsSections: View {
 struct SimulationDefaultsRows: View {
     @AppStorage(AppPreferences.workflow) private var workflowJSON = ""
     @State private var gradingExpanded = false
+    @State private var headExpanded = false
 
     private var stored: [String: Any] {
         (try? JSONSerialization.jsonObject(with: Data(workflowJSON.utf8)) as? [String: Any]) ?? [:]
@@ -148,6 +149,23 @@ struct SimulationDefaultsRows: View {
             numberField("Gamma", key: "mesh_gamma")
             numberField("Gamma opposite", key: "mesh_gamma_opposite")
         }
+        DisclosureGroup("Head Shape", isExpanded: $headExpanded) {
+            numberField("Ear-to-ear radius scale", key: "head_radius_scale")
+            numberField("Front-to-back scale", key: "head_width_scale")
+            numberField("Height scale", key: "head_height_scale")
+            numberField("Width change with height (1/mm)", key: "head_y_deformation")
+            Toggle("Adapt shape to ears", isOn: adaptiveOvalness)
+            if adaptiveOvalness.wrappedValue {
+                numberField("Adaptation strength", key: "head_ovalness_strength")
+                numberField("Smallest front-to-back scale", key: "head_min_width_scale")
+                numberField("Largest height scale", key: "head_max_height_scale")
+            }
+        }
+    }
+
+    private var adaptiveOvalness: Binding<Bool> {
+        let field = field("head_adaptive_ovalness")
+        return Binding(get: { AppPreferences.workflowFlag(field, in: stored) }, set: { update(field.key, $0) })
     }
 }
 

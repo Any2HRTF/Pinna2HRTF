@@ -45,6 +45,14 @@ enum AppPreferences {
         .init(key: "mesh_max_error", config: "preprocessing.mesh_max_error", rule: "mesh_grading.max_error"),
         .init(key: "mesh_gamma", config: "preprocessing.mesh_gamma", rule: "mesh_grading.gamma"),
         .init(key: "mesh_gamma_opposite", config: "preprocessing.mesh_gamma_opposite", rule: "mesh_grading.gamma_opposite"),
+        .init(key: "head_radius_scale", config: "preprocessing.head_radius_scale", rule: "head.radius_scale"),
+        .init(key: "head_width_scale", config: "preprocessing.head_width_scale", rule: "head.width_scale"),
+        .init(key: "head_height_scale", config: "preprocessing.head_height_scale", rule: "head.height_scale"),
+        .init(key: "head_y_deformation", config: "preprocessing.head_y_deformation", rule: "head.y_deformation"),
+        .init(key: "head_adaptive_ovalness", config: "preprocessing.head_adaptive_ovalness", rule: "head.adaptive_ovalness"),
+        .init(key: "head_ovalness_strength", config: "preprocessing.head_ovalness_strength", rule: "head.ovalness_strength"),
+        .init(key: "head_min_width_scale", config: "preprocessing.head_min_width_scale", rule: "head.min_width_scale"),
+        .init(key: "head_max_height_scale", config: "preprocessing.head_max_height_scale", rule: "head.max_height_scale"),
         .init(key: "adaptive_fmm_length", config: "numcalc.adaptive_fmm_length", rule: nil),
         .init(key: "normalize", config: "postprocessing.normalize", rule: nil),
         .init(key: "level_offset_db", config: "postprocessing.level_offset_db", rule: "postprocessing.level_offset"),
@@ -54,6 +62,8 @@ enum AppPreferences {
         .init(key: "spatial_subdivisions", config: "postprocessing.spatial_subdivisions", rule: "postprocessing.spatial_subdivisions"),
         .init(key: "spatial_normalize", config: "postprocessing.spatial_normalize", rule: nil)
     ]
+
+    static let workflowFlagRules: Set<String> = ["scan.prepare_left", "scan.prepare_right", "head.adaptive_ovalness"]
 
     static var storedWorkflow: [String: Any] {
         guard let text = UserDefaults.standard.string(forKey: workflow),
@@ -82,7 +92,7 @@ enum AppPreferences {
         var values = ["scan.enabled": "true"]
         for field in workflowFields {
             guard let rule = field.rule else { continue }
-            values[rule] = field.rule?.hasPrefix("scan.prepare") == true ? String(workflowFlag(field, in: stored)) : workflowText(field, in: stored)
+            values[rule] = workflowFlagRules.contains(rule) ? String(workflowFlag(field, in: stored)) : workflowText(field, in: stored)
         }
         return values
     }
@@ -95,7 +105,7 @@ enum AppPreferences {
         if let model = stored["inference_model"] as? String { payload["inference_model"] = model }
         for field in workflowFields {
             guard stored[field.key] != nil else { continue }
-            guard let rule = field.rule, !rule.hasPrefix("scan.prepare") else {
+            guard let rule = field.rule, !workflowFlagRules.contains(rule) else {
                 payload[field.key] = workflowFlag(field, in: stored)
                 continue
             }

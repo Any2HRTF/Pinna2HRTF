@@ -435,7 +435,9 @@ def default_settings() -> dict:
 def new_project_workflow(values: dict) -> dict:
     groups = {
         "scan_preparation": ("prepare_left", "prepare_right", "target_edge_mm", "left_margin_mm", "right_margin_mm", "side_min_mm", "side_max_mm", "require_manual_review"),
-        "preprocessing": ("source_assignment_face_count", "mesh_min_edge_length", "mesh_max_edge_length", "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite"),
+        "preprocessing": ("source_assignment_face_count", "mesh_min_edge_length", "mesh_max_edge_length", "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite",
+                          "head_radius_scale", "head_width_scale", "head_height_scale", "head_y_deformation", "head_adaptive_ovalness",
+                          "head_ovalness_strength", "head_min_width_scale", "head_max_height_scale"),
         "numcalc": ("adaptive_fmm_length",),
         "postprocessing": ("normalize", "level_offset_db", "resample_hrirs", "sampling_rate", "spatial_upsampling", "spatial_subdivisions", "spatial_normalize"),
     }

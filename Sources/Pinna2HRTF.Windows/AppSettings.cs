@@ -72,6 +72,14 @@ internal sealed class WorkflowPreferences
     public bool SpatialUpsampling { get; set; } = SettingsCatalog.Flag("postprocessing.spatial_upsampling");
     public int SpatialSubdivisions { get; set; } = SettingsCatalog.Whole("postprocessing.spatial_subdivisions");
     public bool SpatialNormalize { get; set; } = SettingsCatalog.Flag("postprocessing.spatial_normalize");
+    public double HeadRadiusScale { get; set; } = SettingsCatalog.Decimal("preprocessing.head_radius_scale");
+    public double HeadWidthScale { get; set; } = SettingsCatalog.Decimal("preprocessing.head_width_scale");
+    public double HeadHeightScale { get; set; } = SettingsCatalog.Decimal("preprocessing.head_height_scale");
+    public double HeadYDeformation { get; set; } = SettingsCatalog.Decimal("preprocessing.head_y_deformation");
+    public double HeadOvalnessStrength { get; set; } = SettingsCatalog.Decimal("preprocessing.head_ovalness_strength");
+    public double HeadMinWidthScale { get; set; } = SettingsCatalog.Decimal("preprocessing.head_min_width_scale");
+    public double HeadMaxHeightScale { get; set; } = SettingsCatalog.Decimal("preprocessing.head_max_height_scale");
+    public bool HeadAdaptiveOvalness { get; set; } = SettingsCatalog.Flag("preprocessing.head_adaptive_ovalness");
 
     public Dictionary<string, string> FormValues()
     {
@@ -87,6 +95,14 @@ internal sealed class WorkflowPreferences
             ["mesh_grading.max_error"] = Number(MeshMaxError), ["mesh_grading.gamma"] = Number(MeshGamma), ["mesh_grading.gamma_opposite"] = Number(MeshGammaOpposite),
             ["postprocessing.level_offset"] = Number(LevelOffsetDb), ["postprocessing.sampling_rate"] = Whole(SamplingRate),
             ["postprocessing.spatial_subdivisions"] = Whole(SpatialSubdivisions),
+            ["head.radius_scale"] = Number(HeadRadiusScale),
+            ["head.width_scale"] = Number(HeadWidthScale),
+            ["head.height_scale"] = Number(HeadHeightScale),
+            ["head.y_deformation"] = Number(HeadYDeformation),
+            ["head.ovalness_strength"] = Number(HeadOvalnessStrength),
+            ["head.min_width_scale"] = Number(HeadMinWidthScale),
+            ["head.max_height_scale"] = Number(HeadMaxHeightScale),
+            ["head.adaptive_ovalness"] = HeadAdaptiveOvalness ? "true" : "false",
         };
     }
 
@@ -329,6 +345,16 @@ public partial class MainWindow
                     NumberRow(controls, "Maximum error (mm)", "mesh_grading.max_error", () => defaults.MeshMaxError, v => defaults.MeshMaxError = v);
                     NumberRow(controls, "Gamma", "mesh_grading.gamma", () => defaults.MeshGamma, v => defaults.MeshGamma = v);
                     NumberRow(controls, "Gamma opposite", "mesh_grading.gamma_opposite", () => defaults.MeshGammaOpposite, v => defaults.MeshGammaOpposite = v);
+                });
+                SettingsAdvanced(simulation, "Head shape", controls => {
+                    NumberRow(controls, "Ear-to-ear radius scale", "head.radius_scale", () => defaults.HeadRadiusScale, v => defaults.HeadRadiusScale = v);
+                    NumberRow(controls, "Front-to-back scale", "head.width_scale", () => defaults.HeadWidthScale, v => defaults.HeadWidthScale = v);
+                    NumberRow(controls, "Height scale", "head.height_scale", () => defaults.HeadHeightScale, v => defaults.HeadHeightScale = v);
+                    NumberRow(controls, "Width change with height (1/mm)", "head.y_deformation", () => defaults.HeadYDeformation, v => defaults.HeadYDeformation = v);
+                    SwitchRow(controls, "Adapt shape to ears", defaults.HeadAdaptiveOvalness, v => defaults.HeadAdaptiveOvalness = v);
+                    NumberRow(controls, "Adaptation strength", "head.ovalness_strength", () => defaults.HeadOvalnessStrength, v => defaults.HeadOvalnessStrength = v);
+                    NumberRow(controls, "Smallest front-to-back scale", "head.min_width_scale", () => defaults.HeadMinWidthScale, v => defaults.HeadMinWidthScale = v);
+                    NumberRow(controls, "Largest height scale", "head.max_height_scale", () => defaults.HeadMaxHeightScale, v => defaults.HeadMaxHeightScale = v);
                 });
                 var computing = SettingsSection(panel, "Calculation");
                 IntegerRow(computing, "Parallel NumCalc instances", "numcalc.parallel_instances", () => appPreferences.MaxInstances, v => appPreferences.MaxInstances = v);
