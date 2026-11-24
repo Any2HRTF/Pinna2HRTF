@@ -1,6 +1,7 @@
 """Ear-distance measurement and placement, shared by native apps and preprocessing."""
 from __future__ import annotations
 import argparse
+from pathlib import Path
 import json
 import math
 import networkx as nx
@@ -71,6 +72,30 @@ def resolve_geometry(ears, settings, validate=True):
         positive(mean)
     return {"ear_distance_left": distances.get("left"), "ear_distance_right": distances.get("right"),
             "ear_distance": mean, "translations": translations}
+
+
+def head_preview(command):
+    import trimesh
+    from .Config import PreprocessingConfig
+    from .Preprocessing.src.create_head import head
+    settings = PreprocessingConfig.model_validate(command.get("preprocessing") or {})
+    ears = {side: trimesh.load(command[side], force="mesh") if command.get(side) else None for side in ("left", "right")}
+    geometry = resolve_geometry(ears, settings)
+    folder = Path(command["folder"])
+    folder.mkdir(parents=True, exist_ok=True)
+    result = {}
+    for side, ear in ears.items():
+        if ear is None:
+            continue
+        ear.apply_translation(geometry["translations"][side])
+        ear.export(folder / f"{side}.stl")
+        result[side] = str(folder / f"{side}.stl")
+    head(ears["left"], ears["right"], folder / "head.stl", radius_scale=settings.head_radius_scale, width_scale=settings.head_width_scale,
+         height_scale=settings.head_height_scale, y_deformation=settings.head_y_deformation, adaptive_ovalness=settings.head_adaptive_ovalness,
+         ovalness_strength=settings.head_ovalness_strength, min_width_scale=settings.head_min_width_scale,
+         max_height_scale=settings.head_max_height_scale, subdivisions=4)
+    result["head"] = str(folder / "head.stl")
+    return result
 
 
 def needs_distance_warning(distance):

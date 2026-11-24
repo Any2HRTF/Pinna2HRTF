@@ -215,6 +215,8 @@ struct ProjectInspectorView: View {
                     headShapeField("Smallest front-to-back scale", id: "head.min_width_scale")
                     headShapeField("Largest height scale", id: "head.max_height_scale")
                 }
+                HeadShapePreview(store: store)
+                    .padding(.top, 4)
             }
         }
         Section("Microphones") {

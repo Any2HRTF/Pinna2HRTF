@@ -498,6 +498,9 @@ def execute(command: dict) -> dict:
                 "numcalc": {"max_instances": instances, "max_cpu_load": cpu}, "settings": settings}
     if action == "defaults":
         return {"config": default_settings()}
+    if action == "head-preview":
+        from .Geometry import head_preview
+        return head_preview(command)
     if action == "rules":
         from .SettingsRules import rules
         return rules()
