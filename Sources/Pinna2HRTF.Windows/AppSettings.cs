@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using CommunityToolkit.WinUI.Controls;
 using Windows.System;
+using Windows.Storage.Pickers;
 
 namespace Pinna2HRTF.Windows;
 
@@ -203,19 +204,22 @@ public partial class MainWindow
     async Task ApplyNewProjectDefaultsAsync(ProjectRecord project, int? index = null)
     {
         var preferences = JsonSerializer.Deserialize<AppPreferences>(JsonSerializer.Serialize(appPreferences))!;
-        var reply = await RequestPythonAsync("project", new {
+        var reply = await RequestNewProjectDefaultsAsync(preferences, index ?? projects.Count + 1);
+        project.SaveLocation = reply.GetProperty("save_location").GetString()!;
+        project.InputHandling = preferences.InputHandling;
+        ProjectDocument.Restore(project, JsonNode.Parse(reply.GetProperty("config").GetRawText())!.AsObject());
+    }
+
+    Task<JsonElement> RequestNewProjectDefaultsAsync(AppPreferences preferences, int index) =>
+        RequestPythonAsync("project", new {
             action = "new-defaults", parent = preferences.ProjectDirectory.Length > 0 ? preferences.ProjectDirectory : Path.Combine(appData, "Projects"),
-            index = index ?? projects.Count + 1, defaults = new {
+            index, defaults = new {
                 minimum_frequency = preferences.MinimumFrequency, maximum_frequency = preferences.MaximumFrequency,
                 frequency_steps = preferences.FrequencySteps, max_instances = preferences.MaxInstances,
                 max_cpu_load = preferences.MaxCpuLoad, evaluation_grid = preferences.EvaluationGrid,
                 workflow = JsonSerializer.SerializeToNode(preferences.Workflow, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower })
             }
         });
-        project.SaveLocation = reply.GetProperty("save_location").GetString()!;
-        project.InputHandling = preferences.InputHandling;
-        ProjectDocument.Restore(project, JsonNode.Parse(reply.GetProperty("config").GetRawText())!.AsObject());
-    }
 
     async Task InitializeInitialProjectAsync(ProjectRecord project)
     {
@@ -296,15 +300,23 @@ public partial class MainWindow
             heading.Children.Add(titleRow);
             if (name == names[0])
             {
-                var resetDefaults = new Button { Content = "Reset to defaults…", HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+                var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
+                var saveDefaults = new Button { Content = "Save defaults…" };
+                var loadDefaults = new Button { Content = "Load defaults…" };
+                var resetDefaults = new Button { Content = "Reset to defaults…", VerticalAlignment = VerticalAlignment.Center };
+                actions.Children.Add(saveDefaults); actions.Children.Add(loadDefaults); actions.Children.Add(resetDefaults);
                 ToolTipService.SetToolTip(resetDefaults, "Reset Project Defaults. Existing projects keep their settings.");
-                Grid.SetColumn(resetDefaults, 1); titleRow.Children.Add(resetDefaults);
+                Grid.SetColumn(actions, 1); titleRow.Children.Add(actions);
                 titleRow.SizeChanged += (_, args) => {
-                    var narrow = args.NewSize.Width < 480;
-                    Grid.SetRow(resetDefaults, narrow ? 1 : 0); Grid.SetColumn(resetDefaults, narrow ? 0 : 1);
-                    resetDefaults.HorizontalAlignment = narrow ? HorizontalAlignment.Left : HorizontalAlignment.Right;
+                    var narrow = args.NewSize.Width < 780;
+                    Grid.SetRow(actions, narrow ? 1 : 0); Grid.SetColumn(actions, narrow ? 0 : 1);
+                    Grid.SetColumnSpan(actions, narrow ? 2 : 1);
+                    actions.HorizontalAlignment = narrow ? HorizontalAlignment.Left : HorizontalAlignment.Right;
+                    actions.Orientation = args.NewSize.Width < 430 ? Orientation.Vertical : Orientation.Horizontal;
                 };
                 resetDefaults.Click += async (_, _) => { if (await ResetProjectDefaultsAsync()) ShowCategory(names[0]); };
+                saveDefaults.Click += async (_, _) => await SaveDefaultsFileAsync();
+                loadDefaults.Click += async (_, _) => { if (await LoadDefaultsFileAsync()) ShowCategory(names[0]); };
             }
             if (name == names[0]) heading.Children.Add(new TextBlock {
                 Text = "Default settings used for newly created projects.", Foreground = mutedTextBrush, TextWrapping = TextWrapping.Wrap
@@ -331,7 +343,7 @@ public partial class MainWindow
                     appPreferences.InputHandling = (InputHandling)handling.SelectedIndex;
                     SaveAppPreferences();
                 };
-                files.Children.Add(new SettingsCard { Header = "Input files", Content = handling });
+                files.Children.Add(new SettingsCard { Header = DefaultsLabel("Input files", "defaults.input_handling"), Content = handling });
                 var defaults = appPreferences.Workflow;
                 ChoiceRow(files, "Input source", ["Individual ear meshes", "Full-head scan"], defaults.FullHeadScan ? 1 : 0,
                     i => defaults.FullHeadScan = i == 1);
@@ -344,7 +356,7 @@ public partial class MainWindow
                 ChoiceRow(ears, "Ears to prepare from a full-head scan", ["Left and right", "Left only", "Right only"],
                     defaults.PrepareLeft && defaults.PrepareRight ? 0 : defaults.PrepareLeft ? 1 : 2,
                     i => { defaults.PrepareLeft = i != 2; defaults.PrepareRight = i != 1; });
-                SettingsAdvanced(ears, "Advanced scan settings", controls => {
+                SettingsAdvanced(ears, "Ear cropping & remeshing", controls => {
                     NumberRow(controls, "Target edge length (mm)", "scan.target_edge", () => defaults.TargetEdgeMm, v => defaults.TargetEdgeMm = v);
                     NumberRow(controls, "Left crop margin (mm)", "scan.left_margin", () => defaults.LeftMarginMm, v => defaults.LeftMarginMm = v);
                     NumberRow(controls, "Right crop margin (mm)", "scan.right_margin", () => defaults.RightMarginMm, v => defaults.RightMarginMm = v);
@@ -480,7 +492,12 @@ public partial class MainWindow
             PrimaryButtonText = "Reset", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close, XamlRoot = Root.XamlRoot
         };
         if (await ShowDialogAsync(confirmation) != ContentDialogResult.Primary) return false;
-        var defaults = new AppPreferences();
+        SetProjectDefaults(new AppPreferences());
+        return true;
+    }
+
+    void SetProjectDefaults(AppPreferences defaults)
+    {
         appPreferences.ProjectDirectory = defaults.ProjectDirectory;
         appPreferences.InputHandling = defaults.InputHandling;
         appPreferences.EvaluationGrid = defaults.EvaluationGrid;
@@ -491,7 +508,93 @@ public partial class MainWindow
         appPreferences.MaxCpuLoad = defaults.MaxCpuLoad;
         appPreferences.Workflow = defaults.Workflow;
         SaveAppPreferences();
-        return true;
+    }
+
+    static readonly string[] ProjectDefaultKeys = ["ProjectDirectory", "InputHandling", "EvaluationGrid", "MinimumFrequency", "MaximumFrequency", "FrequencySteps", "MaxInstances", "MaxCpuLoad", "Workflow"];
+
+    JsonObject DefaultsFile()
+    {
+        var preferences = JsonSerializer.SerializeToNode(appPreferences)!.AsObject();
+        var values = new JsonObject();
+        foreach (var key in ProjectDefaultKeys) values[key] = preferences[key]!.DeepClone();
+        return new JsonObject { ["format"] = "Pinna2HRTF.ProjectDefaults", ["version"] = 1, ["defaults"] = values };
+    }
+
+    async Task SaveDefaultsFileAsync()
+    {
+        try
+        {
+            var picker = new FileSavePicker { SuggestedFileName = "Pinna2HRTF-project-defaults", SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
+            picker.FileTypeChoices.Add("Pinna2HRTF project defaults", new List<string> { ".json" });
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            var file = await picker.PickSaveFileAsync();
+            if (file == null || shutdownCleanupDone) return;
+            HeadGeometry.AtomicWrite(file.Path, DefaultsFile().ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
+        {
+            await ShowDialogAsync(new ContentDialog { Title = "Unable to save defaults", Content = error.Message, CloseButtonText = "Close", XamlRoot = Root.XamlRoot });
+        }
+    }
+
+    async Task<bool> LoadDefaultsFileAsync()
+    {
+        try
+        {
+            var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
+            picker.FileTypeFilter.Add(".json");
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            var file = await picker.PickSingleFileAsync();
+            if (file == null || shutdownCleanupDone) return false;
+            var path = file.Path;
+            if (new FileInfo(path).Length > 1024 * 1024) throw new IOException("This file is too large to be a project defaults file.");
+            var document = JsonNode.Parse(await File.ReadAllTextAsync(path))?.AsObject() ?? throw new IOException("Empty defaults file.");
+            if ((string?)document["format"] != "Pinna2HRTF.ProjectDefaults" || (int?)document["version"] != 1 || document["defaults"] is not JsonObject values ||
+                ProjectDefaultKeys.Any(key => values[key] == null) || values.Any(pair => !ProjectDefaultKeys.Contains(pair.Key)))
+                throw new IOException("Choose a supported Pinna2HRTF project defaults file.");
+            var defaults = values.Deserialize<AppPreferences>()!;
+            if (!Enum.IsDefined(defaults.InputHandling) || defaults.ProjectDirectory == null || defaults.EvaluationGrid == null ||
+                defaults.Workflow == null || !defaults.Workflow.Valid() || defaults.ProjectDirectory.Length > 0 && !Path.IsPathFullyQualified(defaults.ProjectDirectory) ||
+                !File.Exists(Path.Combine(packageRoot, "HRTFCalculation", "Inference", "resources", defaults.Workflow.InferenceModel + ".yaml")))
+                throw new IOException("The file contains invalid project defaults or an unavailable model.");
+            var issues = SettingsCatalog.Issues(defaults.FormValues(), null);
+            if (issues.Count > 0) throw new IOException(issues[0].Message);
+            await RequestNewProjectDefaultsAsync(defaults, 1);
+            var confirmation = new ContentDialog {
+                Title = "Load Project Defaults?", Content = "Replace Project Defaults with " + Path.GetFileName(path) + "? Existing projects, notifications and tool settings will stay unchanged.",
+                PrimaryButtonText = "Load", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close, XamlRoot = Root.XamlRoot
+            };
+            if (await ShowDialogAsync(confirmation) != ContentDialogResult.Primary) return false;
+            SetProjectDefaults(defaults);
+            return true;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or FormatException or System.Runtime.InteropServices.COMException)
+        {
+            await ShowDialogAsync(new ContentDialog { Title = "Unable to load defaults", Content = error.Message, CloseButtonText = "Close", XamlRoot = Root.XamlRoot });
+            return false;
+        }
+    }
+
+    FrameworkElement DefaultsLabel(string title, string? id = null)
+    {
+        id ??= title switch {
+            "Project location" => "defaults.project_location", "Input source" => "defaults.input_source",
+            "Ear modelling method" => "defaults.ear_model_method", "Mesh2PPM model" => "inference.model",
+            "Ears to prepare from a full-head scan" => "defaults.prepared_ears", "Require ear review" => "defaults.require_review",
+            "Evaluation grid" => "mesh2hrtf.evaluation_grid", "Adaptive FMM expansion length" => "numcalc.adaptive_fmm",
+            "Apply level offset" => "postprocessing.normalize", "Resample HRIRs" => "postprocessing.resample_hrirs",
+            "Spatially upsample HRTFs" => "postprocessing.spatial_upsampling", "Normalize to frontal reference" => "postprocessing.spatial_normalize",
+            "Adapt shape to ears" => "head.adaptive_ovalness", _ => null
+        };
+        var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+        panel.Children.Add(new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center });
+        if (id != null && settingHelp.ContainsKey(id))
+        {
+            var info = InfoButton(id);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(info, "About " + title);
+            panel.Children.Add(info);
+        }
+        return panel;
     }
 
     void SettingsOption(StackPanel parent, string title, bool value, Action<bool> write, Action<StackPanel> build)
@@ -510,11 +613,12 @@ public partial class MainWindow
         };
     }
 
-    static SettingsExpander SettingsAdvanced(StackPanel parent, string title, Action<StackPanel> build)
+    SettingsExpander SettingsAdvanced(StackPanel parent, string title, Action<StackPanel> build)
     {
         var controls = new StackPanel();
         build(controls);
-        var expander = new SettingsExpander { Header = title };
+        var expander = new SettingsExpander { Header = DefaultsLabel(title) };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(expander, title);
         foreach (var control in controls.Children.ToArray())
         {
             controls.Children.Remove(control);
@@ -532,7 +636,7 @@ public partial class MainWindow
             if (choice.SelectedIndex < 0) return;
             write(choice.SelectedIndex); SaveAppPreferences();
         };
-        parent.Children.Add(new SettingsCard { Header = title, Content = choice });
+        parent.Children.Add(new SettingsCard { Header = DefaultsLabel(title), Content = choice });
     }
 
     void NumberRow(StackPanel parent, string title, string id, Func<double> read, Action<double> write)
@@ -552,7 +656,7 @@ public partial class MainWindow
             if (args.Key == VirtualKey.Enter) { Commit(); args.Handled = true; }
             if (args.Key == VirtualKey.Escape) { box.Text = read().ToString("G", CultureInfo.CurrentCulture); box.Description = null; args.Handled = true; }
         };
-        parent.Children.Add(new SettingsCard { Header = title, Content = box });
+        parent.Children.Add(new SettingsCard { Header = DefaultsLabel(title, id), Content = box });
     }
 
     void SwitchRow(StackPanel parent, string title, bool value, Action<bool> write, string? description = null)
@@ -560,7 +664,7 @@ public partial class MainWindow
         var toggle = new ToggleSwitch { IsOn = value };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toggle, title);
         toggle.Toggled += (_, _) => { write(toggle.IsOn); SaveAppPreferences(); };
-        parent.Children.Add(new SettingsCard { Header = title, Description = description ?? "", Content = toggle });
+        parent.Children.Add(new SettingsCard { Header = DefaultsLabel(title), Description = description ?? "", Content = toggle });
     }
 
     void CloseAppSettings()
@@ -601,7 +705,7 @@ public partial class MainWindow
             if (args.Key == VirtualKey.Enter) { Commit(); args.Handled = true; }
             if (args.Key == VirtualKey.Escape) { box.Text = read().ToString(CultureInfo.CurrentCulture); box.Description = null; args.Handled = true; }
         };
-        parent.Children.Add(new SettingsCard { Header = title, Content = box });
+        parent.Children.Add(new SettingsCard { Header = DefaultsLabel(title, id), Content = box });
     }
 
     void PathRow(StackPanel parent, string title, Func<string> read, Action<string> write, string fallback, bool directory,
@@ -632,7 +736,7 @@ public partial class MainWindow
         var open = new Button { Content = "Open" };
         ToolTipService.SetToolTip(open, directory ? "Open folder in File Explorer" : "Show in File Explorer");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(open, "Show " + title + " in File Explorer");
-        var card = new SettingsCard { Header = title, Description = description, Content = actions };
+        var card = new SettingsCard { Header = DefaultsLabel(title), Description = description, Content = actions };
         if (title == "Mesh2HRTF") ToolTipService.SetToolTip(card, "Mesh2HRTF export resources: choose the mesh2hrtf folder containing Mesh2Input. The Python package used for SOFA export belongs to the selected Python environment.");
         actions.Children.Add(reveal);
         if (component) actions.Children.Add(open);

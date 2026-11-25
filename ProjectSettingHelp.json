@@ -418,6 +418,42 @@
     ]
   },
   {
+    "id": "defaults.project_location",
+    "title": "Default project location",
+    "description": "New projects receive a unique subfolder here. Leave this unset to use Projects inside the active app profile; existing projects keep their save locations.",
+    "publications": []
+  },
+  {
+    "id": "defaults.input_handling",
+    "title": "Input files",
+    "description": "Copy into project keeps a separate copy of each input in the project folder. Reference original files uses their current locations, so those files must remain available and unchanged. This choice applies to new projects.",
+    "publications": []
+  },
+  {
+    "id": "defaults.input_source",
+    "title": "Default input source",
+    "description": "Choose separate ear meshes or a full-head scan for new projects. Full-head scans must be aligned and cropped into ear meshes before simulation preparation.",
+    "publications": []
+  },
+  {
+    "id": "defaults.ear_model_method",
+    "title": "Default ear modelling method",
+    "description": "Mesh2PPM predicts a parametric ear mesh automatically; Manual PPM fitting lets you fit and save the model yourself. No ear model uses the ear meshes directly. Each project can change this choice later.",
+    "publications": []
+  },
+  {
+    "id": "defaults.prepared_ears",
+    "title": "Ears to prepare",
+    "description": "Choose which ears to extract from a full-head scan by default. This does not select input files and does not affect projects using individual ear meshes.",
+    "publications": []
+  },
+  {
+    "id": "defaults.require_review",
+    "title": "Require ear review",
+    "description": "Pause after extracting ears from a full-head scan so you can inspect and accept or edit each prepared ear before continuing. Enable this for new projects that should always include a manual review.",
+    "publications": []
+  },
+  {
     "id": "postprocessing.amt_path",
     "title": "Auditory Modeling Toolbox folder",
     "description": "Legacy setting retained for compatibility. Python upsampling does not use AMT.",

@@ -136,7 +136,7 @@ public partial class MainWindow
         workflowPreparation.Children.Add(scanActions);
         workflowPreparation.Children.Add(WorkflowText("Use an aligned scan, or align it here before preparing ears."));
         workflowPreparation.Children.Add(requireReviewBox);
-        AddExpander(workflowPreparation, "Advanced scan settings", [
+        AddExpander(workflowPreparation, "Ear cropping & remeshing", [
             AddSettingPanel("Target edge length (mm)", "scan_preparation.target_edge", targetEdgeBox),
             AddSettingPanel("Left crop margin (mm)", "scan_preparation.left_margin", leftMarginBox),
             AddSettingPanel("Right crop margin (mm)", "scan_preparation.right_margin", rightMarginBox),
