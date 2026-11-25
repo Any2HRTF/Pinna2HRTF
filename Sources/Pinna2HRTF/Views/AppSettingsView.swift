@@ -98,29 +98,33 @@ struct SettingsPaneView: View {
 
     @ViewBuilder private var projects: some View {
         Section {
-            locationPicker("Location", path: $projectDirectory,
+            locationPicker("Location", helpID: "defaults.project_location", path: $projectDirectory,
                            defaultTitle: "Application Support", choose: { chooseDirectory(selection: $projectDirectory) })
-            Picker("Input files", selection: $inputHandling) {
-                ForEach(InputHandling.allCases) { handling in
-                    Text(handling.title).tag(handling.rawValue)
+            HelpRow("Input files", helpID: "defaults.input_handling") {
+                Picker("Input files", selection: $inputHandling) {
+                    ForEach(InputHandling.allCases) { handling in
+                        Text(handling.title).tag(handling.rawValue)
+                    }
                 }
+                .labelsHidden()
+                .fixedSize()
             }
         } header: {
             Text("Project Files")
         }
         ProjectDefaultsSections(store: store)
         Section {
-            locationPicker("Evaluation grid", path: $evaluationGrid,
+            locationPicker("Evaluation grid", helpID: "mesh2hrtf.evaluation_grid", path: $evaluationGrid,
                            defaultTitle: "ARI Grid (91 directions)", choose: chooseGrid)
-            LabeledContent("Lowest frequency") {
+            HelpRow("Lowest frequency", helpID: "mesh2hrtf.min_frequency") {
                 NumberStepperField(title: "Lowest frequency", value: $minimumFrequency,
                                    range: 0...max(0, min(maximumFrequency - 1, 95999)), step: 100, unit: "Hz")
             }
-            LabeledContent("Highest frequency") {
+            HelpRow("Highest frequency", helpID: "mesh2hrtf.max_frequency") {
                 NumberStepperField(title: "Highest frequency", value: $maximumFrequency,
                                    range: max(1, min(minimumFrequency + 1, 96000))...96000, step: 100, unit: "Hz")
             }
-            LabeledContent("Frequency steps") {
+            HelpRow("Frequency steps", helpID: "mesh2hrtf.frequency_steps") {
                 NumberStepperField(title: "Frequency steps", value: $frequencySteps, range: SettingsCatalog.range("mesh2hrtf.frequency_steps"))
             }
             SimulationDefaultsRows()
@@ -128,10 +132,10 @@ struct SettingsPaneView: View {
             Text("Simulation")
         }
         Section {
-            LabeledContent("Parallel NumCalc instances") {
+            HelpRow("Parallel NumCalc instances", helpID: "numcalc.parallel_instances") {
                 NumberStepperField(title: "Parallel NumCalc instances", value: $maxInstances, range: SettingsCatalog.range("numcalc.parallel_instances"))
             }
-            LabeledContent("CPU load limit") {
+            HelpRow("CPU load limit", helpID: "numcalc.cpu_limit") {
                 NumberStepperField(title: "CPU load limit", value: $maxCPULoad, range: SettingsCatalog.range("numcalc.cpu_limit"), unit: "%")
             }
             AdaptiveFMMDefaultToggle()
@@ -139,6 +143,9 @@ struct SettingsPaneView: View {
             Text("Calculation")
         }
         ExportDefaultsSections()
+        Section {
+            ProjectDefaultsActions()
+        }
     }
 
     @ViewBuilder private var notifications: some View {
@@ -182,14 +189,14 @@ struct SettingsPaneView: View {
         }
     }
 
-    private func locationPicker(_ title: String, path: Binding<String>, defaultTitle: String, choose: @escaping () -> Void) -> some View {
+    private func locationPicker(_ title: String, helpID: String, path: Binding<String>, defaultTitle: String, choose: @escaping () -> Void) -> some View {
         let selection = Binding<String>(
             get: { path.wrappedValue.isEmpty ? "default" : "custom" },
             set: { choice in
                 if choice == "default" { path.wrappedValue = "" }
                 if choice == "other" { DispatchQueue.main.async(execute: choose) }
             })
-        return Picker(title, selection: selection) {
+        return HelpRow(title, helpID: helpID) { Picker(title, selection: selection) {
             Text(defaultTitle).tag("default")
             if !path.wrappedValue.isEmpty {
                 Label {
@@ -203,7 +210,9 @@ struct SettingsPaneView: View {
             Divider()
             Text("Other…").tag("other")
         }
-        .help(path.wrappedValue.isEmpty ? defaultTitle : path.wrappedValue)
+        .labelsHidden()
+        .fixedSize()
+        .help(path.wrappedValue.isEmpty ? defaultTitle : path.wrappedValue) }
     }
 
     private static func menuIcon(forPath path: String) -> NSImage {

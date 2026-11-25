@@ -424,6 +424,69 @@ def copy_input(source: Path, folder: Path) -> Path:
     return target
 
 
+DEFAULTS_FILE_FORMAT = "Pinna2HRTF.ProjectDefaults"
+DEFAULTS_FILE_VERSION = 2
+PROJECT_DEFAULT_KEYS = ("project_directory", "input_handling", "evaluation_grid", "minimum_frequency", "maximum_frequency",
+                        "frequency_steps", "max_instances", "max_cpu_load", "workflow")
+
+
+def snake_case(name: str) -> str:
+    import re
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
+def legacy_project_defaults(values: dict) -> dict:
+    converted = {snake_case(key): value for key, value in values.items()}
+    handling = converted.get("input_handling")
+    converted["input_handling"] = {0: "copy", 1: "reference", "Copy": "copy", "Reference": "reference"}.get(handling, handling)
+    if isinstance(converted.get("workflow"), dict):
+        converted["workflow"] = {snake_case(key): value for key, value in converted["workflow"].items()}
+    return converted
+
+
+def validated_project_defaults(values) -> dict:
+    if not isinstance(values, dict) or set(values) != set(PROJECT_DEFAULT_KEYS):
+        raise ValueError("Choose a supported Pinna2HRTF project defaults file.")
+    if values["input_handling"] not in ("copy", "reference"):
+        raise ValueError("Input handling must be copy or reference.")
+    directory, grid = values["project_directory"], values["evaluation_grid"]
+    if not isinstance(directory, str) or not isinstance(grid, str):
+        raise ValueError("The project location and evaluation grid must be text.")
+    if directory and not Path(directory).expanduser().is_absolute():
+        raise ValueError("The default project location must be an absolute folder.")
+    if any(type(values[key]) is not int for key in PROJECT_DEFAULT_KEYS[3:8]):
+        raise ValueError("Frequencies, steps, instances and CPU load must be whole numbers.")
+    if grid:
+        execute({"action": "validate-grid", "path": grid})
+    new_project_workflow(values)
+    return {key: values[key] for key in PROJECT_DEFAULT_KEYS}
+
+
+def save_project_defaults(command: dict) -> dict:
+    from .Outputs import replace_text
+    path = Path(command["path"]).expanduser()
+    document = {"format": DEFAULTS_FILE_FORMAT, "version": DEFAULTS_FILE_VERSION, "defaults": validated_project_defaults(command["defaults"])}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    replace_text(path, json.dumps(document, indent=2, allow_nan=False) + "\n")
+    return {"path": str(path)}
+
+
+def read_project_defaults(command: dict) -> dict:
+    path = Path(command["path"]).expanduser()
+    if path.stat().st_size > 1024 * 1024:
+        raise ValueError("This file is too large to be a project defaults file.")
+    try:
+        document = json.loads(path.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError as error:
+        raise ValueError("Choose a supported Pinna2HRTF project defaults file.") from error
+    if not isinstance(document, dict) or document.get("format") != DEFAULTS_FILE_FORMAT or document.get("version") not in (1, DEFAULTS_FILE_VERSION):
+        raise ValueError("Choose a supported Pinna2HRTF project defaults file.")
+    values = document.get("defaults")
+    if document["version"] == 1 and isinstance(values, dict):
+        values = legacy_project_defaults(values)
+    return {"defaults": validated_project_defaults(values)}
+
+
 def default_settings() -> dict:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
@@ -500,6 +563,10 @@ def execute(command: dict) -> dict:
                 "numcalc": {"max_instances": instances, "max_cpu_load": cpu}, "settings": settings}
     if action == "defaults":
         return {"config": default_settings()}
+    if action == "save-defaults":
+        return save_project_defaults(command)
+    if action == "read-defaults":
+        return read_project_defaults(command)
     if action == "head-preview":
         from .Geometry import head_preview
         return head_preview(command)

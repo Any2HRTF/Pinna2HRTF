@@ -69,17 +69,25 @@ struct ProjectDefaultsSections: View {
 
     var body: some View {
         Section {
-            Picker("Input", selection: inputSource) {
-                Text("Ear meshes").tag(false)
-                Text("Full-head scan").tag(true)
+            HelpRow("Input", helpID: "defaults.input_source") {
+                Picker("Input", selection: inputSource) {
+                    Text("Ear meshes").tag(false)
+                    Text("Full-head scan").tag(true)
+                }
+                .labelsHidden()
+                .fixedSize()
             }
-            Picker("Ears from scan", selection: scanEars) {
-                Text("Left and Right").tag("both")
-                Text("Left").tag("left")
-                Text("Right").tag("right")
+            HelpRow("Ears from scan", helpID: "defaults.prepared_ears") {
+                Picker("Ears from scan", selection: scanEars) {
+                    Text("Left and Right").tag("both")
+                    Text("Left").tag("left")
+                    Text("Right").tag("right")
+                }
+                .labelsHidden()
+                .fixedSize()
             }
-            Toggle("Review ears before continuing", isOn: flag("require_manual_review"))
-            DisclosureGroup("Scan Cropping", isExpanded: $scanExpanded) {
+            HelpToggle("Review ears before continuing", helpID: "defaults.require_review", isOn: flag("require_manual_review"))
+            DisclosureGroup("Ear Cropping & Remeshing", isExpanded: $scanExpanded) {
                 numberField("Target edge (mm)", key: "target_edge_mm")
                 numberField("Left margin (mm)", key: "left_margin_mm")
                 numberField("Right margin (mm)", key: "right_margin_mm")
@@ -90,10 +98,14 @@ struct ProjectDefaultsSections: View {
             Text("Ear Preparation")
         }
         Section {
-            Picker("Ear model", selection: earModel) {
-                ForEach(EarModelMethod.allCases) { method in
-                    Text(method.title).tag(method)
+            HelpRow("Ear model", helpID: "defaults.ear_model_method") {
+                Picker("Ear model", selection: earModel) {
+                    ForEach(EarModelMethod.allCases) { method in
+                        Text(method.title).tag(method)
+                    }
                 }
+                .labelsHidden()
+                .fixedSize()
             }
             ModelPicker(selection: inferenceModel, options: store.modelOptions, helpID: "inference.model")
                 .disabled(earModel.wrappedValue != .mesh2ppm)
@@ -139,7 +151,7 @@ struct SimulationDefaultsRows: View {
     }
 
     var body: some View {
-        LabeledContent("Microphone faces") {
+        HelpRow("Microphone faces", helpID: "mesh2hrtf.microphone_faces") {
             NumberStepperField(title: "Microphone faces", value: faces, range: SettingsCatalog.range("mesh2hrtf.microphone_faces"))
         }
         DisclosureGroup("Mesh Grading", isExpanded: $gradingExpanded) {
@@ -154,7 +166,7 @@ struct SimulationDefaultsRows: View {
             numberField("Front-to-back scale", key: "head_width_scale")
             numberField("Height scale", key: "head_height_scale")
             numberField("Width change with height (1/mm)", key: "head_y_deformation")
-            Toggle("Adapt shape to ears", isOn: adaptiveOvalness)
+            HelpToggle("Adapt shape to ears", helpID: "head.adaptive_ovalness", isOn: adaptiveOvalness)
             if adaptiveOvalness.wrappedValue {
                 numberField("Adaptation strength", key: "head_ovalness_strength")
                 numberField("Smallest front-to-back scale", key: "head_min_width_scale")
@@ -175,7 +187,7 @@ struct AdaptiveFMMDefaultToggle: View {
     var body: some View {
         let field = AppPreferences.workflowFields.first { $0.key == "adaptive_fmm_length" }!
         let stored = (try? JSONSerialization.jsonObject(with: Data(workflowJSON.utf8)) as? [String: Any]) ?? [:]
-        Toggle("Adaptive FMM expansion", isOn: Binding(
+        HelpToggle("Adaptive FMM expansion", helpID: "numcalc.adaptive_fmm", isOn: Binding(
             get: { AppPreferences.workflowFlag(field, in: stored) },
             set: { value in
                 var values = stored
@@ -217,19 +229,19 @@ struct ExportDefaultsSections: View {
 
     var body: some View {
         Section {
-            Toggle("Normalize", isOn: flag("normalize"))
+            HelpToggle("Normalize", helpID: "postprocessing.normalize", isOn: flag("normalize"))
             LabeledTextField("Level offset (dB)", helpID: "postprocessing.level_offset", text: text("level_offset_db"),
                              fieldEnabled: flag("normalize").wrappedValue)
-            Toggle("Resample HRIRs", isOn: flag("resample_hrirs"))
+            HelpToggle("Resample HRIRs", helpID: "postprocessing.resample_hrirs", isOn: flag("resample_hrirs"))
             LabeledTextField("Sampling rate (Hz)", helpID: "postprocessing.sampling_rate", text: text("sampling_rate"),
                              fieldEnabled: flag("resample_hrirs").wrappedValue)
-            Toggle("Spatial upsampling", isOn: flag("spatial_upsampling"))
-            LabeledContent("Subdivision level") {
+            HelpToggle("Spatial upsampling", helpID: "postprocessing.spatial_upsampling", isOn: flag("spatial_upsampling"))
+            HelpRow("Subdivision level", helpID: "postprocessing.spatial_subdivisions") {
                 NumberStepperField(title: "Subdivision level", value: subdivisions,
                                    range: SettingsCatalog.range("postprocessing.spatial_subdivisions"))
             }
             .disabled(!flag("spatial_upsampling").wrappedValue)
-            Toggle("Normalize spatial output", isOn: flag("spatial_normalize"))
+            HelpToggle("Normalize spatial output", helpID: "postprocessing.spatial_normalize", isOn: flag("spatial_normalize"))
                 .disabled(!flag("spatial_upsampling").wrappedValue)
         } header: {
             Text("SOFA Export")

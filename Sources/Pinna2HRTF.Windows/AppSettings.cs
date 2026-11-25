@@ -510,15 +510,27 @@ public partial class MainWindow
         SaveAppPreferences();
     }
 
-    static readonly string[] ProjectDefaultKeys = ["ProjectDirectory", "InputHandling", "EvaluationGrid", "MinimumFrequency", "MaximumFrequency", "FrequencySteps", "MaxInstances", "MaxCpuLoad", "Workflow"];
+    static readonly JsonSerializerOptions SnakeCase = new() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
 
-    JsonObject DefaultsFile()
+    static JsonObject DefaultsPayload(AppPreferences preferences) => new()
     {
-        var preferences = JsonSerializer.SerializeToNode(appPreferences)!.AsObject();
-        var values = new JsonObject();
-        foreach (var key in ProjectDefaultKeys) values[key] = preferences[key]!.DeepClone();
-        return new JsonObject { ["format"] = "Pinna2HRTF.ProjectDefaults", ["version"] = 1, ["defaults"] = values };
-    }
+        ["project_directory"] = preferences.ProjectDirectory,
+        ["input_handling"] = preferences.InputHandling == InputHandling.Reference ? "reference" : "copy",
+        ["evaluation_grid"] = preferences.EvaluationGrid,
+        ["minimum_frequency"] = preferences.MinimumFrequency, ["maximum_frequency"] = preferences.MaximumFrequency,
+        ["frequency_steps"] = preferences.FrequencySteps, ["max_instances"] = preferences.MaxInstances, ["max_cpu_load"] = preferences.MaxCpuLoad,
+        ["workflow"] = JsonSerializer.SerializeToNode(preferences.Workflow, SnakeCase)
+    };
+
+    static AppPreferences PreferencesFromDefaults(JsonObject values) => new()
+    {
+        ProjectDirectory = (string)values["project_directory"]!,
+        InputHandling = (string?)values["input_handling"] == "reference" ? InputHandling.Reference : InputHandling.Copy,
+        EvaluationGrid = (string)values["evaluation_grid"]!,
+        MinimumFrequency = (int)values["minimum_frequency"]!, MaximumFrequency = (int)values["maximum_frequency"]!,
+        FrequencySteps = (int)values["frequency_steps"]!, MaxInstances = (int)values["max_instances"]!, MaxCpuLoad = (int)values["max_cpu_load"]!,
+        Workflow = values["workflow"]!.Deserialize<WorkflowPreferences>(SnakeCase)!
+    };
 
     async Task SaveDefaultsFileAsync()
     {
@@ -529,7 +541,7 @@ public partial class MainWindow
             WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
             var file = await picker.PickSaveFileAsync();
             if (file == null || shutdownCleanupDone) return;
-            HeadGeometry.AtomicWrite(file.Path, DefaultsFile().ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            await RequestPythonAsync("project", new { action = "save-defaults", path = file.Path, defaults = DefaultsPayload(appPreferences) });
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
         {
@@ -546,22 +558,10 @@ public partial class MainWindow
             WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
             var file = await picker.PickSingleFileAsync();
             if (file == null || shutdownCleanupDone) return false;
-            var path = file.Path;
-            if (new FileInfo(path).Length > 1024 * 1024) throw new IOException("This file is too large to be a project defaults file.");
-            var document = JsonNode.Parse(await File.ReadAllTextAsync(path))?.AsObject() ?? throw new IOException("Empty defaults file.");
-            if ((string?)document["format"] != "Pinna2HRTF.ProjectDefaults" || (int?)document["version"] != 1 || document["defaults"] is not JsonObject values ||
-                ProjectDefaultKeys.Any(key => values[key] == null) || values.Any(pair => !ProjectDefaultKeys.Contains(pair.Key)))
-                throw new IOException("Choose a supported Pinna2HRTF project defaults file.");
-            var defaults = values.Deserialize<AppPreferences>()!;
-            if (!Enum.IsDefined(defaults.InputHandling) || defaults.ProjectDirectory == null || defaults.EvaluationGrid == null ||
-                defaults.Workflow == null || !defaults.Workflow.Valid() || defaults.ProjectDirectory.Length > 0 && !Path.IsPathFullyQualified(defaults.ProjectDirectory) ||
-                !File.Exists(Path.Combine(packageRoot, "HRTFCalculation", "Inference", "resources", defaults.Workflow.InferenceModel + ".yaml")))
-                throw new IOException("The file contains invalid project defaults or an unavailable model.");
-            var issues = SettingsCatalog.Issues(defaults.FormValues(), null);
-            if (issues.Count > 0) throw new IOException(issues[0].Message);
-            await RequestNewProjectDefaultsAsync(defaults, 1);
+            var reply = await RequestPythonAsync("project", new { action = "read-defaults", path = file.Path });
+            var defaults = PreferencesFromDefaults(JsonNode.Parse(reply.GetProperty("defaults").GetRawText())!.AsObject());
             var confirmation = new ContentDialog {
-                Title = "Load Project Defaults?", Content = "Replace Project Defaults with " + Path.GetFileName(path) + "? Existing projects, notifications and tool settings will stay unchanged.",
+                Title = "Load Project Defaults?", Content = "Replace Project Defaults with " + Path.GetFileName(file.Path) + "? Existing projects, notifications and tool settings will stay unchanged.",
                 PrimaryButtonText = "Load", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close, XamlRoot = Root.XamlRoot
             };
             if (await ShowDialogAsync(confirmation) != ContentDialogResult.Primary) return false;
