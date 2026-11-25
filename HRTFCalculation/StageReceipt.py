@@ -194,26 +194,9 @@ def preprocessing_status(config, app, record, command_config):
             validate_preprocessing_inputs(config, lambda _: None)
             return True
         return checked(shared_matches, False)
-    legacy = root / LEGACY_PREPROCESSING_RECEIPT
-    if app == "windows":
-        receipt = root / WINDOWS_PREPROCESSING_RECEIPT
-        if receipt.exists():
-            return checked(lambda: windows_preprocessing_receipt_matches(receipt, record, command_config) and preprocessing_outputs_match(config), True)
-        recorded = read_windows_text(legacy)
-        if recorded is None:
-            return verdict("missing-receipt")
-        return checked(lambda: recorded == windows_legacy_preprocessing_stamp(record, command_config) and preprocessing_outputs_match(config), True)
-    receipt = root / MAC_PREPROCESSING_RECEIPT
-    if not receipt.exists():
-        receipt = legacy
-    if not receipt.exists():
-        return verdict("missing-receipt")
-    if app != "mac":
-        return verdict("legacy-unsupported", True)
-    saved = read_text(receipt)
-    if not saved:
-        return verdict("receipt-unreadable", True)
-    return checked(lambda: mac_preprocessing_matches(saved, record, config) and preprocessing_outputs_match(config), True)
+    if any((root / name).exists() for name in (LEGACY_PREPROCESSING_RECEIPT, MAC_PREPROCESSING_RECEIPT, WINDOWS_PREPROCESSING_RECEIPT)):
+        return verdict("inputs-changed", True)
+    return verdict("missing-receipt")
 
 
 def spatial_upsampling_current(config):
@@ -627,12 +610,8 @@ MAC_OWNED_PREPROCESSING_KEYS = (
     "source_assignment_face_count", "source_position_input_left", "source_position_input_right")
 
 
-MAC_HEAD_SHAPE_KEYS = ("headRadiusScale", "headWidthScale", "headHeightScale", "headYDeformation", "headAdaptiveOvalness",
-                       "headOvalnessStrength", "headMinWidthScale", "headMaxHeightScale")
-
-
 def mac_configuration(preprocessing, manual, predictions, preserved, scan):
-    settings = {key: value for key, value in preprocessing.items() if key != "evaluationGrid" and key not in MAC_HEAD_SHAPE_KEYS}
+    settings = {key: value for key, value in preprocessing.items() if key != "evaluationGrid"}
     settings["skipMeshGrading"] = preprocessing.get("skipMeshGrading", False)
     settings["sourceAssignmentFaceCount"] = preprocessing.get("sourceAssignmentFaceCount", "6")
     for name in ("sourcePositionInputLeft", "sourcePositionInputRight"):

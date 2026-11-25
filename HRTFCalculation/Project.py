@@ -19,7 +19,7 @@ import uuid
 import yaml
 
 from .Config import DEFAULT_EVALUATION_GRID, PipelineConfig, config_from_text, default_resource, load_config
-from .Compatibility import decode_settings, read_settings
+from .Compatibility import decode_settings, read_settings, import_legacy_head_settings, migrate_head_settings
 from .MicrophonePlacement import ignore_stale_placements, placements_path, read_placements, statuses, updated_placements
 
 
@@ -232,8 +232,7 @@ EDITABLE_SETTINGS = {
         "frequency_step_count", "source_assignment_face_count", "source_position_input_left",
         "source_position_input_right", "mesh_min_edge_length", "mesh_max_edge_length",
         "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite", "skip_mesh_grading", "head_radius_scale",
-        "head_width_scale", "head_height_scale", "head_y_deformation", "head_adaptive_ovalness",
-        "head_ovalness_strength", "head_min_width_scale", "head_max_height_scale",
+        "head_width_scale", "head_height_scale", "head_taper_percent",
     ),
     "numcalc": (
         "max_instances", "max_cpu_load", "adaptive_fmm_length",
@@ -315,6 +314,7 @@ def settings_document(command: dict, saved: dict | None) -> tuple[PipelineConfig
     edited = command["config"]
     merging = "preserved" in command or "revision" in command or command.get("merge") is True
     current = merge_settings(edited, command.get("preserved"), saved) if merging else edited
+    current = import_legacy_head_settings(current)
     config = PipelineConfig.model_validate(current)
     mapping = config.model_dump(mode="json")
     serialized = yaml.safe_dump(current if command.get("preserve_fields") else mapping, sort_keys=False)
@@ -324,7 +324,7 @@ def settings_document(command: dict, saved: dict | None) -> tuple[PipelineConfig
 def save_settings(command: dict, path: Path) -> dict:
     if command.get("stage"):
         from .SettingsRules import check
-        found = check(command["config"], command["stage"])
+        found = check(import_legacy_head_settings(command["config"]), command["stage"])
         if found:
             raise ValueError(found[0]["message"])
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -458,6 +458,7 @@ def validated_project_defaults(values) -> dict:
         raise ValueError("Frequencies, steps, instances and CPU load must be whole numbers.")
     if grid:
         execute({"action": "validate-grid", "path": grid})
+    values = import_legacy_head_settings(values)
     new_project_workflow(values)
     return {key: values[key] for key in PROJECT_DEFAULT_KEYS}
 
@@ -487,6 +488,28 @@ def read_project_defaults(command: dict) -> dict:
     return {"defaults": validated_project_defaults(values)}
 
 
+
+def migrate_head_settings_command(command):
+    from .Outputs import replace_text
+    if "path" not in command:
+        value, notices = migrate_head_settings(command["value"])
+        return {"value": value, "changed": bool(notices), "notices": notices}
+    path = Path(command["path"]).expanduser()
+    with settings_lock(path, create=False):
+        raw = path.read_bytes()
+        value, notices = migrate_head_settings(json.loads(raw.decode("utf-8-sig")))
+        backup = None
+        if notices:
+            if path.read_bytes() != raw:
+                raise ValueError("Settings changed during head-shape migration.")
+            backup = path.with_name(path.name + ".head-shape-compat-" + uuid.uuid4().hex + ".bak")
+            with backup.open("xb") as stream:
+                stream.write(raw)
+            if path.read_bytes() != raw:
+                raise ValueError("Settings changed during head-shape migration; the original backup was preserved.")
+            replace_text(path, json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
+    return {"path": str(path), "backup": str(backup) if backup else None, "changed": bool(notices), "notices": notices}
+
 def default_settings() -> dict:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
@@ -499,12 +522,11 @@ def new_project_workflow(values: dict) -> dict:
     groups = {
         "scan_preparation": ("prepare_left", "prepare_right", "target_edge_mm", "left_margin_mm", "right_margin_mm", "side_min_mm", "side_max_mm", "require_manual_review"),
         "preprocessing": ("source_assignment_face_count", "mesh_min_edge_length", "mesh_max_edge_length", "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite",
-                          "head_radius_scale", "head_width_scale", "head_height_scale", "head_y_deformation", "head_adaptive_ovalness",
-                          "head_ovalness_strength", "head_min_width_scale", "head_max_height_scale"),
+                          "head_radius_scale", "head_width_scale", "head_height_scale", "head_taper_percent"),
         "numcalc": ("adaptive_fmm_length",),
         "postprocessing": ("normalize", "level_offset_db", "resample_hrirs", "sampling_rate", "spatial_upsampling", "spatial_subdivisions", "spatial_normalize"),
     }
-    workflow = values.get("workflow", {})
+    workflow = import_legacy_head_settings(values.get("workflow", {}))
     allowed = {key for keys in groups.values() for key in keys} | {"full_head_scan", "ear_model_method", "inference_model"}
     if not isinstance(workflow, dict) or workflow.keys() - allowed:
         raise ValueError("Unsupported new-project workflow defaults.")
@@ -541,6 +563,8 @@ def execute(command: dict) -> dict:
         if not all((grid / name).is_file() for name in ("Nodes.txt", "Elements.txt")):
             raise ValueError("Choose a folder with Nodes.txt and Elements.txt.")
         return {"path": str(grid)}
+    if action == "migrate-head-settings":
+        return migrate_head_settings_command(command)
     if action == "new-defaults":
         values = command["defaults"]
         fields = ("minimum_frequency", "maximum_frequency", "frequency_steps", "max_instances", "max_cpu_load")
@@ -575,7 +599,7 @@ def execute(command: dict) -> dict:
         return rules()
     if action == "check":
         from .SettingsRules import check
-        return {"issues": check(command["config"], command.get("stage"))}
+        return {"issues": check(import_legacy_head_settings(command["config"]), command.get("stage"))}
     if action in {"recycle-plan", "recycle"}:
         from .ProjectTrash import execute as trash
         return trash(command)

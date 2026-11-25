@@ -48,11 +48,7 @@ enum AppPreferences {
         .init(key: "head_radius_scale", config: "preprocessing.head_radius_scale", rule: "head.radius_scale"),
         .init(key: "head_width_scale", config: "preprocessing.head_width_scale", rule: "head.width_scale"),
         .init(key: "head_height_scale", config: "preprocessing.head_height_scale", rule: "head.height_scale"),
-        .init(key: "head_y_deformation", config: "preprocessing.head_y_deformation", rule: "head.y_deformation"),
-        .init(key: "head_adaptive_ovalness", config: "preprocessing.head_adaptive_ovalness", rule: "head.adaptive_ovalness"),
-        .init(key: "head_ovalness_strength", config: "preprocessing.head_ovalness_strength", rule: "head.ovalness_strength"),
-        .init(key: "head_min_width_scale", config: "preprocessing.head_min_width_scale", rule: "head.min_width_scale"),
-        .init(key: "head_max_height_scale", config: "preprocessing.head_max_height_scale", rule: "head.max_height_scale"),
+        .init(key: "head_taper_percent", config: "preprocessing.head_taper_percent", rule: "head.taper_percent"),
         .init(key: "adaptive_fmm_length", config: "numcalc.adaptive_fmm_length", rule: nil),
         .init(key: "normalize", config: "postprocessing.normalize", rule: nil),
         .init(key: "level_offset_db", config: "postprocessing.level_offset_db", rule: "postprocessing.level_offset"),
@@ -63,7 +59,18 @@ enum AppPreferences {
         .init(key: "spatial_normalize", config: "postprocessing.spatial_normalize", rule: nil)
     ]
 
-    static let workflowFlagRules: Set<String> = ["scan.prepare_left", "scan.prepare_right", "head.adaptive_ovalness"]
+
+    static let workflowFlagRules: Set<String> = ["scan.prepare_left", "scan.prepare_right"]
+
+    static func migrateHeadSettings() throws {
+        guard let text = UserDefaults.standard.string(forKey: workflow), HeadGeometrySettings.needsHeadSettingsMigration(text) else { return }
+        let object = try JSONSerialization.jsonObject(with: Data(text.utf8))
+        let migrated = try HeadGeometrySettings.migrateHeadState(object)
+        let data = try JSONSerialization.data(withJSONObject: migrated, options: .sortedKeys)
+        let backup = workflow + ".head-shape-compat-backup"
+        if UserDefaults.standard.string(forKey: backup) == nil { UserDefaults.standard.set(text, forKey: backup) }
+        UserDefaults.standard.set(String(decoding: data, as: UTF8.self), forKey: workflow)
+    }
 
     static var storedWorkflow: [String: Any] {
         guard let text = UserDefaults.standard.string(forKey: workflow),
@@ -90,6 +97,11 @@ enum AppPreferences {
 
     static func workflowFormValues(_ stored: [String: Any] = storedWorkflow) -> [String: String] {
         var values = ["scan.enabled": "true"]
+        for key in ["normalize", "resample_hrirs", "spatial_upsampling"] {
+            if let field = workflowFields.first(where: { $0.key == key }) {
+                values["postprocessing." + key] = String(workflowFlag(field, in: stored))
+            }
+        }
         for field in workflowFields {
             guard let rule = field.rule else { continue }
             values[rule] = workflowFlagRules.contains(rule) ? String(workflowFlag(field, in: stored)) : workflowText(field, in: stored)

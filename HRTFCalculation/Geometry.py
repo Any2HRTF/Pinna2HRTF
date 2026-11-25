@@ -91,9 +91,8 @@ def head_preview(command):
         ear.export(folder / f"{side}.stl")
         result[side] = str(folder / f"{side}.stl")
     head(ears["left"], ears["right"], folder / "head.stl", radius_scale=settings.head_radius_scale, width_scale=settings.head_width_scale,
-         height_scale=settings.head_height_scale, y_deformation=settings.head_y_deformation, adaptive_ovalness=settings.head_adaptive_ovalness,
-         ovalness_strength=settings.head_ovalness_strength, min_width_scale=settings.head_min_width_scale,
-         max_height_scale=settings.head_max_height_scale, subdivisions=4)
+         height_scale=settings.head_height_scale, taper_percent=settings.head_taper_percent,
+         subdivisions=4)
     result["head"] = str(folder / "head.stl")
     return result
 

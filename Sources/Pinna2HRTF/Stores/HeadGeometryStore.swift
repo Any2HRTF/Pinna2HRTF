@@ -80,6 +80,7 @@ extension AppStore {
                 self.updateSelectedProject { p in
                     p.settings.preprocessing.earDistance = desired.map { String($0.distance) }
                 }
+                self.viewer.requestHeadPreview()
             }
             let output = URL(fileURLWithPath: project.saveLocation)
             let hasOutputs = ["Intermediates/dummy_head.stl", "Intermediates/Left/graded_head.ply", "Intermediates/Right/graded_head.ply", "Projects/Left", "Projects/Right"].contains { FileManager.default.fileExists(atPath: output.appendingPathComponent($0).path) }

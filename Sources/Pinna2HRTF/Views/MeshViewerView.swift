@@ -72,6 +72,16 @@ struct MeshViewerView: View {
                     store.updateCameraPosition(position, target: target, orientation: orientation)
                 }, surfaceSelected: store.previewMicrophonePosition)
                     .id(ObjectIdentifier(store.selectedScene))
+                    .opacity(store.viewer.headPreviewMessage == "Updating head preview…" ? 0.3 : 1)
+            }
+        }
+        .overlay {
+            if let message = store.viewer.headPreviewMessage {
+                Group {
+                    if message == "Updating head preview…" { ProgressView(message).controlSize(.small) }
+                    else { Text(message).textSelection(.enabled) }
+                }
+                .padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
             }
         }
         .frame(maxHeight: .infinity)

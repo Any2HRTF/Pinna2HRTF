@@ -26,6 +26,9 @@ internal sealed record GeometryValues(
 
 internal static class HeadGeometry
 {
+    public static bool NeedsHeadSettingsMigration(string text) => new[] {
+        "head_y_deformation", "headydeformation", "ovalness", "head_min_width_scale", "headminwidthscale", "head_max_height_scale", "headmaxheightscale"
+    }.Any(key => text.Contains(key, StringComparison.OrdinalIgnoreCase));
     public static bool NeedsWarning(double distance) => distance <= 50;
     public static string Number(double value) => value.ToString("G17", CultureInfo.InvariantCulture);
     public static double Parse(string value)

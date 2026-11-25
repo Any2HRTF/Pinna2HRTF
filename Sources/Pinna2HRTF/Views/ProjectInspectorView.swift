@@ -3,6 +3,8 @@ import AppKit
 
 struct ProjectInspectorView: View {
     @ObservedObject var store: AppStore
+    @State private var headExpanded = false
+    @State private var headPreviewProjectID: UUID?
 
     var body: some View {
         Group {
@@ -20,6 +22,8 @@ struct ProjectInspectorView: View {
                 }
             }
         }
+        .onChange(of: headPreviewSettings) { _ in if headExpanded && headPreviewProjectID == store.selectedProjectID { store.viewer.requestHeadPreview() } }
+        .onChange(of: store.selectedProjectID) { _ in headExpanded = false }
         .onChange(of: store.earDistanceFocusRequest) { _ in store.workflowStep = .simulation }
     }
 
@@ -104,7 +108,7 @@ struct ProjectInspectorView: View {
                     }
                     .toggleStyle(.checkbox)
                 }
-                DisclosureGroup("Advanced") {
+                DisclosureGroup("Ear Cropping & Remeshing") {
                     Toggle("Review ears before continuing", isOn: Binding(
                         get: { store.selectedProject?.scanPreparation.requireManualReview ?? false },
                         set: { value in store.updateSelectedProject { project in
@@ -204,20 +208,12 @@ struct ProjectInspectorView: View {
     @ViewBuilder var simulationSections: some View {
         Section("Head") {
             HeadGeometryControls(store: store)
-            DisclosureGroup("Head Shape") {
+            DisclosureGroup("Head Shape", isExpanded: $headExpanded) {
                 headShapeField("Ear-to-ear radius scale", id: "head.radius_scale")
                 headShapeField("Front-to-back scale", id: "head.width_scale")
                 headShapeField("Height scale", id: "head.height_scale")
-                headShapeField("Width change with height (1/mm)", id: "head.y_deformation")
-                SettingToggle(title: "Adapt shape to ears", helpID: "head.adaptive_ovalness", isOn: headAdaptiveOvalnessBinding)
-                if headAdaptiveOvalnessBinding.wrappedValue {
-                    headShapeField("Adaptation strength", id: "head.ovalness_strength")
-                    headShapeField("Smallest front-to-back scale", id: "head.min_width_scale")
-                    headShapeField("Largest height scale", id: "head.max_height_scale")
-                }
-                HeadShapePreview(store: store)
-                    .padding(.top, 4)
-            }
+                headShapeField("Head taper (%)", id: "head.taper_percent")
+            }.onChange(of: headExpanded) { expanded in if expanded { headPreviewProjectID = store.selectedProjectID; store.viewer.requestHeadPreview() } }
         }
         Section("Microphones") {
             LabeledContent("Position") {
@@ -365,6 +361,13 @@ struct ProjectInspectorView: View {
         )
     }
 
+    private var headPreviewSettings: [String: String] {
+        guard let settings = store.selectedProject?.settings.preprocessing else { return [:] }
+        var values = Dictionary(uniqueKeysWithValues: PreprocessingSettings.headShapeFields.map { ($0.id, settings[keyPath: $0.keyPath] ?? "") })
+        values["distance"] = settings.earDistance ?? ""
+        return values
+    }
+
     func headShapeField(_ title: String, id: String) -> some View {
         let field = PreprocessingSettings.headShapeFields.first { $0.id == id }!
         let binding = Binding<String>(
@@ -374,12 +377,6 @@ struct ProjectInspectorView: View {
         return LabeledTextField(title, helpID: id, text: binding)
     }
 
-    var headAdaptiveOvalnessBinding: Binding<Bool> {
-        Binding(
-            get: { store.selectedProject?.settings.preprocessing.headAdaptiveOvalness ?? SettingsCatalog.flag("preprocessing.head_adaptive_ovalness") },
-            set: { value in store.updateSelectedProject { $0.settings.preprocessing.headAdaptiveOvalness = value } }
-        )
-    }
 
     func optionalPreprocessingBinding(_ keyPath: WritableKeyPath<PreprocessingSettings, String?>) -> Binding<String> {
         Binding(

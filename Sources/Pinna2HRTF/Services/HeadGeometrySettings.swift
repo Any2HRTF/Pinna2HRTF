@@ -26,6 +26,25 @@ struct GeometryValues: Codable, Equatable {
 }
 
 enum HeadGeometrySettings {
+    static func needsHeadSettingsMigration(_ text: String) -> Bool {
+        let text = text.lowercased()
+        return ["head_y_deformation", "headydeformation", "ovalness", "head_min_width_scale", "headminwidthscale", "head_max_height_scale", "headmaxheightscale"].contains { text.contains($0) }
+    }
+    static func migrateHeadState(_ object: Any) throws -> Any {
+        let data = try JSONSerialization.data(withJSONObject: object)
+        guard needsHeadSettingsMigration(String(decoding: data, as: UTF8.self)) else { return object }
+        let response = try ProjectConfigDocument.request("migrate-head-settings", ["value": object])
+        guard let result = try JSONSerialization.jsonObject(with: response) as? [String: Any], let value = result["value"] else {
+            throw error("Could not migrate head-shape settings.")
+        }
+        return value
+    }
+    static func migrateHeadStateFile(_ url: URL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let data = try Data(contentsOf: url)
+        guard needsHeadSettingsMigration(String(decoding: data, as: UTF8.self)) else { return }
+        _ = try ProjectConfigDocument.request("migrate-head-settings", ["path": url.path])
+    }
     static func needsWarning(_ distance: Double) -> Bool { distance <= 50 }
     static func error(_ message: String) -> NSError { NSError(domain: "EarDistance", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
     static func number(_ text: String) throws -> Double {

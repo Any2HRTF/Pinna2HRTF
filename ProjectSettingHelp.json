@@ -80,7 +80,7 @@
   {
     "id": "head.width_scale",
     "title": "Front-to-back scale",
-    "description": "Front-to-back head size relative to the ear-to-ear radius. Default: 1.5.",
+    "description": "Front-to-back head size relative to the ear-to-ear radius. Default: 1.39.",
     "publications": []
   },
   {
@@ -90,33 +90,9 @@
     "publications": []
   },
   {
-    "id": "head.y_deformation",
-    "title": "Width change with height",
-    "description": "Widens the head above the ear axis and narrows it below for positive values, per millimetre of height. Default: 0.",
-    "publications": []
-  },
-  {
-    "id": "head.adaptive_ovalness",
-    "title": "Adapt shape to ears",
-    "description": "Adjusts the front-to-back and height scales from how far the ears flare out. Default: on.",
-    "publications": []
-  },
-  {
-    "id": "head.ovalness_strength",
-    "title": "Adaptation strength",
-    "description": "Largest change that ear flare can make to the front-to-back and height scales. Default: 0.08.",
-    "publications": []
-  },
-  {
-    "id": "head.min_width_scale",
-    "title": "Smallest front-to-back scale",
-    "description": "Lower limit for the adapted front-to-back scale. Default: 1.48.",
-    "publications": []
-  },
-  {
-    "id": "head.max_height_scale",
-    "title": "Largest height scale",
-    "description": "Upper limit for the adapted height scale. Default: 1.53.",
+    "id": "head.taper_percent",
+    "title": "Head taper (%)",
+    "description": "Positive values widen the head above the ear axis and narrow it below; negative values reverse this. Zero leaves the width unchanged. The normalized strength of +100% equals the former +0.01 per millimetre, applied before height scaling; it is not a 100% increase in overall head width.",
     "publications": []
   },
   {

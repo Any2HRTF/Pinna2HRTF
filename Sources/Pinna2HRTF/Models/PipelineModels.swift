@@ -220,20 +220,13 @@ struct PreprocessingSettings: Codable, Equatable {
     var headRadiusScale: String?
     var headWidthScale: String?
     var headHeightScale: String?
-    var headYDeformation: String?
-    var headOvalnessStrength: String?
-    var headMinWidthScale: String?
-    var headMaxHeightScale: String?
-    var headAdaptiveOvalness: Bool?
+    var headTaperPercent: String?
 
     static let headShapeFields: [(keyPath: WritableKeyPath<PreprocessingSettings, String?>, config: String, id: String)] = [
         (\.headRadiusScale, "head_radius_scale", "head.radius_scale"),
         (\.headWidthScale, "head_width_scale", "head.width_scale"),
         (\.headHeightScale, "head_height_scale", "head.height_scale"),
-        (\.headYDeformation, "head_y_deformation", "head.y_deformation"),
-        (\.headOvalnessStrength, "head_ovalness_strength", "head.ovalness_strength"),
-        (\.headMinWidthScale, "head_min_width_scale", "head.min_width_scale"),
-        (\.headMaxHeightScale, "head_max_height_scale", "head.max_height_scale")
+        (\.headTaperPercent, "head_taper_percent", "head.taper_percent"),
     ]
 }
 

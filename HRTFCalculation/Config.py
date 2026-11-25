@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 import yaml
 import warnings
-from .Compatibility import LEGACY_DISTANCE_IMPORTED, import_legacy_distance, read_settings
+from .Compatibility import LEGACY_DISTANCE_IMPORTED, import_legacy_distance, import_legacy_head_settings, read_settings
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -143,13 +143,9 @@ class PreprocessingConfig(BaseModel):
     enabled: bool = True
     write_intermediates: bool = True
     head_radius_scale: float = 1.01
-    head_width_scale: float = 1.5
+    head_width_scale: float = 1.39
     head_height_scale: float = 1.5
-    head_adaptive_ovalness: bool = True
-    head_ovalness_strength: float = 0.08
-    head_min_width_scale: float = 1.48
-    head_max_height_scale: float = 1.53
-    head_y_deformation: float = 0.0
+    head_taper_percent: float = Field(default=0.0, allow_inf_nan=False)
     ear_cut_clearance_scale: float = 1.3
     ear_cut_mode: Literal["ellipse", "projected_footprint", "exact"] = "ellipse"
     ear_canal_closer_mode: Literal["legacy", "interpolated"] = "legacy"
@@ -159,7 +155,7 @@ class PreprocessingConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def legacy_distance(cls, data):
-        return import_legacy_distance({"preprocessing": data})["preprocessing"] if isinstance(data, dict) else data
+        return import_legacy_head_settings(import_legacy_distance({"preprocessing": data}))["preprocessing"] if isinstance(data, dict) else data
 
     @field_validator("ear_distance")
     @classmethod

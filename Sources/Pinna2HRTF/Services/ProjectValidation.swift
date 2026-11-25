@@ -28,7 +28,6 @@ enum ProjectValidation {
         for field in PreprocessingSettings.headShapeFields {
             values[field.id] = pre[keyPath: field.keyPath] ?? SettingsCatalog.text("preprocessing." + field.config)
         }
-        values["head.adaptive_ovalness"] = String(pre.headAdaptiveOvalness ?? SettingsCatalog.flag("preprocessing.head_adaptive_ovalness"))
         return values
     }
 

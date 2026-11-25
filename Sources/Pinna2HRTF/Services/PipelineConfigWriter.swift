@@ -79,7 +79,6 @@ enum PipelineConfigWriter {
         for field in PreprocessingSettings.headShapeFields {
             if let value = pre[keyPath: field.keyPath] { preprocessing[field.config] = number(value) }
         }
-        if let adaptive = pre.headAdaptiveOvalness { preprocessing["head_adaptive_ovalness"] = adaptive }
         for side in EarSide.allCases {
             if let position = positions[side] {
                 preprocessing["source_position_input_\(side.rawValue)"] = [position.x, position.y, position.z]

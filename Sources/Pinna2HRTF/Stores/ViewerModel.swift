@@ -16,7 +16,16 @@ final class ViewerModel: ObservableObject {
     @Published var microphonePlacementError: String?
     @Published private var automaticMicrophoneProcesses: [String: Process] = [:]
 
-    private(set) var meshLoadID = UUID()
+    @Published var headPreviewMessage: String?
+    var headPreviewTask: Task<Void, Never>?
+    var headPreviewPendingKey: String?
+    struct CachedHeadPreview {
+        let key: String
+        var loaded: LoadedScene
+        var camera: ViewerCameraState?
+    }
+    var headPreviewCache: [UUID: CachedHeadPreview] = [:]
+    var meshLoadID = UUID()
     private var selectedCameraCenter = SCNVector3Zero
     private var selectedCameraScale: Double = 1
     private var viewerStateByProject: [UUID: ProjectViewerState]
@@ -47,15 +56,19 @@ final class ViewerModel: ObservableObject {
 
     func restoreViewer(artifacts: [Artifact]) {
         clearMicrophonePlacementSession()
-        guard let project = selectedProject, let path = viewerStateByProject[project.id]?.selectedArtifactPath,
-              let artifact = artifacts.first(where: { $0.url.path == path && $0.exists }) else {
+        guard let project = selectedProject, let path = viewerStateByProject[project.id]?.selectedArtifactPath else {
             resetViewer()
             return
         }
+        if path == headPreviewURL?.path { requestHeadPreview(); return }
+        guard let artifact = artifacts.first(where: { $0.url.path == path && $0.exists }) else { resetViewer(); return }
         openArtifact(artifact)
     }
 
     func resetViewer() {
+        headPreviewTask?.cancel()
+        headPreviewPendingKey = nil
+        headPreviewMessage = nil
         meshLoadID = UUID()
         selectedPressure = nil
         selectedMesh = nil
@@ -67,6 +80,10 @@ final class ViewerModel: ObservableObject {
     }
 
     func openArtifact(_ artifact: Artifact) {
+        if artifact.url == headPreviewURL { requestHeadPreview(); return }
+        headPreviewTask?.cancel()
+        headPreviewPendingKey = nil
+        headPreviewMessage = nil
         if artifact.isPressure {
             clearMicrophonePlacementSession()
             resetViewer()
@@ -90,6 +107,10 @@ final class ViewerModel: ObservableObject {
     }
 
     func openMesh(_ url: URL, resetCamera: Bool = false) {
+        if url == headPreviewURL { requestHeadPreview(resetCamera: resetCamera); return }
+        headPreviewTask?.cancel()
+        headPreviewPendingKey = nil
+        headPreviewMessage = nil
         selectedPressure = nil
         guard FileManager.default.fileExists(atPath: url.path), ["stl", "ply"].contains(url.pathExtension.lowercased()) else {
             log("Could not open \(url.lastPathComponent).")
@@ -107,14 +128,14 @@ final class ViewerModel: ObservableObject {
         }
     }
 
-    private struct LoadedScene: @unchecked Sendable {
+    struct LoadedScene: @unchecked Sendable {
         let scene: SCNScene
         let center: SCNVector3
         let maximumDimension: CGFloat
         let cameraPosition: SCNVector3
     }
 
-    private func finishLoadingMesh(_ loaded: LoadedScene?, url: URL, loadID: UUID, projectID: UUID?,
+    func finishLoadingMesh(_ loaded: LoadedScene?, url: URL, loadID: UUID, projectID: UUID?,
                                    savedCamera: ViewerCameraState?, resetCamera: Bool) {
         guard let loaded else {
             log("Could not load \(url.lastPathComponent): no mesh objects found.")
@@ -136,8 +157,8 @@ final class ViewerModel: ObservableObject {
         rememberSelectedArtifact(url)
     }
 
-    private nonisolated static func loadScene(url: URL, darkMode: Bool, savedCamera: ViewerCameraState?,
-                                              microphonePreview: MicrophonePreview?) -> LoadedScene? {
+    nonisolated static func loadScene(url: URL, darkMode: Bool, savedCamera: ViewerCameraState?,
+                                              microphonePreview: MicrophonePreview?, ears: [URL] = []) -> LoadedScene? {
         let microphone = microphonePreview?.microphonePosition(for: url)
         let asset = MDLAsset(url: url)
         guard asset.count > 0 else { return nil }
@@ -149,6 +170,16 @@ final class ViewerModel: ObservableObject {
             node.geometry?.firstMaterial?.diffuse.contents = meshColor(darkMode: darkMode)
             node.geometry?.firstMaterial?.roughness.contents = 0.72
             scene.rootNode.addChildNode(node)
+        }
+        for ear in ears {
+            let earAsset = MDLAsset(url: ear)
+            for index in 0..<earAsset.count {
+                let node = SCNNode(mdlObject: earAsset.object(at: index))
+                node.categoryBitMask = 2
+                node.geometry?.firstMaterial?.diffuse.contents = NSColor.systemOrange
+                node.geometry?.firstMaterial?.roughness.contents = 0.72
+                scene.rootNode.addChildNode(node)
+            }
         }
         let bounds = scene.rootNode.boundingBox
         let center = SCNVector3((bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2, (bounds.min.z + bounds.max.z) / 2)
@@ -170,7 +201,7 @@ final class ViewerModel: ObservableObject {
         let cameraNode = SCNNode()
         cameraNode.camera = camera
         let frontDirection: CGFloat = url.path.lowercased().contains("left") ? 1 : -1
-        let defaultPosition = SCNVector3(center.x, center.y + frontDirection * distance, center.z + maximumDimension * 0.12)
+        let defaultPosition = ears.isEmpty ? SCNVector3(center.x, center.y + frontDirection * distance, center.z + maximumDimension * 0.12) : SCNVector3(center.x + distance, center.y - maximumDimension * 0.25, center.z + maximumDimension * 0.2)
         let cameraPosition: SCNVector3
         if let savedCamera {
             let scale = Double(maximumDimension)
@@ -193,6 +224,9 @@ final class ViewerModel: ObservableObject {
     }
 
     func openImage(_ url: URL) {
+        headPreviewTask?.cancel()
+        headPreviewPendingKey = nil
+        headPreviewMessage = nil
         meshLoadID = UUID()
         selectedPressure = nil
         guard FileManager.default.fileExists(atPath: url.path), let image = NSImage(contentsOf: url) else {
@@ -212,6 +246,7 @@ final class ViewerModel: ObservableObject {
         guard state != selectedCameraState else { return }
         selectedCameraState = state
         viewerStateByProject[projectID, default: ProjectViewerState(selectedArtifactPath: selectedMesh.path)].cameraByArtifact[selectedMesh.path] = state
+        if selectedMesh == headPreviewURL { headPreviewCache[projectID]?.camera = state }
         saveViewerStates()
     }
 

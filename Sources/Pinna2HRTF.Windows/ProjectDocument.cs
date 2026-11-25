@@ -36,11 +36,7 @@ internal static class ProjectDocument
             ["head.radius_scale"] = pre.HeadRadiusScale,
             ["head.width_scale"] = pre.HeadWidthScale,
             ["head.height_scale"] = pre.HeadHeightScale,
-            ["head.y_deformation"] = pre.HeadYDeformation,
-            ["head.ovalness_strength"] = pre.HeadOvalnessStrength,
-            ["head.min_width_scale"] = pre.HeadMinWidthScale,
-            ["head.max_height_scale"] = pre.HeadMaxHeightScale,
-            ["head.adaptive_ovalness"] = Flag(pre.HeadAdaptiveOvalness),
+            ["head.taper_percent"] = pre.HeadTaperPercent,
             ["mesh_grading.min_edge_length"] = pre.MeshMinEdgeLength, ["mesh_grading.max_edge_length"] = pre.MeshMaxEdgeLength,
             ["mesh_grading.max_error"] = pre.MeshMaxError, ["mesh_grading.gamma"] = pre.MeshGamma, ["mesh_grading.gamma_opposite"] = pre.MeshGammaOpposite,
             ["numcalc.parallel_instances"] = p.Settings.NumCalc.MaxInstances, ["numcalc.cpu_limit"] = p.Settings.NumCalc.MaxCpuLoad,
@@ -142,9 +138,8 @@ internal static class ProjectDocument
             ("mesh_min_edge_length", "mesh_grading.min_edge_length", pre.MeshMinEdgeLength), ("mesh_max_edge_length", "mesh_grading.max_edge_length", pre.MeshMaxEdgeLength),
             ("mesh_max_error", "mesh_grading.max_error", pre.MeshMaxError), ("mesh_gamma", "mesh_grading.gamma", pre.MeshGamma), ("mesh_gamma_opposite", "mesh_grading.gamma_opposite", pre.MeshGammaOpposite) })
             Set("preprocessing", key, Numeric(id, text, "preprocessing." + key));
-        foreach (var (key, id, text) in new[] { ("head_radius_scale", "head.radius_scale", pre.HeadRadiusScale), ("head_width_scale", "head.width_scale", pre.HeadWidthScale), ("head_height_scale", "head.height_scale", pre.HeadHeightScale), ("head_y_deformation", "head.y_deformation", pre.HeadYDeformation), ("head_ovalness_strength", "head.ovalness_strength", pre.HeadOvalnessStrength), ("head_min_width_scale", "head.min_width_scale", pre.HeadMinWidthScale), ("head_max_height_scale", "head.max_height_scale", pre.HeadMaxHeightScale) })
+        foreach (var (key, id, text) in new[] { ("head_radius_scale", "head.radius_scale", pre.HeadRadiusScale), ("head_width_scale", "head.width_scale", pre.HeadWidthScale), ("head_height_scale", "head.height_scale", pre.HeadHeightScale), ("head_taper_percent", "head.taper_percent", pre.HeadTaperPercent) })
             Set("preprocessing", key, Numeric(id, text, "preprocessing." + key));
-        Set("preprocessing", "head_adaptive_ovalness", pre.HeadAdaptiveOvalness);
         Set("preprocessing", "skip_mesh_grading", false);
         Set("numcalc", "enabled", false);
         Set("numcalc", "max_instances", Numeric("numcalc.parallel_instances", num.MaxInstances, "numcalc.max_instances"));
@@ -178,11 +173,7 @@ internal static class ProjectDocument
         pre.HeadRadiusScale = D("preprocessing", "head_radius_scale");
         pre.HeadWidthScale = D("preprocessing", "head_width_scale");
         pre.HeadHeightScale = D("preprocessing", "head_height_scale");
-        pre.HeadYDeformation = D("preprocessing", "head_y_deformation");
-        pre.HeadOvalnessStrength = D("preprocessing", "head_ovalness_strength");
-        pre.HeadMinWidthScale = D("preprocessing", "head_min_width_scale");
-        pre.HeadMaxHeightScale = D("preprocessing", "head_max_height_scale");
-        pre.HeadAdaptiveOvalness = B("preprocessing", "head_adaptive_ovalness");
+        pre.HeadTaperPercent = D("preprocessing", "head_taper_percent");
         scan.Enabled = Flag("scan_preparation", "enabled"); scan.ScanPath = S("scan_preparation", "scan_path", "");
         scan.OriginalScanPath = S("scan_preparation", "original_scan_path", scan.ScanPath);
         if (ReadAlignmentOriginal(scan.ScanPath) is string original && File.Exists(original))

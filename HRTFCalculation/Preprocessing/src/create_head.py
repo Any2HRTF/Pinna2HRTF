@@ -1,24 +1,10 @@
-"""
-Creates a dummy head mesh aligned to the coordinate axes.
-The radius with regards to y is retrieved through the average outline of both ear meshes,
-wheres the x and z radius are 1.5 times the y radius.
-
-It takes paths to the left_ear and right_ear stl mesh files
-and an export_path (including .stl) where the dummy head mesh will be exported to.
-Also, the y radius will be returned.
-
-
-@author: lthalhammer
-September 2024
-"""
-
 import argparse
 import numpy as np
 import trimesh
 from HRTFCalculation.LiveEvents import emit_live_event
 
 
-def head(left_ear, right_ear, export_path, radius_scale=1.01, width_scale=1.5, height_scale=1.5, y_deformation=0.0, adaptive_ovalness=True, ovalness_strength=0.08, min_width_scale=1.48, max_height_scale=1.53, subdivisions=7):
+def head(left_ear, right_ear, export_path, radius_scale=1.01, width_scale=1.39, height_scale=1.5, taper_percent=0.0, subdivisions=7):
     ears = [("left", left_ear), ("right", right_ear)]
     ears = [(side, ear) for side, ear in ears if ear is not None]
     if not ears:
@@ -34,19 +20,17 @@ def head(left_ear, right_ear, export_path, radius_scale=1.01, width_scale=1.5, h
         emit_live_event("Left and right ear sizes differ substantially", level="warning")
         print("Warning: left and right ear radius are quite asymmetrical.")
     radius = np.mean(list(radii.values())) * radius_scale
-    if adaptive_ovalness:
-        extents = [np.ptp(outline, axis=0) for outline in outlines.values()]
-        flare = np.mean([extent[0] / max(extent[2], np.finfo(float).eps) for extent in extents])
-        ovalness = np.clip((flare - 0.45) / 0.55, 0, 1) * ovalness_strength
-        width_scale = max(min_width_scale, width_scale - ovalness)
-        height_scale = min(max_height_scale, height_scale + ovalness)
-
     print(f"radius: {radius:.2f}")
     print(f"head scale x/y/z: {width_scale:.3f}/1.000/{height_scale:.3f}")
     dummy_head = trimesh.creation.icosphere(subdivisions, radius)
 
-    if y_deformation != 0:
-        dummy_head.vertices[:, 1] *= dummy_head.vertices[:, 2] * y_deformation + 1
+    if not np.isfinite(taper_percent):
+        raise ValueError("Head taper must be a finite percentage.")
+    if taper_percent != 0:
+        width_factors = 1 + dummy_head.vertices[:, 2] * taper_percent / 10000
+        if np.any(width_factors <= 0):
+            raise ValueError("Head taper would collapse or invert the head. Reduce its strength or the head radius.")
+        dummy_head.vertices[:, 1] *= width_factors
 
     dummy_head.apply_scale((width_scale, 1, height_scale))
 
@@ -61,6 +45,10 @@ if __name__ == "__main__":
     parser.add_argument('--right_path', type=str, help='Path to the right ear mesh')
     parser.add_argument('--export_path', type=str, required=True, help='Export path for the head mesh')
 
+    parser.add_argument('--radius-scale', type=float, default=1.01)
+    parser.add_argument('--width-scale', type=float, default=1.39, help='Front-to-back scale relative to the ear-to-ear radius.')
+    parser.add_argument('--height-scale', type=float, default=1.5)
+    parser.add_argument('--taper-percent', type=float, default=0.0, help='Head taper strength: +100 equals +0.01 per mm; positive widens above the ear axis.')
     args = parser.parse_args()
 
     if not args.left_path and not args.right_path:
@@ -69,4 +57,4 @@ if __name__ == "__main__":
     right_ear = trimesh.load(args.right_path, force="mesh") if args.right_path else None
     export_path = args.export_path
 
-    radius = head(left_ear, right_ear, export_path)
+    radius = head(left_ear, right_ear, export_path, radius_scale=args.radius_scale, width_scale=args.width_scale, height_scale=args.height_scale, taper_percent=args.taper_percent)

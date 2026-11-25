@@ -133,6 +133,9 @@ public partial class MainWindow : Window
     TextBlock selectedArtifactText = new();
     Image imagePreview = new();
     TextBlock viewerPlaceholder = new();
+    Border previewLoading = new();
+    readonly ProgressRing previewLoadingRing = new() { Width = 20, Height = 20 };
+    readonly TextBlock previewLoadingText = new() { TextWrapping = TextWrapping.Wrap, FontSize = 14, VerticalAlignment = VerticalAlignment.Center };
     Border viewerInteractionHint = new();
     Border resetViewButtonHost = new();
     Viewport3DX meshViewport = new();
@@ -298,7 +301,13 @@ public partial class MainWindow : Window
         EnsureStateDirectory(Path.Combine(appData, "Blender", "config"));
         EnsureStateDirectory(Path.Combine(appData, "Blender", "scripts"));
         EnsureStateDirectory(Path.Combine(appData, "Blender", "datafiles"));
-        try { await SettingsCatalog.InitializeAsync(action => RequestPythonAsync("project", new { action })); }
+        try
+        {
+            await SettingsCatalog.InitializeAsync(action => RequestPythonAsync("project", new { action }));
+            foreach (var path in new[] { AppPreferencesPath, registryPath })
+                if (File.Exists(path) && HeadGeometry.NeedsHeadSettingsMigration(File.ReadAllText(path)))
+                    await RequestPythonAsync("project", new { action = "migrate-head-settings", path });
+        }
         catch (Exception error) when (error is IOException or JsonException or InvalidOperationException or KeyNotFoundException or OperationCanceledException)
         {
             if (shutdownCleanupDone) return;
@@ -746,6 +755,13 @@ public partial class MainWindow : Window
         viewerGrid.Children.Add(imagePreview);
         viewerPlaceholder = new TextBlock { Text = "No preview selected", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, FontSize = 18, Foreground = mutedTextBrush };
         viewerGrid.Children.Add(viewerPlaceholder);
+        var loadingContent = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        previewLoadingText.Foreground = primaryTextBrush;
+        loadingContent.Children.Add(previewLoadingRing); loadingContent.Children.Add(previewLoadingText);
+        previewLoading = new Border { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            Background = surfaceBrush, BorderBrush = borderBrush, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(16, 12, 16, 12), Margin = new Thickness(16), Visibility = Visibility.Collapsed, IsHitTestVisible = false, Child = loadingContent };
+        viewerGrid.Children.Add(previewLoading);
         viewerInteractionHint = new Border
         {
             HorizontalAlignment = HorizontalAlignment.Right,
@@ -1218,7 +1234,6 @@ public partial class MainWindow : Window
         maxInstancesBox.Text = project?.Settings.NumCalc.MaxInstances ?? "1";
         maxCpuLoadBox.Text = project?.Settings.NumCalc.MaxCpuLoad ?? "90";
         adaptiveFmmLengthBox.IsChecked = project?.Settings.NumCalc.AdaptiveFmmLength ?? true;
-        headAdaptiveOvalnessBox.IsChecked = project?.Settings.Preprocessing.HeadAdaptiveOvalness ?? SettingsCatalog.Flag("preprocessing.head_adaptive_ovalness");
         normalizeHrtfsBox.IsChecked = project?.Settings.Postprocessing?.Normalize ?? true;
         resampleHrirsBox.IsChecked = project?.Settings.Postprocessing?.ResampleHrirs ?? false;
         spatialUpsamplingBox.IsChecked = project?.Settings.Postprocessing?.SpatialUpsampling ?? false;
@@ -1229,7 +1244,7 @@ public partial class MainWindow : Window
         LoadSelectedProjectLog();
         loading = false;
         UpdatePostprocessingControls();
-        UpdateHeadShapeControls();
+        RequestHeadPreview();
         UpdatePlacementButtons();
         RebaseSettingInputs();
         RestoreSettingDrafts(project);
@@ -1291,7 +1306,6 @@ public partial class MainWindow : Window
         "scan_preparation.prepare_right" => (prepareRightEarBox.IsChecked == true).ToString(),
         "inference.model" => modelPicker.SelectedItem?.ToString() ?? "",
         "numcalc.adaptive_fmm" => (adaptiveFmmLengthBox.IsChecked == true).ToString(),
-        "head.adaptive_ovalness" => (headAdaptiveOvalnessBox.IsChecked == true).ToString(),
         "postprocessing.normalize" => (normalizeHrtfsBox.IsChecked == true).ToString(),
         "postprocessing.spatial_upsampling" => (spatialUpsamplingBox.IsChecked == true).ToString(),
         "postprocessing.spatial_normalize" => (spatialNormalizeBox.IsChecked == true).ToString(),
@@ -1307,7 +1321,6 @@ public partial class MainWindow : Window
         "scan_preparation.prepare_right" => project.Settings.ScanPreparation.PrepareRight.ToString(),
         "inference.model" => ModelName(project.Settings.Inference.ModelConfig),
         "numcalc.adaptive_fmm" => project.Settings.NumCalc.AdaptiveFmmLength.ToString(),
-        "head.adaptive_ovalness" => project.Settings.Preprocessing.HeadAdaptiveOvalness.ToString(),
         "postprocessing.normalize" => (project.Settings.Postprocessing?.Normalize ?? true).ToString(),
         "postprocessing.spatial_upsampling" => (project.Settings.Postprocessing?.SpatialUpsampling ?? false).ToString(),
         "postprocessing.spatial_normalize" => (project.Settings.Postprocessing?.SpatialNormalize ?? false).ToString(),
@@ -1366,7 +1379,7 @@ public partial class MainWindow : Window
     async Task HandleSettingChangeAsync(string id)
     {
         if (loading || selectedProject == null) return;
-        if (id.StartsWith("head.", StringComparison.Ordinal)) RequestHeadPreview();
+        if (id.StartsWith("head.", StringComparison.Ordinal)) RequestHeadPreview(true);
         if (id == "mesh2hrtf.ear_distance") { await EditGeometryAsync("ear", earDistanceBox.Text); return; }
         var project = selectedProject;
         var desired = CurrentSettingValue(id);
@@ -1426,7 +1439,6 @@ public partial class MainWindow : Window
             case "scan_preparation.prepare_right": prepareRightEarBox.IsChecked = bool.TryParse(value, out var right) && right; break;
             case "inference.model": modelPicker.SelectedItem = value; break;
             case "numcalc.adaptive_fmm": adaptiveFmmLengthBox.IsChecked = bool.TryParse(value, out var adaptive) && adaptive; break;
-            case "head.adaptive_ovalness": headAdaptiveOvalnessBox.IsChecked = bool.TryParse(value, out var ovalness) && ovalness; UpdateHeadShapeControls(); break;
             case "postprocessing.normalize": normalizeHrtfsBox.IsChecked = bool.TryParse(value, out var normalize) && normalize; break;
             case "postprocessing.spatial_upsampling": spatialUpsamplingBox.IsChecked = bool.TryParse(value, out var spatial) && spatial; break;
             case "postprocessing.spatial_normalize": spatialNormalizeBox.IsChecked = bool.TryParse(value, out var spatialNormal) && spatialNormal; break;
@@ -1464,7 +1476,6 @@ public partial class MainWindow : Window
         }
         project.Settings.Preprocessing.EvaluationGrid = evaluationGridBox.Text.Trim();
         project.Settings.NumCalc.AdaptiveFmmLength = adaptiveFmmLengthBox.IsChecked == true;
-        project.Settings.Preprocessing.HeadAdaptiveOvalness = headAdaptiveOvalnessBox.IsChecked == true;
         project.Settings.Postprocessing ??= new PostprocessingSettings();
         project.Settings.Postprocessing.Normalize = normalizeHrtfsBox.IsChecked == true;
         project.Settings.Postprocessing.SpatialUpsampling = spatialUpsamplingBox.IsChecked == true;
@@ -2066,7 +2077,7 @@ public partial class MainWindow : Window
         artifacts.Clear();
         foreach (var artifact in ArtifactsFor(selectedProject, inspection).Where(x => x.Exists))
             artifacts.Add(artifact);
-        artifactPicker.SelectedItem = artifacts.FirstOrDefault(x => SamePath(x.Path, selectedPath)) ?? artifacts.FirstOrDefault();
+        artifactPicker.SelectedItem = artifacts.FirstOrDefault(x => SamePath(x.Path, selectedPath)) ?? artifacts.FirstOrDefault(x => !x.IsHeadPreview);
         refreshingArtifacts = false;
         if (artifactPicker.SelectedItem is Artifact selected)
             OpenArtifact(selected);
@@ -2127,6 +2138,7 @@ public partial class MainWindow : Window
             if(Directory.Exists(solver)) foreach(var source in Directory.GetDirectories(solver,"source_*").OrderBy(x=>x))
                 if(File.Exists(Path.Combine(source,"NC.inp"))&&Directory.Exists(Path.Combine(source,"be.out")))list.Add(new Artifact($"{side} pressure · Source {Path.GetFileName(source)[7..]}",Path.Combine(source,"NC.inp"),side));
         }
+        list.Add(new Artifact("Head preview", HeadPreviewPath(project), IsHeadPreview: true));
         return list.DistinctBy(x => Path.GetFullPath(x.Path), StringComparer.OrdinalIgnoreCase).ToList();
     }
 
@@ -2183,6 +2195,8 @@ public partial class MainWindow : Window
 
     void OpenArtifact(Artifact artifact)
     {
+        if (artifact.IsHeadPreview) { RequestHeadPreview(true); return; }
+        ShowPreviewLoading(null);
         if (artifact.IsPressure)
         {
             if (selectedArtifactPath != artifact.Path) { selectedArtifactPath = artifact.Path; RememberSelectedArtifact(artifact.Path); _ = ObserveUiTaskAsync(OpenPressureViewerAsync(artifact), "Pressure viewer", selectedProject); }
@@ -2226,7 +2240,7 @@ public partial class MainWindow : Window
             alignmentLoadingRing.Visibility = Visibility.Visible;
             scanAlignmentStatus.Text = "Loading head scan…";
         }
-        else RemoveMeshVisuals();
+        else { RemoveMeshVisuals(); ShowPreviewLoading("Loading mesh…"); }
         try
         {
             var loaded = await Task.Run(() => MeshLoader.Load(artifact.Path), cancellation);
@@ -2276,6 +2290,7 @@ public partial class MainWindow : Window
         {
             if (generation == meshLoadGeneration)
             {
+                ShowPreviewLoading(null);
                 alignmentLoadingRing.IsActive = false;
                 alignmentLoadingRing.Visibility = Visibility.Collapsed;
                 if (scanAlignmentMode) UpdateAlignmentSaveEnabled();
@@ -2303,10 +2318,23 @@ public partial class MainWindow : Window
         return MicrophoneMarkerRadiusMeshUnits * (currentMesh?.Scale ?? 1.0);
     }
 
+    void ShowPreviewLoading(string? message)
+    {
+        previewLoadingRing.IsActive = message != null;
+        previewLoading.Visibility = message == null ? Visibility.Collapsed : Visibility.Visible;
+        if (message != null) { previewLoadingText.Text = message; viewerPlaceholder.Visibility = Visibility.Collapsed; }
+    }
+
     void ResetViewer()
     {
+        ShowPreviewLoading(null);
         meshLoadCancellation?.Cancel();
         meshLoadGeneration++;
+        headPreviewGeneration++;
+        headPreviewPending = false;
+        headPreviewTimer?.Stop();
+        alignmentLoadingRing.IsActive = false;
+        alignmentLoadingRing.Visibility = Visibility.Collapsed;
         RemoveMeshVisuals();
         meshVisual = null;
         microphoneVisual = null;
@@ -2649,7 +2677,7 @@ public partial class MainWindow : Window
 
     void ResetMeshCamera()
     {
-        var state = selectedProject != null && selectedArtifactPath != null && viewerStates.TryGetValue(selectedProject.Id, out var projectState) && projectState.CameraByArtifact.TryGetValue(selectedArtifactPath, out var saved) ? saved : new MeshCameraState { Yaw = string.Equals(selectedArtifactSide ?? SideForPath(selectedArtifactPath ?? ""), "left", StringComparison.OrdinalIgnoreCase) ? 180 : 0, Pitch = 8, Distance = Math.Max(currentMesh?.MaximumDimension * 1.7 ?? 300, 120) };
+        var state = selectedProject != null && selectedArtifactPath != null && viewerStates.TryGetValue(selectedProject.Id, out var projectState) && projectState.CameraByArtifact.TryGetValue(selectedArtifactPath, out var saved) ? saved : new MeshCameraState { Yaw = selectedProject != null && SamePath(selectedArtifactPath, HeadPreviewPath(selectedProject)) ? 90 : string.Equals(selectedArtifactSide ?? SideForPath(selectedArtifactPath ?? ""), "left", StringComparison.OrdinalIgnoreCase) ? 180 : 0, Pitch = 8, Distance = Math.Max(currentMesh?.MaximumDimension * 1.7 ?? 300, 120) };
         var camera = new PerspectiveCamera { FieldOfView = 38 };
         var yaw = state.Yaw * Math.PI / 180;
         var pitch = state.Pitch * Math.PI / 180;
@@ -2692,7 +2720,7 @@ public partial class MainWindow : Window
         ResetMeshCamera();
         var isStl = string.Equals(Path.GetExtension(selectedArtifactPath), ".stl", StringComparison.OrdinalIgnoreCase);
         ZoomExtentsWithoutAlignmentAxes(isStl);
-        if (isStl) ZoomOutMeshCamera(2.8);
+        if (isStl && !SamePath(selectedArtifactPath, HeadPreviewPath(selectedProject))) ZoomOutMeshCamera(2.8);
         SaveMeshCamera();
     }
 
@@ -3782,6 +3810,9 @@ public partial class MainWindow : Window
         foreach (var editor in editorWindows.ToArray()) { try { editor.Close(); } catch { } }
         if (shutdownCleanupDone) return;
         shutdownCleanupDone = true;
+        headPreviewGeneration++;
+        headPreviewPending = false;
+        headPreviewTimer?.Stop();
         try { if (placementSide != null) EndPlacement(); } catch { }
         try
         {
@@ -4190,10 +4221,10 @@ public partial class MainWindow : Window
     }
 }
 
-record Artifact(string Title, string Path, string? Side = null)
+record Artifact(string Title, string Path, string? Side = null, bool IsHeadPreview = false)
 {
     public bool IsPressure => System.IO.Path.GetFileName(Path).Equals("NC.inp",StringComparison.OrdinalIgnoreCase) && File.Exists(Path) && Directory.Exists(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(Path)!,"be.out"));
-    public bool Exists => File.Exists(Path) || IsPressure;
+    public bool Exists => IsHeadPreview || File.Exists(Path) || IsPressure;
     public bool IsMesh => new[] { ".stl", ".ply" }.Contains(System.IO.Path.GetExtension(Path), StringComparer.OrdinalIgnoreCase);
     public bool IsImage => new[] { ".jpg", ".jpeg", ".png", ".bmp", ".gif" }.Contains(System.IO.Path.GetExtension(Path), StringComparer.OrdinalIgnoreCase);
     public bool IsText => new[] { ".txt", ".csv", ".json", ".yaml", ".yml", ".log", ".out" }.Contains(System.IO.Path.GetExtension(Path), StringComparer.OrdinalIgnoreCase);

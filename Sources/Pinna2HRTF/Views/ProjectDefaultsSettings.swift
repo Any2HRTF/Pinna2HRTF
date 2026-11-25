@@ -165,20 +165,10 @@ struct SimulationDefaultsRows: View {
             numberField("Ear-to-ear radius scale", key: "head_radius_scale")
             numberField("Front-to-back scale", key: "head_width_scale")
             numberField("Height scale", key: "head_height_scale")
-            numberField("Width change with height (1/mm)", key: "head_y_deformation")
-            HelpToggle("Adapt shape to ears", helpID: "head.adaptive_ovalness", isOn: adaptiveOvalness)
-            if adaptiveOvalness.wrappedValue {
-                numberField("Adaptation strength", key: "head_ovalness_strength")
-                numberField("Smallest front-to-back scale", key: "head_min_width_scale")
-                numberField("Largest height scale", key: "head_max_height_scale")
-            }
+            numberField("Head taper (%)", key: "head_taper_percent")
         }
     }
 
-    private var adaptiveOvalness: Binding<Bool> {
-        let field = field("head_adaptive_ovalness")
-        return Binding(get: { AppPreferences.workflowFlag(field, in: stored) }, set: { update(field.key, $0) })
-    }
 }
 
 struct AdaptiveFMMDefaultToggle: View {
@@ -229,22 +219,41 @@ struct ExportDefaultsSections: View {
 
     var body: some View {
         Section {
-            HelpToggle("Normalize", helpID: "postprocessing.normalize", isOn: flag("normalize"))
-            LabeledTextField("Level offset (dB)", helpID: "postprocessing.level_offset", text: text("level_offset_db"),
-                             fieldEnabled: flag("normalize").wrappedValue)
-            HelpToggle("Resample HRIRs", helpID: "postprocessing.resample_hrirs", isOn: flag("resample_hrirs"))
-            LabeledTextField("Sampling rate (Hz)", helpID: "postprocessing.sampling_rate", text: text("sampling_rate"),
-                             fieldEnabled: flag("resample_hrirs").wrappedValue)
-            HelpToggle("Spatial upsampling", helpID: "postprocessing.spatial_upsampling", isOn: flag("spatial_upsampling"))
-            HelpRow("Subdivision level", helpID: "postprocessing.spatial_subdivisions") {
-                NumberStepperField(title: "Subdivision level", value: subdivisions,
-                                   range: SettingsCatalog.range("postprocessing.spatial_subdivisions"))
+            DefaultsOption(title: "Apply level offset", helpID: "postprocessing.normalize", isOn: flag("normalize")) {
+                LabeledTextField("Level offset (dB)", helpID: "postprocessing.level_offset", text: text("level_offset_db"))
             }
-            .disabled(!flag("spatial_upsampling").wrappedValue)
-            HelpToggle("Normalize spatial output", helpID: "postprocessing.spatial_normalize", isOn: flag("spatial_normalize"))
-                .disabled(!flag("spatial_upsampling").wrappedValue)
-        } header: {
-            Text("SOFA Export")
+            DefaultsOption(title: "Resample HRIRs", helpID: "postprocessing.resample_hrirs", isOn: flag("resample_hrirs")) {
+                LabeledTextField("Sampling rate (Hz)", helpID: "postprocessing.sampling_rate", text: text("sampling_rate"))
+            }
+            DefaultsOption(title: "Spatially upsample HRTFs", helpID: "postprocessing.spatial_upsampling", isOn: flag("spatial_upsampling")) {
+                LabeledContent {
+                    NumberStepperField(title: "Subdivision level", value: subdivisions, range: SettingsCatalog.range("postprocessing.spatial_subdivisions"))
+                } label: { SettingLabel(title: "Subdivision level", helpID: "postprocessing.spatial_subdivisions") }
+                SettingToggle(title: "Normalize to frontal reference", helpID: "postprocessing.spatial_normalize", isOn: flag("spatial_normalize"))
+            }
+        } header: { Text("SOFA Export") }
+    }
+}
+
+private struct DefaultsOption<Content: View>: View {
+    let title: String
+    let helpID: String
+    @Binding var isOn: Bool
+    @State private var expanded: Bool
+    let content: Content
+
+    init(title: String, helpID: String, isOn: Binding<Bool>, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.helpID = helpID
+        self._isOn = isOn
+        self._expanded = State(initialValue: isOn.wrappedValue)
+        self.content = content()
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) { content.disabled(!isOn) } label: {
+            SettingToggle(title: title, helpID: helpID, isOn: $isOn)
         }
+        .onChange(of: isOn) { expanded = $0 }
     }
 }

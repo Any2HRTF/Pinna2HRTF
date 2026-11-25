@@ -27,6 +27,65 @@ def import_legacy_distance(data):
     return result
 
 
+
+REMOVED_HEAD_SETTINGS = {
+    "head_adaptive_ovalness", "head_ovalness_strength", "head_min_width_scale", "head_max_height_scale",
+    "headAdaptiveOvalness", "headOvalnessStrength", "headMinWidthScale", "headMaxHeightScale",
+    "HeadAdaptiveOvalness", "HeadOvalnessStrength", "HeadMinWidthScale", "HeadMaxHeightScale",
+}
+LEGACY_HEAD_TAPER = {
+    "head_y_deformation": "head_taper_percent",
+    "headYDeformation": "headTaperPercent",
+    "HeadYDeformation": "HeadTaperPercent",
+}
+
+
+def migrate_head_settings(value):
+    import math
+    notices = set()
+
+    def migrate(item):
+        if isinstance(item, list):
+            return [migrate(child) for child in item]
+        if not isinstance(item, dict):
+            return item
+        result = {}
+        for key, child in item.items():
+            if key in REMOVED_HEAD_SETTINGS:
+                notices.add("Removed retired adaptive head-shape settings; head adaptation is no longer applied.")
+                continue
+            if key in LEGACY_HEAD_TAPER:
+                continue
+            if key in ("PreservedConfigJSON", "preservedConfigJSON") and isinstance(child, str) and child.strip():
+                parsed = json.loads(child)
+                updated = migrate(parsed)
+                result[key] = json.dumps(updated, ensure_ascii=False, allow_nan=False) if updated != parsed else child
+            else:
+                result[key] = migrate(child)
+        for legacy, current in LEGACY_HEAD_TAPER.items():
+            if legacy not in item:
+                continue
+            if current not in result:
+                raw = item[legacy]
+                if isinstance(raw, bool) or not isinstance(raw, (str, int, float)):
+                    raise ValueError("Legacy head deformation must be a finite number.")
+                number = float(raw) * 10000
+                if not math.isfinite(number):
+                    raise ValueError("Legacy head deformation must be a finite number.")
+                result[current] = format(number, ".15g") if isinstance(raw, str) else number
+            notices.add("Converted legacy head deformation to Head taper (%): 0.01 per mm equals 100%.")
+        return result
+
+    return migrate(value), sorted(notices)
+
+
+def import_legacy_head_settings(value):
+    import warnings
+    migrated, notices = migrate_head_settings(value)
+    for notice in notices:
+        warnings.warn(notice, UserWarning, stacklevel=2)
+    return migrated
+
 def read_settings(path):
     return decode_settings(Path(path).read_bytes())
 

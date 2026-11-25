@@ -55,6 +55,7 @@ final class AppStore: ObservableObject {
             self.projectsChangePending = false
             self.status.refreshSummaries(for: self.projects)
             self.refreshArtifacts()
+            if self.viewer.selectedMesh == self.viewer.headPreviewURL { self.viewer.requestHeadPreview() }
         }
     }
 
@@ -95,7 +96,10 @@ final class AppStore: ObservableObject {
     var packageURL: URL { library.packageURL }
 
     var projectSummaries: [UUID: String] { status.projectSummaries }
-    var artifacts: [Artifact] { status.artifacts }
+    var artifacts: [Artifact] {
+        guard let url = viewer.headPreviewURL else { return status.artifacts }
+        return status.artifacts + [Artifact(title: "Head preview", url: url, cachedExists: true)]
+    }
     var isCheckingProjectFiles: Bool { status.isCheckingProjectFiles }
     var stageStates: [Stage: StageState] { status.stageStates }
     var selectedProjectStatus: ProjectStatusSnapshot? { status.status(for: selectedProject, environment: environment) }
@@ -149,7 +153,10 @@ final class AppStore: ObservableObject {
     func useAutomaticMicrophonePosition(_ side: EarSide) { viewer.useAutomaticMicrophonePosition(side) }
 
     func stopRunningProcess() { if let id = selectedProjectID { runner.stop(id) } }
-    func stopAllRunningProcesses(completion: @escaping @MainActor () -> Void) { runner.stopAll(completion: completion) }
+    func stopAllRunningProcesses(completion: @escaping @MainActor () -> Void) {
+        viewer.headPreviewTask?.cancel()
+        runner.stopAll(completion: completion)
+    }
 
     func appendLog(_ text: String, for projectID: UUID? = nil) { activity.append(text, for: projectID) }
     func clearSelectedProjectLog() { activity.clearSelected() }

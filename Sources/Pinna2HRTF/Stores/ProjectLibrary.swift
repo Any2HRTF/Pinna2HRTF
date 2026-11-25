@@ -31,6 +31,9 @@ final class ProjectLibrary: ObservableObject {
                 try? FileManager.default.removeItem(at: obsolete)
             }
         }
+        var defaultsMigrationError: String?
+        do { try AppPreferences.migrateHeadSettings() }
+        catch { defaultsMigrationError = "Could not migrate project defaults: \(error.localizedDescription)" }
         var registry = Self.migrated(registryStore.load(), rootURL: rootURL, packageURL: packageURL)
         if Defaults.isPackagedApp {
             registry.environment = Defaults.environment(root: rootURL)
@@ -45,7 +48,7 @@ final class ProjectLibrary: ObservableObject {
         selectedProjectID = registry.selectedProjectID ?? registry.projects.first?.id
         environment = registry.environment
         registryStore.save(registry)
-        persistenceMessage = registryStore.lastError ?? registryStore.recoveryMessage
+        persistenceMessage = defaultsMigrationError ?? registryStore.lastError ?? registryStore.recoveryMessage
         registryRecoveryPresented = registryStore.savingBlocked
     }
 

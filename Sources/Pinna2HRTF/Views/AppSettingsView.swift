@@ -99,7 +99,7 @@ struct SettingsPaneView: View {
     @ViewBuilder private var projects: some View {
         Section {
             locationPicker("Location", helpID: "defaults.project_location", path: $projectDirectory,
-                           defaultTitle: "Application Support", choose: { chooseDirectory(selection: $projectDirectory) })
+                           defaultTitle: "Projects", choose: { chooseDirectory(selection: $projectDirectory) })
             HelpRow("Input files", helpID: "defaults.input_handling") {
                 Picker("Input files", selection: $inputHandling) {
                     ForEach(InputHandling.allCases) { handling in

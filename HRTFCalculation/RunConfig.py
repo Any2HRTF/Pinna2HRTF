@@ -232,7 +232,7 @@ def preprocessing_input_signature(config: PipelineConfig) -> dict:
         effective.pop("source_position_" + other, None)
         effective.pop("source_position_input_" + other, None)
         ears[side] = {"mesh_sha256": cached_sha256(source), "settings": effective, "grid": grid_hashes}
-    return {"format": "pinna2hrtf-preprocessing-inputs-v1", "ears": ears}
+    return {"format": "pinna2hrtf-preprocessing-inputs-v2", "ears": ears}
 
 
 def validate_preprocessing_inputs(config: PipelineConfig, logger: Logger, allow_legacy: bool = False) -> None:

@@ -33,13 +33,20 @@ final class ProjectRegistryStore: @unchecked Sendable {
 
     private func decode(_ data: Data) -> ProjectRegistry? {
         guard let object = try? JSONSerialization.jsonObject(with: data),
-              let geometry = try? HeadGeometrySettings.migrateRegistry(object),
+              let head = try? HeadGeometrySettings.migrateHeadState(object),
+              let geometry = try? HeadGeometrySettings.migrateRegistry(head),
               let migrated = Self.migrateLegacyMeshSettings(geometry),
               let data = try? JSONSerialization.data(withJSONObject: migrated) else { return nil }
         return try? JSONDecoder().decode(ProjectRegistry.self, from: data)
     }
 
     func load() -> ProjectRegistry {
+        do { try HeadGeometrySettings.migrateHeadStateFile(url) }
+        catch {
+            savingBlocked = true
+            recoveryMessage = "Could not migrate head-shape settings. The project list is protected: \(error.localizedDescription)"
+            return ProjectRegistry(projects: [], selectedProjectID: nil, environment: Defaults.environment(root: rootURL))
+        }
         if let data = try? Data(contentsOf: url), let registry = decode(data) {
             lastGoodData = data
             if let object = try? JSONSerialization.jsonObject(with: data),
