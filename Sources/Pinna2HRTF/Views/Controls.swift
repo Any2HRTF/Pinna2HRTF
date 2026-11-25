@@ -126,6 +126,15 @@ struct FieldWarning: View {
     }
 }
 
+extension Locale {
+    static let posix = Locale(identifier: "en_US_POSIX")
+}
+
+enum FieldWidth {
+    static let number: CGFloat = 96
+    static let text: CGFloat = 220
+}
+
 struct LabeledTextField: View {
     let title: String
     let helpID: String
@@ -141,12 +150,18 @@ struct LabeledTextField: View {
         self.validationError = validationError
     }
 
+    private var isNumber: Bool {
+        SettingsCatalog.rules.fields.contains { $0.id == helpID && ($0.kind == "integer" || $0.kind == "decimal") }
+    }
+
     var body: some View {
         LabeledContent {
             VStack(alignment: .trailing, spacing: 4) {
                 TextField(title, text: $text)
                     .labelsHidden()
-                    .multilineTextAlignment(.trailing)
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(isNumber ? .trailing : .leading)
+                    .frame(minWidth: isNumber ? FieldWidth.number : 80, maxWidth: isNumber ? FieldWidth.number : FieldWidth.text)
                     .disabled(!fieldEnabled)
                 if fieldEnabled, let error = validationError ?? ProjectValidation.fieldMessage(helpID, text: text) {
                     FieldWarning(error)
@@ -167,11 +182,11 @@ struct NumberStepperField: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            TextField(title, value: $value, format: .number)
+            TextField(title, value: $value, format: .number.grouping(.never).locale(.posix))
                 .labelsHidden()
                 .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.trailing)
-                .frame(width: 72)
+                .frame(width: FieldWidth.number)
                 .onChange(of: value) { newValue in
                     let bounded = min(max(newValue, range.lowerBound), range.upperBound)
                     if bounded != newValue { value = bounded }

@@ -78,9 +78,9 @@ struct PressureFieldView: View {
             LinearGradient(colors: model.quantity.palette.map { Color(red: Double($0.x), green: Double($0.y), blue: Double($0.z)) }, startPoint: .leading, endPoint: .trailing)
                 .frame(width: 210, height: 10)
             HStack {
-                Text(model.range.lowerBound, format: .number.precision(.significantDigits(4)))
+                Text(model.range.lowerBound, format: .number.precision(.significantDigits(4)).grouping(.never).locale(.posix))
                 Spacer()
-                Text(model.range.upperBound, format: .number.precision(.significantDigits(4)))
+                Text(model.range.upperBound, format: .number.precision(.significantDigits(4)).grouping(.never).locale(.posix))
             }.font(.caption.monospacedDigit()).frame(width: 210)
             Toggle("Lock color scale", isOn: $model.lockScale).toggleStyle(.checkbox)
                 .help("Keep the range when changing frequency")

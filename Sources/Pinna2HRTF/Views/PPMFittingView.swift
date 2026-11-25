@@ -84,7 +84,7 @@ struct PPMFittingView: View {
             Section("Distance") {
                 LabeledContent("Symmetric RMSE") {
                     if let metric = model.metrics.first(where: { $0.label == "Symmetric RMSE" }) {
-                        Text(metric.value, format: .number.precision(.fractionLength(3))) + Text(" mm")
+                        Text(metric.value, format: .number.precision(.fractionLength(3)).grouping(.never).locale(.posix)) + Text(" mm")
                     } else {
                         Text("—")
                     }
@@ -94,7 +94,7 @@ struct PPMFittingView: View {
                 DisclosureGroup("Details") {
                     ForEach(model.metrics) { metric in
                         LabeledContent(metric.label) {
-                            Text(metric.value, format: .number.precision(.fractionLength(3))) + Text(" mm")
+                            Text(metric.value, format: .number.precision(.fractionLength(3)).grouping(.never).locale(.posix)) + Text(" mm")
                         }
                         .monospacedDigit()
                     }
@@ -215,7 +215,7 @@ private struct PPMFittingParameterRow: View {
         VStack(alignment: .leading, spacing: 6) {
             LabeledContent(parameterLabel) {
                 HStack(spacing: 4) {
-                    TextField(parameterLabel, value: value, format: .number.precision(.fractionLength(2)))
+                    TextField(parameterLabel, value: value, format: .number.precision(.fractionLength(2)).grouping(.never).locale(.posix))
                         .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                         .multilineTextAlignment(.trailing)

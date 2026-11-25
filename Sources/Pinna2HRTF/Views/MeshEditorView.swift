@@ -135,9 +135,9 @@ struct MeshEditorView: View {
         Section("Cutting Plane") {
             LabeledContent("Normal") {
                 HStack(spacing: 6) {
-                    TextField("X", value: $model.planeNormalX, format: .number).accessibilityLabel("Plane normal X")
-                    TextField("Y", value: $model.planeNormalY, format: .number).accessibilityLabel("Plane normal Y")
-                    TextField("Z", value: $model.planeNormalZ, format: .number).accessibilityLabel("Plane normal Z")
+                    TextField("X", value: $model.planeNormalX, format: .number.grouping(.never).locale(.posix)).accessibilityLabel("Plane normal X")
+                    TextField("Y", value: $model.planeNormalY, format: .number.grouping(.never).locale(.posix)).accessibilityLabel("Plane normal Y")
+                    TextField("Z", value: $model.planeNormalZ, format: .number.grouping(.never).locale(.posix)).accessibilityLabel("Plane normal Z")
                 }
                 .labelsHidden()
                 .textFieldStyle(.roundedBorder)
@@ -157,7 +157,7 @@ struct MeshEditorView: View {
                 }
             }
             LabeledContent("Offset (mm)") {
-                TextField("Offset (mm)", value: $model.planeOffset, format: .number.precision(.fractionLength(2)))
+                TextField("Offset (mm)", value: $model.planeOffset, format: .number.precision(.fractionLength(2)).grouping(.never).locale(.posix))
                     .labelsHidden()
                     .textFieldStyle(.roundedBorder)
                     .multilineTextAlignment(.trailing)
@@ -169,14 +169,14 @@ struct MeshEditorView: View {
             Toggle("Fit preview to mesh", isOn: $model.fitPlanePreview)
             if !model.fitPlanePreview {
                 LabeledContent("Preview width (mm)") {
-                    TextField("Preview width (mm)", value: $model.planePreviewWidth, format: .number.precision(.fractionLength(2)))
+                    TextField("Preview width (mm)", value: $model.planePreviewWidth, format: .number.precision(.fractionLength(2)).grouping(.never).locale(.posix))
                         .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 80)
                 }
                 LabeledContent("Preview height (mm)") {
-                    TextField("Preview height (mm)", value: $model.planePreviewHeight, format: .number.precision(.fractionLength(2)))
+                    TextField("Preview height (mm)", value: $model.planePreviewHeight, format: .number.precision(.fractionLength(2)).grouping(.never).locale(.posix))
                         .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                         .multilineTextAlignment(.trailing)
