@@ -162,6 +162,7 @@ struct LabeledTextField: View {
                     .textFieldStyle(.roundedBorder)
                     .multilineTextAlignment(isNumber ? .trailing : .leading)
                     .frame(minWidth: isNumber ? FieldWidth.number : 80, maxWidth: isNumber ? FieldWidth.number : FieldWidth.text)
+                    .padding(.vertical, 3)
                     .disabled(!fieldEnabled)
                 if fieldEnabled, let error = validationError ?? ProjectValidation.fieldMessage(helpID, text: text) {
                     FieldWarning(error)
@@ -169,6 +170,7 @@ struct LabeledTextField: View {
             }
         } label: {
             SettingLabel(title: title, helpID: helpID)
+                .padding(.vertical, 3)
         }
     }
 }
