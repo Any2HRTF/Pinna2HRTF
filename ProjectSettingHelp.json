@@ -92,7 +92,7 @@
   {
     "id": "head.taper_percent",
     "title": "Head taper (%)",
-    "description": "Positive values widen the head above the ear axis and narrow it below; negative values reverse this. Zero leaves the width unchanged. The normalized strength of +100% equals the former +0.01 per millimetre, applied before height scaling; it is not a 100% increase in overall head width.",
+    "description": "Controls how head width changes with height. At +100%, the width scale factor increases by 0.01 per millimetre above the ear axis and decreases by 0.01 per millimetre below it, before height scaling. Positive values widen the top and narrow the bottom; negative values reverse this. Default: 0%.",
     "publications": []
   },
   {
