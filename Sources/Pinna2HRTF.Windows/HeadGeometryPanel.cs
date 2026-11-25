@@ -17,6 +17,13 @@ public partial class MainWindow
     readonly TextBox headWidthScaleBox = new();
     readonly TextBox headHeightScaleBox = new();
     readonly TextBox headTaperPercentBox = new();
+    readonly ComboBox torsoModePicker = new();
+    Expander? torsoShapeExpander;
+    readonly TextBox torsoWidthBox = new();
+    readonly TextBox torsoDepthBox = new();
+    readonly TextBox torsoHeightBox = new();
+    string SelectedTorsoMode => (torsoModePicker.SelectedItem as ComboBoxItem)?.Tag as string ?? "off";
+    void UpdateTorsoControls() { if (torsoShapeExpander != null) torsoShapeExpander.Visibility = SelectedTorsoMode == "geometric" ? Visibility.Visible : Visibility.Collapsed; }
     Expander? headShapeExpander;
     DispatcherTimer? headPreviewTimer;
     int headPreviewGeneration;
@@ -29,6 +36,10 @@ public partial class MainWindow
 
     void AddHeadShapeTextSettings(Dictionary<string, TextSetting> settings)
     {
+        settings["torso.width"] = new(torsoWidthBox, p => p.Settings.Preprocessing.TorsoWidthMM, (p, v) => p.Settings.Preprocessing.TorsoWidthMM = v.Trim(), SettingsCatalog.Text("preprocessing.torso_width_mm"));
+        settings["torso.depth"] = new(torsoDepthBox, p => p.Settings.Preprocessing.TorsoDepthMM, (p, v) => p.Settings.Preprocessing.TorsoDepthMM = v.Trim(), SettingsCatalog.Text("preprocessing.torso_depth_mm"));
+        settings["torso.height"] = new(torsoHeightBox, p => p.Settings.Preprocessing.TorsoHeightMM, (p, v) => p.Settings.Preprocessing.TorsoHeightMM = v.Trim(), SettingsCatalog.Text("preprocessing.torso_height_mm"));
+
         settings["head.radius_scale"] = new(headRadiusScaleBox, p => p.Settings.Preprocessing.HeadRadiusScale, (p, v) => p.Settings.Preprocessing.HeadRadiusScale = v.Trim(), SettingsCatalog.Text("preprocessing.head_radius_scale"));
         settings["head.width_scale"] = new(headWidthScaleBox, p => p.Settings.Preprocessing.HeadWidthScale, (p, v) => p.Settings.Preprocessing.HeadWidthScale = v.Trim(), SettingsCatalog.Text("preprocessing.head_width_scale"));
         settings["head.height_scale"] = new(headHeightScaleBox, p => p.Settings.Preprocessing.HeadHeightScale, (p, v) => p.Settings.Preprocessing.HeadHeightScale = v.Trim(), SettingsCatalog.Text("preprocessing.head_height_scale"));
@@ -42,7 +53,7 @@ public partial class MainWindow
         if (!focus && !SamePath(selectedArtifactPath, path)) return;
         var sources = new[] { "left", "right" }.Select(side => PreprocessingMesh(project, side) ?? (side == "left" ? project.LeftEar : project.RightEar));
         var key = project.Id + "|" + string.Join("|", sources.Select(source => source + ":" + (File.Exists(source) ? MeshIdentity(source) : "missing"))) + "|" +
-            JsonSerializer.Serialize(ProjectDocument.FormValues(project).Where(pair => pair.Key.StartsWith("head.", StringComparison.Ordinal) || pair.Key == "mesh2hrtf.ear_distance").OrderBy(pair => pair.Key));
+            JsonSerializer.Serialize(ProjectDocument.FormValues(project).Where(pair => (pair.Key.StartsWith("head.", StringComparison.Ordinal) || pair.Key.StartsWith("torso.", StringComparison.Ordinal)) || pair.Key == "mesh2hrtf.ear_distance").OrderBy(pair => pair.Key));
         if (focus)
         {
             if (!SamePath(selectedArtifactPath, path)) { SaveMeshCamera(); ResetViewer(); }
@@ -95,7 +106,7 @@ public partial class MainWindow
         void Message(string text) { if (!Current()) return; headPreviewPending = false; ShowPreviewLoading(null); viewerPlaceholder.Text = text; viewerPlaceholder.Visibility = Visibility.Visible; }
         if (left == null && right == null) { Message("Choose an ear mesh to preview the head."); return; }
         var values = ProjectDocument.FormValues(project);
-        var invalid = values.Keys.Where(id => id.StartsWith("head.", StringComparison.Ordinal) || id == "mesh2hrtf.ear_distance")
+        var invalid = values.Keys.Where(id => (id.StartsWith("head.", StringComparison.Ordinal) || id.StartsWith("torso.", StringComparison.Ordinal)) || id == "mesh2hrtf.ear_distance")
             .Select(id => SettingsCatalog.Check(values, id)).FirstOrDefault(message => message != null);
         if (invalid != null) { Message(invalid); return; }
         var folder = Path.Combine(Path.GetDirectoryName(HeadPreviewPath(project))!, Guid.NewGuid().ToString("N"));
@@ -185,6 +196,24 @@ public partial class MainWindow
         AddExpander(panel, "Head shape", shape);
         headShapeExpander = (Expander)panel.Children[^1];
         headShapeExpander.Expanding += (_, _) => RequestHeadPreview(true);
+        torsoModePicker.Items.Add(new ComboBoxItem { Content = "Off", Tag = "off" });
+        torsoModePicker.Items.Add(new ComboBoxItem { Content = "Geometric", Tag = "geometric" });
+        torsoModePicker.Items.Add(new ComboBoxItem { Content = "Acoustic (not available yet)", Tag = "acoustic", IsEnabled = false });
+        panel.Children.Add(AddSettingPanel("Torso modelling", "torso.mode", torsoModePicker));
+        var torso = new List<FrameworkElement>();
+        torso.Add(AddSettingPanel("Torso width (mm)", "torso.width", torsoWidthBox));
+        torso.Add(AddSettingPanel("Torso depth (mm)", "torso.depth", torsoDepthBox));
+        torso.Add(AddSettingPanel("Torso height (mm)", "torso.height", torsoHeightBox));
+        AddExpander(panel, "Torso shape", torso);
+        torsoShapeExpander = (Expander)panel.Children[^1];
+        torsoShapeExpander.Expanding += (_, _) => RequestHeadPreview(true);
+        torsoModePicker.SelectionChanged += async (_, _) => {
+            UpdateTorsoControls();
+            if (loading) return;
+            await HandleSettingChangeAsync("torso.mode");
+            RequestHeadPreview(true);
+        };
+        UpdateTorsoControls();
         var grid = new Grid();
         grid.Children.Add(panel);
         return grid;

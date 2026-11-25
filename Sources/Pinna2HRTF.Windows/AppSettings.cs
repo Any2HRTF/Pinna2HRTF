@@ -76,6 +76,10 @@ internal sealed class WorkflowPreferences
     public double HeadRadiusScale { get; set; } = SettingsCatalog.Decimal("preprocessing.head_radius_scale");
     public double HeadWidthScale { get; set; } = SettingsCatalog.Decimal("preprocessing.head_width_scale");
     public double HeadHeightScale { get; set; } = SettingsCatalog.Decimal("preprocessing.head_height_scale");
+    public string TorsoMode { get; set; } = SettingsCatalog.Text("preprocessing.torso_mode");
+    public double TorsoWidthMM { get; set; } = SettingsCatalog.Decimal("preprocessing.torso_width_mm");
+    public double TorsoDepthMM { get; set; } = SettingsCatalog.Decimal("preprocessing.torso_depth_mm");
+    public double TorsoHeightMM { get; set; } = SettingsCatalog.Decimal("preprocessing.torso_height_mm");
     public double HeadTaperPercent { get; set; } = SettingsCatalog.Decimal("preprocessing.head_taper_percent");
 
     public Dictionary<string, string> FormValues()
@@ -99,6 +103,11 @@ internal sealed class WorkflowPreferences
             ["head.width_scale"] = Number(HeadWidthScale),
             ["head.height_scale"] = Number(HeadHeightScale),
             ["head.taper_percent"] = Number(HeadTaperPercent),
+            ["torso.mode"] = TorsoMode,
+            ["torso.width"] = Number(TorsoWidthMM),
+            ["torso.depth"] = Number(TorsoDepthMM),
+            ["torso.height"] = Number(TorsoHeightMM),
+
         };
     }
 
@@ -376,6 +385,23 @@ public partial class MainWindow
                     NumberRow(controls, "Height scale", "head.height_scale", () => defaults.HeadHeightScale, v => defaults.HeadHeightScale = v);
                     NumberRow(controls, "Head taper (%)", "head.taper_percent", () => defaults.HeadTaperPercent, v => defaults.HeadTaperPercent = v);
                 });
+                var torsoChoice = new ComboBox { MaxWidth = 280 };
+                torsoChoice.Items.Add(new ComboBoxItem { Content = "Off", Tag = "off" });
+                torsoChoice.Items.Add(new ComboBoxItem { Content = "Geometric", Tag = "geometric" });
+                torsoChoice.Items.Add(new ComboBoxItem { Content = "Acoustic (not available yet)", IsEnabled = false });
+                torsoChoice.SelectedIndex = defaults.TorsoMode == "geometric" ? 1 : 0;
+                simulation.Children.Add(new SettingsCard { Header = DefaultsLabel("Torso modelling", "torso.mode"), Content = torsoChoice });
+                var torsoShape = SettingsAdvanced(simulation, "Torso shape", controls => {
+                    NumberRow(controls, "Torso width (mm)", "torso.width", () => defaults.TorsoWidthMM, v => defaults.TorsoWidthMM = v);
+                    NumberRow(controls, "Torso depth (mm)", "torso.depth", () => defaults.TorsoDepthMM, v => defaults.TorsoDepthMM = v);
+                    NumberRow(controls, "Torso height (mm)", "torso.height", () => defaults.TorsoHeightMM, v => defaults.TorsoHeightMM = v);
+                });
+                torsoShape.Visibility = defaults.TorsoMode == "geometric" ? Visibility.Visible : Visibility.Collapsed;
+                torsoChoice.SelectionChanged += (_, _) => {
+                    defaults.TorsoMode = torsoChoice.SelectedIndex == 1 ? "geometric" : "off";
+                    torsoShape.Visibility = defaults.TorsoMode == "geometric" ? Visibility.Visible : Visibility.Collapsed;
+                    SaveAppPreferences();
+                };
                 var computing = SettingsSection(panel, "Calculation");
                 IntegerRow(computing, "Parallel NumCalc instances", "numcalc.parallel_instances", () => appPreferences.MaxInstances, v => appPreferences.MaxInstances = v);
                 IntegerRow(computing, "CPU load limit (%)", "numcalc.cpu_limit", () => appPreferences.MaxCpuLoad, v => appPreferences.MaxCpuLoad = v);

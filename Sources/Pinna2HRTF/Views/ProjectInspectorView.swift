@@ -4,6 +4,7 @@ import AppKit
 struct ProjectInspectorView: View {
     @ObservedObject var store: AppStore
     @State private var headExpanded = false
+    @State private var torsoExpanded = false
     @State private var headPreviewProjectID: UUID?
 
     var body: some View {
@@ -22,8 +23,8 @@ struct ProjectInspectorView: View {
                 }
             }
         }
-        .onChange(of: headPreviewSettings) { _ in if headExpanded && headPreviewProjectID == store.selectedProjectID { store.viewer.requestHeadPreview() } }
-        .onChange(of: store.selectedProjectID) { _ in headExpanded = false }
+        .onChange(of: headPreviewSettings) { _ in if headPreviewProjectID == store.selectedProjectID { store.viewer.requestHeadPreview() } }
+        .onChange(of: store.selectedProjectID) { _ in headExpanded = false; torsoExpanded = false }
         .onChange(of: store.earDistanceFocusRequest) { _ in store.workflowStep = .simulation }
     }
 
@@ -214,6 +215,20 @@ struct ProjectInspectorView: View {
                 headShapeField("Height scale", id: "head.height_scale")
                 headShapeField("Head taper (%)", id: "head.taper_percent")
             }.onChange(of: headExpanded) { expanded in if expanded { headPreviewProjectID = store.selectedProjectID; store.viewer.requestHeadPreview() } }
+            HelpRow("Torso modelling", helpID: "torso.mode") {
+                Picker("Torso modelling", selection: torsoModeBinding) {
+                    Text("Off").tag("off")
+                    Text("Geometric").tag("geometric")
+                    Text("Acoustic (Not Available Yet)").tag("acoustic").disabled(true)
+                }.labelsHidden()
+            }
+            if torsoModeBinding.wrappedValue == "geometric" {
+                DisclosureGroup("Torso Shape", isExpanded: $torsoExpanded) {
+                    headShapeField("Torso width (mm)", id: "torso.width")
+                    headShapeField("Torso depth (mm)", id: "torso.depth")
+                    headShapeField("Torso height (mm)", id: "torso.height")
+                }.onChange(of: torsoExpanded) { expanded in if expanded { headPreviewProjectID = store.selectedProjectID; store.viewer.requestHeadPreview() } }
+            }
         }
         Section("Microphones") {
             LabeledContent("Position") {
@@ -363,13 +378,22 @@ struct ProjectInspectorView: View {
 
     private var headPreviewSettings: [String: String] {
         guard let settings = store.selectedProject?.settings.preprocessing else { return [:] }
-        var values = Dictionary(uniqueKeysWithValues: PreprocessingSettings.headShapeFields.map { ($0.id, settings[keyPath: $0.keyPath] ?? "") })
+        var values = Dictionary(uniqueKeysWithValues: PreprocessingSettings.geometryFields.map { ($0.id, settings[keyPath: $0.keyPath] ?? "") })
         values["distance"] = settings.earDistance ?? ""
+        values["torso.mode"] = settings.torsoMode ?? "off"
         return values
     }
 
+    var torsoModeBinding: Binding<String> {
+        Binding(get: { store.selectedProject?.settings.preprocessing.torsoMode ?? SettingsCatalog.text("preprocessing.torso_mode") },
+                set: { value in
+                    headPreviewProjectID = store.selectedProjectID
+                    store.updateSelectedProject { $0.settings.preprocessing.torsoMode = value }
+                })
+    }
+
     func headShapeField(_ title: String, id: String) -> some View {
-        let field = PreprocessingSettings.headShapeFields.first { $0.id == id }!
+        let field = PreprocessingSettings.geometryFields.first { $0.id == id }!
         let binding = Binding<String>(
             get: { store.selectedProject?.settings.preprocessing[keyPath: field.keyPath] ?? SettingsCatalog.text("preprocessing." + field.config) },
             set: { value in store.updateSelectedProject { $0.settings.preprocessing[keyPath: field.keyPath] = value } }

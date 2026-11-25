@@ -36,6 +36,14 @@ FIELDS = (
      "message": "Use a number greater than 0.", "stages": SIMULATION_STAGES},
     {"id": "head.taper_percent", "config": "preprocessing.head_taper_percent", "kind": "decimal",
      "message": "Enter a finite head taper strength in percent.", "stages": SIMULATION_STAGES},
+    {"id": "torso.mode", "config": "preprocessing.torso_mode", "kind": "text", "choices": ("off", "geometric"),
+     "message": "Choose Off or Geometric. Acoustic torso modelling is not available yet.", "stages": SIMULATION_STAGES},
+    {"id": "torso.width", "config": "preprocessing.torso_width_mm", "kind": "decimal", "exclusive_minimum": 0,
+     "message": "Use a dimension greater than 0 mm.", "stages": SIMULATION_STAGES},
+    {"id": "torso.depth", "config": "preprocessing.torso_depth_mm", "kind": "decimal", "exclusive_minimum": 0,
+     "message": "Use a dimension greater than 0 mm.", "stages": SIMULATION_STAGES},
+    {"id": "torso.height", "config": "preprocessing.torso_height_mm", "kind": "decimal", "exclusive_minimum": 0,
+     "message": "Use a dimension greater than 0 mm.", "stages": SIMULATION_STAGES},
     {"id": "numcalc.parallel_instances", "config": "numcalc.max_instances", "kind": "integer", "minimum": 1, "maximum": 1024,
      "message": "Use 1 to 1024 parallel instances.", "stages": ("numcalc",)},
     {"id": "numcalc.cpu_limit", "config": "numcalc.max_cpu_load", "kind": "integer", "minimum": 1, "maximum": 100,
@@ -108,7 +116,7 @@ def field_message(rule: dict, text: str) -> str | None:
     if not text:
         return None if rule.get("optional") else PARSE_MESSAGES.get(rule["kind"], rule["message"])
     if rule["kind"] == "text":
-        return None
+        return rule["message"] if "choices" in rule and text not in rule["choices"] else None
     value = number(text, rule["kind"])
     if value is None:
         return PARSE_MESSAGES[rule["kind"]]

@@ -92,7 +92,8 @@ def head_preview(command):
         result[side] = str(folder / f"{side}.stl")
     head(ears["left"], ears["right"], folder / "head.stl", radius_scale=settings.head_radius_scale, width_scale=settings.head_width_scale,
          height_scale=settings.head_height_scale, taper_percent=settings.head_taper_percent,
-         subdivisions=4)
+         subdivisions=4, torso_mode=settings.torso_mode, torso_width_mm=settings.torso_width_mm,
+         torso_depth_mm=settings.torso_depth_mm, torso_height_mm=settings.torso_height_mm)
     result["head"] = str(folder / "head.stl")
     return result
 

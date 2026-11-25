@@ -146,6 +146,10 @@ class PreprocessingConfig(BaseModel):
     head_width_scale: float = 1.39
     head_height_scale: float = 1.5
     head_taper_percent: float = Field(default=0.0, allow_inf_nan=False)
+    torso_mode: Literal["off", "geometric"] = "off"
+    torso_width_mm: float = Field(default=459.0, gt=0, allow_inf_nan=False)
+    torso_depth_mm: float = Field(default=238.68, gt=0, allow_inf_nan=False)
+    torso_height_mm: float = Field(default=134.2, gt=0, allow_inf_nan=False)
     ear_cut_clearance_scale: float = 1.3
     ear_cut_mode: Literal["ellipse", "projected_footprint", "exact"] = "ellipse"
     ear_canal_closer_mode: Literal["legacy", "interpolated"] = "legacy"

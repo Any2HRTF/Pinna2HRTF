@@ -1233,6 +1233,8 @@ public partial class MainWindow : Window
         meshGammaOppositeBox.Text = project?.Settings.Preprocessing.MeshGammaOpposite ?? "0.1";
         maxInstancesBox.Text = project?.Settings.NumCalc.MaxInstances ?? "1";
         maxCpuLoadBox.Text = project?.Settings.NumCalc.MaxCpuLoad ?? "90";
+        torsoModePicker.SelectedIndex = project?.Settings.Preprocessing.TorsoMode == "geometric" ? 1 : 0;
+        UpdateTorsoControls();
         adaptiveFmmLengthBox.IsChecked = project?.Settings.NumCalc.AdaptiveFmmLength ?? true;
         normalizeHrtfsBox.IsChecked = project?.Settings.Postprocessing?.Normalize ?? true;
         resampleHrirsBox.IsChecked = project?.Settings.Postprocessing?.ResampleHrirs ?? false;
@@ -1257,7 +1259,7 @@ public partial class MainWindow : Window
         if (id.StartsWith("scan_preparation.")) return Stage.ScanPreparation;
         if (id == "project.use_bezierppm" || id.StartsWith("inference.", StringComparison.OrdinalIgnoreCase)) return Stage.Inference;
         if (id.StartsWith("mesh2hrtf.", StringComparison.OrdinalIgnoreCase) || id.StartsWith("mesh_grading.", StringComparison.OrdinalIgnoreCase) ||
-            id.StartsWith("head.", StringComparison.OrdinalIgnoreCase)) return Stage.Preprocessing;
+            (id.StartsWith("head.", StringComparison.OrdinalIgnoreCase) || id.StartsWith("torso.", StringComparison.OrdinalIgnoreCase))) return Stage.Preprocessing;
         if (id.StartsWith("postprocessing.", StringComparison.OrdinalIgnoreCase)) return Stage.Postprocessing;
         return null;
     }
@@ -1300,6 +1302,7 @@ public partial class MainWindow : Window
 
     string CurrentSettingValue(string id) => textSettings.TryGetValue(id, out var binding) ? binding.Control.Text : id switch
     {
+        "torso.mode" => SelectedTorsoMode,
         "project.use_bezierppm" => (usePredictionsBox.IsChecked == true).ToString(),
         "scan_preparation.enabled" => (scanPreparationEnabledBox.IsChecked == true).ToString(),
         "scan_preparation.prepare_left" => (prepareLeftEarBox.IsChecked == true).ToString(),
@@ -1315,6 +1318,7 @@ public partial class MainWindow : Window
 
     string StoredSettingValue(ProjectRecord project, string id) => textSettings.TryGetValue(id, out var binding) ? binding.Read(project) ?? "" : id switch
     {
+        "torso.mode" => project.Settings.Preprocessing.TorsoMode,
         "project.use_bezierppm" => project.Settings.Inference.UsePredictionsForPreprocessing.ToString(),
         "scan_preparation.enabled" => project.Settings.ScanPreparation.Enabled.ToString(),
         "scan_preparation.prepare_left" => project.Settings.ScanPreparation.PrepareLeft.ToString(),
@@ -1379,7 +1383,7 @@ public partial class MainWindow : Window
     async Task HandleSettingChangeAsync(string id)
     {
         if (loading || selectedProject == null) return;
-        if (id.StartsWith("head.", StringComparison.Ordinal)) RequestHeadPreview(true);
+        if (id.StartsWith("head.", StringComparison.Ordinal) || id.StartsWith("torso.", StringComparison.Ordinal)) RequestHeadPreview(true);
         if (id == "mesh2hrtf.ear_distance") { await EditGeometryAsync("ear", earDistanceBox.Text); return; }
         var project = selectedProject;
         var desired = CurrentSettingValue(id);
@@ -1437,6 +1441,7 @@ public partial class MainWindow : Window
             case "scan_preparation.enabled": scanPreparationEnabledBox.IsChecked = bool.TryParse(value, out var scan) && scan; break;
             case "scan_preparation.prepare_left": prepareLeftEarBox.IsChecked = bool.TryParse(value, out var left) && left; break;
             case "scan_preparation.prepare_right": prepareRightEarBox.IsChecked = bool.TryParse(value, out var right) && right; break;
+            case "torso.mode": torsoModePicker.SelectedIndex = value == "geometric" ? 1 : 0; UpdateTorsoControls(); break;
             case "inference.model": modelPicker.SelectedItem = value; break;
             case "numcalc.adaptive_fmm": adaptiveFmmLengthBox.IsChecked = bool.TryParse(value, out var adaptive) && adaptive; break;
             case "postprocessing.normalize": normalizeHrtfsBox.IsChecked = bool.TryParse(value, out var normalize) && normalize; break;
@@ -1475,6 +1480,7 @@ public partial class MainWindow : Window
             project.Settings.ScanPreparation.ReviewedRight = null;
         }
         project.Settings.Preprocessing.EvaluationGrid = evaluationGridBox.Text.Trim();
+        project.Settings.Preprocessing.TorsoMode = SelectedTorsoMode;
         project.Settings.NumCalc.AdaptiveFmmLength = adaptiveFmmLengthBox.IsChecked == true;
         project.Settings.Postprocessing ??= new PostprocessingSettings();
         project.Settings.Postprocessing.Normalize = normalizeHrtfsBox.IsChecked == true;

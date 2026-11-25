@@ -49,6 +49,11 @@ enum AppPreferences {
         .init(key: "head_width_scale", config: "preprocessing.head_width_scale", rule: "head.width_scale"),
         .init(key: "head_height_scale", config: "preprocessing.head_height_scale", rule: "head.height_scale"),
         .init(key: "head_taper_percent", config: "preprocessing.head_taper_percent", rule: "head.taper_percent"),
+        .init(key: "torso_mode", config: "preprocessing.torso_mode", rule: "torso.mode"),
+        .init(key: "torso_width_mm", config: "preprocessing.torso_width_mm", rule: "torso.width"),
+        .init(key: "torso_depth_mm", config: "preprocessing.torso_depth_mm", rule: "torso.depth"),
+        .init(key: "torso_height_mm", config: "preprocessing.torso_height_mm", rule: "torso.height"),
+
         .init(key: "adaptive_fmm_length", config: "numcalc.adaptive_fmm_length", rule: nil),
         .init(key: "normalize", config: "postprocessing.normalize", rule: nil),
         .init(key: "level_offset_db", config: "postprocessing.level_offset_db", rule: "postprocessing.level_offset"),
@@ -123,6 +128,7 @@ enum AppPreferences {
             }
             let text = workflowText(field, in: stored).trimmingCharacters(in: .whitespacesAndNewlines)
             guard SettingsCatalog.check(values, id: rule) == nil else { continue }
+            if field.key == "torso_mode" { payload[field.key] = text; continue }
             payload[field.key] = Int(text).map { $0 as Any } ?? Double(text).map { $0 as Any }
         }
         return payload.compactMapValues { $0 }

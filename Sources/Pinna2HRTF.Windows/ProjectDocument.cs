@@ -37,6 +37,11 @@ internal static class ProjectDocument
             ["head.width_scale"] = pre.HeadWidthScale,
             ["head.height_scale"] = pre.HeadHeightScale,
             ["head.taper_percent"] = pre.HeadTaperPercent,
+            ["torso.mode"] = pre.TorsoMode,
+            ["torso.width"] = pre.TorsoWidthMM,
+            ["torso.depth"] = pre.TorsoDepthMM,
+            ["torso.height"] = pre.TorsoHeightMM,
+
             ["mesh_grading.min_edge_length"] = pre.MeshMinEdgeLength, ["mesh_grading.max_edge_length"] = pre.MeshMaxEdgeLength,
             ["mesh_grading.max_error"] = pre.MeshMaxError, ["mesh_grading.gamma"] = pre.MeshGamma, ["mesh_grading.gamma_opposite"] = pre.MeshGammaOpposite,
             ["numcalc.parallel_instances"] = p.Settings.NumCalc.MaxInstances, ["numcalc.cpu_limit"] = p.Settings.NumCalc.MaxCpuLoad,
@@ -138,8 +143,9 @@ internal static class ProjectDocument
             ("mesh_min_edge_length", "mesh_grading.min_edge_length", pre.MeshMinEdgeLength), ("mesh_max_edge_length", "mesh_grading.max_edge_length", pre.MeshMaxEdgeLength),
             ("mesh_max_error", "mesh_grading.max_error", pre.MeshMaxError), ("mesh_gamma", "mesh_grading.gamma", pre.MeshGamma), ("mesh_gamma_opposite", "mesh_grading.gamma_opposite", pre.MeshGammaOpposite) })
             Set("preprocessing", key, Numeric(id, text, "preprocessing." + key));
-        foreach (var (key, id, text) in new[] { ("head_radius_scale", "head.radius_scale", pre.HeadRadiusScale), ("head_width_scale", "head.width_scale", pre.HeadWidthScale), ("head_height_scale", "head.height_scale", pre.HeadHeightScale), ("head_taper_percent", "head.taper_percent", pre.HeadTaperPercent) })
+        foreach (var (key, id, text) in new[] { ("head_radius_scale", "head.radius_scale", pre.HeadRadiusScale), ("head_width_scale", "head.width_scale", pre.HeadWidthScale), ("head_height_scale", "head.height_scale", pre.HeadHeightScale), ("head_taper_percent", "head.taper_percent", pre.HeadTaperPercent), ("torso_width_mm", "torso.width", pre.TorsoWidthMM), ("torso_depth_mm", "torso.depth", pre.TorsoDepthMM), ("torso_height_mm", "torso.height", pre.TorsoHeightMM) })
             Set("preprocessing", key, Numeric(id, text, "preprocessing." + key));
+        Set("preprocessing", "torso_mode", pre.TorsoMode);
         Set("preprocessing", "skip_mesh_grading", false);
         Set("numcalc", "enabled", false);
         Set("numcalc", "max_instances", Numeric("numcalc.parallel_instances", num.MaxInstances, "numcalc.max_instances"));
@@ -174,6 +180,11 @@ internal static class ProjectDocument
         pre.HeadWidthScale = D("preprocessing", "head_width_scale");
         pre.HeadHeightScale = D("preprocessing", "head_height_scale");
         pre.HeadTaperPercent = D("preprocessing", "head_taper_percent");
+        pre.TorsoMode = S("preprocessing", "torso_mode", "off");
+        pre.TorsoWidthMM = D("preprocessing", "torso_width_mm");
+        pre.TorsoDepthMM = D("preprocessing", "torso_depth_mm");
+        pre.TorsoHeightMM = D("preprocessing", "torso_height_mm");
+
         scan.Enabled = Flag("scan_preparation", "enabled"); scan.ScanPath = S("scan_preparation", "scan_path", "");
         scan.OriginalScanPath = S("scan_preparation", "original_scan_path", scan.ScanPath);
         if (ReadAlignmentOriginal(scan.ScanPath) is string original && File.Exists(original))

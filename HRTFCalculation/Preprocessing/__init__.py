@@ -393,6 +393,10 @@ def run_preprocessing_pipeline(left_path, right_path, mesh_grading_executable, m
             width_scale=settings.head_width_scale,
             height_scale=settings.head_height_scale,
             taper_percent=settings.head_taper_percent,
+            torso_mode=settings.torso_mode,
+            torso_width_mm=settings.torso_width_mm,
+            torso_depth_mm=settings.torso_depth_mm,
+            torso_height_mm=settings.torso_height_mm,
         )
         emit_live_event("Cutting ear areas from the head mesh")
         logger("Cutting ear areas from dummy head")

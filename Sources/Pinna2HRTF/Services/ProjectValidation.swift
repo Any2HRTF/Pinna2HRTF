@@ -25,7 +25,8 @@ enum ProjectValidation {
             "scan.side_min": scan.sideMinMM, "scan.side_max": scan.sideMaxMM,
             "ear_model.method": project.workflowMethod?.rawValue ?? ""
         ]
-        for field in PreprocessingSettings.headShapeFields {
+        values["torso.mode"] = pre.torsoMode ?? SettingsCatalog.text("preprocessing.torso_mode")
+        for field in PreprocessingSettings.geometryFields {
             values[field.id] = pre[keyPath: field.keyPath] ?? SettingsCatalog.text("preprocessing." + field.config)
         }
         return values

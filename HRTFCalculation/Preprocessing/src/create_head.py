@@ -4,7 +4,7 @@ import trimesh
 from HRTFCalculation.LiveEvents import emit_live_event
 
 
-def head(left_ear, right_ear, export_path, radius_scale=1.01, width_scale=1.39, height_scale=1.5, taper_percent=0.0, subdivisions=7):
+def head(left_ear, right_ear, export_path, radius_scale=1.01, width_scale=1.39, height_scale=1.5, taper_percent=0.0, subdivisions=7, torso_mode="off", torso_width_mm=459.0, torso_depth_mm=238.68, torso_height_mm=134.2):
     ears = [("left", left_ear), ("right", right_ear)]
     ears = [(side, ear) for side, ear in ears if ear is not None]
     if not ears:
@@ -34,6 +34,12 @@ def head(left_ear, right_ear, export_path, radius_scale=1.01, width_scale=1.39, 
 
     dummy_head.apply_scale((width_scale, 1, height_scale))
 
+    if torso_mode == "geometric":
+        from HRTFCalculation.Preprocessing.src.create_torso import geometric_torso
+        emit_live_event("Joining the head, neck and geometric torso")
+        dummy_head = geometric_torso(dummy_head, radius, torso_width_mm, torso_depth_mm, torso_height_mm)
+    elif torso_mode != "off":
+        raise ValueError("Torso modelling must be off or geometric. Acoustic torso modelling is not available yet.")
     dummy_head.export(export_path)
     return radius
 
@@ -49,6 +55,10 @@ if __name__ == "__main__":
     parser.add_argument('--width-scale', type=float, default=1.39, help='Front-to-back scale relative to the ear-to-ear radius.')
     parser.add_argument('--height-scale', type=float, default=1.5)
     parser.add_argument('--taper-percent', type=float, default=0.0, help='Head taper strength: +100 equals +0.01 per mm; positive widens above the ear axis.')
+    parser.add_argument('--torso-mode', choices=('off', 'geometric'), default='off')
+    parser.add_argument('--torso-width-mm', type=float, default=459.0)
+    parser.add_argument('--torso-depth-mm', type=float, default=238.68)
+    parser.add_argument('--torso-height-mm', type=float, default=134.2)
     args = parser.parse_args()
 
     if not args.left_path and not args.right_path:
@@ -57,4 +67,4 @@ if __name__ == "__main__":
     right_ear = trimesh.load(args.right_path, force="mesh") if args.right_path else None
     export_path = args.export_path
 
-    radius = head(left_ear, right_ear, export_path, radius_scale=args.radius_scale, width_scale=args.width_scale, height_scale=args.height_scale, taper_percent=args.taper_percent)
+    radius = head(left_ear, right_ear, export_path, radius_scale=args.radius_scale, width_scale=args.width_scale, height_scale=args.height_scale, taper_percent=args.taper_percent, torso_mode=args.torso_mode, torso_width_mm=args.torso_width_mm, torso_depth_mm=args.torso_depth_mm, torso_height_mm=args.torso_height_mm)

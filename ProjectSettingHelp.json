@@ -434,5 +434,49 @@
     "title": "Auditory Modeling Toolbox folder",
     "description": "Legacy setting retained for compatibility. Python upsampling does not use AMT.",
     "publications": []
+  },
+  {
+    "id": "torso.mode",
+    "title": "Torso modelling",
+    "description": "Geometric modelling adds a closed neck and upper torso to the simulation mesh before the ears are cut and joined. Off keeps the head-only model. Acoustic torso modelling is not available yet.",
+    "publications": [
+      {
+        "title": "Algazi et al. (2001): The CIPIC HRTF Database",
+        "url": "https://escholarship.org/content/qt3d10j9jw/qt3d10j9jw.pdf"
+      }
+    ]
+  },
+  {
+    "id": "torso.width",
+    "title": "Torso width",
+    "description": "Maximum left-to-right width of the capped half-ellipsoid. Default: 459.00 mm. Neck diameter is calculated as 77% of the head width before taper.",
+    "publications": [
+      {
+        "title": "Algazi et al. (2001): The CIPIC HRTF Database",
+        "url": "https://escholarship.org/content/qt3d10j9jw/qt3d10j9jw.pdf"
+      }
+    ]
+  },
+  {
+    "id": "torso.depth",
+    "title": "Torso depth",
+    "description": "Maximum front-to-back depth of the capped half-ellipsoid. Default: 238.68 mm.",
+    "publications": [
+      {
+        "title": "Algazi et al. (2001): The CIPIC HRTF Database",
+        "url": "https://escholarship.org/content/qt3d10j9jw/qt3d10j9jw.pdf"
+      }
+    ]
+  },
+  {
+    "id": "torso.height",
+    "title": "Torso height",
+    "description": "Height from the flat bottom to the top of the torso. Default: 134.20 mm. The top stays 139.60 mm below the ear axis using fixed CIPIC head and neck proportions; the bottom and connecting neck are positioned automatically.",
+    "publications": [
+      {
+        "title": "Algazi et al. (2001): The CIPIC HRTF Database",
+        "url": "https://escholarship.org/content/qt3d10j9jw/qt3d10j9jw.pdf"
+      }
+    ]
   }
 ]

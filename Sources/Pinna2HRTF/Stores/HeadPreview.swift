@@ -16,7 +16,7 @@ extension ViewerModel {
         let ears = Dictionary(uniqueKeysWithValues: project.includedEars.compactMap { side in
             ArtifactScanner.preprocessingMesh(for: project, side: side).map { (side.rawValue, $0.path) }
         })
-        let parameters = values.keys.filter { $0.hasPrefix("head.") || $0 == "mesh2hrtf.ear_distance" }.sorted().map { "\($0)=\(values[$0]!)" }
+        let parameters = values.keys.filter { ($0.hasPrefix("head.") || $0.hasPrefix("torso.")) || $0 == "mesh2hrtf.ear_distance" }.sorted().map { "\($0)=\(values[$0]!)" }
         let sources = ears.keys.sorted().map { side in
             let path = ears[side]!
             return side + "=" + path + ":" + (ArtifactScanner.meshIdentity(URL(fileURLWithPath: path)) ?? "missing")
@@ -39,14 +39,14 @@ extension ViewerModel {
         }
         if !previous { selectedScene = SCNScene() }
         headPreviewMessage = "Updating head preview…"
-        if let error = values.keys.filter({ $0.hasPrefix("head.") || $0 == "mesh2hrtf.ear_distance" }).sorted().compactMap({ SettingsCatalog.check(values, id: $0) }).first {
+        if let error = values.keys.filter({ ($0.hasPrefix("head.") || $0.hasPrefix("torso.")) || $0 == "mesh2hrtf.ear_distance" }).sorted().compactMap({ SettingsCatalog.check(values, id: $0) }).first {
             headPreviewMessage = error
             return
         }
         guard !ears.isEmpty else { headPreviewMessage = "Choose an ear mesh to preview the head."; return }
         let folder = identity.deletingLastPathComponent().appendingPathComponent(UUID().uuidString, isDirectory: true)
-        var preprocessing: [String: Any] = [:]
-        for field in PreprocessingSettings.headShapeFields {
+        var preprocessing: [String: Any] = ["torso_mode": project.settings.preprocessing.torsoMode ?? SettingsCatalog.text("preprocessing.torso_mode")]
+        for field in PreprocessingSettings.geometryFields {
             if let text = project.settings.preprocessing[keyPath: field.keyPath] { preprocessing[field.config] = Double(text).map { $0 as Any } ?? text }
         }
         if let distance = project.settings.preprocessing.earDistance { preprocessing["ear_distance"] = Double(distance).map { $0 as Any } ?? distance }

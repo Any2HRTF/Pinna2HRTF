@@ -232,7 +232,7 @@ EDITABLE_SETTINGS = {
         "frequency_step_count", "source_assignment_face_count", "source_position_input_left",
         "source_position_input_right", "mesh_min_edge_length", "mesh_max_edge_length",
         "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite", "skip_mesh_grading", "head_radius_scale",
-        "head_width_scale", "head_height_scale", "head_taper_percent",
+        "head_width_scale", "head_height_scale", "head_taper_percent", "torso_mode", "torso_width_mm", "torso_depth_mm", "torso_height_mm",
     ),
     "numcalc": (
         "max_instances", "max_cpu_load", "adaptive_fmm_length",
@@ -522,7 +522,7 @@ def new_project_workflow(values: dict) -> dict:
     groups = {
         "scan_preparation": ("prepare_left", "prepare_right", "target_edge_mm", "left_margin_mm", "right_margin_mm", "side_min_mm", "side_max_mm", "require_manual_review"),
         "preprocessing": ("source_assignment_face_count", "mesh_min_edge_length", "mesh_max_edge_length", "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite",
-                          "head_radius_scale", "head_width_scale", "head_height_scale", "head_taper_percent"),
+                          "head_radius_scale", "head_width_scale", "head_height_scale", "head_taper_percent", "torso_mode", "torso_width_mm", "torso_depth_mm", "torso_height_mm"),
         "numcalc": ("adaptive_fmm_length",),
         "postprocessing": ("normalize", "level_offset_db", "resample_hrirs", "sampling_rate", "spatial_upsampling", "spatial_subdivisions", "spatial_normalize"),
     }

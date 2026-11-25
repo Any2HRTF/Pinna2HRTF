@@ -217,6 +217,8 @@ def preprocessing_input_signature(config: PipelineConfig) -> dict:
     settings = config.preprocessing.model_dump(mode="json")
     for key in ("enabled", "title", "pictures", "write_intermediates"):
         settings.pop(key, None)
+    if settings.get("torso_mode") == "off":
+        settings = {key: value for key, value in settings.items() if not key.startswith("torso_")}
     grid = Path(config.paths.evaluation_grid)
     if config.paths.evaluation_grid == DEFAULT_EVALUATION_GRID:
         grid = BUNDLED_EVALUATION_GRID_PATH

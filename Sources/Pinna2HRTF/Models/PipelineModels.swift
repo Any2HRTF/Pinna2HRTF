@@ -221,12 +221,21 @@ struct PreprocessingSettings: Codable, Equatable {
     var headWidthScale: String?
     var headHeightScale: String?
     var headTaperPercent: String?
+    var torsoMode: String?
+    var torsoWidthMM: String?
+    var torsoDepthMM: String?
+    var torsoHeightMM: String?
 
-    static let headShapeFields: [(keyPath: WritableKeyPath<PreprocessingSettings, String?>, config: String, id: String)] = [
+
+    static let geometryFields: [(keyPath: WritableKeyPath<PreprocessingSettings, String?>, config: String, id: String)] = [
         (\.headRadiusScale, "head_radius_scale", "head.radius_scale"),
         (\.headWidthScale, "head_width_scale", "head.width_scale"),
         (\.headHeightScale, "head_height_scale", "head.height_scale"),
         (\.headTaperPercent, "head_taper_percent", "head.taper_percent"),
+        (\.torsoWidthMM, "torso_width_mm", "torso.width"),
+        (\.torsoDepthMM, "torso_depth_mm", "torso.depth"),
+        (\.torsoHeightMM, "torso_height_mm", "torso.height"),
+
     ]
 }
 
