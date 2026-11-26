@@ -118,7 +118,6 @@ struct ProjectDefaultsSections: View {
 struct SimulationDefaultsRows: View {
     @AppStorage(AppPreferences.workflow) private var workflowJSON = ""
     @State private var gradingExpanded = false
-    @State private var headExpanded = false
 
     private var stored: [String: Any] {
         (try? JSONSerialization.jsonObject(with: Data(workflowJSON.utf8)) as? [String: Any]) ?? [:]
@@ -161,27 +160,57 @@ struct SimulationDefaultsRows: View {
             numberField("Gamma", key: "mesh_gamma")
             numberField("Gamma opposite", key: "mesh_gamma_opposite")
         }
-        DisclosureGroup("Head Shape", isExpanded: $headExpanded) {
+    }
+}
+
+struct HeadTorsoDefaultsSections: View {
+    @AppStorage(AppPreferences.workflow) private var workflowJSON = ""
+
+    private var stored: [String: Any] {
+        (try? JSONSerialization.jsonObject(with: Data(workflowJSON.utf8)) as? [String: Any]) ?? [:]
+    }
+
+    private func field(_ key: String) -> AppPreferences.WorkflowField {
+        AppPreferences.workflowFields.first { $0.key == key }!
+    }
+
+    private func text(_ key: String) -> Binding<String> {
+        Binding(get: { AppPreferences.workflowText(field(key), in: stored) }, set: { value in
+            var values = stored
+            values[key] = value
+            AppPreferences.storeWorkflow(values)
+        })
+    }
+
+    private func numberField(_ title: String, key: String) -> some View {
+        let rule = field(key).rule ?? key
+        return LabeledTextField(title, helpID: rule, text: text(key),
+                                validationError: SettingsCatalog.check(AppPreferences.workflowFormValues(stored), id: rule))
+    }
+
+    var body: some View {
+        Section("Head") {
             numberField("Ear-to-ear radius scale", key: "head_radius_scale")
             numberField("Front-to-back scale", key: "head_width_scale")
             numberField("Height scale", key: "head_height_scale")
             numberField("Head taper (%)", key: "head_taper_percent")
         }
-        HelpRow("Torso modelling", helpID: "torso.mode") {
-            Picker("Torso modelling", selection: text("torso_mode")) {
-                Text("Off").tag("off")
-                Text("Geometric").tag("geometric")
+        Section("Torso") {
+            HelpRow("Torso modelling", helpID: "torso.mode") {
+                Picker("Torso modelling", selection: text("torso_mode")) {
+                    Text("Off").tag("off")
+                    Text("Geometric").tag("geometric")
+                }
+                .labelsHidden()
+                .fixedSize()
             }
-            .labelsHidden()
-            .fixedSize()
-        }
-        if AppPreferences.workflowText(field("torso_mode"), in: stored) == "geometric" {
-            numberField("Torso width (mm)", key: "torso_width_mm")
-            numberField("Torso depth (mm)", key: "torso_depth_mm")
-            numberField("Torso height (mm)", key: "torso_height_mm")
+            if AppPreferences.workflowText(field("torso_mode"), in: stored) == "geometric" {
+                numberField("Torso width (mm)", key: "torso_width_mm")
+                numberField("Torso depth (mm)", key: "torso_depth_mm")
+                numberField("Torso height (mm)", key: "torso_height_mm")
+            }
         }
     }
-
 }
 
 struct AdaptiveFMMDefaultToggle: View {

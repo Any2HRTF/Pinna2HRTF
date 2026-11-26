@@ -27,7 +27,7 @@ struct HeadGeometryControls: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            LabeledTextField("Ear distance from head center (mm)", helpID: "mesh2hrtf.ear_distance", text: $distance)
+            LabeledTextField("Ear distance (mm)", helpID: "mesh2hrtf.ear_distance", text: $distance)
                 .focused($focused).onSubmit { commit() }
                 .id("ear-distance")
             HStack(alignment: .top, spacing: 12) {

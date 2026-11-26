@@ -2,12 +2,12 @@ import Foundation
 import AppKit
 
 enum WorkflowStep: Int, CaseIterable, Identifiable {
-    case inputs, prepare, simulation, calculate, results
+    case inputs, prepare, head, simulation, calculate, results
     var id: Int { rawValue }
-    var title: String { ["Project Setup", "Ear preparation & modelling", "Simulation setup", "Calculation", "SOFA export"][rawValue] }
+    var title: String { ["Project Setup", "Ear preparation & modelling", "Head & torso", "Simulation setup", "Calculation", "SOFA export"][rawValue] }
     var stage: Stage? {
         switch self {
-        case .inputs: nil
+        case .inputs, .head: nil
         case .prepare: .scanPreparation
         case .simulation: .preprocessing
         case .calculate: .numcalc
@@ -155,6 +155,12 @@ extension AppStore {
     func workflowStatus(_ step: WorkflowStep) -> String {
         guard let project = selectedProject else { return "Needs input" }
         if step == .inputs { return workflowInputIssue == nil ? "Complete" : "Needs input" }
+        if step == .head {
+            if workflowSides.isEmpty { return "Awaiting project setup" }
+            let values = ProjectValidation.formValues(for: project)
+            let invalid = values.keys.contains { ($0.hasPrefix("head.") || $0.hasPrefix("torso.") || $0 == "mesh2hrtf.ear_distance") && SettingsCatalog.check(values, id: $0) != nil }
+            return invalid ? "Needs input" : "Complete"
+        }
         if step == .prepare {
             if project.scanPreparation.enabled {
                 let scanState = stageStates[.scanPreparation] ?? .ready

@@ -113,6 +113,7 @@ struct SettingsPaneView: View {
             Text("Project Files")
         }
         ProjectDefaultsSections(store: store)
+        HeadTorsoDefaultsSections()
         Section {
             locationPicker("Evaluation grid", helpID: "mesh2hrtf.evaluation_grid", path: $evaluationGrid,
                            defaultTitle: "ARI Grid (91 directions)", choose: chooseGrid)

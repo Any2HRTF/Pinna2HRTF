@@ -3,7 +3,6 @@ import AppKit
 
 struct ProjectInspectorView: View {
     @ObservedObject var store: AppStore
-    @State private var headExpanded = false
     @State private var headPreviewProjectID: UUID?
 
     var body: some View {
@@ -23,8 +22,9 @@ struct ProjectInspectorView: View {
             }
         }
         .onChange(of: headPreviewSettings) { _ in if headPreviewProjectID == store.selectedProjectID { store.viewer.requestHeadPreview() } }
-        .onChange(of: store.selectedProjectID) { _ in headExpanded = false }
-        .onChange(of: store.earDistanceFocusRequest) { _ in store.workflowStep = .simulation }
+        .onChange(of: store.workflowStep) { step in if step == .head { showHeadPreview() } }
+        .onChange(of: store.selectedProjectID) { _ in if store.workflowStep == .head { showHeadPreview() } }
+        .onChange(of: store.earDistanceFocusRequest) { _ in store.workflowStep = .head }
     }
 
     private var stepList: some View {
@@ -67,6 +67,7 @@ struct ProjectInspectorView: View {
         switch store.workflowStep {
         case .inputs: projectSections
         case .prepare: prepareSections
+        case .head: headSections
         case .simulation: simulationSections
         case .calculate: calculationSections
         case .results: exportSections
@@ -205,15 +206,20 @@ struct ProjectInspectorView: View {
         }
     }
 
-    @ViewBuilder var simulationSections: some View {
+    private func showHeadPreview() {
+        headPreviewProjectID = store.selectedProjectID
+        store.viewer.requestHeadPreview()
+    }
+
+    @ViewBuilder var headSections: some View {
         Section("Head") {
             HeadGeometryControls(store: store)
-            DisclosureGroup("Head Shape", isExpanded: $headExpanded) {
-                headShapeField("Ear-to-ear radius scale", id: "head.radius_scale")
-                headShapeField("Front-to-back scale", id: "head.width_scale")
-                headShapeField("Height scale", id: "head.height_scale")
-                headShapeField("Head taper (%)", id: "head.taper_percent")
-            }.onChange(of: headExpanded) { expanded in if expanded { headPreviewProjectID = store.selectedProjectID; store.viewer.requestHeadPreview() } }
+            headShapeField("Ear-to-ear radius scale", id: "head.radius_scale")
+            headShapeField("Front-to-back scale", id: "head.width_scale")
+            headShapeField("Height scale", id: "head.height_scale")
+            headShapeField("Head taper (%)", id: "head.taper_percent")
+        }
+        Section("Torso") {
             HelpRow("Torso modelling", helpID: "torso.mode") {
                 Picker("Torso modelling", selection: torsoModeBinding) {
                     Text("Off").tag("off")
@@ -228,6 +234,9 @@ struct ProjectInspectorView: View {
                 headShapeField("Torso height (mm)", id: "torso.height")
             }
         }
+    }
+
+    @ViewBuilder var simulationSections: some View {
         Section("Microphones") {
             LabeledContent("Position") {
                 HStack(spacing: 6) {
