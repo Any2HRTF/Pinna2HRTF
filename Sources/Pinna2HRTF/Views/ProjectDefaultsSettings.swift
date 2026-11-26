@@ -196,15 +196,9 @@ struct HeadTorsoDefaultsSections: View {
             numberField("Head taper (%)", key: "head_taper_percent")
         }
         Section("Torso") {
-            HelpRow("Torso modelling", helpID: "torso.mode") {
-                Picker("Torso modelling", selection: text("torso_mode")) {
-                    Text("Off").tag("off")
-                    Text("Geometric").tag("geometric")
-                }
-                .labelsHidden()
-                .fixedSize()
-            }
-            if AppPreferences.workflowText(field("torso_mode"), in: stored) == "geometric" {
+            DefaultsOption(title: "Geometric torso", helpID: "torso.mode", isOn: Binding(
+                get: { text("torso_mode").wrappedValue == "geometric" },
+                set: { text("torso_mode").wrappedValue = $0 ? "geometric" : "off" })) {
                 numberField("Torso width (mm)", key: "torso_width_mm")
                 numberField("Torso depth (mm)", key: "torso_depth_mm")
                 numberField("Torso height (mm)", key: "torso_height_mm")

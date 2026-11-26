@@ -220,15 +220,8 @@ struct ProjectInspectorView: View {
             headShapeField("Head taper (%)", id: "head.taper_percent")
         }
         Section("Torso") {
-            HelpRow("Torso modelling", helpID: "torso.mode") {
-                Picker("Torso modelling", selection: torsoModeBinding) {
-                    Text("Off").tag("off")
-                    Text("Geometric").tag("geometric")
-                }
-                .labelsHidden()
-                .fixedSize()
-            }
-            if torsoModeBinding.wrappedValue == "geometric" {
+            SettingToggle(title: "Geometric torso", helpID: "torso.mode", isOn: torsoEnabledBinding)
+            if torsoEnabledBinding.wrappedValue {
                 headShapeField("Torso width (mm)", id: "torso.width")
                 headShapeField("Torso depth (mm)", id: "torso.depth")
                 headShapeField("Torso height (mm)", id: "torso.height")
@@ -389,6 +382,10 @@ struct ProjectInspectorView: View {
         values["distance"] = settings.earDistance ?? ""
         values["torso.mode"] = settings.torsoMode ?? "off"
         return values
+    }
+
+    var torsoEnabledBinding: Binding<Bool> {
+        Binding(get: { torsoModeBinding.wrappedValue == "geometric" }, set: { torsoModeBinding.wrappedValue = $0 ? "geometric" : "off" })
     }
 
     var torsoModeBinding: Binding<String> {
