@@ -146,7 +146,7 @@ class PreprocessingConfig(BaseModel):
     head_width_scale: float = 1.39
     head_height_scale: float = 1.5
     head_taper_percent: float = Field(default=0.0, allow_inf_nan=False)
-    torso_mode: Literal["off", "geometric"] = "off"
+    torso_mode: Literal["off", "geometric", "acoustic"] = "off"
     torso_width_mm: float = Field(default=459.0, gt=0, allow_inf_nan=False)
     torso_depth_mm: float = Field(default=238.68, gt=0, allow_inf_nan=False)
     torso_height_mm: float = Field(default=134.2, gt=0, allow_inf_nan=False)
@@ -242,6 +242,21 @@ class PostprocessingConfig(BaseModel):
         return value
 
 
+class AcousticTorsoConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    gain: float = Field(default=1 / 3, ge=0, allow_inf_nan=False)
+    min_source_elevation_deg: float | None = Field(default=None, ge=-90, le=90, allow_inf_nan=False)
+    max_angular_gap_deg: float = Field(default=12.0, gt=0, lt=90, allow_inf_nan=False)
+    symmetry: Literal["auto", "require", "off"] = "auto"
+    interpolation: Literal["aligned_idw", "nearest"] = "aligned_idw"
+    missing_policy: Literal["error", "skip"] = "error"
+    delay_model: Literal["algazi", "reijniers"] = "algazi"
+    model_source_distance_m: float = Field(default=100.0, gt=0, allow_inf_nan=False)
+    apply_shadow: bool = True
+    normalize_reflection_mix: bool = True
+
+
 class UIConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -263,6 +278,13 @@ class PipelineConfig(BaseModel):
     numcalc: NumCalcConfig = Field(default_factory=NumCalcConfig)
     postprocessing: PostprocessingConfig = Field(default_factory=PostprocessingConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
+    acoustic_torso: AcousticTorsoConfig = Field(default_factory=AcousticTorsoConfig)
+
+    @model_validator(mode="after")
+    def acoustic_hrir_output(self):
+        if self.preprocessing.torso_mode == "acoustic" and not self.preprocessing.compute_hrirs:
+            raise ValueError("Acoustic torso modelling requires preprocessing.compute_hrirs: true.")
+        return self
 
     def resolved(self, base_dir: Path | None = None) -> "PipelineConfig":
         clone = self.model_copy(deep=True)

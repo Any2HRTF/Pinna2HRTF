@@ -101,6 +101,9 @@ def signature(config, stage):
         settings.pop(option, None)
     result = {"settings": settings, "preprocessing": preprocessing_input_signature(config),
               "exports": {p.relative_to(destination).as_posix(): sha256(p) for p in exports}, "ears": {}}
+    if config.preprocessing.torso_mode == "acoustic":
+        from .AcousticTorso import export_identity
+        result["acoustic_torso"] = export_identity(config)
     for side, ear in zip(("left", "right"), input_paths(config)):
         if ear is not None:
             files = sorted((root / "Projects" / side.title() / "Output2HRTF").glob("*.sofa"))

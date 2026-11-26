@@ -13,7 +13,7 @@ STEPS = {
 }
 
 
-MACHINE_COMMANDS = ("project", "mesh", "pressure", "fit-worker", "outputs", "output-worker")
+MACHINE_COMMANDS = ("torso", "project", "mesh", "pressure", "fit-worker", "outputs", "output-worker")
 
 
 def cli() -> None:

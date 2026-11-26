@@ -234,6 +234,10 @@ EDITABLE_SETTINGS = {
         "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite", "skip_mesh_grading", "head_radius_scale",
         "head_width_scale", "head_height_scale", "head_taper_percent", "torso_mode", "torso_width_mm", "torso_depth_mm", "torso_height_mm",
     ),
+    "acoustic_torso": (
+        "gain", "min_source_elevation_deg", "max_angular_gap_deg", "symmetry", "interpolation",
+        "missing_policy", "delay_model", "model_source_distance_m", "apply_shadow", "normalize_reflection_mix",
+    ),
     "numcalc": (
         "max_instances", "max_cpu_load", "adaptive_fmm_length",
     ),
@@ -527,10 +531,12 @@ def new_project_workflow(values: dict) -> dict:
         "postprocessing": ("normalize", "level_offset_db", "resample_hrirs", "sampling_rate", "spatial_upsampling", "spatial_subdivisions", "spatial_normalize"),
     }
     workflow = import_legacy_head_settings(values.get("workflow", {}))
-    allowed = {key for keys in groups.values() for key in keys} | {"full_head_scan", "ear_model_method", "inference_model"}
+    allowed = {key for keys in groups.values() for key in keys} | {"full_head_scan", "ear_model_method", "inference_model", "acoustic_torso"}
     if not isinstance(workflow, dict) or workflow.keys() - allowed:
         raise ValueError("Unsupported new-project workflow defaults.")
     settings = {section: {key: workflow[key] for key in keys if key in workflow} for section, keys in groups.items()}
+    from .Config import AcousticTorsoConfig
+    settings["acoustic_torso"] = AcousticTorsoConfig.model_validate(workflow.get("acoustic_torso", {})).model_dump(mode="json")
     settings["scan_preparation"]["enabled"] = workflow.get("full_head_scan", False)
     method = workflow.get("ear_model_method", "none")
     settings["ui"] = {"ear_model_method": method}

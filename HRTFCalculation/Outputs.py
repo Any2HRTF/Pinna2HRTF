@@ -14,6 +14,7 @@ from .RunConfig import MANIFEST_RELATIVE, SLURM_RECORD, _DOTNET_EPOCH_TICKS, _ou
 EDITOR_FOLDERS = {"meshedits", "manual ppm"}
 STAGES = ("Scan-Preparation", "Inference", "Preprocessing", "Numcalc", "Postprocessing")
 FILES = (
+    ("Preprocessing", re.compile(r"^Intermediates/AcousticTorsoGrids/[0-9a-f]{64}/((requested/)?(Nodes|Elements)\.txt|torso_grid_manifest\.json|pinna_torso_grid\.json)$", re.IGNORECASE)),
     ("Postprocessing", re.compile(r"^HRTF/Upsampled/HRIR_[^/]+/(hrtf_Nd=[0-5](_dense)?\.sofa|upsampling_report\.(txt|mat)|upsampling\.json)$", re.IGNORECASE)),
     ("Postprocessing", re.compile(r"^HRTF/\.pinna2hrtf-upsampling-[a-z0-9_]{8}/(plan\.json|Upsampled/HRIR_[^/]+/(hrtf_Nd=[0-5](_dense)?\.sofa|upsampling_report\.(txt|mat)|upsampling\.json))$", re.IGNORECASE)),
     ("Preprocessing", re.compile(r"^Manual PPM/((Left|Right)\.(stl|json|blend[0-9]*)|PPM\.blend[0-9]*|Templates/[0-9a-f-]{36}-PPM\.blend[0-9]*)$", re.IGNORECASE)),
@@ -38,6 +39,7 @@ FILES = (
 )
 
 DIRECTORIES = (
+    ("Preprocessing", re.compile(r"^Intermediates/AcousticTorsoGrids(/[0-9a-f]{64}(/requested)?)?$", re.IGNORECASE)),
     ("Preprocessing", re.compile(r"^Manual PPM(/Templates)?$", re.IGNORECASE)),
     ("Scan-Preparation", re.compile(r"^MeshEdits$", re.IGNORECASE)),
     ("Scan-Preparation", re.compile(r"^Prepared$", re.IGNORECASE)),
@@ -323,6 +325,9 @@ def stage_outputs(config, stage, dry_run):
         return
     inputs = [p for p in (config.paths.left_ear, config.paths.right_ear, config.scan_preparation.scan_path, config.scan_preparation.original_scan_path,
                           config.inference.model_config_file, config.inference.model_checkpoint) if p]
+    if config.preprocessing.torso_mode == "acoustic":
+        from .AcousticTorso import source_grid
+        inputs.append(source_grid(config))
     store = Outputs({"root": str(root), "inputs": inputs, "output_folder": config.postprocessing.output_sofa_dir})
     with store.locked():
         store.begin(stage)

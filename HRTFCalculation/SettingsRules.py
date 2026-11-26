@@ -36,14 +36,22 @@ FIELDS = (
      "message": "Use a number greater than 0.", "stages": SIMULATION_STAGES},
     {"id": "head.taper_percent", "config": "preprocessing.head_taper_percent", "kind": "decimal",
      "message": "Enter a finite head taper strength in percent.", "stages": SIMULATION_STAGES},
-    {"id": "torso.mode", "config": "preprocessing.torso_mode", "kind": "text", "choices": ("off", "geometric"),
-     "message": "Choose Off or Geometric. Acoustic torso modelling is not available yet.", "stages": SIMULATION_STAGES},
+    {"id": "torso.mode", "config": "preprocessing.torso_mode", "kind": "text", "choices": ("off", "geometric", "acoustic"),
+     "message": "Choose Off, Geometric or Acoustic.", "stages": SIMULATION_STAGES},
     {"id": "torso.width", "config": "preprocessing.torso_width_mm", "kind": "decimal", "exclusive_minimum": 0,
      "message": "Use a dimension greater than 0 mm.", "stages": SIMULATION_STAGES},
     {"id": "torso.depth", "config": "preprocessing.torso_depth_mm", "kind": "decimal", "exclusive_minimum": 0,
      "message": "Use a dimension greater than 0 mm.", "stages": SIMULATION_STAGES},
     {"id": "torso.height", "config": "preprocessing.torso_height_mm", "kind": "decimal", "exclusive_minimum": 0,
      "message": "Use a dimension greater than 0 mm.", "stages": SIMULATION_STAGES},
+    {"id": "acoustic_torso.gain", "config": "acoustic_torso.gain", "kind": "decimal", "minimum": 0,
+     "message": "Use a reflection gain of 0 or greater.", "stages": ("postprocessing",)},
+    {"id": "acoustic_torso.model_source_distance_m", "config": "acoustic_torso.model_source_distance_m", "kind": "decimal", "exclusive_minimum": 0,
+     "message": "Use a positive model source distance in metres.", "stages": ("postprocessing",)},
+    {"id": "acoustic_torso.max_angular_gap_deg", "config": "acoustic_torso.max_angular_gap_deg", "kind": "decimal", "exclusive_minimum": 0, "exclusive_maximum": 90,
+     "message": "Use an angular gap greater than 0 and less than 90 degrees.", "stages": SIMULATION_STAGES},
+    {"id": "acoustic_torso.min_source_elevation_deg", "config": "acoustic_torso.min_source_elevation_deg", "kind": "decimal", "minimum": -90, "maximum": 90, "optional": True,
+     "message": "Use an elevation from -90 to 90 degrees, or leave it blank for all directions.", "stages": SIMULATION_STAGES},
     {"id": "numcalc.parallel_instances", "config": "numcalc.max_instances", "kind": "integer", "minimum": 1, "maximum": 1024,
      "message": "Use 1 to 1024 parallel instances.", "stages": ("numcalc",)},
     {"id": "numcalc.cpu_limit", "config": "numcalc.max_cpu_load", "kind": "integer", "minimum": 1, "maximum": 100,
@@ -125,6 +133,8 @@ def field_message(rule: dict, text: str) -> str | None:
     if "exclusive_minimum" in rule and value <= rule["exclusive_minimum"]:
         return rule["message"]
     if "maximum" in rule and value > rule["maximum"]:
+        return rule["message"]
+    if "exclusive_maximum" in rule and value >= rule["exclusive_maximum"]:
         return rule["message"]
     if "multiple_of" in rule and value % rule["multiple_of"]:
         return rule["message"]

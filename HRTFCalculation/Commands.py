@@ -43,7 +43,7 @@ def run_command(command):
             result = project()
         else:
             argparse.ArgumentParser(prog=f"Pinna2HRTF {command}").parse_args()
-            module = {"mesh": "MeshEditing", "pressure": "PressureField", "outputs": "Outputs"}[command]
+            module = {"torso": "AcousticTorso", "mesh": "MeshEditing", "pressure": "PressureField", "outputs": "Outputs"}[command]
             execute = importlib.import_module("." + module, __package__).execute
             result = execute(json.load(sys.stdin))
     print(json.dumps(result, allow_nan=False))

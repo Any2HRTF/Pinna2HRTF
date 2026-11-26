@@ -219,6 +219,10 @@ def preprocessing_input_signature(config: PipelineConfig) -> dict:
         settings.pop(key, None)
     if settings.get("torso_mode") == "off":
         settings = {key: value for key, value in settings.items() if not key.startswith("torso_")}
+    if config.preprocessing.torso_mode == "acoustic":
+        from .AcousticTorso import setup_spec
+        settings = {key: value for key, value in settings.items() if key not in ("torso_width_mm", "torso_depth_mm", "torso_height_mm")}
+        settings["acoustic_torso_grid"] = setup_spec(config)
     grid = Path(config.paths.evaluation_grid)
     if config.paths.evaluation_grid == DEFAULT_EVALUATION_GRID:
         grid = BUNDLED_EVALUATION_GRID_PATH
@@ -240,8 +244,11 @@ def preprocessing_input_signature(config: PipelineConfig) -> dict:
 def validate_preprocessing_inputs(config: PipelineConfig, logger: Logger, allow_legacy: bool = False) -> None:
     from .StageReceipt import StageNotCurrent, preprocessing_outputs_match
     path = config.paths.output_dir / PREPROCESSING_INPUT_RECEIPT
+    if config.preprocessing.torso_mode == "acoustic":
+        from .AcousticTorso import validate_grid
+        validate_grid(config)
     if not path.exists():
-        if allow_legacy:
+        if allow_legacy and config.preprocessing.torso_mode != "acoustic":
             if not preprocessing_outputs_match(config):
                 raise StageNotCurrent("The generated solver inputs changed. Run preprocessing again.")
             logger("Legacy preprocessing has no shared input receipt; proceeding with the existing simulation records. Current desktop preprocessing checks still apply.")
@@ -265,6 +272,11 @@ def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
     if config.inference.use_predictions_for_preprocessing and not config.manual_ppm.enabled:
         from .StageReceipt import require_current_inference
         require_current_inference(config, [side for side, path in (("left", left_path), ("right", right_path)) if path is not None])
+    evaluation_grid = config.paths.evaluation_grid
+    if config.preprocessing.torso_mode == "acoustic":
+        from .AcousticTorso import prepare_grid
+        emit_live_event("Checking and extending the acoustic torso evaluation grid")
+        evaluation_grid = str(prepare_grid(config, logger))
     signature = preprocessing_input_signature(config)
     run_preprocessing_pipeline(
         left_path=left_path,
@@ -272,7 +284,7 @@ def run_preprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) -> 
         output_dir=config.paths.output_dir,
         mesh_grading_executable=config.paths.mesh_grading_executable,
         mesh2hrtf_path=config.paths.mesh2hrtf_path,
-        evaluation_grid=config.paths.evaluation_grid,
+        evaluation_grid=evaluation_grid,
         preprocessing=config.preprocessing,
         logger=logger,
     )
@@ -658,6 +670,9 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
     destination = output_dir.resolve()
     protected = [root / name for name in ("Input", "Projects", "Intermediates", "Prepared", "Manual PPM", "MeshEdits", "Logs", ".pinna2hrtf")]
     protected += [p.resolve() for p in (config.paths.left_ear, config.paths.right_ear, config.scan_preparation.scan_path) if p is not None]
+    if config.preprocessing.torso_mode == "acoustic":
+        from .AcousticTorso import source_grid
+        protected.append(source_grid(config).resolve())
     protected += [Path(p).resolve() for p in json.loads(os.environ.get("PINNA2HRTF_PROTECTED_INPUTS", "[]")) if p]
     if destination == destination.parent or destination == root or destination in root.parents or any(p == destination or p in destination.parents or destination in p.parents for p in protected):
         raise ValueError("Choose a separate SOFA output subfolder without inputs or project work.")
@@ -666,8 +681,10 @@ def run_postprocessing(config: PipelineConfig, dry_run: bool, logger: Logger) ->
     published = False
     try:
         _export_postprocessing(config, staging, logger)
+        if config.preprocessing.torso_mode == "acoustic":
+            validate_preprocessing_inputs(config, logger)
         with _output_manifest_lock(root) as can_record:
-            published_files = _publish_export(staging, destination, config.postprocessing.overwrite, root)
+            published_files = _publish_export(staging, destination, config.postprocessing.overwrite, root, retire_previous=config.preprocessing.torso_mode == "acoustic")
             if can_record and destination.is_relative_to(root):
                 _record_published_outputs(root, published_files, logger)
             else:
@@ -779,11 +796,12 @@ def _record_published_outputs(project_root: Path, files: list[Path], logger: Log
     logger(f"Recorded {len(files)} published files in {manifest}")
 
 
-def _publish_export(staging, destination, overwrite, project_root=None) -> list[Path]:
+def _publish_export(staging, destination, overwrite, project_root=None, retire_previous=False) -> list[Path]:
     destination.mkdir(parents=True, exist_ok=True)
     backups = staging / ".backups"
     backups.mkdir()
     installed = []
+    retired = []
     from .Outputs import classify, write_json
     from .Project import publish_copy
     external = project_root is not None and not destination.is_relative_to(project_root)
@@ -793,6 +811,26 @@ def _publish_export(staging, destination, overwrite, project_root=None) -> list[
     external_files = json.loads(ledger.read_text(encoding="utf-8-sig")) if ledger and ledger.exists() else {}
     owned_files = _read_output_manifest(project_root)["Files"] if project_root and not external else {}
     try:
+        if retire_previous:
+            planned = {path.relative_to(staging) for path in staging.rglob("*") if path.is_file()}
+            candidates = set(destination.rglob("*.sofa"))
+            for key, info in (external_files if external else owned_files).items():
+                target = Path(key) if external else project_root / key
+                if target.is_relative_to(destination) and target.is_file() and (external or info.get("Stage") == "Postprocessing"):
+                    candidates.add(target)
+            for target in sorted(candidates):
+                relative = target.relative_to(destination)
+                if relative in planned:
+                    continue
+                info = external_files.get(str(target)) if external else owned_files.get(_manifest_key(owned_files, target.relative_to(project_root).as_posix()) or "")
+                expected = info if external else (info or {}).get("Sha256")
+                if not overwrite or target.is_symlink() or any(p.is_symlink() for p in target.parents) or not expected or sha256(target).upper() != str(expected).upper():
+                    raise FileExistsError(f"Preserving an unowned or changed export: {target}. Choose a separate SOFA output folder.")
+                backup = backups / "retired" / relative
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                target.replace(backup)
+                retired.append((target, backup))
+                external_files.pop(str(target), None)
         for source in list(staging.rglob("*")):
             if not source.is_file() or backups in source.parents:
                 continue
@@ -826,9 +864,10 @@ def _publish_export(staging, destination, overwrite, project_root=None) -> list[
         if ledger:
             if not any(target.suffix.lower() == ".sofa" for target, _ in installed):
                 raise ValueError("Postprocessing produced no SOFA files")
+            ledger.parent.mkdir(parents=True, exist_ok=True)
             write_json(ledger, external_files)
     except BaseException:
-        for target, backup in reversed(installed):
+        for target, backup in reversed(installed + retired):
             if backup.exists():
                 backup.replace(target)
             else:
@@ -862,12 +901,16 @@ def _export_postprocessing(config, output_dir, logger):
         emit_live_event(f"Converting {project.name} results")
         validate_hrir_frequencies(project)
         m2h.output2hrtf(str(project))
-    if config.postprocessing.resample_hrirs:
+        if config.preprocessing.torso_mode == "geometric":
+            from .AcousticTorso import mark_geometric_exports
+            mark_geometric_exports(project / "Output2HRTF")
+    acoustic = config.preprocessing.torso_mode == "acoustic"
+    if config.postprocessing.resample_hrirs and not acoustic:
         from .Postprocessing.postprocessing import resample_hrir_files
         for project in projects:
             emit_live_event(f"Resampling {project.name} HRIRs")
             resample_hrir_files(project / "Output2HRTF", config.postprocessing.sampling_rate)
-    if config.postprocessing.normalize:
+    if config.postprocessing.normalize and not acoustic:
         from .Postprocessing.postprocessing import normalize_sofa_files
         for project in projects:
             emit_live_event(f"Normalizing {project.name} SOFA files")
@@ -877,6 +920,16 @@ def _export_postprocessing(config, output_dir, logger):
     if len(projects) == 2:
         emit_live_event("Combining left and right results")
     collect_sofa_files(projects, output_dir)
+    if acoustic:
+        from .AcousticTorso import process_exports
+        emit_live_event("Applying acoustic torso reflections and shadow, then restoring the output grid")
+        process_exports(config, output_dir, logger)
+        if config.postprocessing.resample_hrirs:
+            from .Postprocessing.postprocessing import resample_hrir_files
+            resample_hrir_files(output_dir, config.postprocessing.sampling_rate)
+        if config.postprocessing.normalize:
+            from .Postprocessing.postprocessing import normalize_sofa_files
+            normalize_sofa_files(output_dir, config.postprocessing.level_offset_db)
     if config.postprocessing.spatial_upsampling:
         from .Postprocessing.spatial_upsampling import upsample_hrtf_files
         emit_live_event("Spatially upsampling HRTFs with LocaDyn")
