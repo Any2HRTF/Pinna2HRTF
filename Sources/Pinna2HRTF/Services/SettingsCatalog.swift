@@ -10,6 +10,7 @@ enum SettingsCatalog {
         let maximum: Double?
         let multipleOf: Double?
         let optional: Bool?
+        let choices: [String]?
         let when: String?
         let message: String
         let stages: [String]
@@ -77,7 +78,7 @@ enum SettingsCatalog {
     static func message(_ rule: FieldRule, text: String) -> String? {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.isEmpty { return rule.optional == true ? nil : rules.parseMessages[rule.kind] ?? rule.message }
-        if rule.kind == "text" { return nil }
+        if rule.kind == "text" { return rule.choices.map { $0.contains(value) ? nil : rule.message } ?? nil }
         guard let number = number(value, kind: rule.kind) else { return rules.parseMessages[rule.kind] }
         if let minimum = rule.minimum, number < minimum { return rule.message }
         if let minimum = rule.exclusiveMinimum, number <= minimum { return rule.message }

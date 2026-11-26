@@ -73,7 +73,8 @@ internal static class SettingsCatalog
         var kind = (string)rule["kind"]!;
         var parse = (string?)Rules["parse_messages"]?[kind];
         if (string.IsNullOrWhiteSpace(text)) return rule["optional"]?.GetValue<bool>() == true ? null : parse ?? (string?)rule["message"];
-        if (kind == "text") return null;
+        if (kind == "text")
+            return rule["choices"] is JsonArray choices && !choices.Any(choice => (string?)choice == text.Trim()) ? (string?)rule["message"] : null;
         if (Number(text, kind) is not double value) return parse;
         var message = (string?)rule["message"];
         if (rule["minimum"] is JsonNode minimum && value < minimum.GetValue<double>()) return message;
