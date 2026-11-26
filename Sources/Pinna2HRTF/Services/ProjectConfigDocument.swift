@@ -187,6 +187,7 @@ enum ProjectConfigDocument {
             $0 == Defaults.evaluationGrid ? $0 : relocated($0)
         }
         project.settings.preprocessing.earDistance = text(pre, "ear_distance") ?? text(pre, "head_radius")
+        project.settings.acousticTorso = AcousticTorsoSettings(config: config["acoustic_torso"] as? [String: Any] ?? [:])
         project.settings.preprocessing.torsoMode = text(pre, "torso_mode") ?? SettingsCatalog.text("preprocessing.torso_mode")
         for field in PreprocessingSettings.geometryFields {
             project.settings.preprocessing[keyPath: field.keyPath] = text(pre, field.config)

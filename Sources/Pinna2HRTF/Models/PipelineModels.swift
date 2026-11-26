@@ -304,11 +304,12 @@ struct ProjectSettings: Codable, Equatable {
     var manualPPMFitting = ManualPPMFittingSettings()
     var scanPreparation: ScanPreparationSettings?
     var preprocessing = PreprocessingSettings()
+    var acousticTorso: AcousticTorsoSettings?
     var numcalc = NumCalcSettings()
     var postprocessing: PostprocessingSettings? = PostprocessingSettings()
 
     private enum CodingKeys: String, CodingKey {
-        case inference, manualPPMFitting, scanPreparation, preprocessing, numcalc, postprocessing
+        case inference, manualPPMFitting, scanPreparation, preprocessing, acousticTorso, numcalc, postprocessing
     }
 
     init(inference: InferenceSettings, manualPPMFitting: ManualPPMFittingSettings = ManualPPMFittingSettings(),
@@ -328,6 +329,7 @@ struct ProjectSettings: Codable, Equatable {
         manualPPMFitting = try values.decodeIfPresent(ManualPPMFittingSettings.self, forKey: .manualPPMFitting) ?? ManualPPMFittingSettings()
         scanPreparation = try values.decodeIfPresent(ScanPreparationSettings.self, forKey: .scanPreparation)
         preprocessing = try values.decodeIfPresent(PreprocessingSettings.self, forKey: .preprocessing) ?? PreprocessingSettings()
+        acousticTorso = try values.decodeIfPresent(AcousticTorsoSettings.self, forKey: .acousticTorso)
         numcalc = try values.decodeIfPresent(NumCalcSettings.self, forKey: .numcalc) ?? NumCalcSettings()
         postprocessing = try values.decodeIfPresent(PostprocessingSettings.self, forKey: .postprocessing) ?? PostprocessingSettings()
     }

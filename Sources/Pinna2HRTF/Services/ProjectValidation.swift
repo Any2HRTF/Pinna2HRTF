@@ -29,6 +29,7 @@ enum ProjectValidation {
         for field in PreprocessingSettings.geometryFields {
             values[field.id] = pre[keyPath: field.keyPath] ?? SettingsCatalog.text("preprocessing." + field.config)
         }
+        for key in AcousticTorsoSettings.keys { values["acoustic_torso." + key] = AcousticTorsoSettings.effective(project).text(key) }
         return values
     }
 

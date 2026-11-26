@@ -6,6 +6,16 @@ namespace Pinna2HRTF.Windows;
 
 internal static class ProjectDocument
 {
+    internal static AcousticTorsoSettings Acoustic(ProjectRecord project)
+    {
+        if (project.Settings.AcousticTorso != null) return project.Settings.AcousticTorso;
+        var settings = new AcousticTorsoSettings();
+        var root = string.IsNullOrWhiteSpace(project.PreservedConfigJSON) ? null : JsonNode.Parse(project.PreservedConfigJSON);
+        foreach (var key in AcousticTorsoSettings.Keys)
+            if (root?["acoustic_torso"]?[key] is JsonNode value) settings.Set(key, value.ToString());
+        project.Settings.AcousticTorso = settings;
+        return settings;
+    }
     internal static string DefaultEvaluationGrid => SettingsCatalog.Text("paths.evaluation_grid");
     internal static double Number(string value) => HeadGeometry.Parse(value);
     internal static bool SameJson(JsonNode? left,JsonNode? right)
@@ -38,6 +48,17 @@ internal static class ProjectDocument
             ["head.height_scale"] = pre.HeadHeightScale,
             ["head.taper_percent"] = pre.HeadTaperPercent,
             ["torso.mode"] = pre.TorsoMode,
+            ["acoustic_torso.gain"] = Acoustic(p).Get("gain"),
+            ["acoustic_torso.min_source_elevation_deg"] = Acoustic(p).Get("min_source_elevation_deg"),
+            ["acoustic_torso.max_angular_gap_deg"] = Acoustic(p).Get("max_angular_gap_deg"),
+            ["acoustic_torso.symmetry"] = Acoustic(p).Get("symmetry"),
+            ["acoustic_torso.delay_model"] = Acoustic(p).Get("delay_model"),
+            ["acoustic_torso.model_source_distance_m"] = Acoustic(p).Get("model_source_distance_m"),
+            ["acoustic_torso.interpolation"] = Acoustic(p).Get("interpolation"),
+            ["acoustic_torso.missing_policy"] = Acoustic(p).Get("missing_policy"),
+            ["acoustic_torso.apply_shadow"] = Acoustic(p).Get("apply_shadow"),
+            ["acoustic_torso.normalize_reflection_mix"] = Acoustic(p).Get("normalize_reflection_mix"),
+
             ["torso.width"] = pre.TorsoWidthMM,
             ["torso.depth"] = pre.TorsoDepthMM,
             ["torso.height"] = pre.TorsoHeightMM,
@@ -146,6 +167,16 @@ internal static class ProjectDocument
         foreach (var (key, id, text) in new[] { ("head_radius_scale", "head.radius_scale", pre.HeadRadiusScale), ("head_width_scale", "head.width_scale", pre.HeadWidthScale), ("head_height_scale", "head.height_scale", pre.HeadHeightScale), ("head_taper_percent", "head.taper_percent", pre.HeadTaperPercent), ("torso_width_mm", "torso.width", pre.TorsoWidthMM), ("torso_depth_mm", "torso.depth", pre.TorsoDepthMM), ("torso_height_mm", "torso.height", pre.TorsoHeightMM) })
             Set("preprocessing", key, Numeric(id, text, "preprocessing." + key));
         Set("preprocessing", "torso_mode", pre.TorsoMode);
+        var acoustic = Acoustic(p);
+        foreach (var key in AcousticTorsoSettings.Keys)
+        {
+            var value = acoustic.Get(key);
+            if (key == "min_source_elevation_deg" && string.IsNullOrWhiteSpace(value)) Set("acoustic_torso", key, null);
+            else if (SettingsCatalog.IsNumeric("acoustic_torso." + key)) Set("acoustic_torso", key, Numeric("acoustic_torso." + key, value, "acoustic_torso." + key));
+            else if (key is "apply_shadow" or "normalize_reflection_mix") Set("acoustic_torso", key, bool.Parse(value));
+            else Set("acoustic_torso", key, value);
+        }
+
         Set("preprocessing", "skip_mesh_grading", false);
         Set("numcalc", "enabled", false);
         Set("numcalc", "max_instances", Numeric("numcalc.parallel_instances", num.MaxInstances, "numcalc.max_instances"));
@@ -163,6 +194,8 @@ internal static class ProjectDocument
     internal static void Restore(ProjectRecord p, JsonObject root)
     {
         p.PreservedConfigJSON = root.ToJsonString();
+        p.Settings.AcousticTorso = null;
+        Acoustic(p);
         string? Text(string section, string key) => root[section]?[key]?.ToString();
         bool Flag(string section, string key, bool fallback = false) => bool.TryParse(Text(section, key), out var b) ? b : fallback;
         string S(string section, string key, string fallback) => Text(section, key) ?? fallback;

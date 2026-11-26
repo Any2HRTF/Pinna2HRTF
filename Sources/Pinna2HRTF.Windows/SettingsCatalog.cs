@@ -58,6 +58,8 @@ internal static class SettingsCatalog
         return Issues(values, null).Where(issue => related.Contains(issue.Id)).Select(issue => issue.Message).FirstOrDefault();
     }
 
+    internal static bool AffectsStage(string id, string stage) => (Field(id)?["stages"] as JsonArray)?.Any(value => (string?)value == stage) == true;
+
     internal static bool IsNumeric(string id) => (string?)Field(id)?["kind"] is "integer" or "decimal";
     internal static bool IsInteger(string id) => (string?)Field(id)?["kind"] == "integer";
 
@@ -80,6 +82,7 @@ internal static class SettingsCatalog
         if (rule["minimum"] is JsonNode minimum && value < minimum.GetValue<double>()) return message;
         if (rule["exclusive_minimum"] is JsonNode exclusive && value <= exclusive.GetValue<double>()) return message;
         if (rule["maximum"] is JsonNode maximum && value > maximum.GetValue<double>()) return message;
+        if (rule["exclusive_maximum"] is JsonNode upper && value >= upper.GetValue<double>()) return message;
         if (rule["multiple_of"] is JsonNode step && value % step.GetValue<double>() != 0) return message;
         return null;
     }

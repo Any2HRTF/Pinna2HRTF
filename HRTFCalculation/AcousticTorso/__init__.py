@@ -143,8 +143,30 @@ def mark_geometric_exports(folder):
             sofa.setncattr("Pinna2HRTF_TorsoModel", "geometric")
 
 
+def grid_status(command):
+    from ..Config import PipelineConfig
+    config = PipelineConfig.model_validate(command["config"])
+    if config.preprocessing.torso_mode != "acoustic":
+        return {"enabled": False, "prepared": False, "message": "Acoustic torso modelling is off."}
+    if config.paths.output_dir is None:
+        return {"enabled": True, "prepared": False, "message": "Choose a save location before preparing the grid."}
+    config = config.resolved()
+    try:
+        grid = validate_grid(config)
+        manifest = json.loads((grid / "torso_grid_manifest.json").read_text(encoding="utf-8"))
+        requested = len(manifest["original_node_ids"])
+        helpers = len(manifest["added_node_ids"])
+        return {"enabled": True, "prepared": True, "requested_directions": requested,
+                "helper_directions": helpers, "simulation_directions": requested + helpers,
+                "message": f"{requested} output directions · {requested + helpers} simulation directions"}
+    except (OSError, ValueError, KeyError) as error:
+        return {"enabled": True, "prepared": False, "message": "Grid will be checked during Simulation setup.", "detail": str(error)}
+
+
 def execute(command):
     action = command["action"]
+    if action == "status":
+        return grid_status(command)
     if action == "extend-grid":
         from .grid_workflow import extend_grid
         from ..Config import AcousticTorsoConfig

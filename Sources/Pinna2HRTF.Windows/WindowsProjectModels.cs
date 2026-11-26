@@ -9,7 +9,7 @@ class ProjectSettings {
         Inference.UsePredictionsForPreprocessing = method == "mesh2ppm";
         ManualPPM.Enabled = method == "manual";
     }
- public ManualPPMSettings ManualPPM { get; set; } = new(); public InferenceSettings Inference { get; set; } = new(); public PreprocessingSettings Preprocessing { get; set; } = new(); public NumCalcSettings NumCalc { get; set; } = new(); public PostprocessingSettings? Postprocessing { get; set; } = new(); public ScanPreparationSettings ScanPreparation { get; set; } = new(); }
+ public AcousticTorsoSettings? AcousticTorso { get; set; } public ManualPPMSettings ManualPPM { get; set; } = new(); public InferenceSettings Inference { get; set; } = new(); public PreprocessingSettings Preprocessing { get; set; } = new(); public NumCalcSettings NumCalc { get; set; } = new(); public PostprocessingSettings? Postprocessing { get; set; } = new(); public ScanPreparationSettings ScanPreparation { get; set; } = new(); }
 class ScanPreparationSettings {
     public string? IndividualLeftEdit { get; set; }
     public string? IndividualRightEdit { get; set; }

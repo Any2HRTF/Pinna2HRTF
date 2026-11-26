@@ -324,6 +324,7 @@ public partial class MainWindow : Window
         foreach (var pair in CreateTextSettings()) textSettings.Add(pair.Key, pair.Value);
         AddV2TextSettings(textSettings);
         AddHeadShapeTextSettings(textSettings);
+        AddAcousticTextSettings(textSettings);
         BuildInterface();
         LoadSettingHelp();
         LoadAppPreferences();
@@ -1233,7 +1234,8 @@ public partial class MainWindow : Window
         meshGammaOppositeBox.Text = project?.Settings.Preprocessing.MeshGammaOpposite ?? "0.1";
         maxInstancesBox.Text = project?.Settings.NumCalc.MaxInstances ?? "1";
         maxCpuLoadBox.Text = project?.Settings.NumCalc.MaxCpuLoad ?? "90";
-        torsoModePicker.SelectedIndex = project?.Settings.Preprocessing.TorsoMode == "geometric" ? 1 : 0;
+        torsoModePicker.SelectedIndex = project?.Settings.Preprocessing.TorsoMode switch { "geometric" => 1, "acoustic" => 2, _ => 0 };
+        LoadAcousticControls(project);
         UpdateTorsoControls();
         adaptiveFmmLengthBox.IsChecked = project?.Settings.NumCalc.AdaptiveFmmLength ?? true;
         normalizeHrtfsBox.IsChecked = project?.Settings.Postprocessing?.Normalize ?? true;
@@ -1256,6 +1258,8 @@ public partial class MainWindow : Window
 
     Stage? SettingResetStage(string id)
     {
+        if (id.StartsWith("acoustic_torso.", StringComparison.Ordinal))
+            return SettingsCatalog.AffectsStage(id, "preprocessing") ? Stage.Preprocessing : Stage.Postprocessing;
         if (id.StartsWith("scan_preparation.")) return Stage.ScanPreparation;
         if (id == "project.use_bezierppm" || id.StartsWith("inference.", StringComparison.OrdinalIgnoreCase)) return Stage.Inference;
         if (id.StartsWith("mesh2hrtf.", StringComparison.OrdinalIgnoreCase) || id.StartsWith("mesh_grading.", StringComparison.OrdinalIgnoreCase) ||
@@ -1313,6 +1317,7 @@ public partial class MainWindow : Window
         "postprocessing.spatial_upsampling" => (spatialUpsamplingBox.IsChecked == true).ToString(),
         "postprocessing.spatial_normalize" => (spatialNormalizeBox.IsChecked == true).ToString(),
         "postprocessing.resample_hrirs" => (resampleHrirsBox.IsChecked == true).ToString(),
+        var acousticId when acousticId.StartsWith("acoustic_torso.", StringComparison.Ordinal) => AcousticControlValue(acousticId["acoustic_torso.".Length..]),
         _ => ""
     };
 
@@ -1329,6 +1334,7 @@ public partial class MainWindow : Window
         "postprocessing.spatial_upsampling" => (project.Settings.Postprocessing?.SpatialUpsampling ?? false).ToString(),
         "postprocessing.spatial_normalize" => (project.Settings.Postprocessing?.SpatialNormalize ?? false).ToString(),
         "postprocessing.resample_hrirs" => (project.Settings.Postprocessing?.ResampleHrirs ?? false).ToString(),
+        var acousticId when acousticId.StartsWith("acoustic_torso.", StringComparison.Ordinal) => ProjectDocument.Acoustic(project).Get(acousticId["acoustic_torso.".Length..]),
         _ => ""
     };
 
@@ -1435,13 +1441,14 @@ public partial class MainWindow : Window
     void SetSettingControlValue(string id, string value)
     {
         if (textSettings.TryGetValue(id, out var binding)) { binding.Control.Text = value; return; }
+        if (id.StartsWith("acoustic_torso.", StringComparison.Ordinal)) { SetAcousticControl(id["acoustic_torso.".Length..], value); return; }
         switch (id)
         {
             case "project.use_bezierppm": usePredictionsBox.IsChecked = bool.TryParse(value, out var use) && use; break;
             case "scan_preparation.enabled": scanPreparationEnabledBox.IsChecked = bool.TryParse(value, out var scan) && scan; break;
             case "scan_preparation.prepare_left": prepareLeftEarBox.IsChecked = bool.TryParse(value, out var left) && left; break;
             case "scan_preparation.prepare_right": prepareRightEarBox.IsChecked = bool.TryParse(value, out var right) && right; break;
-            case "torso.mode": torsoModePicker.SelectedIndex = value == "geometric" ? 1 : 0; UpdateTorsoControls(); break;
+            case "torso.mode": torsoModePicker.SelectedIndex = value switch { "geometric" => 1, "acoustic" => 2, _ => 0 }; UpdateTorsoControls(); break;
             case "inference.model": modelPicker.SelectedItem = value; break;
             case "numcalc.adaptive_fmm": adaptiveFmmLengthBox.IsChecked = bool.TryParse(value, out var adaptive) && adaptive; break;
             case "postprocessing.normalize": normalizeHrtfsBox.IsChecked = bool.TryParse(value, out var normalize) && normalize; break;
@@ -1481,6 +1488,8 @@ public partial class MainWindow : Window
         }
         project.Settings.Preprocessing.EvaluationGrid = evaluationGridBox.Text.Trim();
         project.Settings.Preprocessing.TorsoMode = SelectedTorsoMode;
+        foreach (var key in acousticChoices.Keys.Concat(acousticFlags.Keys)) ProjectDocument.Acoustic(project).Set(key, AcousticControlValue(key));
+        UpdateAcousticControls();
         project.Settings.NumCalc.AdaptiveFmmLength = adaptiveFmmLengthBox.IsChecked == true;
         project.Settings.Postprocessing ??= new PostprocessingSettings();
         project.Settings.Postprocessing.Normalize = normalizeHrtfsBox.IsChecked == true;
@@ -3455,6 +3464,7 @@ public partial class MainWindow : Window
         RefreshNumCalcStatus(inspection);
         if (MacLayout) RefreshMacPresentation(inspection);
         RefreshWorkflow(inspection);
+        RefreshAcousticGridStatus();
     }
 
     bool InferenceIsAutomatic(ProjectRecord project) => project.Settings.Inference.UsePredictionsForPreprocessing && !project.Settings.ManualPPM.Enabled;

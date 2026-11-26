@@ -8,6 +8,7 @@ enum SettingsCatalog {
         let minimum: Double?
         let exclusiveMinimum: Double?
         let maximum: Double?
+        let exclusiveMaximum: Double?
         let multipleOf: Double?
         let optional: Bool?
         let choices: [String]?
@@ -83,6 +84,7 @@ enum SettingsCatalog {
         if let minimum = rule.minimum, number < minimum { return rule.message }
         if let minimum = rule.exclusiveMinimum, number <= minimum { return rule.message }
         if let maximum = rule.maximum, number > maximum { return rule.message }
+        if let maximum = rule.exclusiveMaximum, number >= maximum { return rule.message }
         if let step = rule.multipleOf, number.truncatingRemainder(dividingBy: step) != 0 { return rule.message }
         return nil
     }

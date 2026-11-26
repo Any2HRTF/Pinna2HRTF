@@ -597,6 +597,9 @@ def execute(command: dict) -> dict:
         return save_project_defaults(command)
     if action == "read-defaults":
         return read_project_defaults(command)
+    if action == "acoustic-torso-status":
+        from .AcousticTorso import grid_status
+        return grid_status(command)
     if action == "head-preview":
         from .Geometry import head_preview
         return head_preview(command)

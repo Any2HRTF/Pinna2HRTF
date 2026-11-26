@@ -23,7 +23,7 @@ public partial class MainWindow
     readonly TextBox torsoDepthBox = new();
     readonly TextBox torsoHeightBox = new();
     string SelectedTorsoMode => (torsoModePicker.SelectedItem as ComboBoxItem)?.Tag as string ?? "off";
-    void UpdateTorsoControls() { if (torsoShapeExpander != null) torsoShapeExpander.Visibility = SelectedTorsoMode == "geometric" ? Visibility.Visible : Visibility.Collapsed; }
+    void UpdateTorsoControls() { if (torsoShapeExpander != null) torsoShapeExpander.Visibility = SelectedTorsoMode == "geometric" ? Visibility.Visible : Visibility.Collapsed; UpdateAcousticControls(); }
     Expander? headShapeExpander;
     DispatcherTimer? headPreviewTimer;
     int headPreviewGeneration;
@@ -198,7 +198,7 @@ public partial class MainWindow
         headShapeExpander.Expanding += (_, _) => RequestHeadPreview(true);
         torsoModePicker.Items.Add(new ComboBoxItem { Content = "Off", Tag = "off" });
         torsoModePicker.Items.Add(new ComboBoxItem { Content = "Geometric", Tag = "geometric" });
-        torsoModePicker.Items.Add(new ComboBoxItem { Content = "Acoustic (not available yet)", Tag = "acoustic", IsEnabled = false });
+        torsoModePicker.Items.Add(new ComboBoxItem { Content = "Acoustic", Tag = "acoustic" });
         panel.Children.Add(AddSettingPanel("Torso modelling", "torso.mode", torsoModePicker));
         var torso = new List<FrameworkElement>();
         torso.Add(AddSettingPanel("Torso width (mm)", "torso.width", torsoWidthBox));
@@ -213,6 +213,7 @@ public partial class MainWindow
             await HandleSettingChangeAsync("torso.mode");
             RequestHeadPreview(true);
         };
+        panel.Children.Add(AcousticGridPanel());
         UpdateTorsoControls();
         var grid = new Grid();
         grid.Children.Add(panel);

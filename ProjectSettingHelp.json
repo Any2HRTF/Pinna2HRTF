@@ -438,7 +438,7 @@
   {
     "id": "torso.mode",
     "title": "Torso modelling",
-    "description": "Geometric modelling adds a closed neck and upper torso to the simulation mesh before the ears are cut and joined. Off keeps the head-only model. Acoustic torso modelling is not available yet.",
+    "description": "Off simulates the head only. Geometric adds a neck and upper torso to the simulation mesh; Acoustic keeps the head-only mesh and adds modelled torso reflection and shadow to the exported HRIRs. Acoustic mode checks and extends the simulation grid during Simulation setup, then removes helper directions during SOFA export.",
     "publications": [
       {
         "title": "Algazi et al. (2001): The CIPIC HRTF Database",
@@ -478,5 +478,65 @@
         "url": "https://escholarship.org/content/qt3d10j9jw/qt3d10j9jw.pdf"
       }
     ]
+  },
+  {
+    "id": "acoustic_torso.gain",
+    "title": "Reflection gain",
+    "description": "Amplitude gain of the added torso reflection before optional reflection-mix normalization. Changing this requires SOFA export again, while valid simulation results can be reused.",
+    "publications": []
+  },
+  {
+    "id": "acoustic_torso.min_source_elevation_deg",
+    "title": "Minimum elevation",
+    "description": "Lowest source elevation receiving the reflection model. Leave blank to include every source direction. Changing this may require a different simulation grid and a new Simulation setup.",
+    "publications": []
+  },
+  {
+    "id": "acoustic_torso.max_angular_gap_deg",
+    "title": "Maximum angular gap",
+    "description": "Largest permitted angular gap between a reflection query and a simulated direction. Simulation setup adds helper directions when needed; the exported SOFA retains only the requested grid.",
+    "publications": []
+  },
+  {
+    "id": "acoustic_torso.symmetry",
+    "title": "Grid symmetry",
+    "description": "Automatic preserves symmetry when the requested grid is symmetric. Require symmetry rejects an asymmetric grid; Off does not request symmetric helper directions.",
+    "publications": []
+  },
+  {
+    "id": "acoustic_torso.delay_model",
+    "title": "Delay model",
+    "description": "Select the torso-reflection delay calculation. Reijniers uses the model source distance below. This affects SOFA export, not the simulated mesh.",
+    "publications": []
+  },
+  {
+    "id": "acoustic_torso.model_source_distance_m",
+    "title": "Model source distance",
+    "description": "Source distance in metres used by the Reijniers delay model. This does not change the evaluation grid radius or NumCalc setup.",
+    "publications": []
+  },
+  {
+    "id": "acoustic_torso.interpolation",
+    "title": "HRIR interpolation",
+    "description": "Peak-aligned interpolation combines nearby HRIRs after aligning their peaks. Nearest direction uses the closest simulated HRIR.",
+    "publications": []
+  },
+  {
+    "id": "acoustic_torso.missing_policy",
+    "title": "Missing reflection coverage",
+    "description": "Stop export reports missing reflection coverage as an error. Skip uncovered directions omits the reflection contribution where suitable data is unavailable.",
+    "publications": []
+  },
+  {
+    "id": "acoustic_torso.apply_shadow",
+    "title": "Apply torso shadow",
+    "description": "Apply the acoustic model’s direction-dependent shadow filter together with the reflection. This affects SOFA export only.",
+    "publications": []
+  },
+  {
+    "id": "acoustic_torso.normalize_reflection_mix",
+    "title": "Normalize reflection mix",
+    "description": "Normalize the combined direct and reflected contribution using the model’s reflection-mix normalization. This is separate from level offset and frontal-reference normalization.",
+    "publications": []
   }
 ]

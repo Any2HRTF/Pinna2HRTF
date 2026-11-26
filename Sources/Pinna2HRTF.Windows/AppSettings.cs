@@ -76,6 +76,7 @@ internal sealed class WorkflowPreferences
     public double HeadRadiusScale { get; set; } = SettingsCatalog.Decimal("preprocessing.head_radius_scale");
     public double HeadWidthScale { get; set; } = SettingsCatalog.Decimal("preprocessing.head_width_scale");
     public double HeadHeightScale { get; set; } = SettingsCatalog.Decimal("preprocessing.head_height_scale");
+    public AcousticTorsoPreferences AcousticTorso { get; set; } = new();
     public string TorsoMode { get; set; } = SettingsCatalog.Text("preprocessing.torso_mode");
     public double TorsoWidthMM { get; set; } = SettingsCatalog.Decimal("preprocessing.torso_width_mm");
     public double TorsoDepthMM { get; set; } = SettingsCatalog.Decimal("preprocessing.torso_depth_mm");
@@ -86,7 +87,7 @@ internal sealed class WorkflowPreferences
     {
         static string Number(double value) => value.ToString("R", CultureInfo.InvariantCulture);
         static string Whole(int value) => value.ToString(CultureInfo.InvariantCulture);
-        return new()
+        var values = new Dictionary<string, string>()
         {
             ["scan.enabled"] = "true", ["scan.prepare_left"] = PrepareLeft ? "true" : "false", ["scan.prepare_right"] = PrepareRight ? "true" : "false",
             ["scan.target_edge"] = Number(TargetEdgeMm), ["scan.left_margin"] = Number(LeftMarginMm), ["scan.right_margin"] = Number(RightMarginMm),
@@ -109,6 +110,9 @@ internal sealed class WorkflowPreferences
             ["torso.height"] = Number(TorsoHeightMM),
 
         };
+        var acoustic = JsonSerializer.SerializeToNode(AcousticTorso, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower })!.AsObject();
+        foreach (var value in acoustic) values["acoustic_torso." + value.Key] = value.Value?.ToString().ToLowerInvariant() ?? "";
+        return values;
     }
 
     public bool Valid() => SettingsCatalog.Issues(FormValues(), null).Count == 0
@@ -152,7 +156,7 @@ public partial class MainWindow
         try
         {
             var value = JsonSerializer.Deserialize<AppPreferences>(File.ReadAllText(AppPreferencesPath)) ?? throw new IOException("Empty settings.");
-            if (value.Version != 1 || value.Workflow == null || SettingsCatalog.Issues(value.FormValues(), null).Count > 0 ||
+            if (value.Version != 1 || value.Workflow == null || value.Workflow.AcousticTorso == null || SettingsCatalog.Issues(value.FormValues(), null).Count > 0 ||
                 !Enum.IsDefined(value.InputHandling) || value.ProjectDirectory == null || value.EvaluationGrid == null ||
                 value.NumCalc == null || value.MeshGrading == null || value.Python == null || value.Uv == null || value.ExternalDirectory == null ||
                 value.Mesh2Hrtf == null || value.Workflow == null || !value.Workflow.Valid() ||
@@ -388,8 +392,8 @@ public partial class MainWindow
                 var torsoChoice = new ComboBox { MaxWidth = 280 };
                 torsoChoice.Items.Add(new ComboBoxItem { Content = "Off", Tag = "off" });
                 torsoChoice.Items.Add(new ComboBoxItem { Content = "Geometric", Tag = "geometric" });
-                torsoChoice.Items.Add(new ComboBoxItem { Content = "Acoustic (not available yet)", IsEnabled = false });
-                torsoChoice.SelectedIndex = defaults.TorsoMode == "geometric" ? 1 : 0;
+                torsoChoice.Items.Add(new ComboBoxItem { Content = "Acoustic", Tag = "acoustic" });
+                torsoChoice.SelectedIndex = defaults.TorsoMode switch { "geometric" => 1, "acoustic" => 2, _ => 0 };
                 simulation.Children.Add(new SettingsCard { Header = DefaultsLabel("Torso modelling", "torso.mode"), Content = torsoChoice });
                 var torsoShape = SettingsAdvanced(simulation, "Torso shape", controls => {
                     NumberRow(controls, "Torso width (mm)", "torso.width", () => defaults.TorsoWidthMM, v => defaults.TorsoWidthMM = v);
@@ -397,9 +401,14 @@ public partial class MainWindow
                     NumberRow(controls, "Torso height (mm)", "torso.height", () => defaults.TorsoHeightMM, v => defaults.TorsoHeightMM = v);
                 });
                 torsoShape.Visibility = defaults.TorsoMode == "geometric" ? Visibility.Visible : Visibility.Collapsed;
+                var acousticGridDefaults = SettingsAdvanced(simulation, "Acoustic torso grid", controls => AcousticDefaultsGrid(controls, defaults.AcousticTorso));
+                acousticGridDefaults.Visibility = defaults.TorsoMode == "acoustic" ? Visibility.Visible : Visibility.Collapsed;
+                SettingsExpander? acousticExportDefaults = null;
                 torsoChoice.SelectionChanged += (_, _) => {
-                    defaults.TorsoMode = torsoChoice.SelectedIndex == 1 ? "geometric" : "off";
+                    defaults.TorsoMode = torsoChoice.SelectedIndex switch { 1 => "geometric", 2 => "acoustic", _ => "off" };
                     torsoShape.Visibility = defaults.TorsoMode == "geometric" ? Visibility.Visible : Visibility.Collapsed;
+                    acousticGridDefaults.Visibility = defaults.TorsoMode == "acoustic" ? Visibility.Visible : Visibility.Collapsed;
+                    if (acousticExportDefaults != null) acousticExportDefaults.Visibility = defaults.TorsoMode == "acoustic" ? Visibility.Visible : Visibility.Collapsed;
                     SaveAppPreferences();
                 };
                 var computing = SettingsSection(panel, "Calculation");
@@ -407,6 +416,8 @@ public partial class MainWindow
                 IntegerRow(computing, "CPU load limit (%)", "numcalc.cpu_limit", () => appPreferences.MaxCpuLoad, v => appPreferences.MaxCpuLoad = v);
                 SwitchRow(computing, "Adaptive FMM expansion length", defaults.AdaptiveFmmLength, v => defaults.AdaptiveFmmLength = v);
                 var sofa = SettingsSection(panel, "SOFA export");
+                acousticExportDefaults = SettingsAdvanced(sofa, "Acoustic torso", controls => AcousticDefaultsExport(controls, defaults.AcousticTorso));
+                acousticExportDefaults.Visibility = defaults.TorsoMode == "acoustic" ? Visibility.Visible : Visibility.Collapsed;
                 SettingsOption(sofa, "Apply level offset", defaults.Normalize, v => defaults.Normalize = v, controls =>
                     NumberRow(controls, "Level offset (dB)", "postprocessing.level_offset", () => defaults.LevelOffsetDb, v => defaults.LevelOffsetDb = v));
                 SettingsOption(sofa, "Resample HRIRs", defaults.ResampleHrirs, v => defaults.ResampleHrirs = v, controls =>
@@ -592,6 +603,7 @@ public partial class MainWindow
     FrameworkElement DefaultsLabel(string title, string? id = null)
     {
         id ??= title switch {
+            "Apply torso shadow" => "acoustic_torso.apply_shadow", "Normalize reflection mix" => "acoustic_torso.normalize_reflection_mix",
             "Project location" => "defaults.project_location", "Input source" => "defaults.input_source",
             "Ear modelling method" => "defaults.ear_model_method", "Mesh2PPM model" => "inference.model",
             "Ears to prepare from a full-head scan" => "defaults.prepared_ears", "Require ear review" => "defaults.require_review",
@@ -642,7 +654,7 @@ public partial class MainWindow
         return expander;
     }
 
-    void ChoiceRow(StackPanel parent, string title, string[] choices, int selected, Action<int> write)
+    void ChoiceRow(StackPanel parent, string title, string[] choices, int selected, Action<int> write, string? helpId = null)
     {
         var choice = new ComboBox { ItemsSource = choices, SelectedIndex = selected, MaxWidth = 280 };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(choice, title);
@@ -650,7 +662,7 @@ public partial class MainWindow
             if (choice.SelectedIndex < 0) return;
             write(choice.SelectedIndex); SaveAppPreferences();
         };
-        parent.Children.Add(new SettingsCard { Header = DefaultsLabel(title), Content = choice });
+        parent.Children.Add(new SettingsCard { Header = DefaultsLabel(title, helpId), Content = choice });
     }
 
     void NumberRow(StackPanel parent, string title, string id, Func<double> read, Action<double> write)

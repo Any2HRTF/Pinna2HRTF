@@ -111,6 +111,7 @@ enum AppPreferences {
             guard let rule = field.rule else { continue }
             values[rule] = workflowFlagRules.contains(rule) ? String(workflowFlag(field, in: stored)) : workflowText(field, in: stored)
         }
+        for key in AcousticTorsoSettings.keys { values["acoustic_torso." + key] = AcousticTorsoSettings(config: stored["acoustic_torso"] as? [String: Any] ?? [:]).text(key) }
         return values
     }
 
@@ -131,6 +132,7 @@ enum AppPreferences {
             if field.key == "torso_mode" { payload[field.key] = text; continue }
             payload[field.key] = Int(text).map { $0 as Any } ?? Double(text).map { $0 as Any }
         }
+        payload["acoustic_torso"] = AcousticTorsoSettings(config: stored["acoustic_torso"] as? [String: Any] ?? [:]).payload
         return payload.compactMapValues { $0 }
     }
 

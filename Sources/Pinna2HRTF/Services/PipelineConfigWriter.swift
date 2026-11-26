@@ -127,6 +127,7 @@ enum PipelineConfigWriter {
                 "template_blend": nullable(manual.templateBlendPath)
             ],
             "preprocessing": preprocessing,
+            "acoustic_torso": AcousticTorsoSettings.effective(project).payload,
             "numcalc": [
                 "enabled": false, "max_instances": number(numcalc.maxInstances),
                 "max_cpu_load": number(numcalc.maxCPULoad), "adaptive_fmm_length": numcalc.adaptiveFmmLength

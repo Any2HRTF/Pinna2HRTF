@@ -208,6 +208,7 @@ public partial class MainWindow
         AddSetting(workflowPages[3], "CPU limit (%)", "numcalc.cpu_limit", maxCpuLoadBox);
         AddSetting(workflowPages[3], "Adaptive FMM expansion length", "numcalc.adaptive_fmm", adaptiveFmmLengthBox);
         var results = workflowPages[4];
+        results.Children.Add(AcousticExportPanel());
         AddSetting(results, "Apply level offset", "postprocessing.normalize", normalizeHrtfsBox);
         workflowLevelOffset = AddSettingPanel("Level offset (dB)", "postprocessing.level_offset", levelOffsetBox); results.Children.Add(workflowLevelOffset);
         AddSetting(results, "Resample HRIRs", "postprocessing.resample_hrirs", resampleHrirsBox);

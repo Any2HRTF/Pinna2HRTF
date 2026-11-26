@@ -220,11 +220,22 @@ struct ProjectInspectorView: View {
             headShapeField("Head taper (%)", id: "head.taper_percent")
         }
         Section("Torso") {
-            SettingToggle(title: "Geometric torso", helpID: "torso.mode", isOn: torsoEnabledBinding)
-            if torsoEnabledBinding.wrappedValue {
+            LabeledContent {
+                Picker("Torso modelling", selection: torsoModeBinding) {
+                    Text("Off").tag("off")
+                    Text("Geometric").tag("geometric")
+                    Text("Acoustic").tag("acoustic")
+                }.labelsHidden()
+            } label: { SettingLabel(title: "Torso modelling", helpID: "torso.mode") }
+            if torsoModeBinding.wrappedValue == "geometric" {
                 headShapeField("Torso width (mm)", id: "torso.width")
                 headShapeField("Torso depth (mm)", id: "torso.depth")
                 headShapeField("Torso height (mm)", id: "torso.height")
+            }
+            if torsoModeBinding.wrappedValue == "acoustic" {
+                AcousticTorsoControls(settings: acousticTorsoBinding)
+                AcousticTorsoGridStatus(request: acousticGridStatusRequest)
+                    .id(String(store.selectedProjectIsRunning))
             }
         }
     }
@@ -275,6 +286,9 @@ struct ProjectInspectorView: View {
     }
 
     @ViewBuilder var exportSections: some View {
+        if torsoModeBinding.wrappedValue == "acoustic" {
+            Section("Acoustic torso") { AcousticTorsoControls(settings: acousticTorsoBinding, export: true) }
+        }
         Section {
             SettingToggle(title: "Apply level offset", helpID: "postprocessing.normalize", isOn: postprocessingValue(\.normalize))
             if postprocessingValue(\.normalize).wrappedValue {
@@ -384,8 +398,15 @@ struct ProjectInspectorView: View {
         return values
     }
 
-    var torsoEnabledBinding: Binding<Bool> {
-        Binding(get: { torsoModeBinding.wrappedValue == "geometric" }, set: { torsoModeBinding.wrappedValue = $0 ? "geometric" : "off" })
+    var acousticTorsoBinding: Binding<AcousticTorsoSettings> {
+        Binding(get: { store.selectedProject.map(AcousticTorsoSettings.effective) ?? AcousticTorsoSettings() },
+                set: { value in store.updateSelectedProject { $0.settings.acousticTorso = value } })
+    }
+
+    var acousticGridStatusRequest: String {
+        guard let project = store.selectedProject,
+              let data = try? JSONSerialization.data(withJSONObject: ["config": PipelineConfigWriter.mapping(project: project, environment: store.environment)], options: .sortedKeys) else { return "{}" }
+        return String(decoding: data, as: UTF8.self)
     }
 
     var torsoModeBinding: Binding<String> {

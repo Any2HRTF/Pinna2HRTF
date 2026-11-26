@@ -196,13 +196,19 @@ struct HeadTorsoDefaultsSections: View {
             numberField("Head taper (%)", key: "head_taper_percent")
         }
         Section("Torso") {
-            DefaultsOption(title: "Geometric torso", helpID: "torso.mode", isOn: Binding(
-                get: { text("torso_mode").wrappedValue == "geometric" },
-                set: { text("torso_mode").wrappedValue = $0 ? "geometric" : "off" })) {
+            LabeledContent {
+                Picker("Torso modelling", selection: text("torso_mode")) {
+                    Text("Off").tag("off")
+                    Text("Geometric").tag("geometric")
+                    Text("Acoustic").tag("acoustic")
+                }.labelsHidden()
+            } label: { SettingLabel(title: "Torso modelling", helpID: "torso.mode") }
+            if text("torso_mode").wrappedValue == "geometric" {
                 numberField("Torso width (mm)", key: "torso_width_mm")
                 numberField("Torso depth (mm)", key: "torso_depth_mm")
                 numberField("Torso height (mm)", key: "torso_height_mm")
             }
+            if text("torso_mode").wrappedValue == "acoustic" { AcousticTorsoDefaultsControls() }
         }
     }
 }
@@ -268,6 +274,9 @@ struct ExportDefaultsSections: View {
                 SettingToggle(title: "Normalize to frontal reference", helpID: "postprocessing.spatial_normalize", isOn: flag("spatial_normalize"))
             }
         } header: { Text("SOFA Export") }
+        if AppPreferences.workflowText(AppPreferences.workflowFields.first { $0.key == "torso_mode" }!, in: stored) == "acoustic" {
+            Section("Acoustic torso") { AcousticTorsoDefaultsControls(export: true) }
+        }
     }
 }
 
