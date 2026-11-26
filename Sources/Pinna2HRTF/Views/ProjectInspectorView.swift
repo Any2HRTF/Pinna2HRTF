@@ -4,7 +4,6 @@ import AppKit
 struct ProjectInspectorView: View {
     @ObservedObject var store: AppStore
     @State private var headExpanded = false
-    @State private var torsoExpanded = false
     @State private var headPreviewProjectID: UUID?
 
     var body: some View {
@@ -24,7 +23,7 @@ struct ProjectInspectorView: View {
             }
         }
         .onChange(of: headPreviewSettings) { _ in if headPreviewProjectID == store.selectedProjectID { store.viewer.requestHeadPreview() } }
-        .onChange(of: store.selectedProjectID) { _ in headExpanded = false; torsoExpanded = false }
+        .onChange(of: store.selectedProjectID) { _ in headExpanded = false }
         .onChange(of: store.earDistanceFocusRequest) { _ in store.workflowStep = .simulation }
     }
 
@@ -219,15 +218,14 @@ struct ProjectInspectorView: View {
                 Picker("Torso modelling", selection: torsoModeBinding) {
                     Text("Off").tag("off")
                     Text("Geometric").tag("geometric")
-                    Text("Acoustic (Not Available Yet)").tag("acoustic").disabled(true)
-                }.labelsHidden()
+                }
+                .labelsHidden()
+                .fixedSize()
             }
             if torsoModeBinding.wrappedValue == "geometric" {
-                DisclosureGroup("Torso Shape", isExpanded: $torsoExpanded) {
-                    headShapeField("Torso width (mm)", id: "torso.width")
-                    headShapeField("Torso depth (mm)", id: "torso.depth")
-                    headShapeField("Torso height (mm)", id: "torso.height")
-                }.onChange(of: torsoExpanded) { expanded in if expanded { headPreviewProjectID = store.selectedProjectID; store.viewer.requestHeadPreview() } }
+                headShapeField("Torso width (mm)", id: "torso.width")
+                headShapeField("Torso depth (mm)", id: "torso.depth")
+                headShapeField("Torso height (mm)", id: "torso.height")
             }
         }
         Section("Microphones") {
@@ -396,7 +394,10 @@ struct ProjectInspectorView: View {
         let field = PreprocessingSettings.geometryFields.first { $0.id == id }!
         let binding = Binding<String>(
             get: { store.selectedProject?.settings.preprocessing[keyPath: field.keyPath] ?? SettingsCatalog.text("preprocessing." + field.config) },
-            set: { value in store.updateSelectedProject { $0.settings.preprocessing[keyPath: field.keyPath] = value } }
+            set: { value in
+                headPreviewProjectID = store.selectedProjectID
+                store.updateSelectedProject { $0.settings.preprocessing[keyPath: field.keyPath] = value }
+            }
         )
         return LabeledTextField(title, helpID: id, text: binding)
     }

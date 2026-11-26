@@ -119,7 +119,6 @@ struct SimulationDefaultsRows: View {
     @AppStorage(AppPreferences.workflow) private var workflowJSON = ""
     @State private var gradingExpanded = false
     @State private var headExpanded = false
-    @State private var torsoExpanded = false
 
     private var stored: [String: Any] {
         (try? JSONSerialization.jsonObject(with: Data(workflowJSON.utf8)) as? [String: Any]) ?? [:]
@@ -172,15 +171,14 @@ struct SimulationDefaultsRows: View {
             Picker("Torso modelling", selection: text("torso_mode")) {
                 Text("Off").tag("off")
                 Text("Geometric").tag("geometric")
-                Text("Acoustic (Not Available Yet)").tag("acoustic").disabled(true)
-            }.labelsHidden()
+            }
+            .labelsHidden()
+            .fixedSize()
         }
         if AppPreferences.workflowText(field("torso_mode"), in: stored) == "geometric" {
-            DisclosureGroup("Torso Shape", isExpanded: $torsoExpanded) {
-                numberField("Torso width (mm)", key: "torso_width_mm")
-                numberField("Torso depth (mm)", key: "torso_depth_mm")
-                numberField("Torso height (mm)", key: "torso_height_mm")
-            }
+            numberField("Torso width (mm)", key: "torso_width_mm")
+            numberField("Torso depth (mm)", key: "torso_depth_mm")
+            numberField("Torso height (mm)", key: "torso_height_mm")
         }
     }
 
