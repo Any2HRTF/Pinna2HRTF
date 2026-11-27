@@ -90,7 +90,7 @@ struct MeshEditorView: View {
                 } label: {
                     HStack {
                         Image(systemName: placed ? "checkmark.circle.fill" : (current ? "smallcircle.filled.circle" : "circle"))
-                            .foregroundStyle([Color.red, .blue, .green][index])
+                            .foregroundStyle(Color(nsColor: MeshEditorModel.landmarkColors[index]))
                         Text(name)
                         Spacer()
                         Text(placed ? "Placed" : (current ? "Next" : ""))
