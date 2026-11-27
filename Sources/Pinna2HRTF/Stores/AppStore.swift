@@ -674,7 +674,7 @@ final class AppStore: ObservableObject {
         library.projects[index] = project
         let resetStages = request.isAlignment ? Stage.allCases : Stage.allCases.filter { $0 != .scanPreparation }
         setStageOutcomes(resetStages, for: request.projectID, to: .ready)
-        appendLog("Saved \(request.isAlignment ? "nose-and-ear-aligned scan" : "reviewed ear"): \(request.destination.lastPathComponent)", for: request.projectID)
+        appendLog("Saved \(request.isAlignment ? "Frankfurt-aligned scan" : "reviewed ear"): \(request.destination.lastPathComponent)", for: request.projectID)
         viewer.openMesh(request.destination, resetCamera: true)
     }
 

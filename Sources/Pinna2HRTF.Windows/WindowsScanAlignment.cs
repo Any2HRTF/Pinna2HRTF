@@ -151,7 +151,7 @@ public partial class MainWindow
                 if (selectedProject == project && session == alignmentGeneration) { EndScanAlignment(); LoadSelectedProject(); RememberSelectedArtifact(destination); RefreshArtifacts(); }
                 RefreshPipelineStatus();return;
             }
-            if(scanAlignmentLandmarks.Count!=3)return;
+            if(scanAlignmentLandmarks.Count!=4)return;
             ClearAlignmentPreview();alignmentProjectId=project.Id;
             alignmentSource=alignmentSessionSource;
             if (alignmentSource == null || !File.Exists(alignmentSource)) throw new IOException("The original scan is missing. Reopen alignment to locate it.");

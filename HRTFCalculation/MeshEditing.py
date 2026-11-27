@@ -1,8 +1,10 @@
 """Non-destructive mesh editing backend for the macOS preparation workspace.
 
-Alignment landmarks: nose tip, left ear-canal entrance, right ear-canal entrance.
-The rigid frame uses +X toward the nose, +Y left, +Z superior, with the ear
-midpoint at the origin. This reference plane is not the anatomical Frankfort plane.
+Alignment landmarks follow the Frankfurt horizontal plane: the lowest points of
+the left and right orbital rims (below the eyes) and the left and right ear-canal
+entrances. The horizontal plane passes through both ear-canal entrances and the
+midpoint of the two orbital points. The rigid frame uses +X forward toward the
+eyes, +Y left, +Z superior, with the ear-canal midpoint at the origin.
 Face deletion and plane cuts deliberately leave open edges; no hole filling or
 reconstruction runs after a manual edit.
 """
@@ -24,20 +26,25 @@ def load(path, merge=False):
     return load_mesh(path, process=False, merge=merge, validate=True)
 
 
-def nose_ear_transform(points):
+ALIGNMENT_LANDMARKS = ['left_orbitale', 'right_orbitale', 'left_ear_canal_entrance', 'right_ear_canal_entrance']
+
+
+def frankfurt_transform(points):
     points = np.asarray(points, dtype=float)
-    if points.shape != (3, 3) or not np.isfinite(points).all():
-        raise ValueError('Pick the nose tip, left ear-canal entrance, and right ear-canal entrance.')
-    nose, left, right = points
+    if points.shape != (4, 3) or not np.isfinite(points).all():
+        raise ValueError('Pick the points below the left and right eye, then the left and right ear-canal entrances.')
+    left_eye, right_eye, left, right = points
     origin = (left + right) / 2
     lateral = left - right
     if np.linalg.norm(lateral) < 1e-6:
         raise ValueError('The two ear-canal entrance landmarks must be distinct.')
     lateral /= np.linalg.norm(lateral)
-    anterior = nose - origin
+    if np.dot(left_eye - right_eye, lateral) <= 0:
+        raise ValueError('The eye points look swapped. Pick below the left eye first, then below the right eye.')
+    anterior = (left_eye + right_eye) / 2 - origin
     anterior -= np.dot(anterior, lateral) * lateral
     if np.linalg.norm(anterior) < 1e-6:
-        raise ValueError('The three landmarks must not lie on one line.')
+        raise ValueError('The eye points must lie in front of the ear canals.')
     anterior /= np.linalg.norm(anterior)
     superior = np.cross(anterior, lateral)
     rotation = np.stack([anterior, lateral, superior])
@@ -158,7 +165,7 @@ def execute(request):
         return report
     mesh = load(request['source'])
     if action == 'align':
-        matrix = nose_ear_transform(request['points'])
+        matrix = frankfurt_transform(request['points'])
         mesh.apply_transform(matrix)
     elif action == 'delete':
         mesh = delete_faces(mesh, request['faces'])
@@ -175,8 +182,8 @@ def execute(request):
         result['transform'] = matrix.tolist()
         if request.get('original_source'):
             result['source_sha256'] = digest(request['original_source'])
-        result['alignment_method'] = 'nose_and_ear_entrances'
-        result['landmark_labels'] = ['nose_tip', 'left_ear_canal_entrance', 'right_ear_canal_entrance']
+        result['alignment_method'] = 'frankfurt_plane'
+        result['landmark_labels'] = ALIGNMENT_LANDMARKS
     return result
 
 

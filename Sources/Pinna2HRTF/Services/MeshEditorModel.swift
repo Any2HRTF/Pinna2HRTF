@@ -304,13 +304,15 @@ final class MeshEditorModel: EditorDocument {
     }
     var pointOfView: SCNNode? { cameraNode }
 
+    static let landmarkNames = ["Below left eye", "Below right eye", "Left ear-canal entrance", "Right ear-canal entrance"]
+
     func pickLandmark(_ point: SCNVector3) {
         guard !busy, !hasAlignment, !versions.isEmpty, tool == .landmarks else { return }
         if landmarkSlot < landmarks.count { landmarks[landmarkSlot] = point }
         else { landmarks.append(point) }
-        landmarkSlot = min(landmarks.count, 2)
+        landmarkSlot = min(landmarks.count, Self.landmarkNames.count - 1)
         refreshMarkers()
-        if landmarks.count == 3 {
+        if landmarks.count == Self.landmarkNames.count {
             let points = landmarks.map { [Double($0.x), Double($0.y), Double($0.z)] }
             Task {
                 guard !hasAlignment else { return }
@@ -331,7 +333,7 @@ final class MeshEditorModel: EditorDocument {
     }
     private func refreshMarkers() {
         markerNodes.forEach { $0.removeFromParentNode() }; markerNodes.removeAll()
-        let colors: [NSColor] = [.systemRed, .systemBlue, .systemGreen]
+        let colors: [NSColor] = [.systemRed, .systemOrange, .systemBlue, .systemGreen]
         for (index, point) in landmarks.enumerated() {
             let sphere = SCNSphere(radius: CGFloat(span * 0.006))
             sphere.firstMaterial?.diffuse.contents = colors[index]

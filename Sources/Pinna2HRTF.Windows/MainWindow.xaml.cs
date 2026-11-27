@@ -814,7 +814,7 @@ public partial class MainWindow : Window
         var alignmentPanel = new StackPanel { Spacing = 6 };
         scanAlignmentStatus = new TextBlock
         {
-            Text = "Click nose tip, then left and right ear-canal entrances",
+            Text = "Click below the left eye, below the right eye, then the left and right ear-canal entrances",
             TextWrapping = TextWrapping.Wrap
         };
         applyScanAlignmentButton.Click += async (_, _) => await ApplyScanAlignmentAsync();
@@ -1787,7 +1787,7 @@ public partial class MainWindow : Window
         scanAlignmentMode = true;
         artifactPicker.IsEnabled = false;
         alignScanButton.IsEnabled = false;
-        scanAlignmentStatus.Text = "Click nose tip, then left and right ear-canal entrances";
+        scanAlignmentStatus.Text = "Click below the left eye, below the right eye, then the left and right ear-canal entrances";
         scanAlignmentBorder.Visibility = Visibility.Visible;
         SelectAlignmentArtifact(new Artifact("Full-head scan alignment", source));
         if (currentMesh != null && SamePath(currentMesh.Path, source)) UpdateAlignmentAxes();
@@ -1821,7 +1821,7 @@ public partial class MainWindow : Window
         scanAlignmentMarkerVisuals.Clear();
         scanAlignmentLandmarks.Clear();
         applyScanAlignmentButton.IsEnabled = false;
-        scanAlignmentStatus.Text = "Click nose tip, then left and right ear-canal entrances";
+        scanAlignmentStatus.Text = "Click below the left eye, below the right eye, then the left and right ear-canal entrances";
     }
 
     Task ApplyScanAlignmentAsync() => PreviewOrSaveAlignmentAsync();
@@ -2301,7 +2301,7 @@ public partial class MainWindow : Window
             resetViewButtonHost.Visibility = Visibility.Visible;
             meshViewport.Visibility = Visibility.Visible;
             UpdatePlacementButtons();
-            if (scanAlignmentMode) scanAlignmentStatus.Text = pendingAlignment == null ? "Click nose tip, then left and right ear-canal entrances" : "Inspect alignment: X forward, Y left, Z up. Save or cancel.";
+            if (scanAlignmentMode) scanAlignmentStatus.Text = pendingAlignment == null ? "Click below the left eye, below the right eye, then the left and right ear-canal entrances" : "Inspect alignment: X forward, Y left, Z up. Save or cancel.";
         }
         catch (OperationCanceledException) { }
         catch (Exception error)
@@ -2450,11 +2450,11 @@ public partial class MainWindow : Window
         else if (primaryClick && scanAlignmentMode && !alignmentPreviewing && !alignmentLoadingRing.IsActive && mode == MeshPointerMode.Rotate && wasClick && currentMesh != null && meshVisual != null)
         {
             var hit = meshViewport.FindHits(point.Position).FirstOrDefault(x => ReferenceEquals(x.ModelHit, meshVisual));
-            if (hit != null && scanAlignmentLandmarks.Count < 3)
+            if (hit != null && scanAlignmentLandmarks.Count < 4)
             {
                 var landmark = currentMesh.ToRaw(hit.PointHit);
                 scanAlignmentLandmarks.Add(landmark);
-                var markerColors = new[] { new Color4(1f, 0.2f, 0.2f, 1f), new Color4(0.2f, 0.45f, 1f, 1f), new Color4(0.2f, 0.9f, 0.35f, 1f) };
+                var markerColors = new[] { new Color4(1f, 0.2f, 0.2f, 1f), new Color4(1f, 0.6f, 0.1f, 1f), new Color4(0.2f, 0.45f, 1f, 1f), new Color4(0.2f, 0.9f, 0.35f, 1f) };
                 var marker = new MeshGeometryModel3D
                 {
                     Geometry = MeshLoader.CreateSphere(currentMesh.ToDisplay(landmark), currentMesh.MaximumDimension * 0.006),
@@ -2464,11 +2464,11 @@ public partial class MainWindow : Window
                 meshViewport.Items.Add(marker);
                 meshVisuals.Add(marker);
                 scanAlignmentMarkerVisuals.Add(marker);
-                var names = new[] { "nose tip", "left ear-canal entrance", "right ear-canal entrance" };
-                scanAlignmentStatus.Text = scanAlignmentLandmarks.Count == 3
-                    ? "Three landmarks picked. Apply the alignment or cancel."
-                    : $"Picked {scanAlignmentLandmarks.Count}/3. Next: {names[scanAlignmentLandmarks.Count]}";
-                if (scanAlignmentLandmarks.Count == 3) _ = PreviewOrSaveAlignmentAsync(previewOnly: true);
+                var names = new[] { "below the left eye", "below the right eye", "left ear-canal entrance", "right ear-canal entrance" };
+                scanAlignmentStatus.Text = scanAlignmentLandmarks.Count == 4
+                    ? "Four landmarks picked. Apply the alignment or cancel."
+                    : $"Picked {scanAlignmentLandmarks.Count}/4. Next: {names[scanAlignmentLandmarks.Count]}";
+                if (scanAlignmentLandmarks.Count == 4) _ = PreviewOrSaveAlignmentAsync(previewOnly: true);
             }
             else if (hit == null)
                 AppendLog("Click directly on the scan surface to place each landmark.", selectedProject?.Id);

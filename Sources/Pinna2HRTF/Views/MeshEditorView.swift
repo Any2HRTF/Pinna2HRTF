@@ -82,7 +82,7 @@ struct MeshEditorView: View {
 
     private var alignmentSection: some View {
         Section("Landmarks") {
-            ForEach(Array(["Nose tip", "Left ear-canal entrance", "Right ear-canal entrance"].enumerated()), id: \.offset) { index, name in
+            ForEach(Array(MeshEditorModel.landmarkNames.enumerated()), id: \.offset) { index, name in
                 let placed = model.hasAlignment || index < model.landmarks.count
                 let current = !model.hasAlignment && model.landmarkSlot == index
                 Button {

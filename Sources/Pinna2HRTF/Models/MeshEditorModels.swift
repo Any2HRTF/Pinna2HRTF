@@ -13,7 +13,7 @@ struct MeshEditorRequest: Identifiable {
     var prepareLeft = true
     var prepareRight = true
     var isAlignment: Bool { side == nil }
-    var title: String { side.map { "Edit \($0.title) Ear" } ?? "Nose and Ear Alignment" }
+    var title: String { side.map { "Edit \($0.title) Ear" } ?? "Frankfurt Plane Alignment" }
 }
 
 struct CuttingPlanePreview {
