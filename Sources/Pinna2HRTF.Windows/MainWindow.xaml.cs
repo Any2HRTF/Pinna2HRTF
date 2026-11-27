@@ -324,6 +324,7 @@ public partial class MainWindow : Window
         foreach (var pair in CreateTextSettings()) textSettings.Add(pair.Key, pair.Value);
         AddV2TextSettings(textSettings);
         AddHeadShapeTextSettings(textSettings);
+        AddAttachmentTextSettings(textSettings);
         AddAcousticTextSettings(textSettings);
         BuildInterface();
         LoadSettingHelp();
@@ -549,6 +550,7 @@ public partial class MainWindow : Window
         var run = new MenuFlyoutSubItem { Text = "Run", VerticalAlignment = VerticalAlignment.Center };
         for (var step = 1; step < WorkflowTitles.Length; step++)
         {
+            if (step == HeadPage) continue;
             var target = step;
             var item = MenuItem(WorkflowTitles[step], (_, _) => RunWorkflowStep(target));
             workflowRunItems[step] = item;
@@ -1237,6 +1239,7 @@ public partial class MainWindow : Window
         torsoModePicker.SelectedIndex = project?.Settings.Preprocessing.TorsoMode switch { "geometric" => 1, "acoustic" => 2, _ => 0 };
         LoadAcousticControls(project);
         UpdateTorsoControls();
+        LoadEarSettings(project);
         adaptiveFmmLengthBox.IsChecked = project?.Settings.NumCalc.AdaptiveFmmLength ?? true;
         normalizeHrtfsBox.IsChecked = project?.Settings.Postprocessing?.Normalize ?? true;
         resampleHrirsBox.IsChecked = project?.Settings.Postprocessing?.ResampleHrirs ?? false;
@@ -1263,7 +1266,8 @@ public partial class MainWindow : Window
         if (id.StartsWith("scan_preparation.")) return Stage.ScanPreparation;
         if (id == "project.use_bezierppm" || id.StartsWith("inference.", StringComparison.OrdinalIgnoreCase)) return Stage.Inference;
         if (id.StartsWith("mesh2hrtf.", StringComparison.OrdinalIgnoreCase) || id.StartsWith("mesh_grading.", StringComparison.OrdinalIgnoreCase) ||
-            (id.StartsWith("head.", StringComparison.OrdinalIgnoreCase) || id.StartsWith("torso.", StringComparison.OrdinalIgnoreCase))) return Stage.Preprocessing;
+            (id.StartsWith("head.", StringComparison.OrdinalIgnoreCase) || id.StartsWith("torso.", StringComparison.OrdinalIgnoreCase) ||
+            id.StartsWith("attachment.", StringComparison.OrdinalIgnoreCase) || id.StartsWith("ear.", StringComparison.OrdinalIgnoreCase))) return Stage.Preprocessing;
         if (id.StartsWith("postprocessing.", StringComparison.OrdinalIgnoreCase)) return Stage.Postprocessing;
         return null;
     }
@@ -1307,6 +1311,8 @@ public partial class MainWindow : Window
     string CurrentSettingValue(string id) => textSettings.TryGetValue(id, out var binding) ? binding.Control.Text : id switch
     {
         "torso.mode" => SelectedTorsoMode,
+        "ear.canal_closure" => SelectedCanalClosure,
+        "attachment.cut_mode" => SelectedEarCut,
         "project.use_bezierppm" => (usePredictionsBox.IsChecked == true).ToString(),
         "scan_preparation.enabled" => (scanPreparationEnabledBox.IsChecked == true).ToString(),
         "scan_preparation.prepare_left" => (prepareLeftEarBox.IsChecked == true).ToString(),
@@ -1324,6 +1330,8 @@ public partial class MainWindow : Window
     string StoredSettingValue(ProjectRecord project, string id) => textSettings.TryGetValue(id, out var binding) ? binding.Read(project) ?? "" : id switch
     {
         "torso.mode" => project.Settings.Preprocessing.TorsoMode,
+        "ear.canal_closure" => project.Settings.Preprocessing.EarCanalCloserMode,
+        "attachment.cut_mode" => project.Settings.Preprocessing.EarCutMode,
         "project.use_bezierppm" => project.Settings.Inference.UsePredictionsForPreprocessing.ToString(),
         "scan_preparation.enabled" => project.Settings.ScanPreparation.Enabled.ToString(),
         "scan_preparation.prepare_left" => project.Settings.ScanPreparation.PrepareLeft.ToString(),
@@ -1449,6 +1457,8 @@ public partial class MainWindow : Window
             case "scan_preparation.prepare_left": prepareLeftEarBox.IsChecked = bool.TryParse(value, out var left) && left; break;
             case "scan_preparation.prepare_right": prepareRightEarBox.IsChecked = bool.TryParse(value, out var right) && right; break;
             case "torso.mode": torsoModePicker.SelectedIndex = value switch { "geometric" => 1, "acoustic" => 2, _ => 0 }; UpdateTorsoControls(); break;
+            case "ear.canal_closure": canalClosurePicker.SelectedIndex = ChoiceIndex(CanalClosureChoices, value); break;
+            case "attachment.cut_mode": earCutPicker.SelectedIndex = ChoiceIndex(EarCutChoices, value); UpdateEarAttachmentControls(); break;
             case "inference.model": modelPicker.SelectedItem = value; break;
             case "numcalc.adaptive_fmm": adaptiveFmmLengthBox.IsChecked = bool.TryParse(value, out var adaptive) && adaptive; break;
             case "postprocessing.normalize": normalizeHrtfsBox.IsChecked = bool.TryParse(value, out var normalize) && normalize; break;
@@ -1488,6 +1498,8 @@ public partial class MainWindow : Window
         }
         project.Settings.Preprocessing.EvaluationGrid = evaluationGridBox.Text.Trim();
         project.Settings.Preprocessing.TorsoMode = SelectedTorsoMode;
+        project.Settings.Preprocessing.EarCanalCloserMode = SelectedCanalClosure;
+        project.Settings.Preprocessing.EarCutMode = SelectedEarCut;
         foreach (var key in acousticChoices.Keys.Concat(acousticFlags.Keys)) ProjectDocument.Acoustic(project).Set(key, AcousticControlValue(key));
         UpdateAcousticControls();
         project.Settings.NumCalc.AdaptiveFmmLength = adaptiveFmmLengthBox.IsChecked == true;

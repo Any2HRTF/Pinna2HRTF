@@ -48,6 +48,9 @@ internal static class ProjectDocument
             ["head.height_scale"] = pre.HeadHeightScale,
             ["head.taper_percent"] = pre.HeadTaperPercent,
             ["torso.mode"] = pre.TorsoMode,
+            ["ear.canal_closure"] = pre.EarCanalCloserMode, ["attachment.cut_mode"] = pre.EarCutMode,
+            ["attachment.clearance"] = pre.EarCutClearanceScale, ["attachment.margin"] = pre.ProjectedCutMargin,
+            ["attachment.smoothing_passes"] = pre.SeamSmoothingIterations, ["attachment.smoothing_strength"] = pre.SeamSmoothingFactor,
             ["acoustic_torso.gain"] = Acoustic(p).Get("gain"),
             ["acoustic_torso.min_source_elevation_deg"] = Acoustic(p).Get("min_source_elevation_deg"),
             ["acoustic_torso.max_angular_gap_deg"] = Acoustic(p).Get("max_angular_gap_deg"),
@@ -167,6 +170,12 @@ internal static class ProjectDocument
         foreach (var (key, id, text) in new[] { ("head_radius_scale", "head.radius_scale", pre.HeadRadiusScale), ("head_width_scale", "head.width_scale", pre.HeadWidthScale), ("head_height_scale", "head.height_scale", pre.HeadHeightScale), ("head_taper_percent", "head.taper_percent", pre.HeadTaperPercent), ("torso_width_mm", "torso.width", pre.TorsoWidthMM), ("torso_depth_mm", "torso.depth", pre.TorsoDepthMM), ("torso_height_mm", "torso.height", pre.TorsoHeightMM) })
             Set("preprocessing", key, Numeric(id, text, "preprocessing." + key));
         Set("preprocessing", "torso_mode", pre.TorsoMode);
+        Set("preprocessing", "ear_canal_closer_mode", pre.EarCanalCloserMode);
+        Set("preprocessing", "ear_cut_mode", pre.EarCutMode);
+        foreach (var (key, id, text) in new[] { ("ear_cut_clearance_scale", "attachment.clearance", pre.EarCutClearanceScale),
+            ("projected_cut_margin", "attachment.margin", pre.ProjectedCutMargin), ("seam_smoothing_iterations", "attachment.smoothing_passes", pre.SeamSmoothingIterations),
+            ("seam_smoothing_factor", "attachment.smoothing_strength", pre.SeamSmoothingFactor) })
+            Set("preprocessing", key, Numeric(id, text, "preprocessing." + key));
         var acoustic = Acoustic(p);
         foreach (var key in AcousticTorsoSettings.Keys)
         {
@@ -214,6 +223,12 @@ internal static class ProjectDocument
         pre.HeadHeightScale = D("preprocessing", "head_height_scale");
         pre.HeadTaperPercent = D("preprocessing", "head_taper_percent");
         pre.TorsoMode = S("preprocessing", "torso_mode", "off");
+        pre.EarCanalCloserMode = D("preprocessing", "ear_canal_closer_mode");
+        pre.EarCutMode = D("preprocessing", "ear_cut_mode");
+        pre.EarCutClearanceScale = D("preprocessing", "ear_cut_clearance_scale");
+        pre.ProjectedCutMargin = D("preprocessing", "projected_cut_margin");
+        pre.SeamSmoothingIterations = D("preprocessing", "seam_smoothing_iterations");
+        pre.SeamSmoothingFactor = D("preprocessing", "seam_smoothing_factor");
         pre.TorsoWidthMM = D("preprocessing", "torso_width_mm");
         pre.TorsoDepthMM = D("preprocessing", "torso_depth_mm");
         pre.TorsoHeightMM = D("preprocessing", "torso_height_mm");

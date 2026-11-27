@@ -82,6 +82,12 @@ internal sealed class WorkflowPreferences
     public double TorsoDepthMM { get; set; } = SettingsCatalog.Decimal("preprocessing.torso_depth_mm");
     public double TorsoHeightMM { get; set; } = SettingsCatalog.Decimal("preprocessing.torso_height_mm");
     public double HeadTaperPercent { get; set; } = SettingsCatalog.Decimal("preprocessing.head_taper_percent");
+    public string EarCanalCloserMode { get; set; } = SettingsCatalog.Text("preprocessing.ear_canal_closer_mode");
+    public string EarCutMode { get; set; } = SettingsCatalog.Text("preprocessing.ear_cut_mode");
+    public double EarCutClearanceScale { get; set; } = SettingsCatalog.Decimal("preprocessing.ear_cut_clearance_scale");
+    public double ProjectedCutMargin { get; set; } = SettingsCatalog.Decimal("preprocessing.projected_cut_margin");
+    public int SeamSmoothingIterations { get; set; } = SettingsCatalog.Whole("preprocessing.seam_smoothing_iterations");
+    public double SeamSmoothingFactor { get; set; } = SettingsCatalog.Decimal("preprocessing.seam_smoothing_factor");
 
     public Dictionary<string, string> FormValues()
     {
@@ -105,6 +111,9 @@ internal sealed class WorkflowPreferences
             ["head.height_scale"] = Number(HeadHeightScale),
             ["head.taper_percent"] = Number(HeadTaperPercent),
             ["torso.mode"] = TorsoMode,
+            ["ear.canal_closure"] = EarCanalCloserMode, ["attachment.cut_mode"] = EarCutMode,
+            ["attachment.clearance"] = Number(EarCutClearanceScale), ["attachment.margin"] = Number(ProjectedCutMargin),
+            ["attachment.smoothing_passes"] = Whole(SeamSmoothingIterations), ["attachment.smoothing_strength"] = Number(SeamSmoothingFactor),
             ["torso.width"] = Number(TorsoWidthMM),
             ["torso.depth"] = Number(TorsoDepthMM),
             ["torso.height"] = Number(TorsoHeightMM),
@@ -358,6 +367,8 @@ public partial class MainWindow
                     i => defaults.EarModelMethod = new[] { "mesh2ppm", "manual", "none" }[i]);
                 var models = modelPicker.Items.Cast<string>().ToArray();
                 ChoiceRow(ears, "Mesh2PPM model", models, Array.IndexOf(models, defaults.InferenceModel), i => defaults.InferenceModel = models[i]);
+                ChoiceRow(ears, "Canal closure", [.. CanalClosureChoices.Select(choice => choice.Title)], ChoiceIndex(CanalClosureChoices, defaults.EarCanalCloserMode),
+                    i => defaults.EarCanalCloserMode = CanalClosureChoices[i].Value, "ear.canal_closure");
                 ChoiceRow(ears, "Ears to prepare from a full-head scan", ["Left and right", "Left only", "Right only"],
                     defaults.PrepareLeft && defaults.PrepareRight ? 0 : defaults.PrepareLeft ? 1 : 2,
                     i => { defaults.PrepareLeft = i != 2; defaults.PrepareRight = i != 1; });
@@ -411,6 +422,14 @@ public partial class MainWindow
                     if (acousticExportDefaults != null) acousticExportDefaults.Visibility = defaults.TorsoMode == "acoustic" ? Visibility.Visible : Visibility.Collapsed;
                     SaveAppPreferences();
                 };
+                SettingsAdvanced(simulation, "Ear attachment", controls => {
+                    ChoiceRow(controls, "Head opening", [.. EarCutChoices.Select(choice => choice.Title)], ChoiceIndex(EarCutChoices, defaults.EarCutMode),
+                        i => defaults.EarCutMode = EarCutChoices[i].Value, "attachment.cut_mode");
+                    NumberRow(controls, "Opening clearance", "attachment.clearance", () => defaults.EarCutClearanceScale, v => defaults.EarCutClearanceScale = v);
+                    NumberRow(controls, "Opening margin (mm)", "attachment.margin", () => defaults.ProjectedCutMargin, v => defaults.ProjectedCutMargin = v);
+                    IntegerRow(controls, "Smoothing passes", "attachment.smoothing_passes", () => defaults.SeamSmoothingIterations, v => defaults.SeamSmoothingIterations = v);
+                    NumberRow(controls, "Smoothing strength", "attachment.smoothing_strength", () => defaults.SeamSmoothingFactor, v => defaults.SeamSmoothingFactor = v);
+                });
                 var computing = SettingsSection(panel, "Calculation");
                 IntegerRow(computing, "Parallel NumCalc instances", "numcalc.parallel_instances", () => appPreferences.MaxInstances, v => appPreferences.MaxInstances = v);
                 IntegerRow(computing, "CPU load limit (%)", "numcalc.cpu_limit", () => appPreferences.MaxCpuLoad, v => appPreferences.MaxCpuLoad = v);
