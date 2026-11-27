@@ -550,7 +550,7 @@ public partial class MainWindow : Window
         var run = new MenuFlyoutSubItem { Text = "Run", VerticalAlignment = VerticalAlignment.Center };
         for (var step = 1; step < WorkflowTitles.Length; step++)
         {
-            if (step == HeadPage) continue;
+            if (step == HeadPage || step == TorsoPage) continue;
             var target = step;
             var item = MenuItem(WorkflowTitles[step], (_, _) => RunWorkflowStep(target));
             workflowRunItems[step] = item;

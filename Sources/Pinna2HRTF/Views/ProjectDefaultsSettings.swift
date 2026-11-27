@@ -197,13 +197,13 @@ struct HeadTorsoDefaultsSections: View {
     }
 
     var body: some View {
-        Section("Head") {
+        Section("Head Model") {
             numberField("Ear-to-ear radius scale", key: "head_radius_scale")
             numberField("Front-to-back scale", key: "head_width_scale")
             numberField("Height scale", key: "head_height_scale")
             numberField("Head taper (%)", key: "head_taper_percent")
         }
-        Section("Torso") {
+        Section("Torso Model") {
             LabeledContent {
                 Picker("Torso modelling", selection: text("torso_mode")) {
                     Text("Off").tag("off")

@@ -22,8 +22,8 @@ struct ProjectInspectorView: View {
             }
         }
         .onChange(of: headPreviewSettings) { _ in if headPreviewProjectID == store.selectedProjectID { store.viewer.requestHeadPreview() } }
-        .onChange(of: store.workflowStep) { step in if step == .head { showHeadPreview() } }
-        .onChange(of: store.selectedProjectID) { _ in if store.workflowStep == .head { showHeadPreview() } }
+        .onChange(of: store.workflowStep) { step in if step == .head || step == .torso { showHeadPreview() } }
+        .onChange(of: store.selectedProjectID) { _ in if store.workflowStep == .head || store.workflowStep == .torso { showHeadPreview() } }
         .onChange(of: store.earDistanceFocusRequest) { _ in store.workflowStep = .head }
     }
 
@@ -69,6 +69,7 @@ struct ProjectInspectorView: View {
         case .prepare: prepareSections
         case .earModel: earModelSections
         case .head: headSections
+        case .torso: torsoSections
         case .simulation: simulationSections
         case .calculate: calculationSections
         case .results: exportSections
@@ -256,6 +257,10 @@ struct ProjectInspectorView: View {
             headShapeField("Height scale", id: "head.height_scale")
             headShapeField("Head taper (%)", id: "head.taper_percent")
         }
+        earAttachmentSection
+    }
+
+    @ViewBuilder var torsoSections: some View {
         Section("Torso") {
             LabeledContent {
                 Picker("Torso modelling", selection: torsoModeBinding) {
@@ -277,6 +282,9 @@ struct ProjectInspectorView: View {
                     .id(String(store.selectedProjectIsRunning))
             }
         }
+    }
+
+    @ViewBuilder var earAttachmentSection: some View {
         Section("Ear Attachment") {
             choiceRow("Head opening", id: "attachment.cut_mode", options: [("ellipse", "Ellipse"), ("projected_footprint", "Bounding box"), ("exact", "Ear outline")])
             if earCutMode == "ellipse" { attachmentField("Opening clearance", id: "attachment.clearance") }

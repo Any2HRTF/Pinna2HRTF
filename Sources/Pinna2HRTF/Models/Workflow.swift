@@ -2,12 +2,12 @@ import Foundation
 import AppKit
 
 enum WorkflowStep: Int, CaseIterable, Identifiable {
-    case inputs, prepare, earModel, head, simulation, calculate, results
+    case inputs, prepare, earModel, head, torso, simulation, calculate, results
     var id: Int { rawValue }
-    var title: String { ["Project setup", "Preparation", "Ear model", "Head & torso", "Simulation setup", "Calculation", "SOFA export"][rawValue] }
+    var title: String { ["Project setup", "Preparation", "Ear model", "Head model", "Torso model", "Simulation setup", "Calculation", "SOFA export"][rawValue] }
     var stage: Stage? {
         switch self {
-        case .inputs, .head: nil
+        case .inputs, .head, .torso: nil
         case .prepare: .scanPreparation
         case .earModel: .inference
         case .simulation: .preprocessing
@@ -155,10 +155,13 @@ extension AppStore {
     func workflowStatus(_ step: WorkflowStep) -> String {
         guard let project = selectedProject else { return "Needs input" }
         if step == .inputs { return project.saveLocation.isEmpty ? "Needs input" : "Complete" }
-        if step == .head {
+        if step == .head || step == .torso {
             if workflowSides.isEmpty { return "Awaiting preparation" }
             let values = ProjectValidation.formValues(for: project)
-            let invalid = values.keys.contains { ($0.hasPrefix("head.") || $0.hasPrefix("torso.") || $0.hasPrefix("attachment.") || $0 == "mesh2hrtf.ear_distance") && SettingsCatalog.check(values, id: $0) != nil }
+            let prefixes = step == .head ? ["head.", "attachment."] : ["torso.", "acoustic_torso."]
+            let invalid = values.keys.contains { id in
+                (prefixes.contains { id.hasPrefix($0) } || (step == .head && id == "mesh2hrtf.ear_distance")) && SettingsCatalog.check(values, id: id) != nil
+            }
             return invalid ? "Needs input" : "Complete"
         }
         if step == .prepare {

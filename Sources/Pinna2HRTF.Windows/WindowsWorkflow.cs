@@ -9,12 +9,12 @@ namespace Pinna2HRTF.Windows;
 
 public partial class MainWindow
 {
-    static readonly string[] WorkflowTitles = ["Project setup", "Preparation", "Ear model", "Head & torso", "Simulation setup", "Calculation", "SOFA export"];
-    static readonly int[] StagePages = [1, 2, 4, 5, 6];
-    const int SetupPage = 0, PreparationPage = 1, EarModelPage = 2, HeadPage = 3, SimulationPage = 4, ResultsPage = 6;
-    readonly StackPanel[] workflowPages = Enumerable.Range(0, 7).Select(_ => new StackPanel { Spacing = 10 }).ToArray();
+    static readonly string[] WorkflowTitles = ["Project setup", "Preparation", "Ear model", "Head model", "Torso model", "Simulation setup", "Calculation", "SOFA export"];
+    static readonly int[] StagePages = [1, 2, 5, 6, 7];
+    const int SetupPage = 0, PreparationPage = 1, EarModelPage = 2, HeadPage = 3, TorsoPage = 4, SimulationPage = 5, CalculationPage = 6, ResultsPage = 7;
+    readonly StackPanel[] workflowPages = Enumerable.Range(0, 8).Select(_ => new StackPanel { Spacing = 10 }).ToArray();
     readonly ListBox workflowNavigation = new() { SelectionMode = SelectionMode.Single };
-    readonly TextBlock[] workflowStates = Enumerable.Range(0, 7).Select(_ => new TextBlock { FontSize = 11, TextWrapping = TextWrapping.Wrap }).ToArray();
+    readonly TextBlock[] workflowStates = Enumerable.Range(0, 8).Select(_ => new TextBlock { FontSize = 11, TextWrapping = TextWrapping.Wrap }).ToArray();
     readonly TextBlock[] workflowReasons = Enumerable.Range(0, 5).Select(_ => new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap }).ToArray();
     readonly RadioButtons workflowSource = new() { Header = "Input source", MaxColumns = 1, ItemsSource = new[] { "Full-head scan", "Individual ear meshes" } };
     readonly RadioButtons workflowMethod = new() { Header = "Ear modelling method", MaxColumns = 1 };
@@ -26,7 +26,7 @@ public partial class MainWindow
     readonly Button workflowCompact = new() { Content = "Show workflow", MaxWidth = 260 };
     readonly ProgressBar workflowProgress = new() { IsIndeterminate = true, Visibility = Visibility.Collapsed };
     ScrollViewer workflowScroll = new();
-    readonly MenuFlyoutItem?[] workflowRunItems = new MenuFlyoutItem?[7];
+    readonly MenuFlyoutItem?[] workflowRunItems = new MenuFlyoutItem?[8];
     readonly List<MenuFlyoutItem> workflowRunAllItems = [], workflowResetItems = [];
     MenuFlyoutItem? workflowRerunItem, workflowStopItem;
     ToggleMenuFlyoutItem? projectsViewItem, workflowViewItem, logViewItem;
@@ -191,6 +191,9 @@ public partial class MainWindow
         head.Children.Add(WorkflowGroupHeading("Head"));
         head.Children.Add(GeometryPanel());
         head.Children.Add(EarAttachmentPanel());
+        var torsoPage = workflowPages[TorsoPage];
+        torsoPage.Children.Add(WorkflowGroupHeading("Torso"));
+        torsoPage.Children.Add(TorsoPanel());
         var simulation = workflowPages[SimulationPage];
         simulation.Children.Add(WorkflowGroupHeading("Microphones"));
         simulation.Children.Add(WorkflowText("Automatic positioning remains the default; adjust only when needed."));
@@ -209,7 +212,7 @@ public partial class MainWindow
         AddExpander(simulation, "Advanced mesh grading", [WorkflowText("Required safety step"),
             AddSettingPanel("Min edge length", "mesh_grading.min_edge_length", meshMinEdgeBox), AddSettingPanel("Max edge length", "mesh_grading.max_edge_length", meshMaxEdgeBox),
             AddSettingPanel("Max error", "mesh_grading.max_error", meshMaxErrorBox), AddSettingPanel("Gamma", "mesh_grading.gamma", meshGammaBox), AddSettingPanel("Gamma opposite", "mesh_grading.gamma_opposite", meshGammaOppositeBox)]);
-        var numcalc = workflowPages[5];
+        var numcalc = workflowPages[CalculationPage];
         numCalcStatusText = WorkflowText(""); numcalc.Children.Add(numCalcStatusText);
         AddSetting(numcalc, "Parallel instances", "numcalc.parallel_instances", maxInstancesBox);
         AddSetting(numcalc, "CPU limit (%)", "numcalc.cpu_limit", maxCpuLoadBox);
@@ -302,7 +305,7 @@ public partial class MainWindow
         PreparationPage => [.. AutomaticStages(project).Where(stage => stage == Stage.ScanPreparation)],
         EarModelPage => [.. AutomaticStages(project).Where(stage => stage == Stage.Inference)],
         SimulationPage => [Stage.Preprocessing],
-        5 => [Stage.Numcalc],
+        CalculationPage => [Stage.Numcalc],
         ResultsPage => [Stage.Postprocessing],
         _ => []
     };
@@ -451,19 +454,19 @@ public partial class MainWindow
                 0 => stageStatus[1].Text,
                 _ => "Complete"
             };
-            if (p == null || sides.Length == 0) workflowStates[HeadPage].Text = "Awaiting preparation";
-            else {
+            foreach (var (page, prefixes) in new[] { (HeadPage, new[] { "head.", "attachment." }), (TorsoPage, new[] { "torso.", "acoustic_torso." }) }) {
+                if (p == null || sides.Length == 0) { workflowStates[page].Text = "Awaiting preparation"; continue; }
                 var values = ProjectDocument.FormValues(p);
-                var invalid = values.Keys.Any(id => (id.StartsWith("head.", StringComparison.Ordinal) || id.StartsWith("torso.", StringComparison.Ordinal) ||
-                    id.StartsWith("attachment.", StringComparison.Ordinal) || id == "mesh2hrtf.ear_distance") && SettingsCatalog.Check(values, id) != null);
-                workflowStates[HeadPage].Text = invalid ? "Needs input" : "Complete";
+                var invalid = values.Keys.Any(id => (prefixes.Any(prefix => id.StartsWith(prefix, StringComparison.Ordinal)) ||
+                    page == HeadPage && id == "mesh2hrtf.ear_distance") && SettingsCatalog.Check(values, id) != null);
+                workflowStates[page].Text = invalid ? "Needs input" : "Complete";
             }
             for (var index = 0; index < workflowStates.Length; index++) {
                 var label = workflowStates[index].Text;
                 if (label == "Blocked") label = index == 0 ? "Needs input" : "Waiting";
                 if (label == "Done") label = "Complete";
-                if (p != null && index >= 5 && label is "Waiting" or "Ready" && statusSnapshots.TryGetValue(p.Id, out var snapshot) &&
-                    snapshot.Revision == StatusRevision(p) && snapshot.Outdated.Contains(Stage.GetValues()[index - 2])) label = "Needs rerun";
+                if (p != null && index >= CalculationPage && label is "Waiting" or "Ready" && statusSnapshots.TryGetValue(p.Id, out var snapshot) &&
+                    snapshot.Revision == StatusRevision(p) && snapshot.Outdated.Contains(Stage.GetValues()[index - 3])) label = "Needs rerun";
                 var symbol = label switch { "Complete" => "\u2713", "Failed" or "Needs rerun" => "!", "Not needed" or "Optional" => "\u2013",
                     "Ready" => "\u25B7", "Running\u2026" => "\u25B6", _ => "\u25CB" };
                 workflowStates[index].Text = $"{symbol}  {label}";

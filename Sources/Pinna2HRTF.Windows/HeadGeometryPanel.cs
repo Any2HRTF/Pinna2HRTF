@@ -196,6 +196,14 @@ public partial class MainWindow
         AddExpander(panel, "Head shape", shape);
         headShapeExpander = (Expander)panel.Children[^1];
         headShapeExpander.Expanding += (_, _) => RequestHeadPreview(true);
+        var grid = new Grid();
+        grid.Children.Add(panel);
+        return grid;
+    }
+
+    StackPanel TorsoPanel()
+    {
+        var panel = new StackPanel();
         torsoModePicker.Items.Add(new ComboBoxItem { Content = "Off", Tag = "off" });
         torsoModePicker.Items.Add(new ComboBoxItem { Content = "Geometric", Tag = "geometric" });
         torsoModePicker.Items.Add(new ComboBoxItem { Content = "Acoustic", Tag = "acoustic" });
@@ -215,9 +223,7 @@ public partial class MainWindow
         };
         panel.Children.Add(AcousticGridPanel());
         UpdateTorsoControls();
-        var grid = new Grid();
-        grid.Children.Add(panel);
-        return grid;
+        return panel;
     }
 
     GeometryValues ApplyGeometrySettings(GeometryValues measured, PreprocessingSettings settings) =>
