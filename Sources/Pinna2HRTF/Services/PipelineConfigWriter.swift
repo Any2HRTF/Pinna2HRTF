@@ -77,8 +77,11 @@ enum PipelineConfigWriter {
         ]
         preprocessing["ear_distance"] = pre.earDistance.map { number($0) } ?? NSNull()
         preprocessing["torso_mode"] = pre.torsoMode ?? SettingsCatalog.text("preprocessing.torso_mode")
-        for field in PreprocessingSettings.geometryFields {
+        for field in PreprocessingSettings.geometryFields + PreprocessingSettings.attachmentFields {
             if let value = pre[keyPath: field.keyPath] { preprocessing[field.config] = number(value) }
+        }
+        for field in PreprocessingSettings.choiceFields {
+            if let value = pre[keyPath: field.keyPath] { preprocessing[field.config] = value }
         }
         for side in EarSide.allCases {
             if let position = positions[side] {

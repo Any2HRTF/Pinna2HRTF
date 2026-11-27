@@ -109,6 +109,14 @@ struct ProjectDefaultsSections: View {
             }
             ModelPicker(selection: inferenceModel, options: store.modelOptions, helpID: "inference.model")
                 .disabled(earModel.wrappedValue != .mesh2ppm)
+            HelpRow("Canal closure", helpID: "ear.canal_closure") {
+                Picker("Canal closure", selection: text("ear_canal_closer_mode")) {
+                    Text("Direct").tag("legacy")
+                    Text("Interpolated").tag("interpolated")
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
         } header: {
             Text("Ear Model")
         }
@@ -201,7 +209,9 @@ struct HeadTorsoDefaultsSections: View {
                     Text("Off").tag("off")
                     Text("Geometric").tag("geometric")
                     Text("Acoustic").tag("acoustic")
-                }.labelsHidden()
+                }
+                .labelsHidden()
+                .fixedSize()
             } label: { SettingLabel(title: "Torso modelling", helpID: "torso.mode") }
             if text("torso_mode").wrappedValue == "geometric" {
                 numberField("Torso width (mm)", key: "torso_width_mm")
@@ -209,6 +219,21 @@ struct HeadTorsoDefaultsSections: View {
                 numberField("Torso height (mm)", key: "torso_height_mm")
             }
             if text("torso_mode").wrappedValue == "acoustic" { AcousticTorsoDefaultsControls() }
+        }
+        Section("Ear Attachment") {
+            HelpRow("Head opening", helpID: "attachment.cut_mode") {
+                Picker("Head opening", selection: text("ear_cut_mode")) {
+                    Text("Ellipse").tag("ellipse")
+                    Text("Bounding box").tag("projected_footprint")
+                    Text("Ear outline").tag("exact")
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            if text("ear_cut_mode").wrappedValue == "ellipse" { numberField("Opening clearance", key: "ear_cut_clearance_scale") }
+            if text("ear_cut_mode").wrappedValue == "projected_footprint" { numberField("Opening margin (mm)", key: "projected_cut_margin") }
+            numberField("Smoothing passes", key: "seam_smoothing_iterations")
+            numberField("Smoothing strength", key: "seam_smoothing_factor")
         }
     }
 }

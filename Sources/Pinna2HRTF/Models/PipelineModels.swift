@@ -225,7 +225,24 @@ struct PreprocessingSettings: Codable, Equatable {
     var torsoWidthMM: String?
     var torsoDepthMM: String?
     var torsoHeightMM: String?
+    var earCanalCloserMode: String?
+    var earCutMode: String?
+    var earCutClearanceScale: String?
+    var projectedCutMargin: String?
+    var seamSmoothingIterations: String?
+    var seamSmoothingFactor: String?
 
+    static let choiceFields: [(keyPath: WritableKeyPath<PreprocessingSettings, String?>, config: String, id: String)] = [
+        (\.earCanalCloserMode, "ear_canal_closer_mode", "ear.canal_closure"),
+        (\.earCutMode, "ear_cut_mode", "attachment.cut_mode")
+    ]
+
+    static let attachmentFields: [(keyPath: WritableKeyPath<PreprocessingSettings, String?>, config: String, id: String)] = [
+        (\.earCutClearanceScale, "ear_cut_clearance_scale", "attachment.clearance"),
+        (\.projectedCutMargin, "projected_cut_margin", "attachment.margin"),
+        (\.seamSmoothingIterations, "seam_smoothing_iterations", "attachment.smoothing_passes"),
+        (\.seamSmoothingFactor, "seam_smoothing_factor", "attachment.smoothing_strength")
+    ]
 
     static let geometryFields: [(keyPath: WritableKeyPath<PreprocessingSettings, String?>, config: String, id: String)] = [
         (\.headRadiusScale, "head_radius_scale", "head.radius_scale"),

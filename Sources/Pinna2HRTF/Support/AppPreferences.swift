@@ -50,6 +50,12 @@ enum AppPreferences {
         .init(key: "head_height_scale", config: "preprocessing.head_height_scale", rule: "head.height_scale"),
         .init(key: "head_taper_percent", config: "preprocessing.head_taper_percent", rule: "head.taper_percent"),
         .init(key: "torso_mode", config: "preprocessing.torso_mode", rule: "torso.mode"),
+        .init(key: "ear_canal_closer_mode", config: "preprocessing.ear_canal_closer_mode", rule: "ear.canal_closure"),
+        .init(key: "ear_cut_mode", config: "preprocessing.ear_cut_mode", rule: "attachment.cut_mode"),
+        .init(key: "ear_cut_clearance_scale", config: "preprocessing.ear_cut_clearance_scale", rule: "attachment.clearance"),
+        .init(key: "projected_cut_margin", config: "preprocessing.projected_cut_margin", rule: "attachment.margin"),
+        .init(key: "seam_smoothing_iterations", config: "preprocessing.seam_smoothing_iterations", rule: "attachment.smoothing_passes"),
+        .init(key: "seam_smoothing_factor", config: "preprocessing.seam_smoothing_factor", rule: "attachment.smoothing_strength"),
         .init(key: "torso_width_mm", config: "preprocessing.torso_width_mm", rule: "torso.width"),
         .init(key: "torso_depth_mm", config: "preprocessing.torso_depth_mm", rule: "torso.depth"),
         .init(key: "torso_height_mm", config: "preprocessing.torso_height_mm", rule: "torso.height"),
@@ -76,6 +82,8 @@ enum AppPreferences {
         if UserDefaults.standard.string(forKey: backup) == nil { UserDefaults.standard.set(text, forKey: backup) }
         UserDefaults.standard.set(String(decoding: data, as: UTF8.self), forKey: workflow)
     }
+
+    static let workflowTextKeys: Set<String> = ["torso_mode", "ear_canal_closer_mode", "ear_cut_mode"]
 
     static var storedWorkflow: [String: Any] {
         guard let text = UserDefaults.standard.string(forKey: workflow),
@@ -129,7 +137,7 @@ enum AppPreferences {
             }
             let text = workflowText(field, in: stored).trimmingCharacters(in: .whitespacesAndNewlines)
             guard SettingsCatalog.check(values, id: rule) == nil else { continue }
-            if field.key == "torso_mode" { payload[field.key] = text; continue }
+            if workflowTextKeys.contains(field.key) { payload[field.key] = text; continue }
             payload[field.key] = Int(text).map { $0 as Any } ?? Double(text).map { $0 as Any }
         }
         payload["acoustic_torso"] = AcousticTorsoSettings(config: stored["acoustic_torso"] as? [String: Any] ?? [:]).payload

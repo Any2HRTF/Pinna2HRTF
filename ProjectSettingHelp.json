@@ -436,6 +436,42 @@
     "publications": []
   },
   {
+    "id": "ear.canal_closure",
+    "title": "Ear canal closure",
+    "description": "How the ear canal opening is capped before simulation. Direct triangulates the opening as it is, the original method. Interpolated triangulates the opening from the side and blends its depth from the edge, which gives a smoother cap for uneven openings. Default: Direct.",
+    "publications": []
+  },
+  {
+    "id": "attachment.cut_mode",
+    "title": "Head opening",
+    "description": "Shape of the opening cut into the dummy head where the ear is attached. Ellipse sizes an ellipse from the ear's extent. Bounding box removes the head surface inside the ear's side-view outline box plus a margin. Ear outline follows the ear's own outer edge. Default: Ellipse.",
+    "publications": []
+  },
+  {
+    "id": "attachment.clearance",
+    "title": "Opening clearance",
+    "description": "Scales the ellipse around the ear when the head opening is an ellipse. Larger values leave more room between the ear edge and the head. Default: 1.3.",
+    "publications": []
+  },
+  {
+    "id": "attachment.margin",
+    "title": "Opening margin",
+    "description": "Extra distance around the ear's outline box when the head opening is a bounding box, in millimetres. Default: 10 mm.",
+    "publications": []
+  },
+  {
+    "id": "attachment.smoothing_passes",
+    "title": "Seam smoothing passes",
+    "description": "Number of smoothing passes over the seam where the ear joins the head. 0 leaves the seam unsmoothed. Default: 5.",
+    "publications": []
+  },
+  {
+    "id": "attachment.smoothing_strength",
+    "title": "Seam smoothing strength",
+    "description": "How far each smoothing pass moves the seam vertices, from 0 (none) to 1. Default: 0.35.",
+    "publications": []
+  },
+  {
     "id": "torso.mode",
     "title": "Torso modelling",
     "description": "Off simulates the head only. Geometric adds a neck and upper torso to the simulation mesh; Acoustic keeps the head-only mesh and adds modelled torso reflection and shadow to the exported HRIRs. Acoustic mode checks and extends the simulation grid during Simulation setup, then removes helper directions during SOFA export.",

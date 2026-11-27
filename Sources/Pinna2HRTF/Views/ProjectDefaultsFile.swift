@@ -76,7 +76,7 @@ enum ProjectDefaultsFile {
                 continue
             }
             let text = AppPreferences.workflowText(field, in: stored).trimmingCharacters(in: .whitespacesAndNewlines)
-            if field.key == "torso_mode" { workflow[field.key] = text; continue }
+            if AppPreferences.workflowTextKeys.contains(field.key) { workflow[field.key] = text; continue }
             if let number = Int(text) { workflow[field.key] = number } else if let number = Double(text), number.isFinite { workflow[field.key] = number }
         }
         workflow["acoustic_torso"] = AcousticTorsoSettings(config: stored["acoustic_torso"] as? [String: Any] ?? [:]).payload

@@ -189,7 +189,7 @@ enum ProjectConfigDocument {
         project.settings.preprocessing.earDistance = text(pre, "ear_distance") ?? text(pre, "head_radius")
         project.settings.acousticTorso = AcousticTorsoSettings(config: config["acoustic_torso"] as? [String: Any] ?? [:])
         project.settings.preprocessing.torsoMode = text(pre, "torso_mode") ?? SettingsCatalog.text("preprocessing.torso_mode")
-        for field in PreprocessingSettings.geometryFields {
+        for field in PreprocessingSettings.geometryFields + PreprocessingSettings.attachmentFields + PreprocessingSettings.choiceFields {
             project.settings.preprocessing[keyPath: field.keyPath] = text(pre, field.config)
         }
         project.settings.preprocessing.sourceAssignmentFaceCount = text(pre, "source_assignment_face_count") ?? SettingsCatalog.text("preprocessing.source_assignment_face_count")

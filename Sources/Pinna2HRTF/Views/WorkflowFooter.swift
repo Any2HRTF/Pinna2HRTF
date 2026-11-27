@@ -7,8 +7,9 @@ struct WorkflowFooter: View {
     private var stages: [Stage] {
         switch store.workflowStep {
         case .prepare:
-            return (store.selectedProject?.scanPreparation.enabled == true ? [.scanPreparation] : [])
-                + (store.earModelMethod == .mesh2ppm ? [.inference] : [])
+            return store.selectedProject?.scanPreparation.enabled == true ? [.scanPreparation] : []
+        case .earModel:
+            return store.earModelMethod == .mesh2ppm ? [.inference] : []
         default:
             return store.workflowStep.stage.map { [$0] } ?? []
         }

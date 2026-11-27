@@ -2,13 +2,14 @@ import Foundation
 import AppKit
 
 enum WorkflowStep: Int, CaseIterable, Identifiable {
-    case inputs, prepare, head, simulation, calculate, results
+    case inputs, prepare, earModel, head, simulation, calculate, results
     var id: Int { rawValue }
-    var title: String { ["Project Setup", "Ear preparation & modelling", "Head & torso", "Simulation setup", "Calculation", "SOFA export"][rawValue] }
+    var title: String { ["Project setup", "Preparation", "Ear model", "Head & torso", "Simulation setup", "NumCalc", "SOFA export"][rawValue] }
     var stage: Stage? {
         switch self {
         case .inputs, .head: nil
         case .prepare: .scanPreparation
+        case .earModel: .inference
         case .simulation: .preprocessing
         case .calculate: .numcalc
         case .results: .postprocessing
@@ -105,7 +106,7 @@ extension AppStore {
         if activeWorkflowAlignment != nil {
             return .init(title: "Save Alignment", step: .prepare, enabled: alignmentCanSave)
         }
-        if let issue = workflowInputIssue { return .init(title: issue, step: .inputs) }
+        if let issue = workflowInputIssue { return .init(title: issue, step: selectedProject?.saveLocation.isEmpty == false ? .prepare : .inputs) }
         if isPlacingMicrophone { return .init(title: "Finish Microphone Placement", step: .simulation) }
         if isCheckingProjectFiles { return .init(title: "Checking project files…", step: workflowStep, enabled: false) }
         if let p = selectedProject, p.scanPreparation.enabled,
@@ -115,14 +116,13 @@ extension AppStore {
         if let issue = selectedValidationIssues.first(where: { $0.id.hasPrefix("ear_edit.") }) {
             return .init(title: issue.message, step: .prepare)
         }
-        if earModelMethod == nil { return .init(title: "Choose an Ear Modelling Method", step: .prepare) }
+        if earModelMethod == nil { return .init(title: "Choose an Ear Modelling Method", step: .earModel) }
         if earModelMethod == .manual,
            let side = workflowSides.first(where: { !(selectedProjectStatus?.validFitSides.contains($0) ?? false) }) {
-            return .init(title: "Fit \(side.title) Ear", step: .prepare, fit: side)
+            return .init(title: "Fit \(side.title) Ear", step: .earModel, fit: side)
         }
-        if let stage = nextStage {
-            let step = stage == .inference ? WorkflowStep.prepare : WorkflowStep.allCases.first(where: { $0.stage == stage })
-            if let step { return .init(title: stage.workflowRunTitle, step: step, stage: stage, enabled: canRun(stage: stage)) }
+        if let stage = nextStage, let step = WorkflowStep.allCases.first(where: { $0.stage == stage }) {
+            return .init(title: stage.workflowRunTitle, step: step, stage: stage, enabled: canRun(stage: stage))
         }
         return .init(title: "Open Results", step: .results)
     }
@@ -154,14 +154,15 @@ extension AppStore {
 
     func workflowStatus(_ step: WorkflowStep) -> String {
         guard let project = selectedProject else { return "Needs input" }
-        if step == .inputs { return workflowInputIssue == nil ? "Complete" : "Needs input" }
+        if step == .inputs { return project.saveLocation.isEmpty ? "Needs input" : "Complete" }
         if step == .head {
-            if workflowSides.isEmpty { return "Awaiting project setup" }
+            if workflowSides.isEmpty { return "Awaiting preparation" }
             let values = ProjectValidation.formValues(for: project)
-            let invalid = values.keys.contains { ($0.hasPrefix("head.") || $0.hasPrefix("torso.") || $0 == "mesh2hrtf.ear_distance") && SettingsCatalog.check(values, id: $0) != nil }
+            let invalid = values.keys.contains { ($0.hasPrefix("head.") || $0.hasPrefix("torso.") || $0.hasPrefix("attachment.") || $0 == "mesh2hrtf.ear_distance") && SettingsCatalog.check(values, id: $0) != nil }
             return invalid ? "Needs input" : "Complete"
         }
         if step == .prepare {
+            if workflowInputIssue != nil { return "Needs input" }
             if project.scanPreparation.enabled {
                 let scanState = stageStates[.scanPreparation] ?? .ready
                 if scanState == .running { return "Running…" }
@@ -171,8 +172,14 @@ extension AppStore {
                     return canRun(stage: .scanPreparation) ? "Ready" : "Needs input"
                 }
             }
+            return "Complete"
+        }
+        if step == .earModel {
+            if workflowInputIssue != nil || (project.scanPreparation.enabled && !(selectedProjectStatus?.completed.contains(.scanPreparation) ?? false)) {
+                return "Awaiting preparation"
+            }
             if earModelMethod == nil { return "Choose method" }
-            if earModelMethod == EarModelMethod.none { return project.scanPreparation.enabled ? "Complete" : "Optional" }
+            if earModelMethod == EarModelMethod.none { return "Complete" }
             if earModelMethod == .manual {
                 let count = workflowSides.filter { selectedProjectStatus?.validFitSides.contains($0) ?? false }.count
                 return !workflowSides.isEmpty && count == workflowSides.count ? "Complete" : "Needs fit · \(count)/\(workflowSides.count)"
@@ -192,7 +199,7 @@ extension AppStore {
         if step.rawValue >= WorkflowStep.simulation.rawValue && preprocessingNeedsRerun(for: project) { return "Needs rerun" }
         if selectedProjectStatus?.completed.contains(stage) ?? false { return "Complete" }
         if canRun(stage: stage) { return "Ready" }
-        if let awaited = awaitedStep(before: stage) { return "Awaiting \(awaited.title.prefix(1).lowercased() + awaited.title.dropFirst())" }
+        if let awaited = awaitedStep(before: stage) { return "Awaiting \(awaited == .calculate ? awaited.title : awaited.title.prefix(1).lowercased() + awaited.title.dropFirst())" }
         return "Needs input"
     }
 
@@ -206,8 +213,8 @@ extension AppStore {
             return completed.contains(.preprocessing) ? nil : .simulation
         case .preprocessing:
             if project.scanPreparation.enabled && !completed.contains(.scanPreparation) { return .prepare }
-            if earModelMethod == .mesh2ppm && !completed.contains(.inference) { return .prepare }
-            if earModelMethod == .manual && !workflowSides.allSatisfy({ selectedProjectStatus?.validFitSides.contains($0) ?? false }) { return .prepare }
+            if earModelMethod == .mesh2ppm && !completed.contains(.inference) { return .earModel }
+            if earModelMethod == .manual && !workflowSides.allSatisfy({ selectedProjectStatus?.validFitSides.contains($0) ?? false }) { return .earModel }
             return nil
         case .scanPreparation, .inference:
             return nil

@@ -26,7 +26,7 @@ enum ProjectValidation {
             "ear_model.method": project.workflowMethod?.rawValue ?? ""
         ]
         values["torso.mode"] = pre.torsoMode ?? SettingsCatalog.text("preprocessing.torso_mode")
-        for field in PreprocessingSettings.geometryFields {
+        for field in PreprocessingSettings.geometryFields + PreprocessingSettings.attachmentFields + PreprocessingSettings.choiceFields {
             values[field.id] = pre[keyPath: field.keyPath] ?? SettingsCatalog.text("preprocessing." + field.config)
         }
         for key in AcousticTorsoSettings.keys { values["acoustic_torso." + key] = AcousticTorsoSettings.effective(project).text(key) }

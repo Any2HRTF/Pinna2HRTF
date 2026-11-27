@@ -233,6 +233,7 @@ EDITABLE_SETTINGS = {
         "source_position_input_right", "mesh_min_edge_length", "mesh_max_edge_length",
         "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite", "skip_mesh_grading", "head_radius_scale",
         "head_width_scale", "head_height_scale", "head_taper_percent", "torso_mode", "torso_width_mm", "torso_depth_mm", "torso_height_mm",
+        "ear_canal_closer_mode", "ear_cut_mode", "ear_cut_clearance_scale", "projected_cut_margin", "seam_smoothing_iterations", "seam_smoothing_factor",
     ),
     "acoustic_torso": (
         "gain", "min_source_elevation_deg", "max_angular_gap_deg", "symmetry", "interpolation",
@@ -526,7 +527,8 @@ def new_project_workflow(values: dict) -> dict:
     groups = {
         "scan_preparation": ("prepare_left", "prepare_right", "target_edge_mm", "left_margin_mm", "right_margin_mm", "side_min_mm", "side_max_mm", "require_manual_review"),
         "preprocessing": ("source_assignment_face_count", "mesh_min_edge_length", "mesh_max_edge_length", "mesh_max_error", "mesh_gamma", "mesh_gamma_opposite",
-                          "head_radius_scale", "head_width_scale", "head_height_scale", "head_taper_percent", "torso_mode", "torso_width_mm", "torso_depth_mm", "torso_height_mm"),
+                          "head_radius_scale", "head_width_scale", "head_height_scale", "head_taper_percent", "torso_mode", "torso_width_mm", "torso_depth_mm", "torso_height_mm",
+                          "ear_canal_closer_mode", "ear_cut_mode", "ear_cut_clearance_scale", "projected_cut_margin", "seam_smoothing_iterations", "seam_smoothing_factor"),
         "numcalc": ("adaptive_fmm_length",),
         "postprocessing": ("normalize", "level_offset_db", "resample_hrirs", "sampling_rate", "spatial_upsampling", "spatial_subdivisions", "spatial_normalize"),
     }

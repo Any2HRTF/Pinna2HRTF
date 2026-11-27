@@ -67,6 +67,7 @@ struct ProjectInspectorView: View {
         switch store.workflowStep {
         case .inputs: projectSections
         case .prepare: prepareSections
+        case .earModel: earModelSections
         case .head: headSections
         case .simulation: simulationSections
         case .calculate: calculationSections
@@ -79,6 +80,9 @@ struct ProjectInspectorView: View {
             LabeledTextField("Project name", helpID: "project.name", text: projectStringBinding(\.name))
             PathField("Save location", helpID: "project.save_location", text: projectStringBinding(\.saveLocation), mode: .directory)
         }
+    }
+
+    @ViewBuilder var prepareSections: some View {
         Section {
             Picker("Input", selection: scanBoolBinding(\.enabled)) {
                 Text("Full-head scan").tag(true)
@@ -92,9 +96,6 @@ struct ProjectInspectorView: View {
                 PathField("Right ear", helpID: "project.right_ear", text: projectStringBinding(\.rightEar), mode: .file)
             }
         }
-    }
-
-    @ViewBuilder var prepareSections: some View {
         if store.selectedProject?.scanPreparation.enabled == true {
             Section("Head Scan") {
                 LabeledContent("Alignment") {
@@ -126,11 +127,16 @@ struct ProjectInspectorView: View {
                 }
             }
         }
-        Section("Ears") {
-            ForEach(store.workflowSides) { side in
-                earRow(side)
+        if !store.workflowSides.isEmpty {
+            Section("Ears") {
+                ForEach(store.workflowSides) { side in
+                    earRow(side)
+                }
             }
         }
+    }
+
+    @ViewBuilder var earModelSections: some View {
         Section {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Ear model")
@@ -152,6 +158,37 @@ struct ProjectInspectorView: View {
             default: EmptyView()
             }
         }
+        Section("Ear Canal") {
+            choiceRow("Canal closure", id: "ear.canal_closure", options: [("legacy", "Direct"), ("interpolated", "Interpolated")])
+        }
+    }
+
+    func choiceRow(_ title: String, id: String, options: [(value: String, title: String)]) -> some View {
+        let field = PreprocessingSettings.choiceFields.first { $0.id == id }!
+        let binding = Binding<String>(
+            get: { store.selectedProject?.settings.preprocessing[keyPath: field.keyPath] ?? SettingsCatalog.text("preprocessing." + field.config) },
+            set: { value in store.updateSelectedProject { $0.settings.preprocessing[keyPath: field.keyPath] = value } }
+        )
+        return HelpRow(title, helpID: id) {
+            Picker(title, selection: binding) {
+                ForEach(options, id: \.value) { option in Text(option.title).tag(option.value) }
+            }
+            .labelsHidden()
+            .fixedSize()
+        }
+    }
+
+    func attachmentField(_ title: String, id: String) -> some View {
+        let field = PreprocessingSettings.attachmentFields.first { $0.id == id }!
+        let binding = Binding<String>(
+            get: { store.selectedProject?.settings.preprocessing[keyPath: field.keyPath] ?? SettingsCatalog.text("preprocessing." + field.config) },
+            set: { value in store.updateSelectedProject { $0.settings.preprocessing[keyPath: field.keyPath] = value } }
+        )
+        return LabeledTextField(title, helpID: id, text: binding)
+    }
+
+    private var earCutMode: String {
+        store.selectedProject?.settings.preprocessing.earCutMode ?? SettingsCatalog.text("preprocessing.ear_cut_mode")
     }
 
     private func earRow(_ side: EarSide) -> some View {
@@ -225,7 +262,9 @@ struct ProjectInspectorView: View {
                     Text("Off").tag("off")
                     Text("Geometric").tag("geometric")
                     Text("Acoustic").tag("acoustic")
-                }.labelsHidden()
+                }
+                .labelsHidden()
+                .fixedSize()
             } label: { SettingLabel(title: "Torso modelling", helpID: "torso.mode") }
             if torsoModeBinding.wrappedValue == "geometric" {
                 headShapeField("Torso width (mm)", id: "torso.width")
@@ -237,6 +276,13 @@ struct ProjectInspectorView: View {
                 AcousticTorsoGridStatus(request: acousticGridStatusRequest)
                     .id(String(store.selectedProjectIsRunning))
             }
+        }
+        Section("Ear Attachment") {
+            choiceRow("Head opening", id: "attachment.cut_mode", options: [("ellipse", "Ellipse"), ("projected_footprint", "Bounding box"), ("exact", "Ear outline")])
+            if earCutMode == "ellipse" { attachmentField("Opening clearance", id: "attachment.clearance") }
+            if earCutMode == "projected_footprint" { attachmentField("Opening margin (mm)", id: "attachment.margin") }
+            attachmentField("Smoothing passes", id: "attachment.smoothing_passes")
+            attachmentField("Smoothing strength", id: "attachment.smoothing_strength")
         }
     }
 
