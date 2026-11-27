@@ -4,7 +4,7 @@ import AppKit
 enum WorkflowStep: Int, CaseIterable, Identifiable {
     case inputs, prepare, earModel, head, simulation, calculate, results
     var id: Int { rawValue }
-    var title: String { ["Project setup", "Preparation", "Ear model", "Head & torso", "Simulation setup", "NumCalc", "SOFA export"][rawValue] }
+    var title: String { ["Project setup", "Preparation", "Ear model", "Head & torso", "Simulation setup", "Calculation", "SOFA export"][rawValue] }
     var stage: Stage? {
         switch self {
         case .inputs, .head: nil
@@ -199,7 +199,7 @@ extension AppStore {
         if step.rawValue >= WorkflowStep.simulation.rawValue && preprocessingNeedsRerun(for: project) { return "Needs rerun" }
         if selectedProjectStatus?.completed.contains(stage) ?? false { return "Complete" }
         if canRun(stage: stage) { return "Ready" }
-        if let awaited = awaitedStep(before: stage) { return "Awaiting \(awaited == .calculate ? awaited.title : awaited.title.prefix(1).lowercased() + awaited.title.dropFirst())" }
+        if let awaited = awaitedStep(before: stage) { return "Awaiting \(awaited.title.prefix(1).lowercased() + awaited.title.dropFirst())" }
         return "Needs input"
     }
 

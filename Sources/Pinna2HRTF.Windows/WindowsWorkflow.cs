@@ -9,7 +9,7 @@ namespace Pinna2HRTF.Windows;
 
 public partial class MainWindow
 {
-    static readonly string[] WorkflowTitles = ["Project setup", "Preparation", "Ear model", "Head & torso", "Simulation setup", "NumCalc", "SOFA export"];
+    static readonly string[] WorkflowTitles = ["Project setup", "Preparation", "Ear model", "Head & torso", "Simulation setup", "Calculation", "SOFA export"];
     static readonly int[] StagePages = [1, 2, 4, 5, 6];
     const int SetupPage = 0, PreparationPage = 1, EarModelPage = 2, HeadPage = 3, SimulationPage = 4, ResultsPage = 6;
     readonly StackPanel[] workflowPages = Enumerable.Range(0, 7).Select(_ => new StackPanel { Spacing = 10 }).ToArray();
